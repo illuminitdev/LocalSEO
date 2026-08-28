@@ -322,10 +322,8 @@ export default function BookingPlots() {
                         </Link>
                         <Link
                             to="/booking/settings"
-                            target="_blank"
-                            rel="noopener noreferrer"
                             className="p-2 rounded-xl bg-white/10 hover:bg-white/15 inline-flex"
-                            title="Schedule settings (opens in new tab)"
+                            title="Schedule settings"
                         >
                             <Settings className="w-4 h-4" />
                         </Link>
@@ -377,8 +375,6 @@ export default function BookingPlots() {
                         <TabBtn active={tab === 'dashboard'} label="Dashboard" icon={<LayoutDashboard className="w-4 h-4" />} onClick={() => setTab('dashboard')} horizontal />
                         <Link
                             to="/booking/settings"
-                            target="_blank"
-                            rel="noopener noreferrer"
                             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-[#5B6770] hover:text-[#12333C] hover:bg-[#F5F7F8] transition"
                         >
                             <Clock className="w-4 h-4" /> Slots & Stripe

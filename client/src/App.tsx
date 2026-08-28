@@ -18,6 +18,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/book" element={<PublicBook />} />
+        <Route path="/booking/settings" element={<BookingSettings />} />
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/dashboard" element={<Dashboard />} />
@@ -29,7 +30,6 @@ export default function App() {
           <Route path="/media" element={<MediaOptimization />} />
           <Route path="/report" element={<ReportGenerator />} />
           <Route path="/citations" element={<Citations />} />
-          <Route path="/booking/settings" element={<BookingSettings />} />
           <Route path="/booking" element={<BookingPlots />} />
         </Route>
       </Routes>
