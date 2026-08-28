@@ -11,7 +11,8 @@ import {
     Sparkles,
     Search,
     BookMarked,
-    CalendarClock
+    CalendarClock,
+    Settings
 } from 'lucide-react';
 import { cn, apiGet } from '../lib/utils';
 import GroundingModal from './GroundingModal';
@@ -44,7 +45,8 @@ const NAV = [
     {
         group: 'Booking Plots',
         items: [
-            { name: 'Booking board', to: '/booking', icon: CalendarClock },
+            { name: 'Booking board', to: '/booking', icon: CalendarClock, end: true },
+            { name: 'Schedule settings', to: '/booking/settings', icon: Settings },
         ]
     },
 ];

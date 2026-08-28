@@ -1,42 +1,32 @@
-import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+﻿import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-    Building2,
     Calendar,
     Check,
     CheckCircle2,
-    ChevronLeft,
-    ChevronRight,
     Clock,
     Copy,
-    CreditCard,
     ExternalLink,
     Flame,
     LayoutDashboard,
     MapPin,
-    MessageSquare,
     Phone,
-    Plus,
     QrCode,
     Settings,
-    Share2,
     ShieldCheck,
-    Trash2,
+    Share2,
     User,
     Wallet,
     Wrench,
     X,
     Zap
 } from 'lucide-react';
-import { apiGet, apiPatch, apiPost, apiPut, cn, restrictPhoneInput } from '../lib/utils';
+import { apiGet, apiPatch, apiPost, cn } from '../lib/utils';
 import CustomerBookingFlow from '../components/CustomerBookingFlow';
 import BookingSetupWizard, { type SetupForm } from '../components/BookingSetupWizard';
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-type Tab = 'dashboard' | 'slots' | 'share';
+type Tab = 'dashboard' | 'share';
 type Filter = 'active' | 'emergencies' | 'standard' | 'all' | 'done';
-type SettingsTab = 'slots' | 'stripe' | 'deposit' | 'twilio' | 'profile';
 
 interface Slot {
     id: string;
@@ -98,23 +88,8 @@ export default function BookingPlots() {
     const [profile, setProfile] = useState<Profile | null>(null);
     const [slots, setSlots] = useState<Slot[]>([]);
     const [bookings, setBookings] = useState<Booking[]>([]);
-    const [settingsOpen, setSettingsOpen] = useState(false);
-    const [settingsTab, setSettingsTab] = useState<SettingsTab>('slots');
     const [qrOpen, setQrOpen] = useState(false);
     const [customerFlowOpen, setCustomerFlowOpen] = useState(false);
-    const [day, setDay] = useState(1);
-    const [draft, setDraft] = useState({ startTime: '08:00', endTime: '11:00', label: 'Morning Slot', isEmergencyOnly: false });
-    const [form, setForm] = useState({
-        deposit: 45,
-        currency: '£',
-        name: '',
-        businessName: '',
-        tradeType: 'Heating Engineer',
-        phone: '',
-        email: '',
-        serviceArea: '',
-        emergencyNote: ''
-    });
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -150,17 +125,6 @@ export default function BookingPlots() {
         });
         setSlots(data.slots || []);
         setBookings(data.bookings || []);
-        setForm({
-            deposit: data.deposit,
-            currency: data.currency,
-            name: data.name,
-            businessName: data.businessName,
-            tradeType: data.tradeType,
-            phone: data.phone || '',
-            email: data.email || '',
-            serviceArea: data.serviceArea || '',
-            emergencyNote: data.emergencyNote || ''
-        });
         setError('');
     };
 
@@ -198,7 +162,6 @@ export default function BookingPlots() {
 
     const bookUrl = `${window.location.origin}/book`;
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(bookUrl)}`;
-    const daySlots = slots.filter((s) => s.dayOfWeek === day);
 
     const completeSetup = async (setup: SetupForm) => {
         setBusy(true);
@@ -219,7 +182,6 @@ export default function BookingPlots() {
         try {
             const data = await apiPost('/api/booking/clear', { forcePicker: true });
             applyData(data);
-            setSettingsOpen(false);
             setQrOpen(false);
             setTab('dashboard');
         } catch (err: any) {
@@ -295,7 +257,7 @@ export default function BookingPlots() {
 
     return (
         <div className="w-full space-y-4">
-            {/* —— Header —— */}
+            {/* â€”â€” Header â€”â€” */}
             <div className="bg-[#12333C] rounded-2xl text-white px-4 py-4 lg:px-6 lg:py-5">
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                     <div className="flex items-center gap-3 min-w-0">
@@ -307,7 +269,7 @@ export default function BookingPlots() {
                                 <h1 className="font-black text-lg lg:text-xl truncate">{profile.businessName}</h1>
                                 <span className="text-[10px] font-black bg-[#C8D400] text-[#12333C] px-2 py-0.5 rounded">PRO</span>
                             </div>
-                            <p className="text-sm text-white/60 truncate">{profile.name} · {profile.tradeType}</p>
+                            <p className="text-sm text-white/60 truncate">{profile.name} Â· {profile.tradeType}</p>
                             {profile.serviceArea && (
                                 <p className="text-xs text-white/40 truncate mt-0.5 flex items-center gap-1">
                                     <MapPin className="w-3 h-3 shrink-0" /> {profile.serviceArea}
@@ -358,14 +320,13 @@ export default function BookingPlots() {
                         <Link to="/book" target="_blank" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#C8D400] text-[#12333C] text-xs font-bold">
                             <ExternalLink className="w-3.5 h-3.5" /> Customer View
                         </Link>
-                        <button
-                            type="button"
-                            onClick={() => { setSettingsTab('slots'); setSettingsOpen(true); }}
-                            className="p-2 rounded-xl bg-white/10 hover:bg-white/15"
+                        <Link
+                            to="/booking/settings"
+                            className="p-2 rounded-xl bg-white/10 hover:bg-white/15 inline-flex"
                             title="Settings"
                         >
                             <Settings className="w-4 h-4" />
-                        </button>
+                        </Link>
                         <button type="button" onClick={switchProfile} className="p-2 rounded-xl bg-white/10 hover:bg-white/15" title="Start over">
                             <User className="w-4 h-4" />
                         </button>
@@ -373,17 +334,17 @@ export default function BookingPlots() {
                 </div>
             </div>
 
-            {/* —— Stats row —— */}
+            {/* â€”â€” Stats row â€”â€” */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 <StatCard label="Emergencies" value={stats.emergencies} sub="Priority callouts" accent="bg-red-600 text-white" icon={<Zap className="w-4 h-4" />} />
                 <StatCard label="Standard" value={stats.standard} sub="Regular schedule" icon={<Clock className="w-4 h-4 text-sky-600" />} />
                 <StatCard label="Active" value={stats.active} sub="Open jobs" icon={<LayoutDashboard className="w-4 h-4 text-[#12333C]" />} />
                 <StatCard label="Done" value={stats.done} sub="Completed" icon={<CheckCircle2 className="w-4 h-4 text-emerald-600" />} />
-                <StatCard label="Deposit" value={`${profile.currency}${profile.deposit}`} sub="Per booking" icon={<span className="text-emerald-600 font-black">£</span>} />
+                <StatCard label="Deposit" value={`${profile.currency}${profile.deposit}`} sub="Per booking" icon={<span className="text-emerald-600 font-black">Â£</span>} />
                 <StatCard label="Slots" value={enabledSlots} sub={`${emergencySlots} emergency`} icon={<Calendar className="w-4 h-4 text-[#12333C]" />} />
             </div>
 
-            {/* —— Main content: bookings + sidebar —— */}
+            {/* â€”â€” Main content: bookings + sidebar â€”â€” */}
             <div className={cn('grid grid-cols-1 gap-4 items-start', customerFlowOpen ? '' : 'xl:grid-cols-[1fr_360px]')}>
                 {/* Bookings panel */}
                 <div className="bg-white rounded-2xl border border-[#E3E8EA] shadow-sm overflow-hidden flex flex-col min-h-[480px]">
@@ -412,13 +373,12 @@ export default function BookingPlots() {
                     {/* Desktop tabs */}
                     <div className="hidden md:flex border-b border-[#E3E8EA] px-4 pt-3 gap-1">
                         <TabBtn active={tab === 'dashboard'} label="Dashboard" icon={<LayoutDashboard className="w-4 h-4" />} onClick={() => setTab('dashboard')} horizontal />
-                        <TabBtn
-                            active={tab === 'slots' || settingsOpen}
-                            label="Slots & Stripe"
-                            icon={<Clock className="w-4 h-4" />}
-                            onClick={() => { setTab('slots'); setSettingsTab('slots'); setSettingsOpen(true); }}
-                            horizontal
-                        />
+                        <Link
+                            to="/booking/settings"
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-[#5B6770] hover:text-[#12333C] hover:bg-[#F5F7F8] transition"
+                        >
+                            <Clock className="w-4 h-4" /> Slots & Stripe
+                        </Link>
                         <TabBtn active={tab === 'share'} label="Share Link" icon={<QrCode className="w-4 h-4" />} onClick={() => setTab('share')} horizontal />
                     </div>
 
@@ -475,7 +435,7 @@ export default function BookingPlots() {
                                                 <Wrench className="w-4 h-4" /> Book Test Job
                                             </button>
                                         </div>
-                                        <p className="text-xs text-[#5B6770] mt-4">Book Test Job opens the customer booking flow right here — no separate page.</p>
+                                        <p className="text-xs text-[#5B6770] mt-4">Book Test Job opens the customer booking flow right here â€” no separate page.</p>
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -510,14 +470,16 @@ export default function BookingPlots() {
                     {/* Mobile bottom nav */}
                     <nav className="md:hidden border-t border-[#E3E8EA] px-1 py-1.5 flex bg-[#F5F7F8]">
                         <TabBtn active={tab === 'dashboard'} label="Dashboard" icon={<LayoutDashboard className="w-4 h-4" />} onClick={() => setTab('dashboard')} />
-                        <TabBtn active={tab === 'slots' || settingsOpen} label="Slots" icon={<Clock className="w-4 h-4" />} onClick={() => { setTab('slots'); setSettingsTab('slots'); setSettingsOpen(true); }} />
+                        <Link to="/booking/settings" className="flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] font-bold text-[#5B6770]">
+                            <Clock className="w-4 h-4" /> Slots
+                        </Link>
                         <TabBtn active={tab === 'share'} label="Share" icon={<QrCode className="w-4 h-4" />} onClick={() => setTab('share')} />
                     </nav>
                     </>
                     )}
                 </div>
 
-                {/* Right sidebar — hidden during test booking flow */}
+                {/* Right sidebar â€” hidden during test booking flow */}
                 {!customerFlowOpen && (
                 <aside className="hidden xl:block space-y-4 sticky top-0">
                     <SidebarShare bookUrl={bookUrl} qrUrl={qrUrl} copied={copied} onCopy={copyLink} onShare={shareLink} onTestJob={openTestBooking} busy={busy} onOpenQr={() => setQrOpen(true)} />
@@ -533,18 +495,17 @@ export default function BookingPlots() {
                                             <span className="font-bold">{s.label}</span>
                                             {s.isEmergencyOnly && <Flame className="w-3 h-3 text-red-500 shrink-0" />}
                                         </div>
-                                        <span className="text-[#5B6770]">{s.startTime} – {s.endTime}</span>
+                                        <span className="text-[#5B6770]">{s.startTime} â€“ {s.endTime}</span>
                                     </li>
                                 ))}
                             </ul>
                         )}
-                        <button
-                            type="button"
-                            onClick={() => { setSettingsTab('slots'); setSettingsOpen(true); }}
-                            className="mt-3 w-full py-2 rounded-xl border border-[#E3E8EA] text-xs font-bold text-[#12333C] hover:bg-[#F5F7F8]"
+                        <Link
+                            to="/booking/settings"
+                            className="mt-3 w-full py-2 rounded-xl border border-[#E3E8EA] text-xs font-bold text-[#12333C] hover:bg-[#F5F7F8] block text-center"
                         >
                             Manage weekly slots
-                        </button>
+                        </Link>
                     </div>
                     {profile.emergencyNote && (
                         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
@@ -569,41 +530,6 @@ export default function BookingPlots() {
                 />
             )}
 
-            {settingsOpen && (
-                <SettingsModal
-                    settingsTab={settingsTab}
-                    setSettingsTab={setSettingsTab}
-                    day={day}
-                    setDay={setDay}
-                    daySlots={daySlots}
-                    slots={slots}
-                    setSlots={setSlots}
-                    draft={draft}
-                    setDraft={setDraft}
-                    form={form}
-                    setForm={setForm}
-                    profile={profile}
-                    busy={busy}
-                    onClose={() => setSettingsOpen(false)}
-                    onSave={async () => {
-                        setBusy(true);
-                        try {
-                            await apiPut('/api/booking/slots', { slots });
-                            await apiPatch('/api/booking/settings', form);
-                            await refresh();
-                            setSettingsOpen(false);
-                        } catch (e: any) {
-                            setError(e.message);
-                        } finally {
-                            setBusy(false);
-                        }
-                    }}
-                    onConnectStripe={async () => {
-                        await apiPost('/api/booking/connect-stripe', {});
-                        await refresh();
-                    }}
-                />
-            )}
         </div>
     );
 }
@@ -694,7 +620,7 @@ function SidebarShare({
                 <div className="flex gap-1.5">
                     <input readOnly value={bookUrl} className="flex-1 min-w-0 rounded-lg border border-[#E3E8EA] bg-[#F5F7F8] px-2 py-2 text-[10px] truncate" />
                     <button type="button" onClick={onCopy} className="px-2.5 rounded-lg bg-[#12333C] text-white text-[10px] font-bold shrink-0">
-                        {copied ? '✓' : 'Copy'}
+                        {copied ? 'âœ“' : 'Copy'}
                     </button>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -900,274 +826,3 @@ function JobCard({
     );
 }
 
-function SettingsModal(props: {
-    settingsTab: SettingsTab;
-    setSettingsTab: (t: SettingsTab) => void;
-    day: number;
-    setDay: (d: number) => void;
-    daySlots: Slot[];
-    slots: Slot[];
-    setSlots: Dispatch<SetStateAction<Slot[]>>;
-    draft: { startTime: string; endTime: string; label: string; isEmergencyOnly: boolean };
-    setDraft: Dispatch<SetStateAction<{ startTime: string; endTime: string; label: string; isEmergencyOnly: boolean }>>;
-    form: any;
-    setForm: Dispatch<SetStateAction<any>>;
-    profile: Profile;
-    busy: boolean;
-    onClose: () => void;
-    onSave: () => void;
-    onConnectStripe: () => void;
-}) {
-    const { settingsTab, setSettingsTab, day, setDay, daySlots, slots, setSlots, draft, setDraft, form, setForm, profile, busy, onClose, onSave, onConnectStripe } = props;
-
-    const tabs: { key: SettingsTab; label: string; icon: typeof Clock }[] = [
-        { key: 'slots', label: 'Weekly Slots & Emergency', icon: Clock },
-        { key: 'stripe', label: 'Stripe Connect', icon: CreditCard },
-        { key: 'deposit', label: 'Deposit Amount', icon: Wallet },
-        { key: 'twilio', label: 'Twilio SMS', icon: MessageSquare },
-        { key: 'profile', label: 'Business Profile', icon: User }
-    ];
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-end lg:items-center justify-center bg-black/45 p-0 lg:p-6">
-            <div className="bg-[#F5F7F8] w-full max-w-4xl max-h-[92dvh] rounded-t-2xl lg:rounded-2xl overflow-hidden flex flex-col shadow-2xl">
-                <div className="bg-[#12333C] text-white px-4 py-3 flex justify-between items-start gap-2">
-                    <div className="flex items-start gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-[#C8D400]/20 flex items-center justify-center shrink-0">
-                            <Settings className="w-4 h-4 text-[#C8D400]" />
-                        </div>
-                        <div>
-                            <h2 className="font-bold text-sm">Booking & Schedule Settings</h2>
-                            <p className="text-[11px] text-white/55 mt-0.5">Manage time slots, Stripe Connect payouts, and deposits</p>
-                        </div>
-                    </div>
-                    <button type="button" onClick={onClose}><X className="w-5 h-5" /></button>
-                </div>
-
-                <div className="flex items-center gap-1 px-2 pt-2 border-b border-[#E3E8EA] bg-white">
-                    <button type="button" className="p-1 text-[#5B6770]"><ChevronLeft className="w-4 h-4" /></button>
-                    <div className="flex-1 flex gap-1 overflow-x-auto py-1">
-                        {tabs.map(({ key, label, icon: Icon }) => (
-                            <button
-                                key={key}
-                                type="button"
-                                onClick={() => setSettingsTab(key)}
-                                className={cn(
-                                    'shrink-0 inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold border-b-2',
-                                    settingsTab === key
-                                        ? 'text-[#12333C] border-[#C8D400] bg-[#C8D400]/10'
-                                        : 'text-[#5B6770] border-transparent'
-                                )}
-                            >
-                                <Icon className="w-3 h-3" /> {label}
-                            </button>
-                        ))}
-                    </div>
-                    <button type="button" className="p-1 text-[#5B6770]"><ChevronRight className="w-4 h-4" /></button>
-                </div>
-
-                <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-                    {settingsTab === 'slots' && (
-                        <>
-                            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex gap-3 text-sm text-amber-900">
-                                <ShieldCheck className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
-                                <div>
-                                    <strong className="block text-[10px] uppercase tracking-wide">Strict Emergency Slot Routing</strong>
-                                    Slots marked <strong>EMERGENCY ONLY</strong> only appear when customers choose an emergency booking.
-                                </div>
-                            </div>
-
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#5B6770]">Select day to configure</p>
-                            <div className="grid grid-cols-7 gap-1.5">
-                                {DAYS.map((name, i) => {
-                                    const count = slots.filter((s) => s.dayOfWeek === i && s.enabled).length;
-                                    const emCount = slots.filter((s) => s.dayOfWeek === i && s.enabled && s.isEmergencyOnly).length;
-                                    return (
-                                        <button
-                                            key={name}
-                                            type="button"
-                                            onClick={() => setDay(i)}
-                                            className={cn(
-                                                'shrink-0 min-w-[48px] rounded-xl px-2 py-2 text-center border text-[10px] font-bold',
-                                                day === i ? 'bg-[#12333C] text-white border-[#12333C]' : 'bg-white border-[#E3E8EA] text-[#12333C]'
-                                            )}
-                                        >
-                                            {name}
-                                            <div className="text-sm font-black leading-none mt-0.5">{count}</div>
-                                            {emCount > 0 && <Flame className="w-2.5 h-2.5 text-red-500 mx-auto mt-0.5" />}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#5B6770]">
-                                Slots for {DAYS[day]} ({daySlots.length})
-                            </p>
-
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-                            {daySlots.map((s) => (
-                                <div
-                                    key={s.id}
-                                    className={cn(
-                                        'bg-white border rounded-xl p-2.5 flex gap-2',
-                                        s.isEmergencyOnly ? 'border-red-200 bg-red-50/50' : 'border-[#E3E8EA]'
-                                    )}
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={s.enabled}
-                                        onChange={() =>
-                                            setSlots((prev) => prev.map((x) => (x.id === s.id ? { ...x, enabled: !x.enabled } : x)))
-                                        }
-                                        className="mt-1 shrink-0"
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                            <p className="font-bold text-xs text-[#12333C]">{s.label}</p>
-                                            <span
-                                                className={cn(
-                                                    'text-[8px] font-black uppercase px-1.5 py-0.5 rounded',
-                                                    s.isEmergencyOnly ? 'bg-red-600 text-white' : 'bg-sky-100 text-sky-700'
-                                                )}
-                                            >
-                                                {s.isEmergencyOnly ? 'Emergency Only' : 'Standard Slot'}
-                                            </span>
-                                        </div>
-                                        <p className="text-[10px] text-[#5B6770] mt-0.5">{s.startTime} – {s.endTime}</p>
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                setSlots((prev) =>
-                                                    prev.map((x) => (x.id === s.id ? { ...x, isEmergencyOnly: !x.isEmergencyOnly } : x))
-                                                )
-                                            }
-                                            className={cn(
-                                                'mt-1.5 inline-flex items-center gap-1 text-[9px] font-black uppercase px-2 py-1 rounded-lg border',
-                                                s.isEmergencyOnly
-                                                    ? 'bg-red-600 text-white border-red-600'
-                                                    : 'bg-white text-[#5B6770] border-[#E3E8EA]'
-                                            )}
-                                        >
-                                            <Flame className="w-3 h-3" />
-                                            {s.isEmergencyOnly ? 'Emergency Slot' : 'Make Emergency'}
-                                        </button>
-                                    </div>
-                                    <button type="button" onClick={() => setSlots((p) => p.filter((x) => x.id !== s.id))} className="shrink-0 p-1 text-[#5B6770] hover:text-red-600">
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
-                                </div>
-                            ))}
-                            </div>
-
-                            <div className="bg-white border border-[#E3E8EA] rounded-xl p-4 space-y-3 lg:max-w-xl">
-                                <p className="text-[10px] font-bold uppercase text-[#5B6770]">Add new slot</p>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <label className="text-[10px] font-bold text-[#5B6770]">
-                                        Start
-                                        <input type="time" value={draft.startTime} onChange={(e) => setDraft((d) => ({ ...d, startTime: e.target.value }))} className="mt-0.5 w-full rounded-lg border border-[#E3E8EA] px-2 py-1.5 text-xs" />
-                                    </label>
-                                    <label className="text-[10px] font-bold text-[#5B6770]">
-                                        End
-                                        <input type="time" value={draft.endTime} onChange={(e) => setDraft((d) => ({ ...d, endTime: e.target.value }))} className="mt-0.5 w-full rounded-lg border border-[#E3E8EA] px-2 py-1.5 text-xs" />
-                                    </label>
-                                </div>
-                                <label className="block text-[10px] font-bold text-[#5B6770]">
-                                    Slot label
-                                    <input value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} className="mt-0.5 w-full rounded-lg border border-[#E3E8EA] px-2 py-1.5 text-xs" placeholder="Morning Slot" />
-                                </label>
-                                <button
-                                    type="button"
-                                    onClick={() =>
-                                        setSlots((prev) => [
-                                            ...prev,
-                                            { id: `slot_${Date.now()}`, dayOfWeek: day, ...draft, enabled: true }
-                                        ])
-                                    }
-                                    className="w-full py-2.5 rounded-xl bg-[#12333C] text-white text-[10px] font-bold flex items-center justify-center gap-1"
-                                >
-                                    <Plus className="w-3 h-3" /> Add Slot
-                                </button>
-                            </div>
-                        </>
-                    )}
-
-                    {settingsTab === 'stripe' && (
-                        <div className="bg-white rounded-xl border border-[#E3E8EA] p-4 space-y-2 text-sm">
-                            <p className="text-xs text-[#5B6770]">
-                                Status: <strong className="text-[#12333C]">{profile.stripeConnected ? 'Connected — Payouts Active' : 'Not connected'}</strong>
-                                <span className="block text-[10px] mt-1">Simulated until you add Stripe keys in backend .env</span>
-                            </p>
-                            <button type="button" onClick={onConnectStripe} className="w-full py-2.5 rounded-xl bg-[#12333C] text-white text-xs font-bold">
-                                Connect Stripe
-                            </button>
-                        </div>
-                    )}
-
-                    {settingsTab === 'deposit' && (
-                        <div className="bg-white rounded-xl border border-[#E3E8EA] p-4 grid grid-cols-3 gap-2">
-                            <label className="text-[10px] font-bold text-[#5B6770] col-span-1">
-                                Currency
-                                <select value={form.currency} onChange={(e) => setForm((f: any) => ({ ...f, currency: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E3E8EA] px-2 py-1.5 text-sm">
-                                    <option value="£">£</option>
-                                    <option value="$">$</option>
-                                    <option value="€">€</option>
-                                </select>
-                            </label>
-                            <label className="text-[10px] font-bold text-[#5B6770] col-span-2">
-                                Deposit amount
-                                <input type="number" min={0} value={form.deposit} onChange={(e) => setForm((f: any) => ({ ...f, deposit: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-[#E3E8EA] px-2 py-1.5 text-sm" />
-                            </label>
-                        </div>
-                    )}
-
-                    {settingsTab === 'twilio' && (
-                        <p className="bg-white rounded-xl border border-[#E3E8EA] p-4 text-xs text-[#5B6770]">
-                            SMS / WhatsApp reminders are simulated in this demo. Job cards include “Send 24h Reminder”.
-                        </p>
-                    )}
-
-                    {settingsTab === 'profile' && (
-                        <div className="bg-white rounded-xl border border-[#E3E8EA] p-3 space-y-2">
-                            {(
-                                [
-                                    ['name', 'Your name', User],
-                                    ['businessName', 'Business name', Building2],
-                                    ['tradeType', 'Trade type', Wrench],
-                                    ['phone', 'Phone', Phone],
-                                    ['serviceArea', 'Service area', MapPin],
-                                    ['emergencyNote', 'Emergency note', Flame]
-                                ] as const
-                            ).map(([key, label, Icon]) => (
-                                <label key={key} className="block text-[10px] font-bold text-[#5B6770]">
-                                    {label}
-                                    <div className="relative mt-0.5">
-                                        <Icon className="w-3.5 h-3.5 text-[#5B6770] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                        <input
-                                            value={form[key]}
-                                            onChange={(e) =>
-                                                setForm((f: any) => ({
-                                                    ...f,
-                                                    [key]: key === 'phone' ? restrictPhoneInput(e.target.value) : e.target.value
-                                                }))
-                                            }
-                                            inputMode={key === 'phone' ? 'numeric' : undefined}
-                                            maxLength={key === 'phone' ? 11 : undefined}
-                                            className="w-full rounded-lg border border-[#E3E8EA] pl-9 pr-2 py-2 text-xs font-medium text-[#12333C] bg-[#F5F7F8] focus:bg-white focus:outline-none focus:border-[#12333C]"
-                                        />
-                                    </div>
-                                </label>
-                            ))}
-                        </div>
-                    )}
-                </div>
-
-                <div className="border-t bg-white px-3 py-2.5 flex justify-between items-center">
-                    <button type="button" onClick={onClose} className="text-xs font-bold text-[#5B6770]">Cancel</button>
-                    <button type="button" disabled={busy} onClick={onSave} className="px-4 py-2 rounded-xl bg-[#C8D400] text-[#12333C] text-xs font-bold disabled:opacity-60">
-                        Save All Changes
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}

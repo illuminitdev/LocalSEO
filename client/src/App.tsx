@@ -10,6 +10,7 @@ import MediaOptimization from './pages/MediaOptimization';
 import ReportGenerator from './pages/ReportGenerator';
 import Citations from './pages/Citations';
 import BookingPlots from './pages/BookingPlots';
+import BookingSettings from './pages/BookingSettings';
 import PublicBook from './pages/PublicBook';
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/media" element={<MediaOptimization />} />
           <Route path="/report" element={<ReportGenerator />} />
           <Route path="/citations" element={<Citations />} />
+          <Route path="/booking/settings" element={<BookingSettings />} />
           <Route path="/booking" element={<BookingPlots />} />
         </Route>
       </Routes>
