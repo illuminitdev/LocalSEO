@@ -73,6 +73,7 @@ export default function CustomerBookingFlow({ profile, slots, embedded = false, 
     const [description, setDescription] = useState('');
     const [notifyVia, setNotifyVia] = useState<'both' | 'whatsapp' | 'sms'>('both');
     const [submitting, setSubmitting] = useState(false);
+    const [paying, setPaying] = useState(false);
     const [error, setError] = useState('');
     const [done, setDone] = useState(false);
     const [dateScroll, setDateScroll] = useState(0);
@@ -94,14 +95,32 @@ export default function CustomerBookingFlow({ profile, slots, embedded = false, 
 
     const selected = daySlots.find((s) => s.id === slotId);
 
-    const canPay = Boolean(customerName.trim() && phone.trim() && address.trim() && selected);
+    const validate = (): string | null => {
+        if (!selected) return 'Select a date and time slot to continue.';
+        if (!customerName.trim()) return 'Enter your full name.';
+        if (!phone.trim()) return 'Enter your phone number.';
+        if (phone.replace(/\D/g, '').length < 10) return 'Enter a valid phone number (at least 10 digits).';
+        if (!address.trim()) return 'Enter the property address.';
+        return null;
+    };
 
     const submit = async () => {
+        const validationError = validate();
+        if (validationError) {
+            setError(validationError);
+            return;
+        }
         if (!selected) return;
+
         setSubmitting(true);
+        setPaying(true);
         setError('');
         try {
-            await apiPost('/api/booking/checkout', {});
+            const checkout = await apiPost('/api/booking/checkout', { amount: profile.deposit });
+            if (!checkout.success && !checkout.simulated) {
+                throw new Error(checkout.error || 'Payment could not be processed');
+            }
+            await new Promise((r) => setTimeout(r, 800));
             await apiPost('/api/booking/bookings', {
                 customerName: customerName.trim(),
                 phone: phone.trim(),
@@ -114,13 +133,15 @@ export default function CustomerBookingFlow({ profile, slots, embedded = false, 
                 endTime: selected.endTime,
                 isEmergency,
                 notifyVia,
-                simulatedPayment: true
+                simulatedPayment: true,
+                paymentId: checkout.paymentId
             });
             setDone(true);
             onSuccess?.();
         } catch (e: any) {
-            setError(e.message || 'Booking failed');
+            setError(e.message || 'Booking failed — check Booking Plots is set up, then try again.');
         } finally {
+            setPaying(false);
             setSubmitting(false);
         }
     };
@@ -363,19 +384,26 @@ export default function CustomerBookingFlow({ profile, slots, embedded = false, 
                             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
                             Direct payout protected · Stripe Connect (simulated)
                         </p>
-                        {!selected && (
+                        {!selected && !error && (
                             <p className="text-xs text-amber-300 mt-3">Select a date and time slot above to continue.</p>
                         )}
                         {error && <p className="text-sm text-red-300 mt-2">{error}</p>}
                         <button
                             type="button"
-                            disabled={submitting || !canPay}
+                            disabled={submitting}
                             onClick={submit}
-                            className="mt-4 w-full py-3.5 rounded-xl bg-[#C8D400] text-[#12333C] font-bold text-sm disabled:opacity-40 hover:bg-[#d6e21a] transition"
+                            className={cn(
+                                'mt-4 w-full py-3.5 rounded-xl font-bold text-sm transition',
+                                submitting
+                                    ? 'bg-[#C8D400]/70 text-[#12333C] cursor-wait'
+                                    : 'bg-[#C8D400] text-[#12333C] hover:bg-[#d6e21a] cursor-pointer'
+                            )}
                         >
-                            {submitting
-                                ? 'Processing payment...'
-                                : `Pay ${profile.currency}${profile.deposit} deposit & book →`}
+                            {paying
+                                ? 'Processing test payment...'
+                                : submitting
+                                  ? 'Confirming booking...'
+                                  : `Pay ${profile.currency}${profile.deposit} deposit & book →`}
                         </button>
                         <p className="text-[11px] text-white/40 text-center mt-2">
                             Upon payment, {profile.name} receives immediate arrival notice.

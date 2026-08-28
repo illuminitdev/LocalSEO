@@ -322,8 +322,10 @@ export default function BookingPlots() {
                         </Link>
                         <Link
                             to="/booking/settings"
+                            target="_blank"
+                            rel="noopener noreferrer"
                             className="p-2 rounded-xl bg-white/10 hover:bg-white/15 inline-flex"
-                            title="Settings"
+                            title="Schedule settings (opens in new tab)"
                         >
                             <Settings className="w-4 h-4" />
                         </Link>
@@ -340,7 +342,7 @@ export default function BookingPlots() {
                 <StatCard label="Standard" value={stats.standard} sub="Regular schedule" icon={<Clock className="w-4 h-4 text-sky-600" />} />
                 <StatCard label="Active" value={stats.active} sub="Open jobs" icon={<LayoutDashboard className="w-4 h-4 text-[#12333C]" />} />
                 <StatCard label="Done" value={stats.done} sub="Completed" icon={<CheckCircle2 className="w-4 h-4 text-emerald-600" />} />
-                <StatCard label="Deposit" value={`${profile.currency}${profile.deposit}`} sub="Per booking" icon={<span className="text-emerald-600 font-black">Â£</span>} />
+                <StatCard label="Deposit" value={`${profile.currency}${profile.deposit}`} sub="Per booking" icon={<span className="text-emerald-600 font-black">£</span>} />
                 <StatCard label="Slots" value={enabledSlots} sub={`${emergencySlots} emergency`} icon={<Calendar className="w-4 h-4 text-[#12333C]" />} />
             </div>
 
@@ -375,6 +377,8 @@ export default function BookingPlots() {
                         <TabBtn active={tab === 'dashboard'} label="Dashboard" icon={<LayoutDashboard className="w-4 h-4" />} onClick={() => setTab('dashboard')} horizontal />
                         <Link
                             to="/booking/settings"
+                            target="_blank"
+                            rel="noopener noreferrer"
                             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-[#5B6770] hover:text-[#12333C] hover:bg-[#F5F7F8] transition"
                         >
                             <Clock className="w-4 h-4" /> Slots & Stripe

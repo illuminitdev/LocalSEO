@@ -3,8 +3,6 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     ArrowLeft,
     Building2,
-    ChevronLeft,
-    ChevronRight,
     Clock,
     CreditCard,
     Flame,
@@ -141,32 +139,33 @@ export default function BookingSettings() {
     if (!profile) return null;
 
     return (
-        <div className="w-full max-w-5xl mx-auto space-y-4 pb-24">
-            <Link to="/booking" className="inline-flex items-center gap-2 text-sm font-bold text-[#12333C] hover:text-[#0C242B]">
-                <ArrowLeft className="w-4 h-4" />
-                Back to booking board
-            </Link>
-
-            <div className="bg-white rounded-2xl border border-[#E3E8EA] shadow-sm overflow-hidden">
-                <div className="bg-[#12333C] text-white px-5 py-4 flex justify-between items-start gap-3">
-                    <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-[#C8D400]/20 flex items-center justify-center shrink-0">
+        <div className="w-full space-y-4">
+            <div className="bg-[#12333C] rounded-2xl text-white px-5 py-4 lg:px-6 lg:py-5">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-11 h-11 rounded-xl bg-[#C8D400]/20 flex items-center justify-center shrink-0">
                             <Settings className="w-5 h-5 text-[#C8D400]" />
                         </div>
-                        <div>
-                            <h1 className="font-bold text-lg">Booking & Schedule Settings</h1>
-                            <p className="text-sm text-white/60 mt-0.5">
+                        <div className="min-w-0">
+                            <h1 className="font-black text-lg lg:text-xl">Booking & Schedule Settings</h1>
+                            <p className="text-sm text-white/60 mt-0.5 truncate">
                                 {profile.businessName} · Manage time slots, Stripe payouts, and deposits
                             </p>
                         </div>
                     </div>
+                    <Link
+                        to="/booking"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-sm font-bold shrink-0"
+                    >
+                        <ArrowLeft className="w-4 h-4" />
+                        Back to booking board
+                    </Link>
                 </div>
+            </div>
 
+            <div className="bg-white rounded-2xl border border-[#E3E8EA] shadow-sm overflow-hidden">
                 <div className="flex items-center gap-1 px-3 pt-3 border-b border-[#E3E8EA] bg-[#FAFBFC] overflow-x-auto">
-                    <button type="button" className="p-1.5 text-[#5B6770] shrink-0" aria-hidden>
-                        <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <div className="flex gap-1 py-1 min-w-0">
+                    <div className="flex gap-1 py-1 min-w-0 flex-1">
                         {TABS.map(({ key, label, icon: Icon }) => (
                             <button
                                 key={key}
@@ -183,12 +182,9 @@ export default function BookingSettings() {
                             </button>
                         ))}
                     </div>
-                    <button type="button" className="p-1.5 text-[#5B6770] shrink-0" aria-hidden>
-                        <ChevronRight className="w-4 h-4" />
-                    </button>
                 </div>
 
-                <div className="p-5 lg:p-6 space-y-4">
+                <div className="p-5 lg:p-6 space-y-4 min-h-[420px]">
                     {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
                     {saved && <p className="text-sm text-emerald-700 bg-emerald-50 rounded-xl px-4 py-2">All changes saved.</p>}
 
@@ -344,7 +340,7 @@ export default function BookingSettings() {
                     )}
                 </div>
 
-                <div className="sticky bottom-0 border-t border-[#E3E8EA] bg-white px-5 py-4 flex justify-between items-center gap-3">
+                <div className="border-t border-[#E3E8EA] bg-[#FAFBFC] px-5 py-4 flex justify-between items-center gap-3">
                     <Link to="/booking" className="text-sm font-bold text-[#5B6770] hover:text-[#12333C]">
                         Cancel
                     </Link>

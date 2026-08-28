@@ -821,7 +821,7 @@ app.get('/api/booking/bookings', (_req, res) => {
 });
 
 app.post('/api/booking/bookings', (req, res) => {
-    const { customerName, phone, address, description, date, slotId, slotLabel, startTime, endTime, isEmergency, notifyVia, simulatedPayment } = req.body || {};
+    const { customerName, phone, address, description, date, slotId, slotLabel, startTime, endTime, isEmergency, notifyVia, simulatedPayment, paymentId } = req.body || {};
     if (!customerName || !phone || !address || !date || !slotId) {
         return res.status(400).json({ error: 'Name, phone, address, date, and slot are required' });
     }
@@ -835,7 +835,8 @@ app.post('/api/booking/bookings', (req, res) => {
         slotLabel: slotLabel || '', startTime: startTime || '', endTime: endTime || '',
         isEmergency: Boolean(isEmergency), notifyVia: notifyVia || 'both',
         depositAmount: bookingState.deposit, currency: bookingState.currency,
-        depositPaid: paid, status: paid ? 'pending' : 'deposit_unpaid', reminderSent: false,
+        depositPaid: paid, paymentId: paymentId || (paid ? 'sim_pay_' + Date.now() : null),
+        status: paid ? 'pending' : 'deposit_unpaid', reminderSent: false,
         createdAt: new Date().toISOString()
     };
     bookingState.bookings = [booking, ...bookingState.bookings];
@@ -871,9 +872,23 @@ app.post('/api/booking/test', (_req, res) => {
     res.status(201).json(booking);
 });
 
-app.post('/api/booking/checkout', (_req, res) => {
+app.post('/api/booking/checkout', (req, res) => {
+    if (!requireBookingReady(res)) return;
     const stripeOn = Boolean(process.env.STRIPE_SECRET_KEY);
-    res.json({ mode: stripeOn ? 'stripe' : 'simulated', simulated: !stripeOn, amount: bookingState.deposit, currency: bookingState.currency });
+    const amount = Number(req.body?.amount ?? bookingState.deposit) || bookingState.deposit;
+    if (stripeOn) {
+        return res.status(501).json({ error: 'Stripe checkout not wired yet — add STRIPE_SECRET_KEY and redeploy.' });
+    }
+    const paymentId = 'sim_pay_' + Date.now();
+    res.json({
+        mode: 'simulated',
+        simulated: true,
+        success: true,
+        paymentId,
+        amount,
+        currency: bookingState.currency,
+        message: 'Test payment accepted (no Stripe key configured)'
+    });
 });
 
 app.post('/api/booking/notify', (req, res) => {
