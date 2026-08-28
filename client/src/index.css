@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #F5F7F8;
+  --color-navy: #12333C;
+  --color-navy-deep: #0C242B;
+  --color-lime: #C8D400;
+  --color-lime-dark: #A8B200;
+  --color-ink: #1C2430;
+  --color-muted: #5B6770;
+  --color-line: #E3E8EA;
+}
+
+body {
+  @apply bg-[#F5F7F8] text-[#1C2430] antialiased;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+button:not(:disabled),
+a,
+select,
+summary,
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+button:disabled,
+[disabled] {
+  cursor: not-allowed;
+}
