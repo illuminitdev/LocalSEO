@@ -890,6 +890,10 @@ app.post('/api/booking/connect-stripe', (_req, res) => {
     res.json({ mode: 'simulated', connected: true, message: 'Simulated Stripe Connect complete' });
 });
 
-app.listen(PORT, () => {
-    console.log('Backend server running on http://localhost:' + PORT);
-});
+module.exports = app;
+
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log('Backend server running on http://localhost:' + PORT);
+    });
+}
