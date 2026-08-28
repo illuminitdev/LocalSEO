@@ -39,7 +39,12 @@ const NAV = [
         items: [
             { name: 'Reviews', to: '/reviews', icon: Star },
             { name: 'Q&A', to: '/qa', icon: MessageSquareQuote },
-            { name: 'Booking Plots', to: '/booking', icon: CalendarClock },
+        ]
+    },
+    {
+        group: 'Booking Plots',
+        items: [
+            { name: 'Booking board', to: '/booking', icon: CalendarClock },
         ]
     },
 ];
