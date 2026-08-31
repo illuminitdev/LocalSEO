@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Mail, ShieldCheck } from 'lucide-react';
+import { Download, Mail, ShieldCheck } from 'lucide-react';
 import { apiGet } from '../lib/utils';
 
 export default function BookSuccess() {
@@ -9,7 +9,6 @@ export default function BookSuccess() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [booking, setBooking] = useState<any>(null);
-    const [email, setEmail] = useState<any>(null);
 
     useEffect(() => {
         if (!sessionId) {
@@ -17,10 +16,9 @@ export default function BookSuccess() {
             setLoading(false);
             return;
         }
-        apiGet(`/api/booking/checkout/verify?session_id=${encodeURIComponent(sessionId)}`)
+        apiGet(`/api/public/checkout/verify?session_id=${encodeURIComponent(sessionId)}`)
             .then((data) => {
                 setBooking(data.booking);
-                setEmail(data.email);
             })
             .catch((e) => setError(e.message || 'Could not confirm booking'))
             .finally(() => setLoading(false));
@@ -39,13 +37,21 @@ export default function BookSuccess() {
             <div className="min-h-screen flex items-center justify-center p-6 bg-[#F8FAFC]">
                 <div className="max-w-md text-center space-y-4">
                     <p className="text-red-600 font-medium">{error || 'Booking could not be confirmed'}</p>
-                    <Link to="/book" className="inline-flex items-center gap-2 text-sm font-bold text-[#0F172A]">
-                        <ArrowLeft className="w-4 h-4" /> Back to booking
-                    </Link>
+                    <p className="text-sm text-[#64748B]">If you completed payment, refresh this page — your booking will be confirmed automatically.</p>
+                    <button
+                        type="button"
+                        onClick={() => window.location.reload()}
+                        className="inline-flex items-center gap-2 text-sm font-bold text-white bg-[#0F172A] px-4 py-2 rounded-xl"
+                    >
+                        Refresh & confirm
+                    </button>
                 </div>
             </div>
         );
     }
+
+    const when = new Date(booking.start_at).toLocaleString('en-GB');
+    const icsUrl = `${import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? 'http://localhost:5000' : '')}/api/public/bookings/${booking.id}/calendar.ics`;
 
     return (
         <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-6">
@@ -54,33 +60,27 @@ export default function BookSuccess() {
                     <ShieldCheck className="w-8 h-8 text-emerald-600" />
                 </div>
                 <h1 className="text-2xl font-black text-[#0F172A]">Booking confirmed</h1>
-                <p className="text-sm text-[#64748B] mt-2">
-                    Payment successful. Your deposit for <strong>{booking.slotLabel}</strong> on <strong>{booking.date}</strong> is confirmed.
-                </p>
+                <p className="text-sm text-[#64748B] mt-2">Deposit paid. Your appointment is confirmed.</p>
 
                 <div className="mt-6 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] p-4 text-left text-sm space-y-2">
-                    <p><span className="text-[#64748B]">Name:</span> <strong>{booking.customerName}</strong></p>
-                    <p><span className="text-[#64748B]">Address:</span> <strong>{booking.address}</strong></p>
-                    <p><span className="text-[#64748B]">Deposit paid:</span> <strong className="text-[#F59E0B]">{booking.currency}{Number(booking.depositAmount).toFixed(2)}</strong></p>
+                    <p><span className="text-[#64748B]">Name:</span> <strong>{booking.customer_name}</strong></p>
+                    <p><span className="text-[#64748B]">When:</span> <strong>{when}</strong></p>
+                    <p><span className="text-[#64748B]">Address:</span> <strong>{booking.customer_address}</strong></p>
                 </div>
 
-                <div className="mt-4 flex items-start justify-center gap-2 text-sm text-[#64748B]">
-                    <Mail className="w-4 h-4 text-[#F59E0B] shrink-0 mt-0.5" />
-                    <p>
-                        {email?.sent
-                            ? <>Confirmation email sent to <strong>{booking.email}</strong>.</>
-                            : email?.mode === 'logged'
-                              ? <>Confirmation logged for <strong>{booking.email}</strong> (add SMTP in backend .env to send real emails).</>
-                              : <>We will email <strong>{booking.email}</strong> when mail is configured.</>}
+                <div className="mt-4 flex flex-col gap-2">
+                    {booking.manage_token && (
+                        <Link to={`/book/manage/${booking.manage_token}`} className="text-sm font-bold text-[#F59E0B]">
+                            Reschedule or cancel
+                        </Link>
+                    )}
+                    <a href={icsUrl} className="inline-flex items-center justify-center gap-2 text-sm font-bold text-[#0F172A]">
+                        <Download className="w-4 h-4" /> Add to calendar (.ics)
+                    </a>
+                    <p className="flex items-center justify-center gap-2 text-xs text-[#64748B]">
+                        <Mail className="w-3.5 h-3.5" /> Confirmation sent to {booking.customer_email}
                     </p>
                 </div>
-
-                <Link
-                    to="/book"
-                    className="mt-8 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold"
-                >
-                    <ArrowLeft className="w-4 h-4" /> Done
-                </Link>
             </div>
         </div>
     );

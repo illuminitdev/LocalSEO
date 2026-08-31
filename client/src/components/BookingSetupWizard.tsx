@@ -27,7 +27,8 @@ export type SetupForm = {
     businessName: string;
     phone: string;
     serviceArea: string;
-    deposit: number;
+    standardDeposit: number;
+    emergencyDeposit: number;
     currency: string;
     acceptingEmergencies: boolean;
     emergencyNote: string;
@@ -49,7 +50,8 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
         businessName: linkedBusiness?.name || '',
         phone: linkedBusiness?.phone || '',
         serviceArea: linkedBusiness?.address || '',
-        deposit: 45,
+        standardDeposit: 45,
+        emergencyDeposit: 60,
         currency: '£',
         acceptingEmergencies: true,
         emergencyNote: ''
@@ -277,29 +279,51 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                         )}
                     </div>
 
-                    <div className="rounded-xl bg-[#0F172A] text-white p-4">
+                    <div className="rounded-xl bg-[#0F172A] text-white p-4 space-y-4">
                         <p className="text-xs font-bold uppercase text-white/60 flex items-center gap-2">
-                            <Wallet className="w-4 h-4 text-[#F59E0B]" /> Customer deposit to pay when booking
+                            <Wallet className="w-4 h-4 text-[#F59E0B]" /> Customer deposits (paid via Stripe)
                         </p>
-                        <div className="flex gap-2 mt-3">
-                            <select
-                                value={form.currency}
-                                onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
-                                className="rounded-lg border-0 bg-white/10 text-white px-2 py-2 text-sm font-bold"
-                            >
-                                <option value="£">£</option>
-                                <option value="$">$</option>
-                                <option value="€">€</option>
-                            </select>
-                            <input
-                                type="number"
-                                min={0}
-                                value={form.deposit}
-                                onChange={(e) => setForm((f) => ({ ...f, deposit: Number(e.target.value) }))}
-                                className="flex-1 rounded-lg border-0 bg-white/10 text-white px-3 py-2 text-2xl font-black"
-                            />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <label className="block">
+                                <span className="text-[10px] font-bold uppercase text-white/50">Standard visit deposit</span>
+                                <div className="flex gap-2 mt-1">
+                                    <select
+                                        value={form.currency}
+                                        onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
+                                        className="rounded-lg border-0 bg-white/10 text-white px-2 py-2 text-sm font-bold"
+                                    >
+                                        <option value="£">£</option>
+                                        <option value="$">$</option>
+                                        <option value="€">€</option>
+                                    </select>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        value={form.standardDeposit}
+                                        onChange={(e) => setForm((f) => ({ ...f, standardDeposit: Number(e.target.value) }))}
+                                        className="flex-1 rounded-lg border-0 bg-white/10 text-white px-3 py-2 text-xl font-black"
+                                    />
+                                </div>
+                            </label>
+                            {form.acceptingEmergencies && (
+                                <label className="block">
+                                    <span className="text-[10px] font-bold uppercase text-red-300 flex items-center gap-1">
+                                        <Flame className="w-3 h-3" /> Emergency deposit (higher)
+                                    </span>
+                                    <div className="flex gap-2 mt-1">
+                                        <span className="rounded-lg bg-white/10 text-white px-2 py-2 text-sm font-bold">{form.currency}</span>
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            value={form.emergencyDeposit}
+                                            onChange={(e) => setForm((f) => ({ ...f, emergencyDeposit: Number(e.target.value) }))}
+                                            className="flex-1 rounded-lg border-0 bg-white/10 text-white px-3 py-2 text-xl font-black"
+                                        />
+                                    </div>
+                                </label>
+                            )}
                         </div>
-                        <p className="text-xs text-white/50 mt-2">Customers pay this deposit via Stripe Checkout to confirm a slot.</p>
+                        <p className="text-xs text-white/50">Customers see the correct deposit for each service type when they book.</p>
                     </div>
 
                     <div className="rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] p-3 text-sm text-[#64748B]">

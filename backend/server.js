@@ -1,8 +1,8 @@
 ﻿const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
+require('dotenv').config({ override: true });
 
-const { sendBookingConfirmationEmail } = require('./lib/bookingEmail');
+const store = require('./lib/store');
 
 let stripeClient = null;
 if (process.env.STRIPE_SECRET_KEY) {
@@ -34,8 +34,22 @@ if (process.env.GEMINI_API_KEY) {
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const { createStripeWebhookHandler } = require('./routes/webhooks');
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), createStripeWebhookHandler(stripeClient));
+
 app.use(cors());
 app.use(express.json({ limit: '8mb' }));
+
+app.use((req, res, next) => {
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+    const send = res.json.bind(res);
+    res.json = (body) => {
+        send(body);
+        if (res.statusCode < 500) persistAppState();
+        return res;
+    };
+    next();
+});
 
 const emptyBusiness = () => ({
     name: '',
@@ -171,6 +185,52 @@ function emptyBookingState() {
 let bookingState = emptyBookingState();
 const pendingCheckouts = new Map();
 const completedStripeSessions = new Map();
+
+function normalizeBookingState(state) {
+    const base = emptyBookingState();
+    if (!state || typeof state !== 'object') return base;
+    const merged = { ...base, ...state };
+    if (!Array.isArray(merged.slots) || merged.slots.length === 0) {
+        merged.slots = defaultBookingSlots();
+    }
+    if (!Array.isArray(merged.bookings)) merged.bookings = [];
+    return merged;
+}
+
+function snapshotAppState() {
+    return {
+        version: 1,
+        savedAt: new Date().toISOString(),
+        connectedBusiness,
+        dashboardState,
+        bookingState,
+        pendingCheckouts: [...pendingCheckouts.entries()],
+        completedStripeSessions: [...completedStripeSessions.entries()]
+    };
+}
+
+function persistAppState() {
+    store.scheduleSave(snapshotAppState());
+}
+
+function hydrateAppState(raw) {
+    if (!raw || typeof raw !== 'object') return;
+    if (raw.connectedBusiness) connectedBusiness = { ...emptyBusiness(), ...raw.connectedBusiness };
+    if (raw.dashboardState) dashboardState = { ...emptyDashboard(), ...raw.dashboardState };
+    if (raw.bookingState) bookingState = normalizeBookingState(raw.bookingState);
+    pendingCheckouts.clear();
+    completedStripeSessions.clear();
+    for (const [key, value] of raw.pendingCheckouts || []) pendingCheckouts.set(key, value);
+    for (const [key, value] of raw.completedStripeSessions || []) completedStripeSessions.set(key, value);
+}
+
+const persisted = store.loadState();
+if (persisted) {
+    hydrateAppState(persisted);
+    console.log(`[store] Restored app state from ${store.STATE_FILE}`);
+} else {
+    console.log(`[store] No saved state yet — will write to ${store.STATE_FILE}`);
+}
 
 function currencySymbolToIso(symbol) {
     const map = { '£': 'gbp', '$': 'usd', '€': 'eur', GBP: 'gbp', USD: 'usd', EUR: 'eur' };
@@ -389,6 +449,7 @@ function pushActivity({ type, message, icon, color }) {
         color: color || 'text-[#F59E0B]'
     };
     dashboardState.activities = [newActivity, ...dashboardState.activities].slice(0, 12);
+    persistAppState();
     return newActivity;
 }
 
@@ -735,411 +796,50 @@ app.post('/api/dashboard/update-stats', (req, res) => {
 });
 
 
-// --- Booking Plots agent (uses LocalPulse business or demo profiles) ---
+// --- Calendly-style booking (Postgres) ---
+const createHostRouter = require('./routes/host');
+const createPublicRouter = require('./routes/public');
+const authRouter = require('./routes/auth');
+const integrationsRouter = require('./routes/integrations');
+
+app.use('/api/auth', authRouter);
+app.use('/api/host', createHostRouter({ stripeClient }));
+app.use('/api/public', createPublicRouter({ stripeClient }));
+app.use('/api/integrations', integrationsRouter);
+
+// Legacy booking API shim — redirects clients to new endpoints
 app.get('/api/booking', (_req, res) => {
-    res.json(bookingPayload());
+    res.status(410).json({ error: 'Booking API moved. Use /api/auth/me and /api/host/dashboard. Register or login first.' });
 });
 
 app.get('/api/booking/public', (_req, res) => {
-    if (!isBookingConfigured()) {
-        return res.status(503).json({ error: 'Booking board not configured yet. Complete setup in Booking Plots.' });
-    }
-    res.json({
-        name: bookingState.name,
-        businessName: bookingState.businessName,
-        tradeType: bookingState.tradeType,
-        phone: bookingState.phone,
-        email: bookingState.email,
-        deposit: bookingState.deposit,
-        currency: bookingState.currency,
-        serviceArea: bookingState.serviceArea,
-        emergencyNote: bookingState.emergencyNote,
-        acceptingEmergencies: bookingState.acceptingEmergencies,
-        slug: bookingState.slug,
-        slots: bookingState.slots,
-        paymentsMode: stripeClient ? 'stripe' : 'simulated',
-        stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || null
-    });
-});
-
-app.post('/api/booking/setup', (req, res) => {
-    const {
-        name,
-        businessName,
-        tradeType,
-        phone,
-        serviceArea,
-        deposit,
-        currency,
-        acceptingEmergencies,
-        emergencyNote
-    } = req.body || {};
-    if (!String(name || '').trim() || !String(businessName || '').trim() || !String(tradeType || '').trim()) {
-        return res.status(400).json({ error: 'Your name, business name, and service type are required.' });
-    }
-    bookingState = {
-        ...emptyBookingState(),
-        active: true,
-        source: connectedBusiness.connected && connectedBusiness.name ? 'business' : 'setup',
-        demoKey: null,
-        name: String(name).trim(),
-        businessName: String(businessName).trim(),
-        tradeType: String(tradeType).trim(),
-        phone: String(phone || '').trim(),
-        serviceArea: String(serviceArea || '').trim(),
-        deposit: Number(deposit) || 45,
-        currency: currency || '£',
-        acceptingEmergencies: acceptingEmergencies !== false,
-        emergencyNote: String(emergencyNote || '').trim(),
-        slug: bookingSlug(businessName),
-        slots: defaultBookingSlots(),
-        bookings: []
-    };
-    res.json(bookingPayload());
-});
-
-app.post('/api/booking/demo', (req, res) => {
-    const key = req.body?.demoKey;
-    const demo = BOOKING_DEMOS[key];
-    if (!demo) return res.status(400).json({ error: 'Unknown demo profile' });
-    bookingState = {
-        ...emptyBookingState(),
-        ...demo,
-        active: true,
-        demoKey: key,
-        source: 'demo',
-        currency: '£',
-        stripeConnected: false,
-        slots: defaultBookingSlots(),
-        bookings: []
-    };
-    res.json(bookingPayload());
-});
-
-app.post('/api/booking/use-business', (_req, res) => {
-    if (!connectedBusiness.connected || !connectedBusiness.name) {
-        return res.status(400).json({ error: 'Connect your business in LocalPulse first (Add location)' });
-    }
-    res.json({
-        prefill: {
-            businessName: connectedBusiness.name,
-            tradeType: connectedBusiness.category || '',
-            phone: connectedBusiness.phone || '',
-            serviceArea: connectedBusiness.address || ''
-        },
-        business: connectedBusiness
-    });
-});
-
-app.post('/api/booking/clear', (req, res) => {
-    const forcePicker = req.body?.forcePicker !== false;
-    bookingState = emptyBookingState();
-    if (!forcePicker && connectedBusiness.connected) syncBookingFromBusiness();
-    res.json(bookingPayload());
-});
-
-app.post('/api/booking/reset-bookings', (_req, res) => {
-    bookingState.bookings = [];
-    res.json(bookingPayload());
-});
-
-app.patch('/api/booking/settings', (req, res) => {
-    if (!requireBookingReady(res)) return;
-    const allowed = ['deposit', 'currency', 'acceptingEmergencies', 'name', 'businessName', 'tradeType', 'phone', 'email', 'serviceArea', 'emergencyNote', 'stripeConnected'];
-    for (const key of allowed) {
-        if (req.body[key] !== undefined) bookingState[key] = req.body[key];
-    }
-    if (req.body.deposit !== undefined) bookingState.deposit = Number(req.body.deposit) || 0;
-    res.json({ ...bookingState, profile: bookingPublicProfile() });
-});
-
-app.put('/api/booking/slots', (req, res) => {
-    if (!requireBookingReady(res)) return;
-    const slots = Array.isArray(req.body?.slots) ? req.body.slots : null;
-    if (!slots) return res.status(400).json({ error: 'slots array required' });
-    bookingState.slots = slots.map((s, i) => ({
-        id: s.id || ('slot_' + i + '_' + Date.now()),
-        dayOfWeek: Number(s.dayOfWeek),
-        startTime: s.startTime,
-        endTime: s.endTime,
-        label: s.label || (s.startTime + ' - ' + s.endTime),
-        isEmergencyOnly: Boolean(s.isEmergencyOnly),
-        enabled: s.enabled !== false
-    }));
-    res.json(bookingState.slots);
-});
-
-app.get('/api/booking/bookings', (_req, res) => {
-    if (!requireBookingReady(res)) return;
-    res.json(bookingState.bookings);
-});
-
-app.post('/api/booking/bookings', async (req, res) => {
-    const { customerName, email, phone, address, description, date, slotId, slotLabel, startTime, endTime, isEmergency, notifyVia, simulatedPayment, paymentId } = req.body || {};
-    if (!customerName || !phone || !address || !date || !slotId) {
-        return res.status(400).json({ error: 'Name, phone, address, date, and slot are required' });
-    }
-    if (!requireBookingReady(res)) return;
-    if (isEmergency && !bookingState.acceptingEmergencies) {
-        return res.status(400).json({ error: 'Not accepting emergencies right now' });
-    }
-    if (stripeClient && simulatedPayment) {
-        return res.status(400).json({ error: 'Use Stripe checkout to pay the deposit' });
-    }
-    const paid = Boolean(simulatedPayment && !stripeClient);
-    const booking = {
-        id: bookingId(), customerName, email: email || '', phone, address, description: description || '', date, slotId,
-        slotLabel: slotLabel || '', startTime: startTime || '', endTime: endTime || '',
-        isEmergency: Boolean(isEmergency), notifyVia: notifyVia || 'both',
-        depositAmount: bookingState.deposit, currency: bookingState.currency,
-        depositPaid: paid, paymentId: paymentId || (paid ? 'sim_pay_' + Date.now() : null),
-        stripeSessionId: null,
-        status: paid ? 'pending' : 'deposit_unpaid', reminderSent: false,
-        confirmationEmailSent: false,
-        createdAt: new Date().toISOString()
-    };
-    bookingState.bookings = [booking, ...bookingState.bookings];
-    pushActivity({ type: 'booking', message: 'New booking from ' + customerName, icon: 'CheckCircle', color: 'text-[#F59E0B]' });
-
-    if (paid && booking.email) {
-        try {
-            const emailResult = await sendBookingConfirmationEmail({
-                to: booking.email,
-                customerName: booking.customerName,
-                businessName: bookingState.businessName,
-                tradespersonName: bookingState.name,
-                date: booking.date,
-                slotLabel: booking.slotLabel,
-                depositAmount: booking.depositAmount,
-                currency: booking.currency,
-                address: booking.address
-            });
-            booking.confirmationEmailSent = Boolean(emailResult.sent);
-        } catch (emailErr) {
-            console.error('Simulated booking email failed:', emailErr);
-        }
-    }
-
-    res.status(201).json(booking);
-});
-
-app.patch('/api/booking/bookings/:id', (req, res) => {
-    if (!requireBookingReady(res)) return;
-    const booking = bookingState.bookings.find((b) => b.id === req.params.id);
-    if (!booking) return res.status(404).json({ error: 'Booking not found' });
-    if (req.body.status) booking.status = req.body.status;
-    if (req.body.reminderSent !== undefined) booking.reminderSent = Boolean(req.body.reminderSent);
-    if (req.body.depositPaid !== undefined) booking.depositPaid = Boolean(req.body.depositPaid);
-    res.json(booking);
-});
-
-app.post('/api/booking/test', (_req, res) => {
-    if (!requireBookingReady(res)) return;
-    const emergency = bookingState.slots.find((s) => s.isEmergencyOnly && s.enabled) || bookingState.slots[0];
-    const booking = {
-        id: bookingId(), customerName: 'Claire Watson', phone: '07788 445566',
-        address: '42 Highfield Road, Apartment 3B, SW19 4EE',
-        description: 'URGENT: Water pipe under the kitchen sink burst and spraying onto floor. Valve seems jammed.',
-        date: new Date().toISOString().slice(0, 10),
-        slotId: emergency?.id || 'test',
-        slotLabel: emergency?.label || 'Emergency Standby (07:00 - 09:00)',
-        startTime: emergency?.startTime || '07:00', endTime: emergency?.endTime || '09:00',
-        isEmergency: true, notifyVia: 'both', depositAmount: bookingState.deposit, currency: bookingState.currency,
-        depositPaid: false, status: 'deposit_unpaid', reminderSent: false, createdAt: new Date().toISOString()
-    };
-    bookingState.bookings = [booking, ...bookingState.bookings];
-    res.status(201).json(booking);
-});
-
-app.post('/api/booking/checkout', async (req, res) => {
-    if (!requireBookingReady(res)) return;
-
-    const {
-        customerName,
-        email,
-        phone,
-        address,
-        description,
-        date,
-        slotId,
-        slotLabel,
-        startTime,
-        endTime,
-        isEmergency,
-        notifyVia
-    } = req.body || {};
-
-    if (!customerName || !phone || !email || !address || !date || !slotId) {
-        return res.status(400).json({ error: 'Name, email, phone, address, date, and slot are required' });
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) {
-        return res.status(400).json({ error: 'Enter a valid email address' });
-    }
-    if (isEmergency && !bookingState.acceptingEmergencies) {
-        return res.status(400).json({ error: 'Not accepting emergencies right now' });
-    }
-
-    const amount = Number(bookingState.deposit) || 0;
-    if (amount <= 0) return res.status(400).json({ error: 'Deposit amount is not configured' });
-
-    if (!stripeClient) {
-        const paymentId = 'sim_pay_' + Date.now();
-        return res.json({
-            mode: 'simulated',
-            simulated: true,
-            success: true,
-            paymentId,
-            amount,
-            currency: bookingState.currency,
-            message: 'Test payment accepted (no Stripe key configured)'
-        });
-    }
-
-    const pendingId = bookingId();
-    const pending = {
-        pendingId,
-        customerName: String(customerName).trim(),
-        email: String(email).trim().toLowerCase(),
-        phone: String(phone).trim(),
-        address: String(address).trim(),
-        description: String(description || '').trim(),
-        date,
-        slotId,
-        slotLabel: slotLabel || '',
-        startTime: startTime || '',
-        endTime: endTime || '',
-        isEmergency: Boolean(isEmergency),
-        notifyVia: notifyVia || 'both',
-        createdAt: new Date().toISOString()
-    };
-    pendingCheckouts.set(pendingId, pending);
-
-    const stripeCurrency = currencySymbolToIso(bookingState.currency);
-    const unitAmount = Math.round(amount * 100);
-
-    try {
-        const session = await stripeClient.checkout.sessions.create({
-            mode: 'payment',
-            customer_email: pending.email,
-            line_items: [
-                {
-                    quantity: 1,
-                    price_data: {
-                        currency: stripeCurrency,
-                        unit_amount: unitAmount,
-                        product_data: {
-                            name: `Booking deposit — ${bookingState.businessName}`,
-                            description: `${pending.slotLabel || 'Appointment'} on ${pending.date}`
-                        }
-                    }
-                }
-            ],
-            metadata: { pendingId },
-            success_url: `${frontendOrigin()}/book/success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${frontendOrigin()}/book?cancelled=1`
-        });
-
-        res.json({ mode: 'stripe', url: session.url, sessionId: session.id });
-    } catch (err) {
-        pendingCheckouts.delete(pendingId);
-        console.error('Stripe checkout error:', err);
-        res.status(500).json({ error: err.message || 'Could not start Stripe checkout' });
-    }
-});
-
-app.get('/api/booking/checkout/verify', async (req, res) => {
-    const sessionId = String(req.query.session_id || '').trim();
-    if (!sessionId) return res.status(400).json({ error: 'session_id is required' });
-
-    const existingId = completedStripeSessions.get(sessionId);
-    if (existingId) {
-        const booking = bookingState.bookings.find((b) => b.id === existingId);
-        if (booking) return res.json({ booking, email: { sent: booking.confirmationEmailSent, to: booking.email } });
-    }
-
-    if (!stripeClient) return res.status(400).json({ error: 'Stripe is not configured' });
-    if (!requireBookingReady(res)) return;
-
-    try {
-        const session = await stripeClient.checkout.sessions.retrieve(sessionId);
-        if (session.payment_status !== 'paid') {
-            return res.status(402).json({ error: 'Payment not completed yet' });
-        }
-
-        const pendingId = session.metadata?.pendingId;
-        const pending = pendingCheckouts.get(pendingId);
-        if (!pending) {
-            const bySession = bookingState.bookings.find((b) => b.stripeSessionId === sessionId);
-            if (bySession) {
-                return res.json({ booking: bySession, email: { sent: bySession.confirmationEmailSent, to: bySession.email } });
-            }
-            return res.status(404).json({ error: 'Booking details not found — contact the business' });
-        }
-
-        const booking = createBookingFromPending(pending, {
-            paymentId: session.payment_intent,
-            stripeSessionId: sessionId
-        });
-
-        bookingState.bookings = [booking, ...bookingState.bookings];
-        pendingCheckouts.delete(pendingId);
-        completedStripeSessions.set(sessionId, booking.id);
-
-        pushActivity({
-            type: 'booking',
-            message: 'Paid booking from ' + booking.customerName,
-            icon: 'CheckCircle',
-            color: 'text-[#F59E0B]'
-        });
-
-        let emailResult = { sent: false, mode: 'skipped', to: booking.email };
-        try {
-            emailResult = await sendBookingConfirmationEmail({
-                to: booking.email,
-                customerName: booking.customerName,
-                businessName: bookingState.businessName,
-                tradespersonName: bookingState.name,
-                date: booking.date,
-                slotLabel: booking.slotLabel,
-                depositAmount: booking.depositAmount,
-                currency: booking.currency,
-                address: booking.address
-            });
-            booking.confirmationEmailSent = Boolean(emailResult.sent);
-        } catch (emailErr) {
-            console.error('Confirmation email failed:', emailErr);
-            emailResult = { sent: false, mode: 'error', to: booking.email, error: emailErr.message };
-        }
-
-        res.json({ booking, email: emailResult });
-    } catch (err) {
-        console.error('Stripe verify error:', err);
-        res.status(500).json({ error: err.message || 'Could not verify payment' });
-    }
-});
-
-app.post('/api/booking/notify', (req, res) => {
-    if (!requireBookingReady(res)) return;
-    const booking = bookingState.bookings.find((b) => b.id === req.body?.bookingId);
-    if (!booking) return res.status(404).json({ error: 'Booking not found' });
-    booking.reminderSent = true;
-    res.json({ mode: 'simulated', sent: true, to: booking.phone });
-});
-
-app.post('/api/booking/connect-stripe', (_req, res) => {
-    if (!requireBookingReady(res)) return;
-    bookingState.stripeConnected = Boolean(stripeClient);
-    res.json({
-        mode: stripeClient ? 'stripe' : 'simulated',
-        connected: bookingState.stripeConnected,
-        message: stripeClient ? 'Stripe payments enabled' : 'Add STRIPE_SECRET_KEY to enable real payments'
-    });
+    res.status(410).json({ error: 'Use /api/public/:hostSlug/:eventSlug instead.' });
 });
 
 module.exports = app;
 
 if (require.main === module) {
-    app.listen(PORT, () => {
-        console.log('Backend server running on http://localhost:' + PORT);
-    });
+    const { migrate } = require('./lib/db');
+    const shutdown = () => {
+        store.flushSave();
+        process.exit(0);
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+
+    (async () => {
+        if (process.env.DATABASE_URL) {
+            try {
+                await migrate();
+                console.log('[db] Migrations complete');
+            } catch (err) {
+                console.error('[db] Migration failed:', err.message);
+            }
+        } else {
+            console.warn('[db] DATABASE_URL not set — booking features require Postgres');
+        }
+        app.listen(PORT, () => {
+            console.log('Backend server running on http://localhost:' + PORT);
+        });
+    })();
 }

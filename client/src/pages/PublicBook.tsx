@@ -1,60 +1,82 @@
 ﻿import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
-import CustomerBookingFlow, { type BookingProfile, type BookingSlot } from '../components/CustomerBookingFlow';
-import { apiGet } from '../lib/utils';
+import { useParams } from 'react-router-dom';import { apiGet } from '../lib/utils';
+import CustomerBookingFlow from '../components/CustomerBookingFlow';
 
-export default function PublicBook() {
+export default function PublicBookHost() {
+    const { hostSlug } = useParams();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [profile, setProfile] = useState<BookingProfile | null>(null);
-    const [slots, setSlots] = useState<BookingSlot[]>([]);
+    const [data, setData] = useState<any>(null);
 
     useEffect(() => {
-        apiGet('/api/booking/public')
-            .then((data) => {
-                setProfile({
-                    name: data.name,
-                    businessName: data.businessName,
-                    tradeType: data.tradeType,
-                    phone: data.phone,
-                    deposit: data.deposit,
-                    currency: data.currency,
-                    serviceArea: data.serviceArea,
-                    emergencyNote: data.emergencyNote,
-                    acceptingEmergencies: data.acceptingEmergencies,
-                    paymentsMode: data.paymentsMode
-                });
-                setSlots(data.slots || []);
-            })
+        if (!hostSlug) return;
+        apiGet(`/api/public/${hostSlug}`)
+            .then(setData)
             .catch((e) => setError(e.message))
             .finally(() => setLoading(false));
-    }, []);
+    }, [hostSlug]);
 
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC] text-[#64748B] font-medium">
-                Loading booking schedule...
-            </div>
-        );
-    }
-
-    if (!profile) {
-        return (
-            <div className="min-h-screen flex items-center justify-center p-6 bg-[#F8FAFC]">
-                <p className="text-red-600">{error || 'Booking unavailable — open Booking Plots and pick a profile first.'}</p>
-            </div>
-        );
-    }
+    if (loading) return <div className="min-h-screen flex items-center justify-center text-[#64748B]">Loading…</div>;
+    if (error || !data) return <div className="min-h-screen flex items-center justify-center text-red-600 p-6">{error || 'Not found'}</div>;
 
     return (
-        <div className="min-h-screen bg-[#F8FAFC] pb-12">
-            <div className="max-w-4xl mx-auto px-4 pt-4">
-                <Link to="/booking" className="inline-flex items-center gap-2 mb-4 text-sm font-bold text-[#0F172A]">
-                    <ArrowLeft className="w-4 h-4" />
-                    Back to Tradesperson Dashboard
-                </Link>
-                <CustomerBookingFlow profile={profile} slots={slots} />
+        <div className="min-h-screen bg-[#F8FAFC] py-6 px-4">
+            <div className="max-w-5xl mx-auto">
+                <CustomerBookingFlow
+                    hostSlug={hostSlug!}
+                    host={{
+                        name: data.name,
+                        tradeType: data.tradeType,
+                        phone: data.phone,
+                        serviceArea: data.serviceArea
+                    }}
+                    eventTypes={data.eventTypes.map((et: any) => ({
+                        slug: et.slug,
+                        name: et.name,
+                        description: et.description,
+                        durationMinutes: et.duration_minutes,
+                        depositCents: et.deposit_cents,
+                        totalCents: et.total_cents
+                    }))}
+                />
+            </div>
+        </div>
+    );
+}
+
+export function PublicBookEvent() {
+    const { hostSlug, eventSlug } = useParams();
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [data, setData] = useState<any>(null);
+
+    useEffect(() => {
+        if (!hostSlug || !eventSlug) return;
+        apiGet(`/api/public/${hostSlug}/${eventSlug}`)
+            .then(setData)
+            .catch((e) => setError(e.message))
+            .finally(() => setLoading(false));
+    }, [hostSlug, eventSlug]);
+
+    if (loading) return <div className="min-h-screen flex items-center justify-center text-[#64748B]">Loading schedule…</div>;
+    if (error || !data) return <div className="min-h-screen flex items-center justify-center text-red-600 p-6">{error || 'Not found'}</div>;
+
+    return (
+        <div className="min-h-screen bg-[#F8FAFC] py-6 px-4">
+            <div className="max-w-5xl mx-auto">
+                <CustomerBookingFlow
+                    hostSlug={hostSlug!}
+                    eventSlug={eventSlug!}
+                    host={data.host}
+                    eventType={{
+                        slug: data.eventType.slug,
+                        name: data.eventType.name,
+                        description: data.eventType.description,
+                        durationMinutes: data.eventType.durationMinutes,
+                        depositCents: data.eventType.depositCents,
+                        totalCents: data.eventType.totalCents
+                    }}
+                />
             </div>
         </div>
     );

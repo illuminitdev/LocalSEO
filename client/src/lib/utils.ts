@@ -1,6 +1,9 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 
+import { authHeaders, getToken } from './auth';
+import { bookingOrgHeaders } from './bookingHost';
+
 export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
 
 export function cn(...inputs: ClassValue[]) {
@@ -21,17 +24,19 @@ async function readError(res: Response, path: string) {
     }
 }
 
+function apiHeaders(token?: string | null) {
+    return { ...authHeaders(), ...bookingOrgHeaders(), ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+}
+
 export async function apiGet(path: string, token?: string | null) {
-    const headers: Record<string, string> = {};
-    if (token) headers.Authorization = `Bearer ${token}`;
+    const headers = apiHeaders(token);
     const res = await fetch(`${API_BASE}${path}`, { headers });
     if (!res.ok) throw new Error(await readError(res, path));
     return res.json();
 }
 
 export async function apiPost(path: string, body: unknown = {}, token?: string | null) {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers.Authorization = `Bearer ${token}`;
+    const headers = { 'Content-Type': 'application/json', ...apiHeaders(token) };
     const res = await fetch(`${API_BASE}${path}`, {
         method: 'POST',
         headers,
@@ -42,8 +47,7 @@ export async function apiPost(path: string, body: unknown = {}, token?: string |
 }
 
 export async function apiPut(path: string, body: unknown = {}, token?: string | null) {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers.Authorization = `Bearer ${token}`;
+    const headers = { 'Content-Type': 'application/json', ...apiHeaders(token) };
     const res = await fetch(`${API_BASE}${path}`, {
         method: 'PUT',
         headers,
@@ -54,8 +58,7 @@ export async function apiPut(path: string, body: unknown = {}, token?: string | 
 }
 
 export async function apiPatch(path: string, body: unknown = {}, token?: string | null) {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers.Authorization = `Bearer ${token}`;
+    const headers = { 'Content-Type': 'application/json', ...apiHeaders(token) };
     const res = await fetch(`${API_BASE}${path}`, {
         method: 'PATCH',
         headers,
@@ -64,3 +67,17 @@ export async function apiPatch(path: string, body: unknown = {}, token?: string 
     if (!res.ok) throw new Error(await readError(res, path));
     return res.json();
 }
+
+export async function apiDelete(path: string, token?: string | null) {
+    const headers = apiHeaders(token);
+    const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE', headers });
+    if (!res.ok) throw new Error(await readError(res, path));
+    return res.json();
+}
+
+export function formatCents(cents: number, currency = 'GBP') {
+    const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
+    return `${symbol}${(cents / 100).toFixed(2)}`;
+}
+
+export { getToken };

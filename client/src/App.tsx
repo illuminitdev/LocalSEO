@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import ProfileAudit from './pages/ProfileAudit';
@@ -11,15 +11,23 @@ import ReportGenerator from './pages/ReportGenerator';
 import Citations from './pages/Citations';
 import BookingPlots from './pages/BookingPlots';
 import BookingSettings from './pages/BookingSettings';
-import PublicBook from './pages/PublicBook';
+import PublicBookHost, { PublicBookEvent } from './pages/PublicBook';
 import BookSuccess from './pages/BookSuccess';
+import BookManage from './pages/BookManage';
+import Login from './pages/Login';
+import Register from './pages/Register';
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/book" element={<PublicBook />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
         <Route path="/book/success" element={<BookSuccess />} />
+        <Route path="/book/manage/:token" element={<BookManage />} />
+        <Route path="/book/:hostSlug/:eventSlug" element={<PublicBookEvent />} />
+        <Route path="/book/:hostSlug" element={<PublicBookHost />} />
+        <Route path="/book" element={<Navigate to="/booking" replace />} />
         <Route path="/booking/settings" element={<BookingSettings />} />
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
