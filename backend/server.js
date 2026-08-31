@@ -3,6 +3,7 @@ const cors = require('cors');
 require('dotenv').config({ override: true });
 
 const store = require('./lib/store');
+const { requirePlacesConfigured, searchBusiness, nearbyCompetitors } = require('./lib/googlePlaces');
 
 let stripeClient = null;
 if (process.env.STRIPE_SECRET_KEY) {
@@ -29,6 +30,12 @@ if (process.env.GEMINI_API_KEY) {
     }
 } else {
     console.warn('GEMINI_API_KEY is missing. Add it to backend/.env');
+}
+
+if (requirePlacesConfigured()) {
+    console.log('Google Places ready.');
+} else {
+    console.warn('GOOGLE_PLACES_API_KEY is missing. Add location search will fall back to Gemini if available.');
 }
 
 const app = express();
@@ -63,7 +70,11 @@ const emptyBusiness = () => ({
     rating: null,
     reviewsCount: 0,
     connected: false,
-    reviews: []
+    reviews: [],
+    lat: null,
+    lng: null,
+    placeId: '',
+    mapsUrl: ''
 });
 
 const emptyDashboard = () => ({
@@ -456,6 +467,7 @@ function pushActivity({ type, message, icon, color }) {
 app.get('/api/status', (_req, res) => {
     res.json({
         gemini: Boolean(aiClient),
+        places: requirePlacesConfigured(),
         textModel: TEXT_MODEL,
         imageModel: IMAGE_MODEL
     });
@@ -479,7 +491,7 @@ app.post('/api/business/connect', (req, res) => {
     dashboardState.reviewResponseRate = 0;
     pushActivity({
         type: 'places',
-        message: `Connected "${connectedBusiness.name}" from live Gemini search.`,
+        message: `Connected "${connectedBusiness.name}" from Google Places.`,
         icon: 'CheckCircle',
         color: 'text-[#F59E0B]'
     });
@@ -487,9 +499,30 @@ app.post('/api/business/connect', (req, res) => {
 });
 
 app.post('/api/places/search', async (req, res) => {
-    if (!requireGemini(res)) return;
     const { query } = req.body;
     if (!query) return res.status(400).json({ error: 'Query is required' });
+
+    // Prefer real Google Places when configured
+    if (requirePlacesConfigured()) {
+        try {
+            const place = await searchBusiness(String(query).trim());
+            if (!place) {
+                return res.status(404).json({ error: 'No matching listing found.' });
+            }
+            return res.json(place);
+        } catch (err) {
+            console.error('Places API search error:', err);
+            // Fall through to Gemini if available
+            if (!aiClient) {
+                return res.status(502).json({
+                    error: `Google Places failed: ${errMessage(err)}. Check the key has Places API enabled.`
+                });
+            }
+            console.warn('Falling back to Gemini Places search…');
+        }
+    }
+
+    if (!requireGemini(res)) return;
 
     try {
         const text = await generateText(
@@ -506,7 +539,7 @@ reviews must be real public snippets only. If you cannot verify reviews, use [].
             return res.status(404).json({ error: data?.error || 'No matching listing found.' });
         }
         if (!data.name) {
-            return res.status(404).json({ error: 'Gemini did not return a verified listing.' });
+            return res.status(404).json({ error: 'Search did not return a verified listing.' });
         }
         res.json({
             name: data.name,
@@ -523,7 +556,7 @@ reviews must be real public snippets only. If you cannot verify reviews, use [].
         });
     } catch (err) {
         console.error('Places search error:', err);
-        res.status(502).json({ error: `Gemini search failed: ${errMessage(err)}` });
+        res.status(502).json({ error: `Listing search failed: ${errMessage(err)}` });
     }
 });
 
@@ -643,20 +676,57 @@ app.post('/api/ai/gap-analysis', async (req, res) => {
     const keyword = req.body?.keyword || `${connectedBusiness.category} near me`;
 
     try {
+        let liveCompetitors = [];
+        if (requirePlacesConfigured() && connectedBusiness.lat != null && connectedBusiness.lng != null) {
+            try {
+                liveCompetitors = await nearbyCompetitors({
+                    lat: connectedBusiness.lat,
+                    lng: connectedBusiness.lng,
+                    keyword: connectedBusiness.category || keyword,
+                    excludeName: connectedBusiness.name
+                });
+            } catch (err) {
+                console.warn('Nearby competitors lookup failed:', err.message);
+            }
+        }
+
+        const competitorBlock = liveCompetitors.length
+            ? `Live nearby competitors from Google Places (use these names/ratings; do not invent others):\n${JSON.stringify(liveCompetitors)}`
+            : 'No live competitor list available — use googleSearch for 2 real nearby competitors only.';
+
         const text = await generateText(
             `Local SEO gap analysis for the real business "${connectedBusiness.name}" at ${connectedBusiness.address}.
+Category: ${connectedBusiness.category || 'local business'}
+Rating: ${connectedBusiness.rating} (${connectedBusiness.reviewsCount} reviews)
 Target query: "${keyword}".
-Use live public competitor data only. Do not invent businesses.
+${competitorBlock}
+Use live public data only. Do not invent businesses.
 Return JSON only:
 {"gapAnalysis": "", "grid": [[1,2,3],[4,5,6],[7,8,9]], "competitors": [{"name": "", "reviews": 0, "rating": 0, "posts": 0, "photos": 0, "trend": "up"}]}
-grid is a 3x3 of estimated Local Pack ranks 1-20 for neighborhood cells.
-First competitors item must be "${connectedBusiness.name} (You)". Include 2 real nearby competitors if publicly known.`,
-            { tools: [{ googleSearch: {} }] }
+grid is a 3x3 of estimated Local Pack ranks 1-20 for neighborhood cells around the business.
+First competitors item must be "${connectedBusiness.name} (You)" with reviews=${connectedBusiness.reviewsCount || 0} and rating=${connectedBusiness.rating || 0}. Include 2 real nearby competitors.`,
+            liveCompetitors.length ? {} : { tools: [{ googleSearch: {} }] }
         );
         const data = parseJsonFromText(text);
         if (!data?.gapAnalysis) {
             return res.status(502).json({ error: 'Gemini returned an unusable gap analysis.' });
         }
+
+        // Ensure you + live competitors if Gemini omitted them
+        if (!Array.isArray(data.competitors) || !data.competitors.length) {
+            data.competitors = [
+                {
+                    name: `${connectedBusiness.name} (You)`,
+                    reviews: connectedBusiness.reviewsCount || 0,
+                    rating: connectedBusiness.rating || 0,
+                    posts: dashboardState.weeklyPosts || 0,
+                    photos: dashboardState.photoCount || 0,
+                    trend: 'up'
+                },
+                ...liveCompetitors.slice(0, 2)
+            ];
+        }
+
         if (Array.isArray(data.grid) && data.grid.length === 3) {
             const ranks = data.grid.flat().filter((n) => typeof n === 'number');
             if (ranks.length) {
@@ -747,7 +817,10 @@ app.post('/api/ai/strategy-report', async (req, res) => {
 
     try {
         const text = await generateText(
-            `Create an executive local SEO report for ${connectedBusiness.name} (${connectedBusiness.category}) at ${connectedBusiness.address}.
+            `Create an executive local SEO report for ${connectedBusiness.name} (${connectedBusiness.category || 'local business'}) at ${connectedBusiness.address}.
+Phone: ${connectedBusiness.phone || 'n/a'}
+Website: ${connectedBusiness.website || 'n/a'}
+Public rating: ${connectedBusiness.rating ?? 'n/a'} from ${connectedBusiness.reviewsCount || 0} reviews
 Use only these live metrics. Do not invent extra numbers.
 - Profile completeness: ${stats.completenessScore}%
 - Average GeoGrid rank: ${stats.visibilityRank}
@@ -755,8 +828,9 @@ Use only these live metrics. Do not invent extra numbers.
 - Review response rate: ${stats.reviewResponseRate}%
 - Weekly posts: ${stats.weeklyPosts}
 - Photo count: ${stats.photoCount}
-- Rating: ${connectedBusiness.rating} from ${connectedBusiness.reviewsCount} reviews
-Return JSON only: grade (A+ to C), positioningText, roadmap (array of 3 items with id, title, desc), metrics (object with localPackRank, completeness, reviewResponseRate, missingMedia).`
+Write a practical report a trade-business owner can act on this week.
+Return JSON only:
+{"grade":"A+|A|A-|B+|B|B-|C+|C","positioningText":"2-3 sentences","roadmap":[{"id":1,"title":"","desc":""},{"id":2,"title":"","desc":""},{"id":3,"title":"","desc":""}],"metrics":{"localPackRank":${stats.visibilityRank},"completeness":${stats.completenessScore},"reviewResponseRate":${stats.reviewResponseRate},"missingMedia":"${stats.photoCount ? `${stats.photoCount} photos` : 'No photos yet'}"}}`
         );
         const data = parseJsonFromText(text);
         if (!data?.grade) return res.status(502).json({ error: 'Gemini returned an unusable report.' });
