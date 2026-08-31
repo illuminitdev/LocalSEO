@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Star, MessageCircle, Sparkles, Check, CheckCircle2, AlertTriangle, Layers } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/utils';
 import EmptyState from '../components/EmptyState';
@@ -74,7 +74,7 @@ export default function ReviewManagement() {
             type: 'review',
             message: `Approved reply to ${targetReview.author}.`,
             icon: 'CheckCircle',
-            color: 'text-[#708238]'
+            color: 'text-[#F59E0B]'
         }).catch(() => {});
     };
 
@@ -114,7 +114,7 @@ export default function ReviewManagement() {
                     <p className="text-gray-500 mt-2">Replies only to reviews loaded from the connected listing.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                    <select value={globalTone} onChange={(e) => setGlobalTone(e.target.value)} className="px-4 py-2.5 bg-white border border-[#E7E5E4] rounded-xl text-sm font-semibold">
+                    <select value={globalTone} onChange={(e) => setGlobalTone(e.target.value)} className="px-4 py-2.5 bg-white border border-[#E2E8F0] rounded-xl text-sm font-semibold">
                         <option value="warm">Professional & Warm</option>
                         <option value="apologetic">Apologetic & Resolution-Focused</option>
                         <option value="enthusiastic">Enthusiastic</option>
@@ -122,7 +122,7 @@ export default function ReviewManagement() {
                     <button
                         onClick={handleBatchDraft}
                         disabled={isDraftingBatch || reviews.every(r => r.status !== 'pending')}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-[#3D4F38] hover:bg-[#4A5E44] text-white rounded-xl font-bold disabled:opacity-70 cursor-pointer"
+                        className="flex items-center gap-2 px-5 py-2.5 bg-[#0F172A] hover:bg-[#111827] text-white rounded-xl font-bold disabled:opacity-70 cursor-pointer"
                     >
                         <Layers className="w-4 h-4" />
                         {isDraftingBatch ? 'Drafting All...' : 'Batch Auto-Draft All'}
@@ -137,8 +137,8 @@ export default function ReviewManagement() {
             ) : (
                 <div className="space-y-6">
                     {reviews.map(review => (
-                        <div key={review.id} className="bg-white rounded-2xl border border-[#E7E5E4] overflow-hidden flex flex-col md:flex-row">
-                            <div className="p-6 md:w-1/2 border-b md:border-b-0 md:border-r border-[#E7E5E4] bg-[#FAF9F5]">
+                        <div key={review.id} className="bg-white rounded-2xl border border-[#E2E8F0] overflow-hidden flex flex-col md:flex-row">
+                            <div className="p-6 md:w-1/2 border-b md:border-b-0 md:border-r border-[#E2E8F0] bg-[#F8FAFC]">
                                 <div className="flex justify-between items-start mb-3">
                                     <div>
                                         <h3 className="font-extrabold text-sm">{review.author}</h3>
@@ -152,7 +152,7 @@ export default function ReviewManagement() {
                                 </div>
                                 <p className="text-sm italic">"{review.text}"</p>
                                 <div className="mt-4">
-                                    {review.sentiment === 'positive' && <span className="text-xs font-bold text-[#3D4F38] flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Positive</span>}
+                                    {review.sentiment === 'positive' && <span className="text-xs font-bold text-[#0F172A] flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Positive</span>}
                                     {review.sentiment === 'negative' && <span className="text-xs font-bold text-red-700 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Negative</span>}
                                     {review.sentiment === 'neutral' && <span className="text-xs font-bold text-gray-600">Neutral</span>}
                                 </div>
@@ -160,24 +160,24 @@ export default function ReviewManagement() {
                             <div className="p-6 md:w-1/2 flex flex-col min-h-[180px]">
                                 {review.status === 'pending' ? (
                                     <div className="flex-1 flex flex-col items-center justify-center text-center py-6">
-                                        <MessageCircle className="w-6 h-6 text-[#708238] mb-3" />
-                                        <button onClick={() => handleDraftSingle(review.id)} disabled={review.isDrafting} className="flex items-center gap-2 px-4 py-2 border border-[#708238]/40 rounded-lg font-bold cursor-pointer">
+                                        <MessageCircle className="w-6 h-6 text-[#F59E0B] mb-3" />
+                                        <button onClick={() => handleDraftSingle(review.id)} disabled={review.isDrafting} className="flex items-center gap-2 px-4 py-2 border border-[#F59E0B]/40 rounded-lg font-bold cursor-pointer">
                                             <Sparkles className={`w-4 h-4 ${review.isDrafting ? 'animate-spin' : ''}`} />
                                             {review.isDrafting ? 'Drafting...' : 'Draft AI Reply'}
                                         </button>
                                     </div>
                                 ) : review.status === 'drafted' ? (
                                     <>
-                                        <textarea value={review.draft} onChange={(e) => setReviews(prev => prev.map(r => r.id === review.id ? { ...r, draft: e.target.value } : r))} className="flex-1 w-full p-3 text-sm border border-[#E7E5E4] rounded-lg min-h-[100px]" />
+                                        <textarea value={review.draft} onChange={(e) => setReviews(prev => prev.map(r => r.id === review.id ? { ...r, draft: e.target.value } : r))} className="flex-1 w-full p-3 text-sm border border-[#E2E8F0] rounded-lg min-h-[100px]" />
                                         <div className="mt-4 flex gap-3">
-                                            <button onClick={() => handlePublish(review.id)} className="flex-1 py-2 bg-[#708238] text-white rounded-lg font-bold cursor-pointer flex justify-center items-center gap-2">
+                                            <button onClick={() => handlePublish(review.id)} className="flex-1 py-2 bg-[#F59E0B] text-white rounded-lg font-bold cursor-pointer flex justify-center items-center gap-2">
                                                 <Check className="w-4 h-4" /> Approve
                                             </button>
-                                            <button onClick={() => handleDraftSingle(review.id)} className="px-4 py-2 border border-[#E7E5E4] rounded-lg font-bold cursor-pointer">Regenerate</button>
+                                            <button onClick={() => handleDraftSingle(review.id)} className="px-4 py-2 border border-[#E2E8F0] rounded-lg font-bold cursor-pointer">Regenerate</button>
                                         </div>
                                     </>
                                 ) : (
-                                    <p className="text-sm bg-[#F4F2EB] p-4 rounded-xl">{review.draft}</p>
+                                    <p className="text-sm bg-[#F1F5F9] p-4 rounded-xl">{review.draft}</p>
                                 )}
                             </div>
                         </div>

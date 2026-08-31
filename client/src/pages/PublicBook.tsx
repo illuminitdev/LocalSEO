@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import CustomerBookingFlow, { type BookingProfile, type BookingSlot } from '../components/CustomerBookingFlow';
@@ -22,7 +22,8 @@ export default function PublicBook() {
                     currency: data.currency,
                     serviceArea: data.serviceArea,
                     emergencyNote: data.emergencyNote,
-                    acceptingEmergencies: data.acceptingEmergencies
+                    acceptingEmergencies: data.acceptingEmergencies,
+                    paymentsMode: data.paymentsMode
                 });
                 setSlots(data.slots || []);
             })
@@ -32,7 +33,7 @@ export default function PublicBook() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-[#F5F7F8] text-[#5B6770] font-medium">
+            <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC] text-[#64748B] font-medium">
                 Loading booking schedule...
             </div>
         );
@@ -40,16 +41,16 @@ export default function PublicBook() {
 
     if (!profile) {
         return (
-            <div className="min-h-screen flex items-center justify-center p-6 bg-[#F5F7F8]">
+            <div className="min-h-screen flex items-center justify-center p-6 bg-[#F8FAFC]">
                 <p className="text-red-600">{error || 'Booking unavailable — open Booking Plots and pick a profile first.'}</p>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-[#F5F7F8] pb-12">
+        <div className="min-h-screen bg-[#F8FAFC] pb-12">
             <div className="max-w-4xl mx-auto px-4 pt-4">
-                <Link to="/booking" className="inline-flex items-center gap-2 mb-4 text-sm font-bold text-[#12333C]">
+                <Link to="/booking" className="inline-flex items-center gap-2 mb-4 text-sm font-bold text-[#0F172A]">
                     <ArrowLeft className="w-4 h-4" />
                     Back to Tradesperson Dashboard
                 </Link>

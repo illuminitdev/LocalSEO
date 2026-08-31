@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { Search, MapPin, Star, Building, CheckCircle2 } from 'lucide-react';
 
 export default function GroundingPanel() {
@@ -56,7 +56,7 @@ export default function GroundingPanel() {
           type: 'places',
           message: `Connected business profile "${results?.name || 'Smile Dental'}" via Google Places grounding.`,
           icon: 'CheckCircle',
-          color: 'text-[#3D4F38]'
+          color: 'text-[#0F172A]'
         })
       });
     } catch (err) {
@@ -71,11 +71,11 @@ export default function GroundingPanel() {
   };
 
   return (
-    <div id="grounding" className="bg-white rounded-2xl border border-[#E7E5E4] shadow-sm overflow-hidden scroll-mt-24">
-      <div className="p-6 border-b border-[#E7E5E4] bg-[#FAF9F5] flex items-center justify-between">
+    <div id="grounding" className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm overflow-hidden scroll-mt-24">
+      <div className="p-6 border-b border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-[#2D2F27] flex items-center gap-2">
-            <Search className="w-5 h-5 text-[#3D4F38]" /> 1. Live Google Places Data Grounding
+          <h2 className="text-xl font-bold text-[#0F172A] flex items-center gap-2">
+            <Search className="w-5 h-5 text-[#0F172A]" /> 1. Live Google Places Data Grounding
           </h2>
           <p className="text-sm text-gray-500 mt-1">Connect your real-world Google Business Profile by searching Google Places.</p>
         </div>
@@ -84,8 +84,8 @@ export default function GroundingPanel() {
       <div className="p-6">
         {connected ? (
           <div className="flex flex-col items-center justify-center py-6 text-center">
-            <CheckCircle2 className="w-12 h-12 text-[#708238] mb-2 animate-bounce" />
-            <h3 className="text-[#2D2F27] font-bold">Profile Connected Successfully!</h3>
+            <CheckCircle2 className="w-12 h-12 text-[#F59E0B] mb-2 animate-bounce" />
+            <h3 className="text-[#0F172A] font-bold">Profile Connected Successfully!</h3>
             <p className="text-sm text-gray-500">Live data grounding active for your business manager.</p>
           </div>
         ) : (
@@ -101,7 +101,7 @@ export default function GroundingPanel() {
                       </div>
                       <input
                         type="text"
-                        className="block w-full pl-10 pr-3 py-2.5 border border-[#E7E5E4] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3D4F38]/50 bg-[#FAF9F5] text-sm"
+                        className="block w-full pl-10 pr-3 py-2.5 border border-[#E2E8F0] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0F172A]/50 bg-[#F8FAFC] text-sm"
                         placeholder="e.g. Smile Dental, Brooklyn"
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
@@ -110,7 +110,7 @@ export default function GroundingPanel() {
                     <button
                       type="submit"
                       disabled={isSearching}
-                      className="px-5 py-2.5 bg-[#3D4F38] text-white rounded-xl font-bold hover:bg-[#4A5E44] transition-all disabled:opacity-70 text-sm shadow-sm cursor-pointer"
+                      className="px-5 py-2.5 bg-[#0F172A] text-white rounded-xl font-bold hover:bg-[#111827] transition-all disabled:opacity-70 text-sm shadow-sm cursor-pointer"
                     >
                       {isSearching ? 'Searching...' : 'Search'}
                     </button>
@@ -121,18 +121,18 @@ export default function GroundingPanel() {
 
             <div className="flex items-center justify-center">
               {results ? (
-                <div className="w-full border border-[#E7E5E4] rounded-xl p-4 bg-[#FAF9F5] animate-in slide-in-from-right-4 duration-300">
+                <div className="w-full border border-[#E2E8F0] rounded-xl p-4 bg-[#F8FAFC] animate-in slide-in-from-right-4 duration-300">
                   <div className="flex justify-between items-start mb-3">
                     <div>
-                      <h4 className="font-bold text-[#2D2F27] flex items-center gap-1.5 text-sm">
-                        <Building className="w-4 h-4 text-[#3D4F38]" />
+                      <h4 className="font-bold text-[#0F172A] flex items-center gap-1.5 text-sm">
+                        <Building className="w-4 h-4 text-[#0F172A]" />
                         {results.name}
                       </h4>
                       <p className="text-xs text-gray-500 flex items-center gap-1 mt-1">
                         <MapPin className="w-3.5 h-3.5" /> {results.address}
                       </p>
                     </div>
-                    <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded border border-[#E7E5E4] text-xs">
+                    <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded border border-[#E2E8F0] text-xs">
                       <Star className="w-3.5 h-3.5 text-[#D97706] fill-current" />
                       <span className="font-bold">{results.rating}</span>
                     </div>

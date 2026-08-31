@@ -12,12 +12,14 @@ import Citations from './pages/Citations';
 import BookingPlots from './pages/BookingPlots';
 import BookingSettings from './pages/BookingSettings';
 import PublicBook from './pages/PublicBook';
+import BookSuccess from './pages/BookSuccess';
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/book" element={<PublicBook />} />
+        <Route path="/book/success" element={<BookSuccess />} />
         <Route path="/booking/settings" element={<BookingSettings />} />
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />

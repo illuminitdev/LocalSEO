@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Calendar, Image as ImageIcon, Send, Sparkles, MessageSquare, Tag } from 'lucide-react';
 import { cn, apiGet, apiPost } from '../lib/utils';
 
@@ -28,7 +28,7 @@ export default function PostAutomation() {
                 type: 'post',
                 message: `Generated GBP ${postType} copy (${tone}).`,
                 icon: 'Activity',
-                color: 'text-[#3D4F38]'
+                color: 'text-[#0F172A]'
             });
         } catch (err: any) {
             setError(err.message || 'Copy failed');
@@ -64,7 +64,7 @@ export default function PostAutomation() {
                 type: 'post',
                 message: `Scheduled GBP ${postType} post with CTA: "${ctaValue}".`,
                 icon: 'Clock',
-                color: 'text-[#708238]'
+                color: 'text-[#F59E0B]'
             });
         } catch (err) {
             console.error(err);
@@ -79,7 +79,7 @@ export default function PostAutomation() {
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
             <div className="mb-8">
-                <h1 className="text-3xl font-bold tracking-tight text-[#2D2F27]">Post Automation Agent</h1>
+                <h1 className="text-3xl font-bold tracking-tight text-[#0F172A]">Post Automation Agent</h1>
                 <p className="text-gray-500 mt-2">Offers, What's New, and Events — Gemini writes copy for the connected listing only.</p>
             </div>
             {error && <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>}
@@ -88,9 +88,9 @@ export default function PostAutomation() {
                 {/* Workspace Column */}
                 <div className="lg:col-span-7 space-y-6">
                     {/* Settings Card */}
-                    <div className="bg-white p-6 rounded-2xl border border-[#E7E5E4] shadow-sm">
+                    <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-sm">
                         <h2 className="text-lg font-semibold mb-6 flex items-center gap-2">
-                            <Tag className="w-5 h-5 text-[#708238]" /> Post Parameters
+                            <Tag className="w-5 h-5 text-[#F59E0B]" /> Post Parameters
                         </h2>
 
                         <div className="space-y-5">
@@ -104,8 +104,8 @@ export default function PostAutomation() {
                                             className={cn(
                                                 "px-4 py-2 rounded-xl text-sm font-semibold transition-colors capitalize cursor-pointer",
                                                 postType === type
-                                                    ? "bg-[#3D4F38] text-white"
-                                                    : "bg-[#FAF9F5] text-gray-600 hover:bg-[#E7E5E4] border border-[#E7E5E4]"
+                                                    ? "bg-[#0F172A] text-white"
+                                                    : "bg-[#F8FAFC] text-gray-600 hover:bg-[#E2E8F0] border border-[#E2E8F0]"
                                             )}
                                         >
                                             {type === 'offer' ? 'Special Offer' : type === 'update' ? "What's New" : 'Event'}
@@ -129,8 +129,8 @@ export default function PostAutomation() {
                                             className={cn(
                                                 "px-4 py-2 rounded-xl text-sm transition-colors border cursor-pointer",
                                                 tone === t.id
-                                                    ? "border-[#708238] bg-[#FAF9F5] text-[#3D4F38] font-bold"
-                                                    : "border-[#E7E5E4] bg-white text-gray-600 hover:bg-[#F4F2EB]"
+                                                    ? "border-[#F59E0B] bg-[#F8FAFC] text-[#0F172A] font-bold"
+                                                    : "border-[#E2E8F0] bg-white text-gray-600 hover:bg-[#F1F5F9]"
                                             )}
                                         >
                                             {t.label}
@@ -140,11 +140,11 @@ export default function PostAutomation() {
                             </div>
                         </div>
 
-                        <div className="mt-6 pt-6 border-t border-[#E7E5E4]">
+                        <div className="mt-6 pt-6 border-t border-[#E2E8F0]">
                             <button
                                 onClick={handleGenerateCopy}
                                 disabled={isGenerating}
-                                className="w-full flex items-center justify-center gap-2 py-3 bg-[#3D4F38] hover:bg-[#4A5E44] text-white rounded-xl font-bold transition-all disabled:opacity-70 cursor-pointer shadow-sm"
+                                className="w-full flex items-center justify-center gap-2 py-3 bg-[#0F172A] hover:bg-[#111827] text-white rounded-xl font-bold transition-all disabled:opacity-70 cursor-pointer shadow-sm"
                             >
                                 <Sparkles className={`w-5 h-5 ${isGenerating ? 'animate-spin' : ''}`} />
                                 {isGenerating ? 'Generating Magic...' : 'Generate AI Copy'}
@@ -153,7 +153,7 @@ export default function PostAutomation() {
                     </div>
 
                     {/* Schedule / Finalize Card */}
-                    <div className="bg-white p-6 rounded-2xl border border-[#E7E5E4] shadow-sm">
+                    <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-sm">
                         <h2 className="text-lg font-semibold mb-6 flex items-center gap-2">
                             <Calendar className="w-5 h-5 text-[#D97706]" /> Finalize & Schedule
                         </h2>
@@ -164,7 +164,7 @@ export default function PostAutomation() {
                                 <select
                                     value={ctaValue}
                                     onChange={(e) => setCtaValue(e.target.value)}
-                                    className="w-full px-4 py-2.5 bg-[#FAF9F5] border border-[#E7E5E4] rounded-xl focus:outline-none focus:border-[#3D4F38]"
+                                    className="w-full px-4 py-2.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:outline-none focus:border-[#0F172A]"
                                 >
                                     <option>Book</option>
                                     <option>Call Now</option>
@@ -176,11 +176,11 @@ export default function PostAutomation() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
-                                    <input type="date" className="w-full px-4 py-2.5 bg-[#FAF9F5] border border-[#E7E5E4] rounded-xl focus:outline-none focus:border-[#3D4F38]" />
+                                    <input type="date" className="w-full px-4 py-2.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:outline-none focus:border-[#0F172A]" />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">Time</label>
-                                    <input type="time" className="w-full px-4 py-2.5 bg-[#FAF9F5] border border-[#E7E5E4] rounded-xl focus:outline-none focus:border-[#3D4F38]" />
+                                    <input type="time" className="w-full px-4 py-2.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:outline-none focus:border-[#0F172A]" />
                                 </div>
                             </div>
                         </div>
@@ -189,7 +189,7 @@ export default function PostAutomation() {
                             <button
                                 onClick={handleSchedulePost}
                                 disabled={isScheduling}
-                                className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#708238] hover:bg-[#5e6d2f] text-white rounded-xl font-bold text-lg transition-colors cursor-pointer shadow-md disabled:opacity-50"
+                                className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#F59E0B] hover:bg-[#D97706] text-white rounded-xl font-bold text-lg transition-colors cursor-pointer shadow-md disabled:opacity-50"
                             >
                                 <Send className="w-5 h-5" /> {isScheduling ? 'Scheduling...' : 'Schedule Post'}
                             </button>
@@ -204,9 +204,9 @@ export default function PostAutomation() {
                             <MessageSquare className="w-4 h-4" /> Live Preview
                         </h2>
 
-                        <div className="bg-white rounded-2xl border border-[#E7E5E4] shadow-md overflow-hidden flex flex-col">
+                        <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-md overflow-hidden flex flex-col">
                             {/* Image Gen Area */}
-                            <div className="relative h-64 bg-[#F4F2EB] flex flex-col items-center justify-center border-b border-[#E7E5E4] p-4 text-center">
+                            <div className="relative h-64 bg-[#F1F5F9] flex flex-col items-center justify-center border-b border-[#E2E8F0] p-4 text-center">
                                 {generatedImage ? (
                                     <img src={generatedImage} alt="Generated" className="w-full h-full object-cover absolute inset-0" />
                                 ) : (
@@ -216,7 +216,7 @@ export default function PostAutomation() {
                                         <button
                                             onClick={handleGenerateImage}
                                             disabled={isGeneratingImage}
-                                            className="flex items-center gap-2 px-4 py-2 bg-white border border-[#E7E5E4] rounded-full text-sm font-medium shadow-sm hover:bg-[#FAF9F5] transition-colors z-10 cursor-pointer"
+                                            className="flex items-center gap-2 px-4 py-2 bg-white border border-[#E2E8F0] rounded-full text-sm font-medium shadow-sm hover:bg-[#F8FAFC] transition-colors z-10 cursor-pointer"
                                         >
                                             <Sparkles className={`w-4 h-4 text-[#D97706] ${isGeneratingImage ? 'animate-spin' : ''}`} />
                                             {isGeneratingImage ? 'Creating...' : 'Generate Image'}
@@ -228,11 +228,11 @@ export default function PostAutomation() {
                             {/* Text Area */}
                             <div className="p-5">
                                 <div className="flex items-center gap-3 mb-3">
-                                    <div className="w-10 h-10 rounded-full bg-[#3D4F38] text-white flex items-center justify-center font-bold">
+                                    <div className="w-10 h-10 rounded-full bg-[#0F172A] text-white flex items-center justify-center font-bold">
                                         {businessName?.charAt(0) || '?'}
                                     </div>
                                     <div>
-                                        <h4 className="font-bold text-sm text-[#2D2F27]">{businessName || 'No listing'}</h4>
+                                        <h4 className="font-bold text-sm text-[#0F172A]">{businessName || 'No listing'}</h4>
                                         <p className="text-xs text-gray-500">Just now</p>
                                     </div>
                                 </div>
@@ -260,8 +260,8 @@ export default function PostAutomation() {
                             </div>
 
                             {/* Fake CTA */}
-                            <div className="p-4 bg-[#FAF9F5] border-t border-[#E7E5E4]">
-                                <div className="w-full py-2 bg-white border border-[#3D4F38] text-[#3D4F38] font-bold text-center rounded-lg text-sm">
+                            <div className="p-4 bg-[#F8FAFC] border-t border-[#E2E8F0]">
+                                <div className="w-full py-2 bg-white border border-[#0F172A] text-[#0F172A] font-bold text-center rounded-lg text-sm">
                                     {ctaValue}
                                 </div>
                             </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+﻿import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     ArrowLeft,
@@ -130,8 +130,8 @@ export default function BookingSettings() {
 
     if (booting) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-[#F5F7F8]">
-                <p className="font-bold text-[#12333C]">Loading settings...</p>
+            <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
+                <p className="font-bold text-[#0F172A]">Loading settings...</p>
             </div>
         );
     }
@@ -139,16 +139,16 @@ export default function BookingSettings() {
     if (!profile) return null;
 
     return (
-        <div className="min-h-screen bg-[#F5F7F8] flex flex-col">
+        <div className="min-h-screen bg-[#F8FAFC] flex flex-col">
             {/* Full-width top bar — no LocalPulse sidebar */}
-            <header className="bg-[#12333C] text-white shrink-0">
+            <header className="bg-[#0F172A] text-white shrink-0">
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div className="flex items-start gap-3 min-w-0">
-                        <div className="w-11 h-11 rounded-xl bg-[#C8D400]/20 flex items-center justify-center shrink-0">
-                            <Settings className="w-5 h-5 text-[#C8D400]" />
+                        <div className="w-11 h-11 rounded-xl bg-[#F59E0B]/20 flex items-center justify-center shrink-0">
+                            <Settings className="w-5 h-5 text-[#F59E0B]" />
                         </div>
                         <div className="min-w-0">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-[#C8D400]">Booking Plots</p>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-[#F59E0B]">Booking Plots</p>
                             <h1 className="font-black text-lg sm:text-xl">Booking & Schedule Settings</h1>
                             <p className="text-sm text-white/60 mt-0.5 truncate">
                                 {profile.businessName} · Manage time slots, Stripe payouts, and deposits
@@ -157,7 +157,7 @@ export default function BookingSettings() {
                     </div>
                     <Link
                         to="/booking"
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#C8D400] text-[#12333C] text-sm font-bold shrink-0 hover:bg-[#d6e21a] transition"
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#F59E0B] text-white text-sm font-bold shrink-0 hover:bg-[#D97706] transition"
                     >
                         <ArrowLeft className="w-4 h-4" />
                         Back to booking board
@@ -166,7 +166,7 @@ export default function BookingSettings() {
             </header>
 
             {/* Tabs */}
-            <nav className="bg-white border-b border-[#E3E8EA] shrink-0 overflow-x-auto">
+            <nav className="bg-white border-b border-[#E2E8F0] shrink-0 overflow-x-auto">
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 flex gap-1 py-2">
                     {TABS.map(({ key, label, icon: Icon }) => (
                         <button
@@ -176,8 +176,8 @@ export default function BookingSettings() {
                             className={cn(
                                 'shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border-b-2 transition',
                                 settingsTab === key
-                                    ? 'text-[#12333C] border-[#C8D400] bg-[#C8D400]/15'
-                                    : 'text-[#5B6770] border-transparent hover:bg-[#F5F7F8]'
+                                    ? 'text-[#0F172A] border-[#F59E0B] bg-[#F59E0B]/15'
+                                    : 'text-[#64748B] border-transparent hover:bg-[#F8FAFC]'
                             )}
                         >
                             <Icon className="w-3.5 h-3.5" /> {label}
@@ -201,7 +201,7 @@ export default function BookingSettings() {
                                 </div>
                             </div>
 
-                            <p className="text-xs font-bold uppercase tracking-wider text-[#5B6770]">Select day to configure</p>
+                            <p className="text-xs font-bold uppercase tracking-wider text-[#64748B]">Select day to configure</p>
                             <div className="grid grid-cols-7 gap-2">
                                 {DAYS.map((name, i) => {
                                     const count = slots.filter((s) => s.dayOfWeek === i && s.enabled).length;
@@ -213,7 +213,7 @@ export default function BookingSettings() {
                                             onClick={() => setDay(i)}
                                             className={cn(
                                                 'rounded-xl px-2 py-2.5 text-center border text-xs font-bold transition',
-                                                day === i ? 'bg-[#12333C] text-white border-[#12333C]' : 'bg-white border-[#E3E8EA] hover:border-[#12333C]/30'
+                                                day === i ? 'bg-[#0F172A] text-white border-[#0F172A]' : 'bg-white border-[#E2E8F0] hover:border-[#0F172A]/30'
                                             )}
                                         >
                                             {name}
@@ -224,7 +224,7 @@ export default function BookingSettings() {
                                 })}
                             </div>
 
-                            <p className="text-xs font-bold uppercase tracking-wider text-[#5B6770]">
+                            <p className="text-xs font-bold uppercase tracking-wider text-[#64748B]">
                                 Slots for {DAYS[day]} ({daySlots.length})
                             </p>
 
@@ -234,28 +234,28 @@ export default function BookingSettings() {
                                 ))}
                             </div>
 
-                            <div className="bg-[#F5F7F8] border border-[#E3E8EA] rounded-xl p-4 space-y-3 max-w-xl">
-                                <p className="text-xs font-bold uppercase text-[#5B6770]">Add new slot</p>
+                            <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4 space-y-3 max-w-xl">
+                                <p className="text-xs font-bold uppercase text-[#64748B]">Add new slot</p>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <label className="text-xs font-bold text-[#5B6770]">
+                                    <label className="text-xs font-bold text-[#64748B]">
                                         Start
-                                        <input type="time" value={draft.startTime} onChange={(e) => setDraft((d) => ({ ...d, startTime: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E3E8EA] px-3 py-2 text-sm bg-white" />
+                                        <input type="time" value={draft.startTime} onChange={(e) => setDraft((d) => ({ ...d, startTime: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm bg-white" />
                                     </label>
-                                    <label className="text-xs font-bold text-[#5B6770]">
+                                    <label className="text-xs font-bold text-[#64748B]">
                                         End
-                                        <input type="time" value={draft.endTime} onChange={(e) => setDraft((d) => ({ ...d, endTime: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E3E8EA] px-3 py-2 text-sm bg-white" />
+                                        <input type="time" value={draft.endTime} onChange={(e) => setDraft((d) => ({ ...d, endTime: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm bg-white" />
                                     </label>
                                 </div>
-                                <label className="block text-xs font-bold text-[#5B6770]">
+                                <label className="block text-xs font-bold text-[#64748B]">
                                     Slot label
-                                    <input value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E3E8EA] px-3 py-2 text-sm bg-white" placeholder="Morning Slot" />
+                                    <input value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm bg-white" placeholder="Morning Slot" />
                                 </label>
                                 <button
                                     type="button"
                                     onClick={() =>
                                         setSlots((prev) => [...prev, { id: `slot_${Date.now()}`, dayOfWeek: day, ...draft, enabled: true }])
                                     }
-                                    className="w-full py-2.5 rounded-xl bg-[#12333C] text-white text-sm font-bold flex items-center justify-center gap-2"
+                                    className="w-full py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold flex items-center justify-center gap-2"
                                 >
                                     <Plus className="w-4 h-4" /> Add Slot
                                 </button>
@@ -264,21 +264,25 @@ export default function BookingSettings() {
                     )}
 
                     {settingsTab === 'stripe' && (
-                        <div className="bg-[#F5F7F8] rounded-xl border border-[#E3E8EA] p-5 space-y-3 max-w-lg">
-                            <p className="text-sm text-[#5B6770]">
+                        <div className="bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] p-5 space-y-3 max-w-lg">
+                            <p className="text-sm text-[#64748B]">
                                 Status:{' '}
-                                <strong className="text-[#12333C]">
+                                <strong className="text-[#0F172A]">
                                     {profile.stripeConnected ? 'Connected — Payouts Active' : 'Not connected'}
                                 </strong>
                             </p>
-                            <p className="text-xs text-[#5B6770]">Simulated until you add Stripe keys in Vercel env or backend .env</p>
+                            <p className="text-xs text-[#64748B]">
+                                {profile.stripeConnected
+                                    ? 'Stripe Checkout is active — customers pay on Stripe when booking.'
+                                    : 'Add STRIPE_SECRET_KEY to backend .env or Vercel env to enable payments.'}
+                            </p>
                             <button
                                 type="button"
                                 onClick={async () => {
                                     await apiPost('/api/booking/connect-stripe', {});
                                     setProfile((p) => (p ? { ...p, stripeConnected: true } : p));
                                 }}
-                                className="w-full py-2.5 rounded-xl bg-[#12333C] text-white text-sm font-bold"
+                                className="w-full py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold"
                             >
                                 Connect Stripe
                             </button>
@@ -286,30 +290,30 @@ export default function BookingSettings() {
                     )}
 
                     {settingsTab === 'deposit' && (
-                        <div className="bg-[#F5F7F8] rounded-xl border border-[#E3E8EA] p-5 grid grid-cols-3 gap-3 max-w-md">
-                            <label className="text-xs font-bold text-[#5B6770] col-span-1">
+                        <div className="bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] p-5 grid grid-cols-3 gap-3 max-w-md">
+                            <label className="text-xs font-bold text-[#64748B] col-span-1">
                                 Currency
-                                <select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E3E8EA] px-2 py-2 text-sm bg-white">
+                                <select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))} className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-2 py-2 text-sm bg-white">
                                     <option value="£">£</option>
                                     <option value="$">$</option>
                                     <option value="€">€</option>
                                 </select>
                             </label>
-                            <label className="text-xs font-bold text-[#5B6770] col-span-2">
+                            <label className="text-xs font-bold text-[#64748B] col-span-2">
                                 Deposit amount
-                                <input type="number" min={0} value={form.deposit} onChange={(e) => setForm((f) => ({ ...f, deposit: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-[#E3E8EA] px-3 py-2 text-sm bg-white" />
+                                <input type="number" min={0} value={form.deposit} onChange={(e) => setForm((f) => ({ ...f, deposit: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm bg-white" />
                             </label>
                         </div>
                     )}
 
                     {settingsTab === 'twilio' && (
-                        <p className="bg-[#F5F7F8] rounded-xl border border-[#E3E8EA] p-5 text-sm text-[#5B6770] max-w-lg">
+                        <p className="bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] p-5 text-sm text-[#64748B] max-w-lg">
                             SMS / WhatsApp reminders are simulated. Job cards on the booking board include “Send 24h Reminder”.
                         </p>
                     )}
 
                     {settingsTab === 'profile' && (
-                        <div className="bg-[#F5F7F8] rounded-xl border border-[#E3E8EA] p-4 space-y-3 max-w-lg">
+                        <div className="bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] p-4 space-y-3 max-w-lg">
                             {(
                                 [
                                     ['name', 'Your name', User],
@@ -320,10 +324,10 @@ export default function BookingSettings() {
                                     ['emergencyNote', 'Emergency note', Flame]
                                 ] as const
                             ).map(([key, label, Icon]) => (
-                                <label key={key} className="block text-xs font-bold text-[#5B6770]">
+                                <label key={key} className="block text-xs font-bold text-[#64748B]">
                                     {label}
                                     <div className="relative mt-1">
-                                        <Icon className="w-4 h-4 text-[#5B6770] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                        <Icon className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                                         <input
                                             value={form[key]}
                                             onChange={(e) =>
@@ -334,7 +338,7 @@ export default function BookingSettings() {
                                             }
                                             inputMode={key === 'phone' ? 'numeric' : undefined}
                                             maxLength={key === 'phone' ? 11 : undefined}
-                                            className="w-full rounded-lg border border-[#E3E8EA] pl-10 pr-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#12333C]"
+                                            className="w-full rounded-lg border border-[#E2E8F0] pl-10 pr-3 py-2.5 text-sm bg-white focus:outline-none focus:border-[#0F172A]"
                                         />
                                     </div>
                                 </label>
@@ -344,12 +348,12 @@ export default function BookingSettings() {
             </main>
 
             {/* Sticky footer */}
-            <footer className="shrink-0 border-t border-[#E3E8EA] bg-white">
+            <footer className="shrink-0 border-t border-[#E2E8F0] bg-white">
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex justify-between items-center gap-3">
-                    <Link to="/booking" className="text-sm font-bold text-[#5B6770] hover:text-[#12333C]">
+                    <Link to="/booking" className="text-sm font-bold text-[#64748B] hover:text-[#0F172A]">
                         Cancel
                     </Link>
-                    <button type="button" disabled={busy} onClick={onSave} className="px-6 py-2.5 rounded-xl bg-[#C8D400] text-[#12333C] text-sm font-bold disabled:opacity-60 hover:bg-[#d6e21a]">
+                    <button type="button" disabled={busy} onClick={onSave} className="px-6 py-2.5 rounded-xl bg-[#F59E0B] text-white text-sm font-bold disabled:opacity-60 hover:bg-[#D97706]">
                         {busy ? 'Saving...' : 'Save All Changes'}
                     </button>
                 </div>
@@ -360,7 +364,7 @@ export default function BookingSettings() {
 
 function SlotRow({ slot: s, setSlots }: { slot: Slot; setSlots: Dispatch<SetStateAction<Slot[]>> }) {
     return (
-        <div className={cn('bg-white border rounded-xl p-3 flex gap-3', s.isEmergencyOnly ? 'border-red-200 bg-red-50/40' : 'border-[#E3E8EA]')}>
+        <div className={cn('bg-white border rounded-xl p-3 flex gap-3', s.isEmergencyOnly ? 'border-red-200 bg-red-50/40' : 'border-[#E2E8F0]')}>
             <input
                 type="checkbox"
                 checked={s.enabled}
@@ -369,25 +373,25 @@ function SlotRow({ slot: s, setSlots }: { slot: Slot; setSlots: Dispatch<SetStat
             />
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-bold text-sm text-[#12333C]">{s.label}</p>
+                    <p className="font-bold text-sm text-[#0F172A]">{s.label}</p>
                     <span className={cn('text-[9px] font-black uppercase px-2 py-0.5 rounded', s.isEmergencyOnly ? 'bg-red-600 text-white' : 'bg-sky-100 text-sky-700')}>
                         {s.isEmergencyOnly ? 'Emergency Only' : 'Standard Slot'}
                     </span>
                 </div>
-                <p className="text-xs text-[#5B6770] mt-0.5">{s.startTime} – {s.endTime}</p>
+                <p className="text-xs text-[#64748B] mt-0.5">{s.startTime} – {s.endTime}</p>
                 <button
                     type="button"
                     onClick={() => setSlots((prev) => prev.map((x) => (x.id === s.id ? { ...x, isEmergencyOnly: !x.isEmergencyOnly } : x)))}
                     className={cn(
                         'mt-2 inline-flex items-center gap-1 text-[10px] font-black uppercase px-2.5 py-1.5 rounded-lg border',
-                        s.isEmergencyOnly ? 'bg-red-600 text-white border-red-600' : 'bg-white text-[#5B6770] border-[#E3E8EA]'
+                        s.isEmergencyOnly ? 'bg-red-600 text-white border-red-600' : 'bg-white text-[#64748B] border-[#E2E8F0]'
                     )}
                 >
                     <Flame className="w-3 h-3" />
                     {s.isEmergencyOnly ? 'Emergency Slot' : 'Make Emergency'}
                 </button>
             </div>
-            <button type="button" onClick={() => setSlots((p) => p.filter((x) => x.id !== s.id))} className="shrink-0 p-1 text-[#5B6770] hover:text-red-600">
+            <button type="button" onClick={() => setSlots((p) => p.filter((x) => x.id !== s.id))} className="shrink-0 p-1 text-[#64748B] hover:text-red-600">
                 <Trash2 className="w-4 h-4" />
             </button>
         </div>

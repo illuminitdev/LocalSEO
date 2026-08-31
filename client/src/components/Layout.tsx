@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
     Building2,
@@ -67,14 +67,14 @@ export default function Layout() {
     }, [location.pathname, isModalOpen]);
 
     return (
-        <div className="flex h-screen bg-[#F5F7F8] text-[#1C2430]">
-            <aside className="w-[260px] flex flex-col bg-[#12333C] text-white shrink-0">
+        <div className="flex h-screen bg-white text-[#0F172A]">
+            <aside className="w-[260px] flex flex-col bg-[#0F172A] text-white shrink-0">
                 <div className="px-5 py-5 border-b border-white/10">
                     <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg bg-[#C8D400] text-[#12333C] flex items-center justify-center font-black">L</div>
+                        <div className="w-8 h-8 rounded-lg bg-[#F59E0B] text-white flex items-center justify-center font-black">L</div>
                         <div>
                             <p className="font-black text-lg leading-none tracking-tight">LocalPulse</p>
-                            <p className="text-[10px] uppercase tracking-widest text-[#C8D400] mt-1">Local SEO platform</p>
+                            <p className="text-[10px] uppercase tracking-widest text-[#F59E0B] mt-1">Local SEO platform</p>
                         </div>
                     </div>
                 </div>
@@ -92,7 +92,7 @@ export default function Layout() {
                                         className={({ isActive }) => cn(
                                             'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
                                             isActive
-                                                ? 'bg-[#C8D400] text-[#12333C]'
+                                                ? 'bg-[#F59E0B] text-white'
                                                 : 'text-white/75 hover:bg-white/10 hover:text-white'
                                         )}
                                     >
@@ -108,7 +108,7 @@ export default function Layout() {
                 <div className="p-4 border-t border-white/10">
                     <button
                         onClick={() => setIsModalOpen(true)}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-[#C8D400] text-[#12333C] text-sm font-bold cursor-pointer hover:bg-[#d6e21a]"
+                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-[#F59E0B] text-white text-sm font-bold cursor-pointer hover:bg-[#D97706]"
                     >
                         <Search className="w-4 h-4" />
                         Add location
@@ -117,19 +117,19 @@ export default function Layout() {
             </aside>
 
             <div className="flex-1 flex flex-col min-w-0">
-                <header className="h-16 bg-white border-b border-[#E3E8EA] flex items-center justify-between px-6 shrink-0">
+                <header className="h-16 bg-white border-b border-[#E2E8F0] flex items-center justify-between px-6 shrink-0">
                     <div className="min-w-0">
-                        <p className="text-[11px] font-bold uppercase tracking-wider text-[#5B6770]">Location</p>
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-[#64748B]">Location</p>
                         <p className="font-semibold truncate">{business.name || 'No location added'}</p>
                     </div>
                     <div className="flex items-center gap-3 text-sm">
                         <span className={cn(
                             'px-2.5 py-1 rounded-full text-xs font-bold',
-                            geminiOn ? 'bg-[#C8D400]/30 text-[#12333C]' : 'bg-red-50 text-red-700'
+                            geminiOn ? 'bg-[#F59E0B]/30 text-[#0F172A]' : 'bg-red-50 text-red-700'
                         )}>
                             {geminiOn ? 'Gemini connected' : 'No API key'}
                         </span>
-                        <span className="text-[#5B6770] hidden sm:inline truncate max-w-[240px]">
+                        <span className="text-[#64748B] hidden sm:inline truncate max-w-[240px]">
                             {business.address || 'Add a location to start tracking'}
                         </span>
                     </div>

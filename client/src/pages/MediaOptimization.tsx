@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { Image as ImageIcon, Sparkles, MapPin, Tag as TagIcon, CheckCircle2, AlertCircle } from 'lucide-react';
 import { apiPost } from '../lib/utils';
 
@@ -36,7 +36,7 @@ export default function MediaOptimization() {
                 type: 'media',
                 message: `Generated ${activeTab} photo with alt-text.`,
                 icon: 'CheckCircle',
-                color: 'text-[#708238]'
+                color: 'text-[#F59E0B]'
             });
         } catch (err: any) {
             setError(err.message || 'Image generation failed');
@@ -52,7 +52,7 @@ export default function MediaOptimization() {
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
             <div className="mb-8">
-                <h1 className="text-3xl font-bold tracking-tight text-[#2D2F27]">Media Optimization Agent</h1>
+                <h1 className="text-3xl font-bold tracking-tight text-[#0F172A]">Media Optimization Agent</h1>
                 <p className="text-gray-500 mt-2">Empty gallery until Gemini generates photos for the connected listing.</p>
             </div>
             {error && <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>}
@@ -70,8 +70,8 @@ export default function MediaOptimization() {
                                 key={cat.name}
                                 onClick={() => setActiveTab(cat.name)}
                                 className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all cursor-pointer ${activeTab === cat.name
-                                    ? 'bg-[#3D4F38] text-white shadow-md'
-                                    : 'bg-white hover:bg-[#FAF9F5] text-gray-700 border border-transparent hover:border-[#E7E5E4]'
+                                    ? 'bg-[#0F172A] text-white shadow-md'
+                                    : 'bg-white hover:bg-[#F8FAFC] text-gray-700 border border-transparent hover:border-[#E2E8F0]'
                                     }`}
                             >
                                 <span>{cat.name}</span>
@@ -87,10 +87,10 @@ export default function MediaOptimization() {
 
                 {/* Media Gallery */}
                 <div className="lg:col-span-3">
-                    <div className="bg-white p-6 rounded-2xl border border-[#E7E5E4] shadow-sm min-h-[500px]">
-                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-[#E7E5E4]">
+                    <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-sm min-h-[500px]">
+                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-[#E2E8F0]">
                             <div>
-                                <h2 className="text-xl font-bold text-[#2D2F27] flex items-center gap-2">
+                                <h2 className="text-xl font-bold text-[#0F172A] flex items-center gap-2">
                                     {activeTab} Photos
                                 </h2>
                                 <p className="text-sm text-gray-500 mt-1 flex items-center gap-1 font-semibold">
@@ -109,7 +109,7 @@ export default function MediaOptimization() {
                         </div>
 
                         {currentPhotos.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center p-12 text-center bg-[#FAF9F5] border-2 border-dashed border-[#E7E5E4] rounded-xl h-64 animate-in">
+                            <div className="flex flex-col items-center justify-center p-12 text-center bg-[#F8FAFC] border-2 border-dashed border-[#E2E8F0] rounded-xl h-64 animate-in">
                                 <ImageIcon className="w-12 h-12 text-gray-300 mb-4" />
                                 <h3 className="font-semibold text-gray-700 mb-1">No photos in {activeTab}</h3>
                                 <p className="text-sm text-gray-500">Generate a Gemini photo for this category.</p>
@@ -117,18 +117,18 @@ export default function MediaOptimization() {
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in duration-300">
                                 {currentPhotos.map((photo) => (
-                                    <div key={photo.id} className="group relative bg-[#FAF9F5] rounded-xl overflow-hidden border border-[#E7E5E4] hover:shadow-md transition-shadow">
+                                    <div key={photo.id} className="group relative bg-[#F8FAFC] rounded-xl overflow-hidden border border-[#E2E8F0] hover:shadow-md transition-shadow">
                                         <div className="aspect-video w-full overflow-hidden bg-gray-150 relative">
                                             <img src={photo.url} alt="Media" className="w-[100%] h-[100%] object-cover" />
                                         </div>
                                         <div className="p-4 space-y-3">
-                                            <div className="flex items-start gap-2 text-xs text-gray-600 bg-white p-2 rounded border border-[#E7E5E4]">
-                                                <TagIcon className="w-4 h-4 text-[#708238] shrink-0 mt-0.5" />
-                                                <span><span className="font-bold text-[#2D2F27]">Auto Alt-Text:</span> {photo.altText}</span>
+                                            <div className="flex items-start gap-2 text-xs text-gray-600 bg-white p-2 rounded border border-[#E2E8F0]">
+                                                <TagIcon className="w-4 h-4 text-[#F59E0B] shrink-0 mt-0.5" />
+                                                <span><span className="font-bold text-[#0F172A]">Auto Alt-Text:</span> {photo.altText}</span>
                                             </div>
-                                            <div className="flex items-start gap-2 text-xs text-gray-600 bg-white p-2 rounded border border-[#E7E5E4]">
+                                            <div className="flex items-start gap-2 text-xs text-gray-600 bg-white p-2 rounded border border-[#E2E8F0]">
                                                 <MapPin className="w-4 h-4 text-[#D97706] shrink-0 mt-0.5" />
-                                                <span><span className="font-bold text-[#2D2F27]">EXIF Geotag:</span> {photo.lat}, {photo.lng}</span>
+                                                <span><span className="font-bold text-[#0F172A]">EXIF Geotag:</span> {photo.lat}, {photo.lng}</span>
                                             </div>
                                         </div>
                                     </div>
