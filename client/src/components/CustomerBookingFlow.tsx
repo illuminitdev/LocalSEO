@@ -6,6 +6,7 @@ import {
     ChevronRight,
     Clock,
     Flame,
+    Mail,
     MapPin,
     Phone,
     ShieldCheck,
@@ -29,7 +30,7 @@ type BookingStep = 'schedule' | 'details' | 'payment';
 type Props = {
     hostSlug: string;
     eventSlug?: string;
-    host: { name: string; tradeType?: string; phone?: string; serviceArea?: string };
+    host: { name: string; tradeType?: string; phone?: string; email?: string; serviceArea?: string };
     eventType?: EventType;
     eventTypes?: EventType[];
     onSuccess?: () => void;
@@ -322,10 +323,16 @@ export default function CustomerBookingFlow({
                                 {eventType.name} · Deposit <span className="text-[#F59E0B] font-bold">{formatCents(eventType.depositCents)}</span>
                             </p>
                         </div>
-                        {host.phone && (
-                            <a href={`tel:${host.phone.replace(/\s/g, '')}`} className="shrink-0 w-10 h-10 rounded-full bg-[#F59E0B] flex items-center justify-center">
-                                <Phone className="w-4 h-4" />
-                            </a>
+                        {(host.phone || host.email) && (
+                            host.email && !host.phone ? (
+                                <a href={`mailto:${host.email}`} className="shrink-0 w-10 h-10 rounded-full bg-[#F59E0B] flex items-center justify-center" title={host.email}>
+                                    <Mail className="w-4 h-4" />
+                                </a>
+                            ) : (
+                                <a href={`tel:${(host.phone || '').replace(/\s/g, '')}`} className="shrink-0 w-10 h-10 rounded-full bg-[#F59E0B] flex items-center justify-center" title={host.phone}>
+                                    <Phone className="w-4 h-4" />
+                                </a>
+                            )
                         )}
                     </div>
                     {eventTypes.length > 1 && (

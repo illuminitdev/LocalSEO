@@ -4,14 +4,14 @@ import {
     ChevronRight,
     Flame,
     KeyRound,
+    Mail,
     MapPin,
-    Phone,
     User,
     Wallet,
     Wrench,
     Zap
 } from 'lucide-react';
-import { cn, restrictPhoneInput } from '../lib/utils';
+import { cn } from '../lib/utils';
 
 const OTHER_SERVICE_TYPE = 'General Tradesperson';
 
@@ -27,7 +27,7 @@ export type SetupForm = {
     tradeType: string;
     name: string;
     businessName: string;
-    phone: string;
+    contact: string;
     serviceArea: string;
     standardDeposit: number;
     emergencyDeposit: number;
@@ -51,7 +51,7 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
         tradeType: '',
         name: '',
         businessName: linkedBusiness?.name || '',
-        phone: linkedBusiness?.phone || '',
+        contact: linkedBusiness?.phone || '',
         serviceArea: linkedBusiness?.address || '',
         standardDeposit: 45,
         emergencyDeposit: 60,
@@ -66,7 +66,7 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
             ...f,
             businessName: linkedBusiness.name || f.businessName,
             tradeType: linkedBusiness.category || f.tradeType,
-            phone: linkedBusiness.phone || f.phone,
+            contact: linkedBusiness.phone || f.contact,
             serviceArea: linkedBusiness.address || f.serviceArea
         }));
         setStep(2);
@@ -240,15 +240,15 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                         </div>
                     </label>
                     <label className="block text-xs font-bold uppercase text-[#64748B]">
-                        Direct phone
+                        Email or phone
                         <div className="relative mt-1">
-                            <Phone className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B] pointer-events-none" />
+                            <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B] pointer-events-none" />
                             <input
-                                inputMode="numeric"
-                                value={form.phone}
-                                onChange={(e) => setForm((f) => ({ ...f, phone: restrictPhoneInput(e.target.value) }))}
-                                placeholder="e.g. 07700900123"
-                                maxLength={11}
+                                type="text"
+                                inputMode="email"
+                                value={form.contact}
+                                onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))}
+                                placeholder="e.g. 07700900123 or hello@yourbusiness.com"
                                 className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] pl-10 pr-3 py-2.5 text-sm focus:outline-none focus:border-[#0F172A] focus:bg-white"
                             />
                         </div>
@@ -372,7 +372,7 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                     <div className="rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] p-3 text-sm text-[#64748B]">
                         <strong className="text-[#0F172A]">{form.businessName}</strong> · {form.tradeType}
                         <br />
-                        {form.name} · {form.phone || 'No phone yet'}
+                        {form.name} · {form.contact || 'No contact yet'}
                     </div>
 
                     <div className="flex gap-2 pt-2">

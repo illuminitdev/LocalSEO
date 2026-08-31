@@ -214,6 +214,7 @@ function createPublicRouter({ stripeClient }) {
                 name: org.name,
                 tradeType: org.trade_type,
                 phone: org.phone,
+                email: org.email,
                 serviceArea: org.service_area,
                 eventTypes
             });
@@ -229,7 +230,7 @@ function createPublicRouter({ stripeClient }) {
             const eventType = await loadEventType(org.id, req.params.eventSlug);
             if (!eventType) return res.status(404).json({ error: 'Service not found' });
             res.json({
-                host: { slug: org.slug, name: org.name, tradeType: org.trade_type, phone: org.phone, serviceArea: org.service_area },
+                host: { slug: org.slug, name: org.name, tradeType: org.trade_type, phone: org.phone, email: org.email, serviceArea: org.service_area },
                 eventType: {
                     slug: eventType.slug,
                     name: eventType.name,

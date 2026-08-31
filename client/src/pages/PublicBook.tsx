@@ -28,6 +28,7 @@ export default function PublicBookHost() {
                         name: data.name,
                         tradeType: data.tradeType,
                         phone: data.phone,
+                        email: data.email,
                         serviceArea: data.serviceArea
                     }}
                     eventTypes={data.eventTypes.map((et: any) => ({

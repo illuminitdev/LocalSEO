@@ -85,6 +85,7 @@ function createHostRouter({ stripeClient }) {
                 name,
                 businessName,
                 tradeType,
+                contact,
                 phone,
                 serviceArea,
                 standardDeposit,
@@ -95,6 +96,11 @@ function createHostRouter({ stripeClient }) {
                 emergencyNote
             } = req.body || {};
 
+            const rawContact = String(contact || phone || '').trim();
+            const isEmail = rawContact.includes('@');
+            const parsedPhone = isEmail ? '' : rawContact;
+            const parsedEmail = isEmail ? rawContact.toLowerCase() : '';
+
             if (!String(name || '').trim() || !String(businessName || '').trim() || !String(tradeType || '').trim()) {
                 return res.status(400).json({ error: 'Your name, business name, and service type are required.' });
             }
@@ -103,7 +109,8 @@ function createHostRouter({ stripeClient }) {
                 hostName: name,
                 businessName,
                 tradeType,
-                phone,
+                phone: parsedPhone,
+                email: parsedEmail,
                 serviceArea,
                 standardDeposit: standardDeposit ?? deposit ?? 45,
                 emergencyDeposit: emergencyDeposit ?? 60,
