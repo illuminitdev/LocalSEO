@@ -32,7 +32,6 @@ type Props = {
     host: { name: string; tradeType?: string; phone?: string; serviceArea?: string };
     eventType?: EventType;
     eventTypes?: EventType[];
-    onBack?: () => void;
     onSuccess?: () => void;
 };
 
@@ -69,7 +68,6 @@ export default function CustomerBookingFlow({
     host,
     eventType: initialEventType,
     eventTypes = [],
-    onBack,
     onSuccess
 }: Props) {
     const [activeEventSlug, setActiveEventSlug] = useState(initialEventSlug || '');
