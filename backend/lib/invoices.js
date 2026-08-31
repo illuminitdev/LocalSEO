@@ -10,26 +10,66 @@ async function clearPendingInvoiceItems(stripeClient, customerId) {
     }
 }
 
+async function getOrCreateCustomer(stripeClient, booking) {
+    const existing = await stripeClient.customers.list({ email: booking.customer_email, limit: 1 });
+    if (existing.data.length) return existing.data[0];
+    return stripeClient.customers.create({
+        email: booking.customer_email,
+        name: booking.customer_name,
+        phone: booking.customer_phone || undefined,
+        metadata: { bookingId: booking.id }
+    });
+}
+
+function effectiveJobTotalCents(booking, eventType) {
+    const depositCents = Number(booking.deposit_cents) || Number(eventType.deposit_cents) || 0;
+    let totalCents = Math.max(Number(booking.total_cents) || 0, Number(eventType.total_cents) || 0);
+    if (depositCents <= 0) return totalCents;
+    if (totalCents <= depositCents) return depositCents;
+    // Legacy setups auto-set total to deposit × 3.33 — treat as deposit-only (no balance invoice)
+    const legacyEstimate = Math.round(depositCents * 3.33);
+    if (Math.abs(totalCents - legacyEstimate) <= 2) return depositCents;
+    return totalCents;
+}
+
 async function createBalanceInvoice(stripeClient, booking, eventType, org) {
-    const totalCents = Math.max(Number(booking.total_cents) || 0, Number(eventType.total_cents) || 0);
     const depositCents = Number(booking.deposit_cents) || 0;
+    const totalCents = effectiveJobTotalCents(booking, eventType);
     const balance = Math.max(0, totalCents - depositCents);
     if (balance <= 0) {
-        return { skipped: true, reason: 'No balance due — deposit covers the full job price' };
+        if (!depositCents || !booking.deposit_paid) {
+            return { skipped: true, reason: 'No balance due — deposit covers the full job price' };
+        }
+
+        const customer = await getOrCreateCustomer(stripeClient, booking);
+        await clearPendingInvoiceItems(stripeClient, customer.id);
+
+        await stripeClient.invoiceItems.create({
+            customer: customer.id,
+            amount: depositCents,
+            currency: (org.currency || 'GBP').toLowerCase(),
+            description: `${eventType.name} — deposit paid`
+        });
+
+        const draft = await stripeClient.invoices.create({
+            customer: customer.id,
+            collection_method: 'send_invoice',
+            days_until_due: 7,
+            metadata: { bookingId: booking.id, invoiceKind: 'deposit_receipt' },
+            pending_invoice_items_behavior: 'include'
+        });
+        const finalized = await stripeClient.invoices.finalizeInvoice(draft.id);
+        const paid = await stripeClient.invoices.pay(finalized.id, { paid_out_of_band: true });
+
+        return {
+            stripeInvoiceId: paid.id,
+            hostedUrl: paid.hosted_invoice_url || finalized.hosted_invoice_url,
+            amountCents: depositCents,
+            status: paid.status
+        };
     }
 
-    let customer;
-    const existing = await stripeClient.customers.list({ email: booking.customer_email, limit: 1 });
-    if (existing.data.length) {
-        customer = existing.data[0];
-    } else {
-        customer = await stripeClient.customers.create({
-            email: booking.customer_email,
-            name: booking.customer_name,
-            phone: booking.customer_phone || undefined,
-            metadata: { bookingId: booking.id }
-        });
-    }
+    const customer = await getOrCreateCustomer(stripeClient, booking);
 
     await clearPendingInvoiceItems(stripeClient, customer.id);
 

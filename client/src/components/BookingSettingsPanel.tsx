@@ -176,7 +176,7 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
                 description: tpl.description,
                 durationMinutes: tpl.durationMinutes,
                 depositCents,
-                totalCents: Math.round(depositCents * 3.33)
+                totalCents: depositCents
             });
             setEventTypes((prev) => [...prev, et]);
             setNewDepositPounds(selectedTemplate === 'standard' ? '60' : selectedTemplate === 'emergency' ? '80' : '100');
@@ -204,7 +204,7 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
         try {
             const updated = await apiPatch(`/api/host/event-types/${et.id}`, {
                 depositCents,
-                totalCents: Math.round(depositCents * 3.33)
+                totalCents: depositCents
             });
             setEventTypes((prev) => prev.map((x) => (x.id === et.id ? updated : x)));
             setEditingId(null);
@@ -221,12 +221,16 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
         try {
             await apiPatch('/api/host/organization', {
                 name: org.name,
+                hostName: org.host_name,
                 tradeType: org.trade_type,
                 phone: org.phone,
                 email: org.email,
                 serviceArea: org.service_area
             });
-            onBack?.();
+            setSaved(true);
+            setSavingProfile(false);
+            setTimeout(() => setSaved(false), 2000);
+            onRefresh?.();
         } catch (e: any) {
             setError(e.message);
             setSavingProfile(false);
@@ -502,26 +506,44 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
                 )}
 
                 {tab === 'profile' && org && (
-                    <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-3">
-                        <h2 className="font-bold">Business profile</h2>
-                        {['name', 'trade_type', 'phone', 'email', 'service_area'].map((field) => (
-                            <label key={field} className="block text-xs font-bold text-[#64748B] capitalize">
-                                {field.replace('_', ' ')}
+                    <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
+                        <div>
+                            <h2 className="font-bold text-[#0F172A]">Profile details</h2>
+                            <p className="text-sm text-[#64748B] mt-1">Edit what customers see on your booking page.</p>
+                        </div>
+                        {([
+                            ['host_name', 'Your full name', 'e.g. Dave Miller'],
+                            ['name', 'Business name', 'e.g. Miller Heating Ltd'],
+                            ['trade_type', 'Service type', 'e.g. Electrician'],
+                            ['phone', 'Phone', 'e.g. 07700900123'],
+                            ['email', 'Email', 'e.g. hello@yourbusiness.com'],
+                            ['service_area', 'Service area', 'e.g. Greater Manchester']
+                        ] as const).map(([field, label, placeholder]) => (
+                            <label key={field} className="block text-xs font-bold uppercase text-[#64748B]">
+                                {label}
                                 <input
                                     value={org[field] || ''}
                                     onChange={(e) => setOrg((o: any) => ({ ...o, [field]: e.target.value }))}
-                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
+                                    placeholder={placeholder}
+                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-medium text-[#0F172A]"
                                 />
                             </label>
                         ))}
-                        <button
-                            type="button"
-                            disabled={savingProfile}
-                            onClick={saveProfile}
-                            className="px-5 py-2.5 rounded-xl bg-[#0F172A] text-white font-bold text-sm disabled:opacity-60"
-                        >
-                            {savingProfile ? 'Saving…' : 'Save profile'}
-                        </button>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                            <button
+                                type="button"
+                                disabled={savingProfile}
+                                onClick={saveProfile}
+                                className="px-5 py-2.5 rounded-xl bg-[#0F172A] text-white font-bold text-sm disabled:opacity-60"
+                            >
+                                {savingProfile ? 'Saving…' : 'Save profile'}
+                            </button>
+                            {onBack && (
+                                <button type="button" onClick={onBack} className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]">
+                                    Back to board
+                                </button>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>

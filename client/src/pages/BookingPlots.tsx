@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Calendar, CheckCircle2, Copy, ExternalLink, LogOut, QrCode, Settings, User, Wrench } from 'lucide-react';
 import { apiGet, apiPost, formatCents, getToken, cn } from '../lib/utils';
 import { clearToken as logout } from '../lib/auth';
-import { clearBookingOrgSlug, setBookingOrgSlug } from '../lib/bookingHost';
+import { setBookingOrgSlug } from '../lib/bookingHost';
 import BookingSetupWizard, { type SetupForm } from '../components/BookingSetupWizard';
 import BookingSettingsPanel from '../components/BookingSettingsPanel';
 
@@ -36,23 +36,24 @@ export default function BookingPlots() {
     const [busy, setBusy] = useState('');
 
     const load = async () => {
-        try {
-            const [d, business] = await Promise.all([
-                apiGet('/api/host/dashboard'),
-                apiGet('/api/business').catch(() => null)
-            ]);
-            setData(d);
-            setLinked(Boolean(business?.connected && business?.name));
-            setLinkedBusiness(business?.connected ? business : null);
-            setError('');
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setLoading(false);
-        }
+        const [d, business] = await Promise.all([
+            apiGet('/api/host/dashboard'),
+            apiGet('/api/business').catch(() => null)
+        ]);
+        setData(d);
+        setLinked(Boolean(business?.connected && business?.name));
+        setLinkedBusiness(business?.connected ? business : null);
+        setError('');
+        setLoading(false);
+        return d;
     };
 
-    useEffect(() => { load(); }, []);
+    useEffect(() => {
+        load().catch((e: any) => {
+            setError(e.message);
+            setLoading(false);
+        });
+    }, []);
 
     const ready = Boolean(data?.ready);
     const org = data?.organization;
@@ -92,20 +93,6 @@ export default function BookingPlots() {
         }
     };
 
-    const startOver = async () => {
-        if (!window.confirm('Start over? This removes your booking profile and all bookings.')) return;
-        setBusy('reset');
-        try {
-            await apiPost('/api/host/reset', {});
-            clearBookingOrgSlug();
-            setData({ ready: false });
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setBusy('');
-        }
-    };
-
     const openCustomerView = () => {
         window.open(hostUrl, '_blank', 'noopener,noreferrer');
     };
@@ -115,12 +102,28 @@ export default function BookingPlots() {
         setError('');
         try {
             const result = await apiPost(`/api/host/bookings/${id}/complete`, {});
-            if (result.invoiceError) {
-                setError(`Job marked done. Balance invoice could not be sent: ${result.invoiceError}`);
+            // Update UI immediately from the complete response so a later refresh failure cannot undo success
+            if (result.booking) {
+                setData((prev: any) => {
+                    if (!prev?.bookings) return prev;
+                    return {
+                        ...prev,
+                        bookings: prev.bookings.map((b: any) => (b.id === id ? { ...b, ...result.booking, status: 'done' } : b))
+                    };
+                });
             }
-            await load();
+            try {
+                await load();
+            } catch {
+                // Job is already done — ignore dashboard refresh blips
+            }
         } catch (e: any) {
             setError(e.message === 'Failed to fetch' ? 'Could not reach server — make sure the backend is running on port 5000.' : e.message);
+            try {
+                await load();
+            } catch {
+                /* ignore */
+            }
         } finally {
             setBusy('');
         }
@@ -188,7 +191,7 @@ export default function BookingPlots() {
                             Open link
                         </Link>
                         <button type="button" onClick={() => openSettings()} className="p-2 rounded-xl bg-white/10" title="Settings"><Settings className="w-4 h-4" /></button>
-                        <button type="button" onClick={startOver} disabled={busy === 'reset'} className="p-2 rounded-xl bg-white/10" title="Start over"><User className="w-4 h-4" /></button>
+                        <button type="button" onClick={() => openSettings('profile')} className="p-2 rounded-xl bg-white/10" title="Profile"><User className="w-4 h-4" /></button>
                         {getToken() && (
                             <button type="button" onClick={() => { logout(); window.location.reload(); }} className="p-2 rounded-xl bg-white/10" title="Logout"><LogOut className="w-4 h-4" /></button>
                         )}

@@ -154,7 +154,7 @@ function createHostRouter({ stripeClient }) {
             const { rows } = await query(
                 `INSERT INTO event_types (org_id, slug, name, description, duration_minutes, deposit_cents, total_cents, active)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-                [req.orgId, slug, name, description || '', Number(durationMinutes) || 60, Number(depositCents) || 4500, Number(totalCents) || 15000, active !== false]
+                [req.orgId, slug, name, description || '', Number(durationMinutes) || 60, Number(depositCents) || 4500, Number(totalCents) || Number(depositCents) || 4500, active !== false]
             );
             res.status(201).json(rows[0]);
         } catch (err) {
@@ -229,11 +229,11 @@ function createHostRouter({ stripeClient }) {
     });
 
     router.patch('/organization', async (req, res) => {
-        const allowed = ['name', 'phone', 'email', 'service_area', 'trade_type', 'timezone'];
+        const allowed = ['name', 'phone', 'email', 'service_area', 'trade_type', 'timezone', 'host_name'];
         const sets = [];
         const vals = [];
         let i = 1;
-        const map = { serviceArea: 'service_area', tradeType: 'trade_type' };
+        const map = { serviceArea: 'service_area', tradeType: 'trade_type', hostName: 'host_name' };
         for (const [k, v] of Object.entries(req.body || {})) {
             const col = map[k] || k;
             if (allowed.includes(col)) {
@@ -337,40 +337,43 @@ function createHostRouter({ stripeClient }) {
             await query(`UPDATE bookings SET status = 'done', updated_at = NOW() WHERE id = $1`, [booking.id]);
             const updated = (await query('SELECT * FROM bookings WHERE id = $1', [booking.id])).rows[0];
 
-            let invoiceResult = null;
-            let invoiceError = null;
-            if (stripeClient) {
-                try {
-                    const { rows: orgRows } = await query('SELECT * FROM organizations WHERE id = $1', [req.orgId]);
-                    const org = orgRows[0];
-                    const { rows: etRows } = await query('SELECT * FROM event_types WHERE id = $1', [booking.event_type_id]);
-                    const eventType = etRows[0];
-                    invoiceResult = await createBalanceInvoice(stripeClient, updated, eventType, org);
-                    if (!invoiceResult.skipped && invoiceResult.stripeInvoiceId) {
-                        await query(
-                            `INSERT INTO invoices (booking_id, stripe_invoice_id, stripe_hosted_url, amount_cents, status)
-                             VALUES ($1, $2, $3, $4, $5)
-                             ON CONFLICT (booking_id) DO UPDATE SET stripe_invoice_id = EXCLUDED.stripe_invoice_id,
-                               stripe_hosted_url = EXCLUDED.stripe_hosted_url, amount_cents = EXCLUDED.amount_cents,
-                               status = EXCLUDED.status, updated_at = NOW()`,
-                            [booking.id, invoiceResult.stripeInvoiceId, invoiceResult.hostedUrl, invoiceResult.amountCents, 'sent']
-                        );
-                        await sendInvoiceEmail({
-                            to: booking.customer_email,
-                            customerName: booking.customer_name,
-                            businessName: org.name,
-                            amountCents: invoiceResult.amountCents,
-                            currency: org.currency,
-                            invoiceUrl: invoiceResult.hostedUrl
-                        });
-                    }
-                } catch (err) {
-                    console.error('Balance invoice error (job still marked done):', err.message);
-                    invoiceError = err.message;
-                }
-            }
+            // Return immediately so the UI does not hang / fail while Stripe invoice APIs run
+            res.json({ booking: updated, invoicePending: Boolean(stripeClient) });
 
-            res.json({ booking: updated, invoice: invoiceResult, invoiceError });
+            if (stripeClient) {
+                setImmediate(async () => {
+                    try {
+                        const { rows: orgRows } = await query('SELECT * FROM organizations WHERE id = $1', [req.orgId]);
+                        const org = orgRows[0];
+                        const { rows: etRows } = await query('SELECT * FROM event_types WHERE id = $1', [booking.event_type_id]);
+                        const eventType = etRows[0];
+                        const invoiceResult = await createBalanceInvoice(stripeClient, updated, eventType, org);
+                        if (!invoiceResult.skipped && invoiceResult.stripeInvoiceId) {
+                            await query(
+                                `INSERT INTO invoices (booking_id, stripe_invoice_id, stripe_hosted_url, amount_cents, status)
+                                 VALUES ($1, $2, $3, $4, $5)
+                                 ON CONFLICT (booking_id) DO UPDATE SET stripe_invoice_id = EXCLUDED.stripe_invoice_id,
+                                   stripe_hosted_url = EXCLUDED.stripe_hosted_url, amount_cents = EXCLUDED.amount_cents,
+                                   status = EXCLUDED.status, updated_at = NOW()`,
+                                [booking.id, invoiceResult.stripeInvoiceId, invoiceResult.hostedUrl, invoiceResult.amountCents, invoiceResult.status || 'sent']
+                            );
+                            // Only email customers when there is a real balance left to pay
+                            if (invoiceResult.status !== 'paid') {
+                                await sendInvoiceEmail({
+                                    to: booking.customer_email,
+                                    customerName: booking.customer_name,
+                                    businessName: org.name,
+                                    amountCents: invoiceResult.amountCents,
+                                    currency: org.currency,
+                                    invoiceUrl: invoiceResult.hostedUrl
+                                });
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Balance invoice error (job already marked done):', err.message);
+                    }
+                });
+            }
         } catch (err) {
             console.error('Complete booking error:', err);
             res.status(500).json({ error: err.message });

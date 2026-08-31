@@ -11,14 +11,14 @@ async function seedDefaultEventTypes(orgId, { standardDepositCents = 4500, emerg
     await query(
         `INSERT INTO event_types (org_id, slug, name, description, duration_minutes, deposit_cents, total_cents, sort_order)
          VALUES ($1, $2, 'Standard Visit', 'Regular scheduled appointment', 60, $3, $4, 0)`,
-        [orgId, standardSlug, standardDepositCents, Math.round(standardDepositCents * 3.33)]
+        [orgId, standardSlug, standardDepositCents, standardDepositCents]
     );
     if (acceptingEmergencies) {
         const emergencySlug = await uniqueEventSlug(orgId, 'emergency-callout', query);
         await query(
             `INSERT INTO event_types (org_id, slug, name, description, duration_minutes, deposit_cents, total_cents, sort_order)
              VALUES ($1, $2, 'Emergency Callout', 'Urgent same-day service', 90, $3, $4, 1)`,
-            [orgId, emergencySlug, emergencyDepositCents, Math.round(emergencyDepositCents * 3.33)]
+            [orgId, emergencySlug, emergencyDepositCents, emergencyDepositCents]
         );
     }
 }
