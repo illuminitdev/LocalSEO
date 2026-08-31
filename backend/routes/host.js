@@ -116,7 +116,8 @@ function createHostRouter({ stripeClient }) {
                 emergencyDeposit: emergencyDeposit ?? 60,
                 currency,
                 acceptingEmergencies,
-                emergencyNote
+                emergencyNote,
+                orgId: req.orgId || null
             });
 
             const data = await loadDashboard(org.id);

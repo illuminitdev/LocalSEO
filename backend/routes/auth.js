@@ -1,17 +1,26 @@
 const express = require('express');
+const { createHash, randomBytes } = require('crypto');
 const { query } = require('../lib/db');
 const { hashPassword, comparePassword, signToken } = require('../lib/authTokens');
-const { uniqueOrgSlug, uniqueEventSlug } = require('../lib/slug');
+const { uniqueOrgSlug } = require('../lib/slug');
 const { requireAuth } = require('../middleware/auth');
-const { seedDefaultEventTypes } = require('../lib/seed');
+const { sendPasswordResetEmail } = require('../lib/bookingEmail');
 
 const router = express.Router();
 
+function frontendOrigin() {
+    return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+}
+
+function hashResetToken(token) {
+    return createHash('sha256').update(token).digest('hex');
+}
+
 router.post('/register', async (req, res) => {
     try {
-        const { email, password, name, businessName, tradeType, phone, serviceArea } = req.body || {};
-        if (!email || !password || !name || !businessName) {
-            return res.status(400).json({ error: 'Email, password, name, and business name are required.' });
+        const { email, password, name } = req.body || {};
+        if (!email || !password || !name) {
+            return res.status(400).json({ error: 'Name, email, and password are required.' });
         }
         if (String(password).length < 8) {
             return res.status(400).json({ error: 'Password must be at least 8 characters.' });
@@ -21,22 +30,22 @@ router.post('/register', async (req, res) => {
         if (existing.rows.length) return res.status(409).json({ error: 'Email already registered.' });
 
         const passwordHash = await hashPassword(password);
+        const displayName = String(name).trim();
         const userRes = await query(
             `INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id, email, name`,
-            [String(email).trim().toLowerCase(), passwordHash, String(name).trim()]
+            [String(email).trim().toLowerCase(), passwordHash, displayName]
         );
         const user = userRes.rows[0];
 
-        const orgSlug = await uniqueOrgSlug(businessName, query);
+        const orgSlug = await uniqueOrgSlug(displayName || 'My business', query);
         const orgRes = await query(
             `INSERT INTO organizations (slug, name, host_name, trade_type, phone, service_area, email, setup_complete)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE) RETURNING id, slug, name`,
-            [orgSlug, String(businessName).trim(), String(name).trim(), String(tradeType || '').trim(), String(phone || '').trim(), String(serviceArea || '').trim(), user.email]
+             VALUES ($1, $2, $3, '', '', '', $4, FALSE) RETURNING id, slug, name`,
+            [orgSlug, 'My business', displayName, user.email]
         );
         const org = orgRes.rows[0];
 
         await query('INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, $3)', [user.id, org.id, 'owner']);
-        await seedDefaultEventTypes(org.id);
 
         const token = signToken({ userId: user.id, orgId: org.id });
         res.status(201).json({
@@ -80,6 +89,73 @@ router.post('/login', async (req, res) => {
     }
 });
 
+router.post('/forgot-password', async (req, res) => {
+    try {
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+        const { rows } = await query('SELECT id, email, name FROM users WHERE email = $1', [email]);
+        if (rows.length) {
+            const user = rows[0];
+            const rawToken = randomBytes(32).toString('hex');
+            const tokenHash = hashResetToken(rawToken);
+            const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+            await query('DELETE FROM password_reset_tokens WHERE user_id = $1 OR expires_at < NOW()', [user.id]);
+            await query(
+                `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
+                [user.id, tokenHash, expiresAt]
+            );
+
+            const resetUrl = `${frontendOrigin()}/reset-password?token=${rawToken}`;
+            await sendPasswordResetEmail({ to: user.email, name: user.name, resetUrl });
+        }
+
+        res.json({
+            success: true,
+            message: 'If an account exists for that email, we sent password reset instructions.'
+        });
+    } catch (err) {
+        console.error('Forgot password error:', err);
+        res.status(500).json({ error: err.message || 'Could not process request' });
+    }
+});
+
+router.post('/reset-password', async (req, res) => {
+    try {
+        const token = String(req.body?.token || '').trim();
+        const password = String(req.body?.password || '');
+        if (!token || !password) {
+            return res.status(400).json({ error: 'Token and new password are required.' });
+        }
+        if (password.length < 8) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+        }
+
+        const tokenHash = hashResetToken(token);
+        const { rows } = await query(
+            `SELECT id, user_id FROM password_reset_tokens
+             WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+             LIMIT 1`,
+            [tokenHash]
+        );
+        if (!rows.length) {
+            return res.status(400).json({ error: 'This reset link is invalid or has expired.' });
+        }
+
+        const row = rows[0];
+        const passwordHash = await hashPassword(password);
+        await query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, row.user_id]);
+        await query('UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1', [row.id]);
+        await query('DELETE FROM password_reset_tokens WHERE user_id = $1 AND id <> $2', [row.user_id, row.id]);
+
+        res.json({ success: true, message: 'Password updated. You can sign in now.' });
+    } catch (err) {
+        console.error('Reset password error:', err);
+        res.status(500).json({ error: err.message || 'Could not reset password' });
+    }
+});
+
 router.get('/me', requireAuth, async (req, res) => {
     const { rows: orgRows } = await query('SELECT * FROM organizations WHERE id = $1', [req.orgId]);
     const org = orgRows[0];
@@ -96,6 +172,48 @@ router.get('/me', requireAuth, async (req, res) => {
         googleCalendarConnected: cal.length > 0,
         stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY)
     });
+});
+
+router.patch('/profile', requireAuth, async (req, res) => {
+    try {
+        const name = String(req.body?.name || '').trim();
+        if (!name) return res.status(400).json({ error: 'Name is required.' });
+
+        const { rows } = await query(
+            `UPDATE users SET name = $1 WHERE id = $2 RETURNING id, email, name`,
+            [name, req.user.id]
+        );
+        res.json({ user: rows[0] });
+    } catch (err) {
+        console.error('Update profile error:', err);
+        res.status(500).json({ error: err.message || 'Could not update profile' });
+    }
+});
+
+router.patch('/password', requireAuth, async (req, res) => {
+    try {
+        const currentPassword = String(req.body?.currentPassword || '');
+        const newPassword = String(req.body?.newPassword || '');
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: 'Current and new password are required.' });
+        }
+        if (newPassword.length < 8) {
+            return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+        }
+
+        const { rows } = await query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+        if (!rows.length) return res.status(404).json({ error: 'User not found.' });
+
+        const ok = await comparePassword(currentPassword, rows[0].password_hash);
+        if (!ok) return res.status(401).json({ error: 'Current password is incorrect.' });
+
+        const passwordHash = await hashPassword(newPassword);
+        await query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, req.user.id]);
+        res.json({ success: true, message: 'Password updated.' });
+    } catch (err) {
+        console.error('Update password error:', err);
+        res.status(500).json({ error: err.message || 'Could not update password' });
+    }
 });
 
 module.exports = router;

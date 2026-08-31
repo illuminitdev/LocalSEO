@@ -1,7 +1,8 @@
 ﻿import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, MapPin, Building2, Star, Activity, CheckCircle, Clock, TrendingUp, CalendarClock } from 'lucide-react';
+import { ArrowRight, MapPin, Building2, Star, Activity, CheckCircle, Clock, TrendingUp, CalendarClock, Search } from 'lucide-react';
 import { apiGet } from '../lib/utils';
+import GroundingModal from '../components/GroundingModal';
 
 const ICONS: Record<string, any> = {
     Activity,
@@ -32,7 +33,7 @@ const PILLARS = [
     {
         to: '/booking',
         title: 'Booking Plots',
-        body: 'Share time slots, take deposits, and manage jobs — simple TradeSlot-style booking for your location.',
+        body: 'Share time slots, take deposits, and manage jobs — simple booking for your trade.',
         icon: CalendarClock,
     },
 ];
@@ -40,23 +41,40 @@ const PILLARS = [
 export default function Dashboard() {
     const [stats, setStats] = useState<any>(null);
     const [business, setBusiness] = useState<any>(null);
+    const [locationModalOpen, setLocationModalOpen] = useState(false);
+
+    const loadBusiness = () => {
+        apiGet('/api/business').then(setBusiness).catch(() => {});
+    };
 
     useEffect(() => {
         apiGet('/api/dashboard/stats').then(setStats).catch(() => setStats({ activities: [], completenessScore: 0 }));
-        apiGet('/api/business').then(setBusiness).catch(() => {});
+        loadBusiness();
     }, []);
 
     return (
         <div className="max-w-6xl mx-auto space-y-6">
-            <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-[#F59E0B]">Shine bright, locally</p>
-                <h1 className="text-3xl font-black tracking-tight mt-1">
-                    {business?.name || 'Add a location to get started'}
-                </h1>
-                <p className="text-[#64748B] mt-2 text-sm max-w-2xl">
-                    LocalPulse follows the same three jobs as BrightLocal: track visibility, manage listings, and grow reputation.
-                    Your Gemini key powers the lookups — you still need to add a real business with <span className="font-semibold text-[#0F172A]">Add location</span>.
-                </p>
+            <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+                <div>
+                    <p className="text-xs font-bold uppercase tracking-widest text-[#F59E0B]">Zappsites · Local SEO</p>
+                    <h1 className="text-3xl font-black tracking-tight mt-1">
+                        {business?.name || 'Add a location to get started'}
+                    </h1>
+                    <p className="text-[#64748B] mt-2 text-sm max-w-2xl">
+                        Track visibility, manage listings, grow reputation, and take bookings — all in one workspace.
+                        {!business?.connected && (
+                            <> Connect a real business with <span className="font-semibold text-[#0F172A]">Add location</span> to power local lookups.</>
+                        )}
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => setLocationModalOpen(true)}
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-[#F59E0B] text-white text-sm font-bold hover:bg-[#D97706] shrink-0"
+                >
+                    <Search className="w-4 h-4" />
+                    {business?.connected ? 'Change location' : 'Add location'}
+                </button>
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -116,6 +134,14 @@ export default function Dashboard() {
                     <p className="text-sm text-[#64748B]">No activity yet. Add a location, then run a grid scan or citation audit.</p>
                 )}
             </div>
+
+            <GroundingModal
+                isOpen={locationModalOpen}
+                onClose={() => {
+                    setLocationModalOpen(false);
+                    loadBusiness();
+                }}
+            />
         </div>
     );
 }

@@ -1,5 +1,4 @@
-﻿import { useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+﻿import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
     Building2,
     LayoutDashboard,
@@ -9,13 +8,12 @@ import {
     MapPin,
     Image as ImageIcon,
     Sparkles,
-    Search,
     BookMarked,
     CalendarClock,
-    Settings
+    Settings,
+    UserRound
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import GroundingModal from './GroundingModal';
 
 const NAV = [
     { group: 'Overview', items: [{ name: 'Dashboard', to: '/', icon: LayoutDashboard, end: true }] },
@@ -49,10 +47,13 @@ const NAV = [
             { name: 'Schedule settings', to: '/booking?panel=settings&tab=events', icon: Settings, match: 'settings' as const },
         ]
     },
+    {
+        group: 'Account',
+        items: [{ name: 'Account', to: '/account', icon: UserRound, end: true }]
+    },
 ];
 
 export default function Layout() {
-    const [isModalOpen, setIsModalOpen] = useState(false);
     const location = useLocation();
     const searchParams = new URLSearchParams(location.search);
     const bookingPanel = searchParams.get('panel');
@@ -68,21 +69,21 @@ export default function Layout() {
 
     return (
         <div className="flex h-screen bg-white text-[#0F172A]">
-            <aside className="w-[260px] flex flex-col bg-[#0F172A] text-white shrink-0">
-                <div className="px-5 py-5 border-b border-white/10">
-                    <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg bg-[#F59E0B] text-white flex items-center justify-center font-black">L</div>
-                        <div>
-                            <p className="font-black text-lg leading-none tracking-tight">LocalPulse</p>
-                            <p className="text-[10px] uppercase tracking-widest text-[#F59E0B] mt-1">Local SEO platform</p>
-                        </div>
+            <aside className="w-[260px] h-screen shrink-0 bg-[#0F172A] text-white overflow-y-auto overflow-x-hidden">
+                <div className="px-4 py-4 flex items-center gap-2.5 border-b border-white/10">
+                    <div className="w-8 h-8 rounded-md bg-[#F59E0B] text-white flex items-center justify-center font-bold text-sm shrink-0">
+                        z
+                    </div>
+                    <div className="min-w-0 leading-none">
+                        <p className="font-semibold text-[15px] tracking-tight truncate">Zappsites</p>
+                        <p className="text-[10px] uppercase tracking-widest text-[#F59E0B] mt-1.5">Local SEO</p>
                     </div>
                 </div>
 
-                <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+                <nav className="px-3 py-3 space-y-4">
                     {NAV.map((section) => (
                         <div key={section.group}>
-                            <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-white/40">{section.group}</p>
+                            <p className="px-2.5 mb-1 text-[10px] font-bold uppercase tracking-wider text-white/40">{section.group}</p>
                             <div className="space-y-0.5">
                                 {section.items.map((item) => (
                                     <NavLink
@@ -90,13 +91,13 @@ export default function Layout() {
                                         to={item.to}
                                         end={'end' in item ? item.end : undefined}
                                         className={() => cn(
-                                            'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                                            'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors',
                                             isNavActive(item)
                                                 ? 'bg-[#F59E0B] text-white'
                                                 : 'text-white/75 hover:bg-white/10 hover:text-white'
                                         )}
                                     >
-                                        <item.icon className="w-4 h-4" />
+                                        <item.icon className="w-4 h-4 shrink-0" />
                                         {item.name}
                                     </NavLink>
                                 ))}
@@ -104,16 +105,6 @@ export default function Layout() {
                         </div>
                     ))}
                 </nav>
-
-                <div className="p-4 border-t border-white/10">
-                    <button
-                        onClick={() => setIsModalOpen(true)}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-[#F59E0B] text-white text-sm font-bold cursor-pointer hover:bg-[#D97706]"
-                    >
-                        <Search className="w-4 h-4" />
-                        Add location
-                    </button>
-                </div>
             </aside>
 
             <div className="flex-1 flex flex-col min-w-0">
@@ -121,8 +112,6 @@ export default function Layout() {
                     <Outlet />
                 </main>
             </div>
-
-            <GroundingModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
         </div>
     );
 }

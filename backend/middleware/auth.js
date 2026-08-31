@@ -45,7 +45,7 @@ async function requireHost(req, res, next) {
         }
 
         const orgSlug = String(req.headers['x-booking-org'] || '').trim();
-        if (orgSlug && (await attachOrgBySlug(req, orgSlug))) {
+        if (!authRequired() && orgSlug && (await attachOrgBySlug(req, orgSlug))) {
             return next();
         }
 

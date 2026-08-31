@@ -106,11 +106,30 @@ async function sendRescheduleEmail({ to, customerName, businessName, startAt }) 
     return sendMail({ to, subject, text, html });
 }
 
+async function sendPasswordResetEmail({ to, name, resetUrl }) {
+    const subject = 'Reset your Zappsites Local SEO password';
+    const text = [
+        `Hi ${name || 'there'},`,
+        '',
+        'We received a request to reset your password.',
+        `Open this link to choose a new password (valid for 1 hour):`,
+        resetUrl,
+        '',
+        'If you did not ask for this, you can ignore this email.'
+    ].join('\n');
+    const html = `<p>Hi ${name || 'there'},</p>
+<p>We received a request to reset your password.</p>
+<p><a href="${resetUrl}">Choose a new password</a> — this link is valid for 1 hour.</p>
+<p>If you did not ask for this, you can ignore this email.</p>`;
+    return sendMail({ to, subject, text, html });
+}
+
 module.exports = {
     sendBookingConfirmationEmail,
     sendHostBookingNotification,
     sendInvoiceEmail,
     sendCancellationEmail,
     sendRescheduleEmail,
+    sendPasswordResetEmail,
     formatMoneyFromCents
 };
