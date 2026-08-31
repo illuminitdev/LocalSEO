@@ -283,47 +283,44 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                         <p className="text-xs font-bold uppercase text-white/60 flex items-center gap-2">
                             <Wallet className="w-4 h-4 text-[#F59E0B]" /> Customer deposits (paid via Stripe)
                         </p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <label className="block">
+                        <label className="block">
+                            {form.acceptingEmergencies ? (
+                                <span className="text-[10px] font-bold uppercase text-red-300 flex items-center gap-1">
+                                    <Flame className="w-3 h-3" /> Emergency deposit
+                                </span>
+                            ) : (
                                 <span className="text-[10px] font-bold uppercase text-white/50">Standard visit deposit</span>
-                                <div className="flex gap-2 mt-1">
-                                    <select
-                                        value={form.currency}
-                                        onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
-                                        className="rounded-lg border-0 bg-white/10 text-white px-2 py-2 text-sm font-bold"
-                                    >
-                                        <option value="£">£</option>
-                                        <option value="$">$</option>
-                                        <option value="€">€</option>
-                                    </select>
-                                    <input
-                                        type="number"
-                                        min={0}
-                                        value={form.standardDeposit}
-                                        onChange={(e) => setForm((f) => ({ ...f, standardDeposit: Number(e.target.value) }))}
-                                        className="flex-1 rounded-lg border-0 bg-white/10 text-white px-3 py-2 text-xl font-black"
-                                    />
-                                </div>
-                            </label>
-                            {form.acceptingEmergencies && (
-                                <label className="block">
-                                    <span className="text-[10px] font-bold uppercase text-red-300 flex items-center gap-1">
-                                        <Flame className="w-3 h-3" /> Emergency deposit (higher)
-                                    </span>
-                                    <div className="flex gap-2 mt-1">
-                                        <span className="rounded-lg bg-white/10 text-white px-2 py-2 text-sm font-bold">{form.currency}</span>
-                                        <input
-                                            type="number"
-                                            min={0}
-                                            value={form.emergencyDeposit}
-                                            onChange={(e) => setForm((f) => ({ ...f, emergencyDeposit: Number(e.target.value) }))}
-                                            className="flex-1 rounded-lg border-0 bg-white/10 text-white px-3 py-2 text-xl font-black"
-                                        />
-                                    </div>
-                                </label>
                             )}
-                        </div>
-                        <p className="text-xs text-white/50">Customers see the correct deposit for each service type when they book.</p>
+                            <div className="flex gap-2 mt-1">
+                                <select
+                                    value={form.currency}
+                                    onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
+                                    className="rounded-lg border-0 bg-white/10 text-white px-2 py-2 text-sm font-bold shrink-0"
+                                >
+                                    <option value="£">£</option>
+                                    <option value="$">$</option>
+                                    <option value="€">€</option>
+                                </select>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    value={form.acceptingEmergencies ? form.emergencyDeposit : form.standardDeposit}
+                                    onChange={(e) =>
+                                        setForm((f) =>
+                                            f.acceptingEmergencies
+                                                ? { ...f, emergencyDeposit: Number(e.target.value) }
+                                                : { ...f, standardDeposit: Number(e.target.value) }
+                                        )
+                                    }
+                                    className="flex-1 min-w-0 rounded-lg border-0 bg-white/10 text-white px-3 py-2 text-xl font-black"
+                                />
+                            </div>
+                        </label>
+                        <p className="text-xs text-white/50">
+                            {form.acceptingEmergencies
+                                ? 'Emergency customers pay this deposit when they book a callout.'
+                                : 'Customers pay this deposit when they book a standard visit.'}
+                        </p>
                     </div>
 
                     <div className="rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] p-3 text-sm text-[#64748B]">
