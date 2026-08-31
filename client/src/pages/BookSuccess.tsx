@@ -51,7 +51,7 @@ export default function BookSuccess() {
     }
 
     const when = new Date(booking.start_at).toLocaleString('en-GB');
-    const icsUrl = `${import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? 'http://localhost:5000' : '')}/api/public/bookings/${booking.id}/calendar.ics`;
+    const icsUrl = `${import.meta.env.VITE_API_BASE ?? ''}/api/public/bookings/${booking.id}/calendar.ics`;
 
     return (
         <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-6">

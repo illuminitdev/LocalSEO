@@ -28,8 +28,8 @@ export default function App() {
         <Route path="/book/:hostSlug/:eventSlug" element={<PublicBookEvent />} />
         <Route path="/book/:hostSlug" element={<PublicBookHost />} />
         <Route path="/book" element={<Navigate to="/booking" replace />} />
-        <Route path="/booking/settings" element={<BookingSettings />} />
         <Route element={<Layout />}>
+          <Route path="/booking/settings" element={<BookingSettings />} />
           <Route path="/" element={<Dashboard />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/profile" element={<ProfileAudit />} />

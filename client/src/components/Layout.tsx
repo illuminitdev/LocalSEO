@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+﻿import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
     Building2,
@@ -14,7 +14,7 @@ import {
     CalendarClock,
     Settings
 } from 'lucide-react';
-import { cn, apiGet } from '../lib/utils';
+import { cn } from '../lib/utils';
 import GroundingModal from './GroundingModal';
 
 const NAV = [
@@ -45,26 +45,26 @@ const NAV = [
     {
         group: 'Booking Plots',
         items: [
-            { name: 'Booking board', to: '/booking', icon: CalendarClock, end: true },
-            { name: 'Schedule settings', to: '/booking/settings', icon: Settings },
+            { name: 'Booking board', to: '/booking', icon: CalendarClock, end: true, match: 'board' as const },
+            { name: 'Schedule settings', to: '/booking?panel=settings&tab=events', icon: Settings, match: 'settings' as const },
         ]
     },
 ];
 
 export default function Layout() {
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [business, setBusiness] = useState({ name: '', connected: false, category: '', address: '' });
-    const [geminiOn, setGeminiOn] = useState(false);
     const location = useLocation();
+    const searchParams = new URLSearchParams(location.search);
+    const bookingPanel = searchParams.get('panel');
 
-    useEffect(() => {
-        Promise.all([apiGet('/api/business'), apiGet('/api/status')])
-            .then(([biz, status]) => {
-                setBusiness(biz);
-                setGeminiOn(Boolean(status.gemini));
-            })
-            .catch(() => {});
-    }, [location.pathname, isModalOpen]);
+    const isNavActive = (item: { to: string; end?: boolean; match?: 'board' | 'settings' }) => {
+        if (!item.to.startsWith('/booking')) {
+            return location.pathname === item.to || (item.end ? false : location.pathname.startsWith(item.to));
+        }
+        if (location.pathname !== '/booking') return false;
+        if (item.match === 'settings') return bookingPanel === 'settings';
+        return bookingPanel !== 'settings';
+    };
 
     return (
         <div className="flex h-screen bg-white text-[#0F172A]">
@@ -89,9 +89,9 @@ export default function Layout() {
                                         key={item.to}
                                         to={item.to}
                                         end={'end' in item ? item.end : undefined}
-                                        className={({ isActive }) => cn(
+                                        className={() => cn(
                                             'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                                            isActive
+                                            isNavActive(item)
                                                 ? 'bg-[#F59E0B] text-white'
                                                 : 'text-white/75 hover:bg-white/10 hover:text-white'
                                         )}
@@ -117,24 +117,6 @@ export default function Layout() {
             </aside>
 
             <div className="flex-1 flex flex-col min-w-0">
-                <header className="h-16 bg-white border-b border-[#E2E8F0] flex items-center justify-between px-6 shrink-0">
-                    <div className="min-w-0">
-                        <p className="text-[11px] font-bold uppercase tracking-wider text-[#64748B]">Location</p>
-                        <p className="font-semibold truncate">{business.name || 'No location added'}</p>
-                    </div>
-                    <div className="flex items-center gap-3 text-sm">
-                        <span className={cn(
-                            'px-2.5 py-1 rounded-full text-xs font-bold',
-                            geminiOn ? 'bg-[#F59E0B]/30 text-[#0F172A]' : 'bg-red-50 text-red-700'
-                        )}>
-                            {geminiOn ? 'Gemini connected' : 'No API key'}
-                        </span>
-                        <span className="text-[#64748B] hidden sm:inline truncate max-w-[240px]">
-                            {business.address || 'Add a location to start tracking'}
-                        </span>
-                    </div>
-                </header>
-
                 <main className="flex-1 overflow-auto p-6">
                     <Outlet />
                 </main>

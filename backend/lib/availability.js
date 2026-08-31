@@ -48,9 +48,17 @@ function generateSlots({
 
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         if (d > maxEnd) break;
-        const dayOfWeek = d.getDay();
-        const dayRules = rules.filter((r) => r.enabled !== false && Number(r.day_of_week) === dayOfWeek);
         const dateStr = localDateStr(d);
+        const dayRules = rules.filter((r) => {
+            if (r.enabled === false) return false;
+            let ruleDate = null;
+            if (r.avail_date) {
+                ruleDate = r.avail_date instanceof Date ? localDateStr(r.avail_date) : String(r.avail_date).slice(0, 10);
+            } else if (r.date) {
+                ruleDate = String(r.date).slice(0, 10);
+            }
+            return ruleDate === dateStr;
+        });
 
         for (const rule of dayRules) {
             const windowStart = parseTimeToMinutes(rule.start_time);

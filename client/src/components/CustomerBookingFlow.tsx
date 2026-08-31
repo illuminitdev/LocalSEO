@@ -35,23 +35,7 @@ type Props = {
     onSuccess?: () => void;
 };
 
-function monthDays(year: number, month: number) {
-    const first = new Date(year, month, 1);
-    const last = new Date(year, month + 1, 0);
-    const days: { date: string; inMonth: boolean }[] = [];
-    const startPad = first.getDay();
-    for (let i = 0; i < startPad; i++) days.push({ date: '', inMonth: false });
-    for (let d = 1; d <= last.getDate(); d++) {
-        const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        days.push({ date, inMonth: true });
-    }
-    return days;
-}
-
-function todayStr() {
-    const n = new Date();
-    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
-}
+import { monthDays, todayStr } from '../lib/calendar';
 
 function isDateSelectable(dateStr: string, maxDaysAhead: number) {
     const today = new Date();

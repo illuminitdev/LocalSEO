@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { cn, restrictPhoneInput } from '../lib/utils';
 
+const OTHER_SERVICE_TYPE = 'General Tradesperson';
+
 const SERVICES = [
     { type: 'Heating Engineer', label: 'Heating & Gas', subtitle: 'Boilers, radiators, no-heat', icon: Flame },
     { type: 'Emergency Plumber', label: 'Plumbing', subtitle: 'Leaks, pipes, emergencies', icon: Wrench },
@@ -44,6 +46,7 @@ type Props = {
 
 export default function BookingSetupWizard({ linked, linkedBusiness, busy, error, onComplete }: Props) {
     const [step, setStep] = useState(1);
+    const [customServiceName, setCustomServiceName] = useState('');
     const [form, setForm] = useState<SetupForm>({
         tradeType: '',
         name: '',
@@ -69,10 +72,30 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
         setStep(2);
     };
 
+    const isOtherSelected = form.tradeType === OTHER_SERVICE_TYPE
+        || (Boolean(form.tradeType) && !SERVICES.some((s) => s.type === form.tradeType));
+
+    const selectService = (type: string) => {
+        if (type === OTHER_SERVICE_TYPE) {
+            setForm((f) => ({ ...f, tradeType: OTHER_SERVICE_TYPE }));
+            return;
+        }
+        setCustomServiceName('');
+        setForm((f) => ({ ...f, tradeType: type }));
+    };
+
     const nextFromService = () => {
         if (!form.tradeType) return;
+        if (isOtherSelected) {
+            const name = customServiceName.trim();
+            if (!name) return;
+            setForm((f) => ({ ...f, tradeType: name }));
+        }
         setStep(2);
     };
+
+    const canContinueFromService = Boolean(form.tradeType)
+        && (!isOtherSelected || customServiceName.trim().length > 0);
 
     const nextFromDetails = (e: FormEvent) => {
         e.preventDefault();
@@ -138,12 +161,14 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {SERVICES.map((s) => {
                             const Icon = s.icon;
-                            const on = form.tradeType === s.type;
+                            const on = s.type === OTHER_SERVICE_TYPE
+                                ? isOtherSelected
+                                : form.tradeType === s.type;
                             return (
                                 <button
                                     key={s.type}
                                     type="button"
-                                    onClick={() => setForm((f) => ({ ...f, tradeType: s.type }))}
+                                    onClick={() => selectService(s.type)}
                                     className={cn(
                                         'text-left rounded-xl border p-4 transition',
                                         on ? 'border-[#F59E0B] bg-[#F59E0B]/15 ring-2 ring-[#F59E0B]/40' : 'border-[#E2E8F0] hover:border-[#0F172A]/30'
@@ -156,9 +181,24 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                             );
                         })}
                     </div>
+                    {isOtherSelected && (
+                        <label className="block mt-4 text-xs font-bold uppercase text-[#64748B]">
+                            Your service name
+                            <input
+                                autoFocus
+                                value={customServiceName}
+                                onChange={(e) => setCustomServiceName(e.target.value)}
+                                placeholder="e.g. Handyman, CCTV installer, painter…"
+                                className="mt-1 w-full rounded-xl border border-[#F59E0B] bg-[#F59E0B]/5 px-3 py-2.5 text-sm font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/40"
+                            />
+                            <p className="text-[11px] font-normal normal-case text-[#64748B] mt-1.5">
+                                This is shown to customers on your booking page.
+                            </p>
+                        </label>
+                    )}
                     <button
                         type="button"
-                        disabled={!form.tradeType}
+                        disabled={!canContinueFromService}
                         onClick={nextFromService}
                         className="mt-5 w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#0F172A] text-white text-sm font-bold disabled:opacity-40"
                     >
@@ -226,7 +266,13 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                         </div>
                     </label>
                     <div className="flex gap-2 pt-2">
-                        <button type="button" onClick={() => setStep(1)} className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]">
+                        <button type="button" onClick={() => {
+                            if (isOtherSelected && form.tradeType !== OTHER_SERVICE_TYPE) {
+                                setCustomServiceName(form.tradeType);
+                                setForm((f) => ({ ...f, tradeType: OTHER_SERVICE_TYPE }));
+                            }
+                            setStep(1);
+                        }} className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]">
                             Back
                         </button>
                         <button type="submit" className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold">

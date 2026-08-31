@@ -6,6 +6,12 @@ function frontendOrigin() {
     return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
 }
 
+function datePart(value) {
+    if (!value) return '';
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    return String(value).slice(0, 10);
+}
+
 async function getHostUserId(orgId) {
     const { rows } = await query(
         `SELECT user_id FROM memberships WHERE org_id = $1 AND role = 'owner' LIMIT 1`,
@@ -52,35 +58,39 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
     }
 
     if (!meta.confirmation_email_sent) {
-        const manageUrl = `${frontendOrigin()}/book/manage/${booking.manage_token}`;
-        const icsUrl = `${frontendOrigin()}/api/public/bookings/${booking.id}/calendar.ics`;
-        const slotLabel = new Date(booking.start_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+        try {
+            const manageUrl = `${frontendOrigin()}/book/manage/${booking.manage_token}`;
+            const icsUrl = `${frontendOrigin()}/api/public/bookings/${booking.id}/calendar.ics`;
+            const slotLabel = new Date(booking.start_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
-        await sendBookingConfirmationEmail({
-            to: booking.customer_email,
-            customerName: booking.customer_name,
-            businessName: meta.org_name,
-            tradespersonName: meta.org_name,
-            date: booking.start_at.slice(0, 10),
-            slotLabel,
-            depositAmount: booking.deposit_cents,
-            currency: 'GBP',
-            address: booking.customer_address,
-            manageUrl,
-            icsUrl
-        });
-
-        if (meta.org_email) {
-            await sendHostBookingNotification({
-                to: meta.org_email,
+            await sendBookingConfirmationEmail({
+                to: booking.customer_email,
                 customerName: booking.customer_name,
-                eventName: meta.event_name,
-                startAt: slotLabel,
-                address: booking.customer_address
+                businessName: meta.org_name,
+                tradespersonName: meta.org_name,
+                date: datePart(booking.start_at),
+                slotLabel,
+                depositAmount: booking.deposit_cents,
+                currency: 'GBP',
+                address: booking.customer_address,
+                manageUrl,
+                icsUrl
             });
-        }
 
-        await query('UPDATE bookings SET confirmation_email_sent = TRUE WHERE id = $1', [booking.id]);
+            if (meta.org_email) {
+                await sendHostBookingNotification({
+                    to: meta.org_email,
+                    customerName: booking.customer_name,
+                    eventName: meta.event_name,
+                    startAt: slotLabel,
+                    address: booking.customer_address
+                });
+            }
+
+            await query('UPDATE bookings SET confirmation_email_sent = TRUE WHERE id = $1', [booking.id]);
+        } catch (emailErr) {
+            console.error('Booking confirmation email error:', emailErr.message);
+        }
     }
 
     return booking;

@@ -1,10 +1,11 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Calendar, CheckCircle2, Copy, ExternalLink, LogOut, QrCode, Settings, User, Wrench } from 'lucide-react';
 import { apiGet, apiPost, formatCents, getToken, cn } from '../lib/utils';
 import { clearToken as logout } from '../lib/auth';
 import { clearBookingOrgSlug, setBookingOrgSlug } from '../lib/bookingHost';
 import BookingSetupWizard, { type SetupForm } from '../components/BookingSetupWizard';
+import BookingSettingsPanel from '../components/BookingSettingsPanel';
 
 function bookingStatusBadge(b: { status: string; deposit_paid?: boolean }) {
     if (b.status === 'confirmed' && b.deposit_paid) {
@@ -23,6 +24,8 @@ function bookingStatusBadge(b: { status: string; deposit_paid?: boolean }) {
 }
 
 export default function BookingPlots() {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const panel = searchParams.get('panel') === 'settings' ? 'settings' : 'board';
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [data, setData] = useState<any>(null);
@@ -159,6 +162,12 @@ export default function BookingPlots() {
     const displayName = org?.name || 'Your business';
     const subtitle = [org?.host_name, org?.trade_type].filter(Boolean).join(' · ');
 
+    const openSettings = (tab = 'events') => {
+        setSearchParams({ panel: 'settings', tab });
+    };
+
+    const backToBoard = () => setSearchParams({});
+
     return (
         <div className="w-full space-y-4">
             <div className="bg-[#0F172A] rounded-2xl text-white px-4 py-4 lg:px-6 lg:py-5">
@@ -178,7 +187,7 @@ export default function BookingPlots() {
                         <Link to={hostUrl} target="_blank" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 text-white text-xs font-bold" title="Open public page">
                             Open link
                         </Link>
-                        <Link to="/booking/settings" className="p-2 rounded-xl bg-white/10" title="Settings"><Settings className="w-4 h-4" /></Link>
+                        <button type="button" onClick={() => openSettings()} className="p-2 rounded-xl bg-white/10" title="Settings"><Settings className="w-4 h-4" /></button>
                         <button type="button" onClick={startOver} disabled={busy === 'reset'} className="p-2 rounded-xl bg-white/10" title="Start over"><User className="w-4 h-4" /></button>
                         {getToken() && (
                             <button type="button" onClick={() => { logout(); window.location.reload(); }} className="p-2 rounded-xl bg-white/10" title="Logout"><LogOut className="w-4 h-4" /></button>
@@ -191,6 +200,17 @@ export default function BookingPlots() {
 
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-4 items-start">
                 <div className="bg-white rounded-2xl border border-[#E2E8F0] overflow-hidden">
+                    {panel === 'settings' ? (
+                        <div className="p-4">
+                            <BookingSettingsPanel
+                                embedded
+                                onBack={backToBoard}
+                                initialDashboard={data}
+                                onRefresh={load}
+                            />
+                        </div>
+                    ) : (
+                        <>
                     <div className="flex gap-1 p-2 border-b border-[#E2E8F0] bg-[#F8FAFC]">
                         {(['upcoming', 'past', 'cancelled'] as const).map((f) => (
                             <button key={f} type="button" onClick={() => setFilter(f)} className={cn('px-3 py-2 rounded-lg text-xs font-bold capitalize', filter === f ? 'bg-white shadow-sm text-[#0F172A]' : 'text-[#64748B]')}>
@@ -265,8 +285,11 @@ export default function BookingPlots() {
                         })}
                         </div>
                     </div>
+                        </>
+                    )}
                 </div>
 
+                {panel === 'board' && (
                 <aside className="space-y-4">
                         <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4">
                             <div className="flex items-center gap-2 mb-2"><QrCode className="w-4 h-4 text-[#F59E0B]" /><h3 className="text-xs font-bold uppercase text-[#64748B]">Share</h3></div>
@@ -284,13 +307,14 @@ export default function BookingPlots() {
                                     </li>
                                 ))}
                             </ul>
-                            <Link to="/booking/settings?tab=events" className="mt-3 block text-center text-xs font-bold text-[#0F172A] underline">Manage event types</Link>
+                            <button type="button" onClick={() => openSettings('events')} className="mt-3 block w-full text-center text-xs font-bold text-[#0F172A] underline">Manage event types</button>
                         </div>
                         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex gap-2">
                             <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                             <p className="text-xs text-emerald-900">Connect Google Calendar in Settings to block busy times automatically.</p>
                         </div>
                     </aside>
+                )}
             </div>
         </div>
     );

@@ -4,7 +4,7 @@ import { twMerge } from "tailwind-merge"
 import { authHeaders, getToken } from './auth';
 import { bookingOrgHeaders } from './bookingHost';
 
-export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
+export const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
