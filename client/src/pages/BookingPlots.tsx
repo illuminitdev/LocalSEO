@@ -1,8 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Calendar, CheckCircle2, Copy, ExternalLink, LogOut, QrCode, Settings, User, Wrench } from 'lucide-react';
-import { apiGet, apiPost, formatCents, getToken, cn } from '../lib/utils';
-import { clearToken as logout } from '../lib/auth';
+import { Calendar, CheckCircle2, Copy, ExternalLink, QrCode, Settings, User, Wrench } from 'lucide-react';
+import { apiGet, apiPost, formatCents, cn } from '../lib/utils';
 import { setBookingOrgSlug } from '../lib/bookingHost';
 import BookingSetupWizard, { type SetupForm } from '../components/BookingSetupWizard';
 import BookingSettingsPanel from '../components/BookingSettingsPanel';
@@ -192,9 +191,6 @@ export default function BookingPlots() {
                         </Link>
                         <button type="button" onClick={() => openSettings()} className="p-2 rounded-xl bg-white/10" title="Settings"><Settings className="w-4 h-4" /></button>
                         <button type="button" onClick={() => openSettings('profile')} className="p-2 rounded-xl bg-white/10" title="Profile"><User className="w-4 h-4" /></button>
-                        {getToken() && (
-                            <button type="button" onClick={() => { logout(); window.location.reload(); }} className="p-2 rounded-xl bg-white/10" title="Logout"><LogOut className="w-4 h-4" /></button>
-                        )}
                     </div>
                 </div>
             </div>
