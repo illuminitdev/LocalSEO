@@ -138,7 +138,7 @@ export default function Account() {
 
     const logout = () => {
         clearToken();
-        navigate('/login', { replace: true });
+        navigate('/', { replace: true });
     };
 
     return (

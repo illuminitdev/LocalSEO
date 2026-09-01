@@ -26,6 +26,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/" element={<RedirectIfAuthed><Login /></RedirectIfAuthed>} />
         <Route path="/login" element={<RedirectIfAuthed><Login /></RedirectIfAuthed>} />
         <Route path="/register" element={<RedirectIfAuthed><Register /></RedirectIfAuthed>} />
         <Route path="/forgot-password" element={<RedirectIfAuthed><ForgotPassword /></RedirectIfAuthed>} />
@@ -43,7 +44,6 @@ export default function App() {
           }
         >
           <Route path="/booking/settings" element={<BookingSettings />} />
-          <Route path="/" element={<Dashboard />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/profile" element={<ProfileAudit />} />
           <Route path="/account" element={<Account />} />

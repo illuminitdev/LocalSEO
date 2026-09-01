@@ -8,7 +8,9 @@ export default function RequireAuth({ children }: { children: React.ReactNode })
 
     if (!token) {
         const next = `${location.pathname}${location.search}`;
-        const to = next && next !== '/' ? `/login?next=${encodeURIComponent(next)}` : '/login';
+        const to = next && next !== '/' && next !== '/login'
+            ? `/?next=${encodeURIComponent(next)}`
+            : '/';
         return <Navigate to={to} replace />;
     }
 

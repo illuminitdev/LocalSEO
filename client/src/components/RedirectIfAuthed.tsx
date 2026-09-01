@@ -7,7 +7,7 @@ export default function RedirectIfAuthed({ children }: { children: React.ReactNo
     const token = getToken();
     if (token) {
         const next = params.get('next');
-        return <Navigate to={next && next.startsWith('/') ? next : '/'} replace />;
+        return <Navigate to={next && next.startsWith('/') && next !== '/' && next !== '/login' ? next : '/dashboard'} replace />;
     }
     return <>{children}</>;
 }

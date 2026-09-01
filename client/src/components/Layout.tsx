@@ -16,7 +16,7 @@ import {
 import { cn } from '../lib/utils';
 
 const NAV = [
-    { group: 'Overview', items: [{ name: 'Dashboard', to: '/', icon: LayoutDashboard, end: true }] },
+    { group: 'Overview', items: [{ name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, end: true }] },
     {
         group: 'Track visibility',
         items: [
