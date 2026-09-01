@@ -24,10 +24,9 @@ export default function AuthShell({ children, title, subtitle, showSecureFooter 
                 <img
                     src="/auth-bg.jpg"
                     alt=""
-                    className="absolute inset-0 h-full w-full object-cover object-bottom"
+                    className="absolute inset-0 h-full w-full object-cover object-bottom opacity-45"
                 />
-                <div className="absolute inset-0 bg-gradient-to-b from-[#0B1220]/92 via-[#0B1220]/55 to-transparent" />
-                <div className="absolute inset-x-0 bottom-0 h-[38%] bg-gradient-to-t from-[#0B1220]/30 to-transparent pointer-events-none" />
+                <div className="absolute inset-0 bg-gradient-to-b from-[#0B1220]/90 via-[#0B1220]/75 to-[#0B1220]/35" />
 
                 <div className="relative z-[1] flex flex-col h-full min-h-[42vh] lg:min-h-screen px-8 py-8 lg:px-10 lg:py-10">
                     <div className="flex items-center gap-2.5 shrink-0">
@@ -37,14 +36,14 @@ export default function AuthShell({ children, title, subtitle, showSecureFooter 
                         <span className="text-[15px] font-semibold tracking-tight text-white">Zappsites</span>
                     </div>
 
-                    <div className="mt-10 lg:mt-14 max-w-lg">
+                    <div className="mt-20 lg:mt-28 max-w-lg">
                         <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[#EA580C]">
                             Local SEO
                         </p>
                         <h1 className="mt-3 text-[1.6rem] sm:text-[1.85rem] lg:text-[2rem] font-semibold tracking-tight leading-tight text-white whitespace-nowrap">
                             Workspace for trade businesses
                         </h1>
-                        <p className="mt-4 text-[14px] text-white/60 leading-relaxed max-w-md">
+                        <p className="mt-4 text-[14px] text-white/70 leading-relaxed max-w-md">
                             Rank locally, manage listings, grow reviews, and take bookings — one place for your trade business.
                         </p>
                         <div className="mt-7 pt-5 border-t border-white/15 flex flex-wrap gap-x-6 gap-y-3">
