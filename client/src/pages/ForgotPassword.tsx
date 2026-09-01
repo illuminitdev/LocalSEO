@@ -57,7 +57,7 @@ export default function ForgotPassword() {
                         )}
                         <label className="block text-sm font-medium text-[#334155]">
                             Email
-                            <AuthFieldWrap icon={Mail}>
+                            <AuthFieldWrap>
                                 <input
                                     type="email"
                                     required

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, KeyRound, Lock } from 'lucide-react';
+import { ArrowLeft, KeyRound } from 'lucide-react';
 import { apiPost } from '../lib/utils';
 import AuthShell, { AuthFieldWrap, authFieldClass } from '../components/AuthShell';
 
@@ -58,7 +58,7 @@ export default function ResetPassword() {
                 )}
                 <label className="block text-sm font-medium text-[#334155]">
                     New password
-                    <AuthFieldWrap icon={Lock}>
+                    <AuthFieldWrap>
                         <input
                             type="password"
                             required
@@ -73,7 +73,7 @@ export default function ResetPassword() {
                 </label>
                 <label className="block text-sm font-medium text-[#334155]">
                     Confirm password
-                    <AuthFieldWrap icon={Lock}>
+                    <AuthFieldWrap>
                         <input
                             type="password"
                             required

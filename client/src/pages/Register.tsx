@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Lock, Mail, User } from 'lucide-react';
 import { apiPost } from '../lib/utils';
 import { setToken } from '../lib/auth';
 import AuthShell, { AuthFieldWrap, authFieldClass } from '../components/AuthShell';
@@ -31,7 +30,7 @@ export default function Register() {
     return (
         <AuthShell
             title="Create account"
-            subtitle="Name, email, and password. You can add business details after you sign in."
+            subtitle="Get started with your free account."
         >
             <form onSubmit={submit} className="space-y-4">
                 {error && (
@@ -39,7 +38,7 @@ export default function Register() {
                 )}
                 <label className="block text-sm font-medium text-[#334155]">
                     Your name
-                    <AuthFieldWrap icon={User}>
+                    <AuthFieldWrap>
                         <input
                             type="text"
                             required
@@ -53,7 +52,7 @@ export default function Register() {
                 </label>
                 <label className="block text-sm font-medium text-[#334155]">
                     Email
-                    <AuthFieldWrap icon={Mail}>
+                    <AuthFieldWrap>
                         <input
                             type="email"
                             required
@@ -67,7 +66,7 @@ export default function Register() {
                 </label>
                 <label className="block text-sm font-medium text-[#334155]">
                     Password
-                    <AuthFieldWrap icon={Lock}>
+                    <AuthFieldWrap>
                         <input
                             type="password"
                             required
@@ -90,7 +89,7 @@ export default function Register() {
             </form>
             <p className="text-sm text-[#64748B] mt-6 text-center">
                 Already have an account?{' '}
-                <Link to="/login" className="font-semibold text-[#2563EB] hover:underline">
+                <Link to="/login" className="font-semibold text-[#0F172A] hover:underline">
                     Sign in
                 </Link>
             </p>

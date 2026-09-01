@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Lock, Mail } from 'lucide-react';
 import { apiPost } from '../lib/utils';
 import { setToken } from '../lib/auth';
 import AuthShell, { AuthFieldWrap, authFieldClass } from '../components/AuthShell';
@@ -10,7 +9,6 @@ export default function Login() {
     const [params] = useSearchParams();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [remember, setRemember] = useState(false);
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
 
@@ -33,7 +31,7 @@ export default function Login() {
     return (
         <AuthShell
             title="Welcome back"
-            subtitle="Sign in to your Local SEO workspace to continue."
+            subtitle="Sign in to your account."
         >
             <form onSubmit={submit} className="space-y-4">
                 {error && (
@@ -41,7 +39,7 @@ export default function Login() {
                 )}
                 <label className="block text-sm font-medium text-[#334155]">
                     Email
-                    <AuthFieldWrap icon={Mail}>
+                    <AuthFieldWrap>
                         <input
                             type="email"
                             required
@@ -56,11 +54,11 @@ export default function Login() {
                 <div>
                     <div className="flex items-center justify-between gap-3">
                         <label className="text-sm font-medium text-[#334155]">Password</label>
-                        <Link to="/forgot-password" className="text-xs font-medium text-[#2563EB] hover:underline">
+                        <Link to="/forgot-password" className="text-xs font-medium text-[#64748B] hover:text-[#0F172A] hover:underline">
                             Forgot password?
                         </Link>
                     </div>
-                    <AuthFieldWrap icon={Lock}>
+                    <AuthFieldWrap>
                         <input
                             type="password"
                             required
@@ -72,15 +70,6 @@ export default function Login() {
                         />
                     </AuthFieldWrap>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                        type="checkbox"
-                        checked={remember}
-                        onChange={(e) => setRemember(e.target.checked)}
-                        className="h-4 w-4 rounded border-[#CBD5E1] text-[#0F172A] focus:ring-[#0F172A]"
-                    />
-                    <span className="text-sm text-[#475569]">Remember me</span>
-                </label>
                 <button
                     type="submit"
                     disabled={busy}
@@ -91,7 +80,7 @@ export default function Login() {
             </form>
             <p className="text-sm text-[#64748B] mt-6 text-center">
                 New here?{' '}
-                <Link to="/register" className="font-semibold text-[#2563EB] hover:underline">
+                <Link to="/register" className="font-semibold text-[#0F172A] hover:underline">
                     Create an account
                 </Link>
             </p>
