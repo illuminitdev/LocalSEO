@@ -32,7 +32,8 @@ const STAGE_CONFIG: Record<
     lambdaSgId: 'sg-0167438f34915d1e2',
     proxyEndpoint: 'rdsproxy.proxy-cehyac2sc676.us-east-1.rds.amazonaws.com',
     dbSecretName: 'ZappsitesDatabase-dev/credentials',
-    clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+    // Staging SPA on Vercel (dev branch) — override with CLIENT_ORIGIN if needed
+    clientOrigin: process.env.CLIENT_ORIGIN || 'https://zappsites-local-seo.vercel.app',
   },
   prod: {
     vpcId: 'vpc-00cb8c1fb56aa6e38',
@@ -146,17 +147,20 @@ export class LocalSeoApiStack extends cdk.Stack {
 
     const integration = new HttpLambdaIntegration('ApiIntegration', fn);
 
-    const allowOrigins = Array.from(
-      new Set(
-        [
-          cfg.clientOrigin,
-          'http://localhost:5173',
-          'https://app.zappsites.com',
-          'https://www.zappsites.com',
-          'https://staging.zappsites.com',
-        ].filter(Boolean)
-      )
-    );
+    // Dev/staging: allow Vercel alias + previews + local Vite.
+    // Prod: lock to known app / marketing origins only.
+    const allowOrigins =
+      stage === 'dev'
+        ? ['*']
+        : Array.from(
+            new Set(
+              [
+                cfg.clientOrigin,
+                'https://app.zappsites.com',
+                'https://www.zappsites.com',
+              ].filter(Boolean)
+            )
+          );
 
     const httpApi = new apigwv2.HttpApi(this, 'HttpApi', {
       apiName: `localseo-api-${stage}`,

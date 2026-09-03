@@ -132,7 +132,19 @@ export default function Account() {
                     serviceArea: o.service_area || ''
                 });
             })
-            .catch((err: Error) => setLoadError(err.message || 'Could not load account'));
+            .catch((err: Error) => {
+                const msg = err.message || 'Could not load account';
+                // Stale session or unreachable API — send back to login instead of a broken Account page
+                if (
+                    msg === 'Failed to fetch' ||
+                    /unauthorized|invalid token|jwt|401/i.test(msg)
+                ) {
+                    clearToken();
+                    navigate('/', { replace: true });
+                    return;
+                }
+                setLoadError(msg);
+            });
         loadBusiness();
     };
 
