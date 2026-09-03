@@ -80,14 +80,29 @@ Scopes: `calendar` + `calendar.events`. Tokens stored in `calendar_connections`.
 
 | Env | Purpose |
 |-----|---------|
-| `STRIPE_SECRET_KEY` | Server SDK |
-| `STRIPE_PUBLISHABLE_KEY` | (client/checkout if used) |
+| `STRIPE_SECRET_KEY` | Server SDK (`sk_test_…` or `sk_live_…`) |
+| `STRIPE_PUBLISHABLE_KEY` | Client / public payloads |
 | `STRIPE_WEBHOOK_SECRET` | Verify `/api/webhooks/stripe` |
+| `STRIPE_PLATFORM_FEE_BPS` | Application fee in basis points (default `500` = 5%) |
+| `STRIPE_CONNECT_RETURN_URL` | Optional override after Connect onboarding |
+| `STRIPE_CONNECT_REFRESH_URL` | Optional override if Account Link expires |
+| `STRIPE_CONNECT_DEFAULT_COUNTRY` | Connected account country (default `GB`) |
 
-**Used by:** paid public bookings, host invoices, checkout verify.
+**Used by:** Connect onboarding for hosts, paid public booking deposits (direct charges + application fee), host invoices, checkout verify.
+
+**Connect:** each booking org stores `stripe_account_id` / `stripe_charges_enabled`. Deposits charge the connected account; platform receives `application_fee_amount`.
 
 **Not used for:** ZappSites plan subscription checkout (that lives on ZappSites Payment API).
 
+### Test-mode Dashboard checklist
+
+1. Stripe Dashboard → **Test mode** ON.
+2. Enable **Connect** on the platform account.
+3. Webhook endpoint → your API `/api/webhooks/stripe` with events: `checkout.session.completed`, `account.updated`, `invoice.paid`. Enable **listening to events on Connected accounts** for Connect checkout events.
+4. Put test keys + webhook secret in backend env.
+5. Host: Booking → Integrations → **Connect Stripe** → complete test onboarding.
+6. Public book with test card `4242…` → deposit on connected account; application fee on platform test balance.
+7. Live later: same code, swap to `sk_live_…` / live webhook; businesses onboard again under Live.
 ---
 
 ## 6. Auth / app URLs

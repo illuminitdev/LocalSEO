@@ -39,9 +39,12 @@ Requires host auth + `bookings` feature (via router middleware).
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| `GET` | `/api/host/dashboard` | Org, events, bookings snapshot |
+| `GET` | `/api/host/dashboard` | Org, events, bookings snapshot (+ `stripeConnect` status) |
 | `POST` | `/api/host/setup` | Initial booking org setup |
 | `POST` | `/api/host/reset` | Reset booking setup |
+| `GET` | `/api/host/stripe/status` | Connect account status (refreshes from Stripe) |
+| `POST` | `/api/host/stripe/connect` | Create Connect account + Account Link URL |
+| `POST` | `/api/host/stripe/dashboard` | Express Dashboard login link |
 | `GET/POST/PATCH/DELETE` | `/api/host/event-types`… | Event type CRUD |
 | `GET/PUT` | `/api/host/availability` | Weekly windows |
 | `PATCH` | `/api/host/organization` | Org / booking settings |
@@ -74,7 +77,24 @@ Requires host auth + `bookings` feature (via router middleware).
 
 ### Stripe webhook
 
-`POST /api/webhooks/stripe` — confirms paid checkout / invoice paid (`backend/routes/webhooks.ts`).
+`POST /api/webhooks/stripe` — `checkout.session.completed` / `invoice.paid` / `account.updated` (`backend/routes/webhooks.ts`).
+
+For Connect deposits, enable the webhook to receive **Connected account** events (or a Connect endpoint) so checkout completion still arrives.
+
+## Stripe Connect (booking deposits)
+
+Direct charges on the business’s connected Express account + platform `application_fee_amount`.
+
+1. Apply migration `009_stripe_connect.sql` (auto via `migrate()` / `npm run migrate` in backend).
+2. Dashboard (Test mode): enable Connect; set webhook events including `account.updated` and connected-account checkout events.
+3. Env: `STRIPE_SECRET_KEY` (test), `STRIPE_WEBHOOK_SECRET`, optional `STRIPE_PLATFORM_FEE_BPS` (default 500 = 5%).
+4. Host → Integrations → **Connect Stripe** → finish Stripe-hosted onboarding until charges enabled.
+5. Customer books → Checkout on `acct_…` → deposit to business; fee to platform.
+6. Verify in Stripe Test Dashboard: payment on connected account; application fee on platform.
+
+Without Connect ready, `POST .../book` returns `stripe_not_connected` (does not charge the platform account).
+
+Simulated mode (no `STRIPE_SECRET_KEY`) still auto-confirms bookings.
 
 ## Supporting libs
 
@@ -83,6 +103,7 @@ Requires host auth + `bookings` feature (via router middleware).
 - `backend/lib/bookingEmail.ts` — transactional email hooks
 - `backend/lib/ics.ts` — calendar file
 - `backend/lib/invoices.ts` — Stripe invoices
+- `backend/lib/stripeConnect.ts` — Connect account links, fee, status sync
 - `backend/lib/googleCalendar.ts` — Calendar OAuth + events
 
 ## External APIs needed
@@ -90,27 +111,28 @@ Requires host auth + `bookings` feature (via router middleware).
 | API | Env vars | Required? |
 |-----|----------|-----------|
 | Postgres | DB_* / `DATABASE_URL` | Yes |
-| Stripe | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` | For paid bookings / invoices |
+| Stripe | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, optional `STRIPE_PLATFORM_FEE_BPS`, Connect return URLs | For paid bookings / invoices |
 | Google OAuth + Calendar | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Optional calendar sync |
 | Frontend / API URLs | `FRONTEND_URL`, `CLIENT_ORIGIN`, `API_BASE_URL` | Emails, OAuth redirect, CORS |
 
 ## DB (LocalPulse migrations)
 
-- `002_booking_setup.sql`, `003_availability_dates.sql`
-- Tables for orgs, event types, availability, bookings, invoices, calendar connections, manage tokens
+- `002_booking_setup.sql`, `003_availability_dates.sql`, `009_stripe_connect.sql`
+- Tables for orgs (incl. Connect columns), event types, availability, bookings, invoices, calendar connections, manage tokens
 
 ## Connection diagram
 
 ```
 Host SPA (/booking)
   → JWT + /api/host/*
+  → Stripe Connect onboarding (Express Account Link)
   → RDS bookings schema
   → optional Google Calendar API
   → optional Stripe (invoices)
 
 Customer (/book/...)
   → /api/public/* (no plan gate)
-  → Stripe Checkout (if paid)
+  → Stripe Checkout on connected account + application_fee
   → webhook → confirmBooking
   → email + ICS + optional Calendar event
 ```
