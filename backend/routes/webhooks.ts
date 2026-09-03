@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query } from '../lib/db';
 import { confirmBookingPayment } from '../lib/confirmBooking';
+import { syncOrgStripeAccount } from '../lib/stripeConnect';
 
 function createStripeWebhookHandler(stripeClient: any) {
     return async (req: Request, res: Response) => {
@@ -24,6 +25,11 @@ function createStripeWebhookHandler(stripeClient: any) {
         }
 
         try {
+            if (event.type === 'account.updated') {
+                const account = event.data.object;
+                await syncOrgStripeAccount(account);
+            }
+
             if (event.type === 'checkout.session.completed') {
                 const session = event.data.object;
                 if (session.payment_status === 'paid' && session.metadata?.bookingId) {

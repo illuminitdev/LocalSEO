@@ -9,6 +9,10 @@ import {
 } from '../lib/bookingEmail';
 import { buildIcs } from '../lib/ics';
 import { confirmBookingPayment } from '../lib/confirmBooking';
+import {
+    applicationFeeAmount,
+    stripeAccountOpts
+} from '../lib/stripeConnect';
 
 function frontendOrigin() {
     return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -19,6 +23,18 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
 
     async function loadOrg(hostSlug: any) {
         const { rows } = await query('SELECT * FROM organizations WHERE slug = $1', [hostSlug]);
+        return rows[0] || null;
+    }
+
+    async function loadOrgByBookingSession(sessionId: string) {
+        const { rows } = await query(
+            `SELECT o.stripe_account_id
+             FROM bookings b
+             JOIN organizations o ON o.id = b.org_id
+             WHERE b.stripe_session_id = $1
+             LIMIT 1`,
+            [sessionId]
+        );
         return rows[0] || null;
     }
 
@@ -72,7 +88,12 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             if (!sessionId) return res.status(400).json({ error: 'session_id required' });
             if (!stripeClient) return res.status(400).json({ error: 'Stripe not configured' });
 
-            const session = await stripeClient.checkout.sessions.retrieve(sessionId);
+            const orgRow = await loadOrgByBookingSession(sessionId);
+            const session = await stripeClient.checkout.sessions.retrieve(
+                sessionId,
+                {},
+                stripeAccountOpts(orgRow?.stripe_account_id)
+            );
             if (session.payment_status !== 'paid') return res.status(402).json({ error: 'Payment not completed' });
 
             const booking = await confirmBookingPayment({
@@ -299,6 +320,16 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             if (!valid) return res.status(409).json({ error: 'That time slot is no longer available' });
 
             const manageToken = newManageToken();
+
+            if (stripeClient) {
+                if (!org.stripe_account_id || !org.stripe_charges_enabled) {
+                    return res.status(400).json({
+                        error: 'This business has not finished connecting Stripe. Deposits cannot be collected yet.',
+                        code: 'stripe_not_connected'
+                    });
+                }
+            }
+
             const pendingRes = await query(
                 `INSERT INTO bookings (org_id, event_type_id, status, customer_name, customer_email, customer_phone,
                   customer_address, description, start_at, end_at, deposit_cents, total_cents, manage_token)
@@ -315,24 +346,32 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 return res.json({ mode: 'simulated', success: true, bookingId: booking.id, manageToken });
             }
 
-            const session = await stripeClient.checkout.sessions.create({
-                mode: 'payment',
-                customer_email: email.toLowerCase(),
-                line_items: [{
-                    quantity: 1,
-                    price_data: {
-                        currency: (org.currency || 'GBP').toLowerCase(),
-                        unit_amount: eventType.deposit_cents,
-                        product_data: {
-                            name: `Deposit — ${eventType.name}`,
-                            description: `${org.name} on ${new Date(startAt).toLocaleString('en-GB')}`
+            const fee = applicationFeeAmount(eventType.deposit_cents);
+            const session = await stripeClient.checkout.sessions.create(
+                {
+                    mode: 'payment',
+                    customer_email: email.toLowerCase(),
+                    line_items: [{
+                        quantity: 1,
+                        price_data: {
+                            currency: (org.currency || 'GBP').toLowerCase(),
+                            unit_amount: eventType.deposit_cents,
+                            product_data: {
+                                name: `Deposit — ${eventType.name}`,
+                                description: `${org.name} on ${new Date(startAt).toLocaleString('en-GB')}`
+                            }
                         }
-                    }
-                }],
-                metadata: { bookingId: booking.id },
-                success_url: `${frontendOrigin()}/book/success?session_id={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${frontendOrigin()}/book/${org.slug}/${eventType.slug}?cancelled=1`
-            });
+                    }],
+                    payment_intent_data: {
+                        application_fee_amount: fee,
+                        metadata: { bookingId: booking.id, orgId: org.id }
+                    },
+                    metadata: { bookingId: booking.id, orgId: org.id },
+                    success_url: `${frontendOrigin()}/book/success?session_id={CHECKOUT_SESSION_ID}`,
+                    cancel_url: `${frontendOrigin()}/book/${org.slug}/${eventType.slug}?cancelled=1`
+                },
+                stripeAccountOpts(org.stripe_account_id)
+            );
 
             await query('UPDATE bookings SET stripe_session_id = $1 WHERE id = $2', [session.id, booking.id]);
             res.json({ mode: 'stripe', url: session.url, sessionId: session.id });

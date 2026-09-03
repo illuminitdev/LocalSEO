@@ -80,6 +80,15 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
     });
     const [org, setOrg] = useState<any>(null);
     const [googleConnected, setGoogleConnected] = useState(false);
+    const [stripeStatus, setStripeStatus] = useState<{
+        configured?: boolean;
+        connected?: boolean;
+        ready?: boolean;
+        chargesEnabled?: boolean;
+        detailsSubmitted?: boolean;
+        accountId?: string | null;
+    } | null>(null);
+    const [stripeBusy, setStripeBusy] = useState(false);
     const [selectedTemplate, setSelectedTemplate] = useState<EventTemplateKey>('standard');
     const [newDepositPounds, setNewDepositPounds] = useState('60');
     const [addingEvent, setAddingEvent] = useState(false);
@@ -118,7 +127,24 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
         apiGet('/api/integrations/google/status')
             .then((g) => setGoogleConnected(g.connected))
             .catch(() => setGoogleConnected(false));
+
+        apiGet('/api/host/stripe/status')
+            .then((s) => setStripeStatus(s))
+            .catch(() => setStripeStatus({ configured: false, connected: false, ready: false }));
     }, [initialDashboard]);
+
+    useEffect(() => {
+        const stripeParam = searchParams.get('stripe');
+        if (stripeParam !== 'return' && stripeParam !== 'refresh') return;
+
+        apiGet('/api/host/stripe/status')
+            .then((s) => setStripeStatus(s))
+            .catch(() => {});
+
+        const next = new URLSearchParams(searchParams);
+        next.delete('stripe');
+        setSearchParams(next, { replace: true });
+    }, [searchParams, setSearchParams]);
 
     const setTab = (t: Tab) => {
         const next = new URLSearchParams(searchParams);
@@ -240,6 +266,32 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
     const connectGoogle = async () => {
         const { url } = await apiGet('/api/integrations/google/start');
         window.location.href = url;
+    };
+
+    const connectStripe = async () => {
+        setStripeBusy(true);
+        setError('');
+        try {
+            const { url } = await apiPost('/api/host/stripe/connect');
+            if (url) window.location.href = url;
+            else throw new Error('No Stripe onboarding URL returned');
+        } catch (e: any) {
+            setError(e.message || 'Could not start Stripe Connect');
+            setStripeBusy(false);
+        }
+    };
+
+    const openStripeDashboard = async () => {
+        setStripeBusy(true);
+        setError('');
+        try {
+            const { url } = await apiPost('/api/host/stripe/dashboard');
+            if (url) window.location.href = url;
+            else throw new Error('No Stripe dashboard URL returned');
+        } catch (e: any) {
+            setError(e.message || 'Could not open Stripe Express Dashboard');
+            setStripeBusy(false);
+        }
     };
 
     if (loading) return <div className="flex items-center justify-center py-16 text-[#64748B]">Loading settings…</div>;
@@ -484,12 +536,53 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
                 {tab === 'integrations' && (
                     <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
                         <h2 className="font-bold">Integrations</h2>
-                        <div className="flex items-center justify-between border border-[#E2E8F0] rounded-xl p-4">
+                        <div className="flex items-center justify-between gap-3 border border-[#E2E8F0] rounded-xl p-4">
                             <div>
                                 <p className="font-bold">Stripe</p>
-                                <p className="text-xs text-[#64748B]">Collect deposits at booking</p>
+                                <p className="text-xs text-[#64748B]">
+                                    Connect your Stripe account so booking deposits pay you. The platform takes a small application fee.
+                                </p>
+                                {stripeStatus?.accountId && (
+                                    <p className="text-[10px] text-[#94A3B8] font-mono mt-1 truncate max-w-[220px]" title={stripeStatus.accountId}>
+                                        {stripeStatus.accountId}
+                                    </p>
+                                )}
                             </div>
-                            <span className="text-xs font-bold text-emerald-700">Configured via env</span>
+                            <div className="flex items-center gap-2 shrink-0">
+                                {!stripeStatus?.configured ? (
+                                    <span className="text-xs font-bold text-[#94A3B8]">Not configured</span>
+                                ) : stripeStatus?.ready ? (
+                                    <>
+                                        <span className="text-xs font-bold text-emerald-700">Connected</span>
+                                        <button
+                                            type="button"
+                                            onClick={openStripeDashboard}
+                                            disabled={stripeBusy}
+                                            className="px-3 py-2 rounded-xl border border-[#E2E8F0] text-xs font-bold text-[#0F172A] disabled:opacity-50"
+                                        >
+                                            Dashboard
+                                        </button>
+                                    </>
+                                ) : stripeStatus?.connected ? (
+                                    <button
+                                        type="button"
+                                        onClick={connectStripe}
+                                        disabled={stripeBusy}
+                                        className="px-3 py-2 rounded-xl bg-[#0F172A] text-white text-xs font-bold disabled:opacity-50"
+                                    >
+                                        {stripeBusy ? 'Opening…' : 'Continue setup'}
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={connectStripe}
+                                        disabled={stripeBusy}
+                                        className="px-3 py-2 rounded-xl bg-[#0F172A] text-white text-xs font-bold disabled:opacity-50"
+                                    >
+                                        {stripeBusy ? 'Opening…' : 'Connect'}
+                                    </button>
+                                )}
+                            </div>
                         </div>
                         <div className="flex items-center justify-between border border-[#E2E8F0] rounded-xl p-4">
                             <div>

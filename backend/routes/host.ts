@@ -8,9 +8,22 @@ import { createBookingOrg } from '../lib/seed';
 import { confirmBookingPayment } from '../lib/confirmBooking';
 import { deleteCalendarEvent } from '../lib/googleCalendar';
 import { requireFeature } from '../middleware/entitlements';
+import {
+    connectStatusPayload,
+    createConnectAccountLink,
+    createConnectLoginLink,
+    ensureConnectAccount,
+    refreshOrgStripeFromStripe,
+    stripeAccountOpts
+} from '../lib/stripeConnect';
 
 async function reconcilePendingPayments(orgId: any, stripeClient: any) {
     if (!stripeClient) return;
+    const { rows: orgRows } = await query(
+        'SELECT stripe_account_id FROM organizations WHERE id = $1',
+        [orgId]
+    );
+    const stripeAccountId = orgRows[0]?.stripe_account_id || null;
     const { rows } = await query(
         `SELECT id, stripe_session_id FROM bookings
          WHERE org_id = $1 AND status = 'awaiting_payment' AND stripe_session_id IS NOT NULL`,
@@ -18,7 +31,11 @@ async function reconcilePendingPayments(orgId: any, stripeClient: any) {
     );
     for (const b of rows) {
         try {
-            const session = await stripeClient.checkout.sessions.retrieve(b.stripe_session_id);
+            const session = await stripeClient.checkout.sessions.retrieve(
+                b.stripe_session_id,
+                {},
+                stripeAccountOpts(stripeAccountId)
+            );
             if (session.payment_status === 'paid') {
                 await confirmBookingPayment({
                     bookingId: b.id,
@@ -81,9 +98,66 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             reconcilePendingPayments((req as any).orgId, stripeClient).catch((err: any) => {
                 console.error('Background payment reconcile error:', err.message);
             });
-            res.json({ ready: true, ...data, stripeConfigured: Boolean(stripeClient) });
+            res.json({
+                ready: true,
+                ...data,
+                stripeConfigured: Boolean(stripeClient),
+                stripeConnect: connectStatusPayload(org)
+            });
         } catch (err: any) {
             console.error('Dashboard error:', err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    router.get('/stripe/status', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'No booking organization' });
+            if (!stripeClient) {
+                return res.json(connectStatusPayload(null));
+            }
+            const org = await refreshOrgStripeFromStripe(stripeClient, (req as any).orgId);
+            res.json(connectStatusPayload(org));
+        } catch (err: any) {
+            console.error('Stripe status error:', err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    router.post('/stripe/connect', async (req: Request, res: Response) => {
+        try {
+            if (!stripeClient) return res.status(400).json({ error: 'Stripe not configured' });
+            if (!(req as any).orgId) return res.status(400).json({ error: 'No booking organization' });
+
+            const { rows } = await query('SELECT * FROM organizations WHERE id = $1', [(req as any).orgId]);
+            const org = rows[0];
+            if (!org) return res.status(404).json({ error: 'Organization not found' });
+
+            const accountId = await ensureConnectAccount(stripeClient, org);
+            const url = await createConnectAccountLink(stripeClient, accountId);
+            res.json({ url, accountId });
+        } catch (err: any) {
+            console.error('Stripe connect error:', err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    router.post('/stripe/dashboard', async (req: Request, res: Response) => {
+        try {
+            if (!stripeClient) return res.status(400).json({ error: 'Stripe not configured' });
+            if (!(req as any).orgId) return res.status(400).json({ error: 'No booking organization' });
+
+            const { rows } = await query(
+                'SELECT stripe_account_id FROM organizations WHERE id = $1',
+                [(req as any).orgId]
+            );
+            const accountId = rows[0]?.stripe_account_id;
+            if (!accountId) return res.status(400).json({ error: 'Connect Stripe first' });
+
+            const url = await createConnectLoginLink(stripeClient, accountId);
+            res.json({ url });
+        } catch (err: any) {
+            console.error('Stripe dashboard link error:', err);
             res.status(500).json({ error: err.message });
         }
     });
