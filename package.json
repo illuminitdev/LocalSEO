@@ -4,9 +4,13 @@
   "version": "1.0.0",
   "description": "LocalPulse — local SEO platform with Booking Plots",
   "scripts": {
+    "dev": "npm run dev --prefix client",
     "dev:client": "npm run dev --prefix client",
     "dev:backend": "npm run dev --prefix backend",
     "build": "npm run build --prefix client",
-    "install:all": "npm install --prefix client && npm install --prefix backend"
+    "build:all": "npm run build --prefix backend && npm run build --prefix client",
+    "install:all": "npm install --prefix client && npm install --prefix backend && npm install --prefix backend/infra",
+    "deploy:api:dev": "npm run deploy:dev --prefix backend",
+    "deploy:api:prod": "npm run deploy:prod --prefix backend"
   }
 }

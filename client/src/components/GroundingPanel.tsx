@@ -1,5 +1,6 @@
 ﻿import { useState } from 'react';
 import { Search, MapPin, Star, Building, CheckCircle2 } from 'lucide-react';
+import { apiPost } from '../lib/utils';
 
 export default function GroundingPanel() {
   const [query, setQuery] = useState('');
@@ -12,27 +13,10 @@ export default function GroundingPanel() {
     if (!query) return;
     setIsSearching(true);
     try {
-      const res = await fetch('http://localhost:5000/api/places/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query })
-      });
-      const data = await res.json();
+      const data = await apiPost('/api/places/search', { query });
       setResults(data);
     } catch (err) {
       console.error(err);
-      // Fallback
-      setResults({
-        name: query,
-        rating: 4.7,
-        reviewsCount: 89,
-        address: "456 Local Ave, New York, NY 10002",
-        category: "Local Service Provider",
-        reviews: [
-          "Excellent response times and professional execution.",
-          "Good value, highly recommend their optimization."
-        ]
-      });
     } finally {
       setIsSearching(false);
     }
@@ -41,26 +25,20 @@ export default function GroundingPanel() {
   const handleConnect = async () => {
     setConnected(true);
 
-    // Broadcast live stats and log activity
     try {
-      await fetch('http://localhost:5000/api/dashboard/update-stats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completenessScore: 80, visibilityRank: 3.0 })
+      await apiPost('/api/business/connect', results);
+      await apiPost('/api/dashboard/update-stats', {
+        completenessScore: 80,
+        visibilityRank: 3.0
       });
-
-      await fetch('http://localhost:5000/api/dashboard/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'places',
-          message: `Connected business profile "${results?.name || 'Smile Dental'}" via Google Places grounding.`,
-          icon: 'CheckCircle',
-          color: 'text-[#0F172A]'
-        })
+      await apiPost('/api/dashboard/activity', {
+        type: 'places',
+        message: `Connected business profile "${results?.name || 'Business'}" via Google Places grounding.`,
+        icon: 'CheckCircle',
+        color: 'text-[#0F172A]'
       });
     } catch (err) {
-      console.error("Dashboard connection failed", err);
+      console.error('Dashboard connection failed', err);
     }
 
     setTimeout(() => {
@@ -138,6 +116,7 @@ export default function GroundingPanel() {
                     </div>
                   </div>
                   <button
+                    type="button"
                     onClick={handleConnect}
                     className="w-full py-2 bg-[#D97706] hover:bg-[#B45309] text-white rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer"
                   >

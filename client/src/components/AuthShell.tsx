@@ -14,10 +14,13 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
         <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center px-4 py-10">
             <div className="w-full max-w-[400px]">
                 <div className="flex items-center justify-center gap-2.5 mb-8">
-                    <div className="h-8 w-8 rounded-lg bg-[#EA580C] text-white flex items-center justify-center font-bold text-sm leading-none">
+                    <div className="h-8 w-8 rounded-lg bg-[#EA580C] text-white flex items-center justify-center font-bold text-sm leading-none shrink-0">
                         z
                     </div>
-                    <span className="text-[15px] font-semibold text-[#0F172A] tracking-tight">Zappsites</span>
+                    <div className="leading-none text-left">
+                        <p className="text-[15px] font-semibold text-[#0F172A] tracking-tight">Zappsites</p>
+                        <p className="text-[10px] uppercase tracking-widest text-[#EA580C] mt-1.5">Local SEO</p>
+                    </div>
                 </div>
 
                 <div className="bg-white rounded-2xl border border-[#E2E8F0] px-6 py-7 sm:px-8 sm:py-8">
@@ -28,11 +31,11 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
 
                 {showLegalFooter && (
                     <p className="mt-6 text-center text-xs text-[#94A3B8] leading-relaxed">
-                        <Link to="#" className="hover:text-[#64748B] hover:underline">
+                        <Link to="/privacy" className="hover:text-[#64748B] hover:underline">
                             Privacy
                         </Link>
                         {' · '}
-                        <Link to="#" className="hover:text-[#64748B] hover:underline">
+                        <Link to="/terms" className="hover:text-[#64748B] hover:underline">
                             Terms
                         </Link>
                     </p>

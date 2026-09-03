@@ -9,6 +9,9 @@ node_modules/
 # Build output
 dist/
 dist-ssr/
+backend/.lambda-dist/
+backend/infra/cdk.out/
+backend/infra/dist/
 *.local
 
 # Logs

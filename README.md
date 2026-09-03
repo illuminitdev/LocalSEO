@@ -1,86 +1,97 @@
-# LocalPulse 📍
+# LocalPulse (Local SEO portal)
 
-LocalPulse is an automated AI Agent management platform designed for local businesses (such as dental practices, restaurants, and service providers) to boost their visibility in the Google Local 3-Pack. The application streamlines review responses, schedules GBP posts, manages customer Q&As, audits photo media, and generates competitive GeoGrid rank tracking insight maps.
+ZappSites Local SEO portal — TypeScript Express API + React SPA. Shares the **ZappSites AWS RDS** (plans, subscriptions, portal_invites). Neon is not used.
 
----
+## Stack
 
-## 🚀 How Its Core Features Work
+| Layer | Tech |
+|-------|------|
+| Frontend | React + Vite (`client/`) — Vercel OK |
+| Backend | TypeScript Express (`backend/`) → Node 22 Lambda |
+| Infra | AWS CDK (`backend/infra/`) → `LocalSeoApi-{dev\|prod}` |
+| DB | Shared ZappSites RDS via Secrets Manager + RDS Proxy |
 
-### 1. Agent Hub Dashboard
-* **Profile Completeness Index**: A circular progress gauge showing overall business profile health and optimization level.
-* **Local Pack Visibility Dial**: Displays the aggregated local rank metric (the average rank across multiple neighborhood cells).
-* **Autopilot Automation Feed**: A scrollable timeline showing simulated actions taken by the backend AI agents (e.g., auto-saved drafts, weekly keyword audits).
+## Local development
 
-### 2. Profile Completeness & Audit Agent
-* An interactive editor for the business's NAP (Name, Address, Phone) details, category, hours, and attributes.
-* **AI Audit**: Checks local search completeness and auto-generates optimized business descriptions, along with secondary categories/metadata suggestions.
+```bash
+npm run install:all
+cp backend/.env.example backend/.env
+# For pure local Postgres: set DATABASE_URL and leave DB_PROXY_ENDPOINT empty
+# For shared RDS from a bastion/VPN: set DB_* vars + SHARED_RDS=true
 
-### 3. Post Automation & Scheduling Agent
-* Create new posts targeting Google Business Profile (Offers, What's New, Events).
-* Features AI copywriting with brand-tone adjustments (Professional, Urgent, Community-Focused).
-* Simulates AI image generation for promotional creatives.
-* Includes CTA selectors (Book, Call Now, Learn More) and scheduler inputs.
+npm run migrate --prefix backend
+npm run dev:backend   # http://localhost:5000
+npm run dev:client    # http://localhost:5173
+```
 
-### 4. Reputation & Review Management Agent
-* Monitors customer reviews, classifies them by sentiment (positive, neutral, negative), and generates context-aware replies according to selected brand tones.
-* Allows batch review drafting and individual review approving/publishing.
+Set `VITE_API_BASE` in the client when the API is on another origin (after AWS deploy).
 
-### 5. Q&A Auto-Responder Agent
-* Utilizes a customizable business knowledge base (parking rules, insurance policies, operational details) to auto-answer incoming customer questions contextually.
+## Deploy API (CDK, uses your terminal AWS credentials)
 
-### 6. GeoGrid Rank Tracker & Competitor Intelligence
-* Visualizes localized 3x3 grid neighborhood rankings for critical keywords like *"Dentist near me"*.
-* Displays a detailed comparison matrix tracking reviews, ratings, posting frequency, and weekly photo volume of local competitors.
-* Offers one-click AI Gap Analysis detailing recommended counter-strategies.
+Account `288761766237`, region `us-east-1` (same as ZappSites). Identity: `aws sts get-caller-identity`.
 
-### 7. Media & Visuals Optimization Agent
-* Standardized categories (Exterior, Interior, Team, Logo) showing completeness guides.
-* Features EXIF geotagging simulations (latitude/longitude metadata embed) and automated alt-text generation.
+```powershell
+cd backend\infra
+npm install
+cd ..
+npm run deploy:dev
+# or
+npm run deploy:prod
+```
 
-### 8. Executive Strategy Report Generator
-* Compiles current performance metrics, grading your business from A+ to C, and outlines a targeted 30-day AI roadmap and action plan.
+Or from repo root:
 
-### 9. Live Real-World Data Grounding
-* Includes a simulation lookup console connected to Google Places data structure to let you query local businesses and establish a mock OAuth GBP integration.
+```powershell
+npm run deploy:api:dev
+```
 
----
+**Marketing:** [www.zappsites.com](https://www.zappsites.com/) · staging: `https://staging.zappsites.com`  
+**Portal prod:** [app.zappsites.com](https://app.zappsites.com/)  
+**Dev portal:** live URL TBD  
 
-## 🛠️ Technology Stack
+**Dev API:** `https://ud9zl0ww6d.execute-api.us-east-1.amazonaws.com`  
+**Prod API:** `https://zw8pq7vyi2.execute-api.us-east-1.amazonaws.com`
 
-### Frontend (`/client`)
-* **React 18** (TypeScript version)
-* **Tailwind CSS** (v4 theme preset)
-* **Vite** (Build Tooling)
-* **React Router Dom** (Client-side routing)
-* **Lucide React** (Vector iconography)
+Point the SPA at the matching API (`VITE_API_BASE`). Set Payment Lambda `LOCAL_SEO_APP_URL` to `https://app.zappsites.com` (prod).
 
-### Backend (`/backend`)
-* **Node.js**
-* **Express.js** (API routing)
-* **CORS** (Cross-Origin Resource Sharing enablement)
-* **Dotenv** (Environment variables management)
-* **Nodemon** (Development hot-reloading)
+Ensure ZappSites migrations **010 + 011** are applied first:
 
----
+```powershell
+Invoke-RestMethod -Method POST `
+  -Uri "https://de8hudsztk.execute-api.us-east-1.amazonaws.com/ops/platform-migrate" `
+  -Headers @{ "x-ops-secret" = "zappsites-ops-dev" }
+```
 
-## 🏁 How to Run the App
+On shared RDS, LocalPulse **skips** creating `plans` / `subscriptions` (005/006). It still migrates users/orgs/bookings + `must_change_password`.
 
-Since dependencies and setups are separated into dedicated `/client` and `/backend` directories, follow these instructions to launch them:
+## Auth & plans
 
-### 1. Start the Backend API Server
-* Open a terminal window configuration.
-* Change directory into `/backend`:
-  ```bash
-  npm run dev
-  ```
-  *(Runs on http://localhost:5000)*
+1. Customer pays on ZappSites → Payment webhook writes `subscriptions` + `portal_invites` (SHA-256 temp password).
+2. Login here: claim invite → create user (bcrypt) + org → link `subscriptions.org_id` → force password change.
+3. Nav/modules only show feature keys from active subscription (`bookings`, `local_presence`, `local_growth`, `reporting`). Others are **hidden**.
 
-### 2. Start the Frontend Development Server
-* Open a second terminal window.
-* Change directory into `/client`:
-  ```bash
-  npm run dev
-  ```
-  *(Runs on http://localhost:5173)*
+### Manual invite test (dev RDS)
 
-* Open your browser and navigate to `http://localhost:5173` to interact with LocalPulse.
+```sql
+INSERT INTO subscriptions (plan_id, status, customer_email, customer_name, customer_phone)
+VALUES ('local-presence', 'active', 'tester@example.com', 'Test User', '+447700900000');
+
+-- password plaintext: Zs-TestPass1!
+INSERT INTO portal_invites (
+  email, full_name, phone, plan_id, password_hash, must_change_password, status, features
+) VALUES (
+  'tester@example.com', 'Test User', '+447700900000', 'local-presence',
+  encode(digest('Zs-TestPass1!', 'sha256'), 'hex'),
+  TRUE, 'paid', '["local_presence"]'::jsonb
+);
+```
+
+Login with `tester@example.com` / `Zs-TestPass1!` → only local presence modules. Repeat with `complete-growth-system` for all four features. Change password in Account Settings.
+
+## Admin
+
+`/admin` — set `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `.env`.
+
+## Neon
+
+Removed. Do not add Neon URLs for AWS paths. Use ZappSites RDS Proxy + Secrets Manager.

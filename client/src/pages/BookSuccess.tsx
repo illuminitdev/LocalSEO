@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Download, Mail, ShieldCheck } from 'lucide-react';
-import { apiGet } from '../lib/utils';
+import { apiGet, API_BASE } from '../lib/utils';
 
 export default function BookSuccess() {
     const [searchParams] = useSearchParams();
@@ -51,7 +51,7 @@ export default function BookSuccess() {
     }
 
     const when = new Date(booking.start_at).toLocaleString('en-GB');
-    const icsUrl = `${import.meta.env.VITE_API_BASE ?? ''}/api/public/bookings/${booking.id}/calendar.ics`;
+    const icsUrl = `${API_BASE}/api/public/bookings/${booking.id}/calendar.ics`;
 
     return (
         <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-6">

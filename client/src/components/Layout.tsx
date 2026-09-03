@@ -1,4 +1,5 @@
-﻿import { NavLink, Outlet, useLocation } from 'react-router-dom';
+﻿import type { ComponentType } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
     Building2,
     LayoutDashboard,
@@ -14,42 +15,58 @@ import {
     UserRound
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { hasRouteAccess, routeRequiresFeatures } from '../lib/planCatalog';
+import { useEntitlements } from '../context/EntitlementsContext';
 
-const NAV = [
-    { group: 'Overview', items: [{ name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, end: true }] },
+type NavItem = {
+    name: string;
+    to: string;
+    icon: ComponentType<{ className?: string }>;
+    end?: boolean;
+    match?: 'board' | 'settings';
+    featurePath: string;
+};
+
+type NavSection = {
+    group: string;
+    items: NavItem[];
+};
+
+const NAV: NavSection[] = [
+    { group: 'Overview', items: [{ name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, end: true, featurePath: '/dashboard' }] },
     {
         group: 'Track visibility',
         items: [
-            { name: 'Local Search Grid', to: '/rank-tracker', icon: MapPin },
-            { name: 'AI Insights', to: '/report', icon: Sparkles },
+            { name: 'Local Search Grid', to: '/rank-tracker', icon: MapPin, featurePath: '/rank-tracker' },
+            { name: 'AI Insights', to: '/report', icon: Sparkles, featurePath: '/report' },
         ]
     },
     {
         group: 'Manage listings',
         items: [
-            { name: 'Business profile', to: '/profile', icon: Building2 },
-            { name: 'Citations', to: '/citations', icon: BookMarked },
-            { name: 'GBP posts', to: '/posts', icon: FileText },
-            { name: 'Photos', to: '/media', icon: ImageIcon },
+            { name: 'Business profile', to: '/profile', icon: Building2, featurePath: '/profile' },
+            { name: 'Citations', to: '/citations', icon: BookMarked, featurePath: '/citations' },
+            { name: 'GBP posts', to: '/posts', icon: FileText, featurePath: '/posts' },
+            { name: 'Photos', to: '/media', icon: ImageIcon, featurePath: '/media' },
         ]
     },
     {
         group: 'Grow reputation',
         items: [
-            { name: 'Reviews', to: '/reviews', icon: Star },
-            { name: 'Q&A', to: '/qa', icon: MessageSquareQuote },
+            { name: 'Reviews', to: '/reviews', icon: Star, featurePath: '/reviews' },
+            { name: 'Q&A', to: '/qa', icon: MessageSquareQuote, featurePath: '/qa' },
         ]
     },
     {
         group: 'Booking Plots',
         items: [
-            { name: 'Booking board', to: '/booking', icon: CalendarClock, end: true, match: 'board' as const },
-            { name: 'Schedule settings', to: '/booking?panel=settings&tab=events', icon: Settings, match: 'settings' as const },
+            { name: 'Booking board', to: '/booking', icon: CalendarClock, end: true, match: 'board' as const, featurePath: '/booking' },
+            { name: 'Schedule settings', to: '/booking?panel=settings&tab=events', icon: Settings, match: 'settings' as const, featurePath: '/booking' },
         ]
     },
     {
         group: 'Account',
-        items: [{ name: 'Account', to: '/account', icon: UserRound, end: true }]
+        items: [{ name: 'Account', to: '/account', icon: UserRound, end: true, featurePath: '/account' }]
     },
 ];
 
@@ -57,8 +74,9 @@ export default function Layout() {
     const location = useLocation();
     const searchParams = new URLSearchParams(location.search);
     const bookingPanel = searchParams.get('panel');
+    const { features, loading, entitlementsDisabled } = useEntitlements();
 
-    const isNavActive = (item: { to: string; end?: boolean; match?: 'board' | 'settings' }) => {
+    const isNavActive = (item: NavItem) => {
         if (!item.to.startsWith('/booking')) {
             return location.pathname === item.to || (item.end ? false : location.pathname.startsWith(item.to));
         }
@@ -66,6 +84,16 @@ export default function Layout() {
         if (item.match === 'settings') return bookingPanel === 'settings';
         return bookingPanel !== 'settings';
     };
+
+    const visibleNav = NAV.map((section) => ({
+        ...section,
+        items: section.items.filter((item) => {
+            if (entitlementsDisabled) return true;
+            // Avoid flash of all modules while entitlements load
+            if (loading) return routeRequiresFeatures(item.featurePath).length === 0;
+            return hasRouteAccess(features, item.featurePath);
+        })
+    })).filter((section) => section.items.length > 0);
 
     return (
         <div className="flex h-screen bg-white text-[#0F172A]">
@@ -81,7 +109,7 @@ export default function Layout() {
                 </div>
 
                 <nav className="px-3 py-3 space-y-4">
-                    {NAV.map((section) => (
+                    {visibleNav.map((section) => (
                         <div key={section.group}>
                             <p className="px-2.5 mb-1 text-[10px] font-bold uppercase tracking-wider text-white/40">{section.group}</p>
                             <div className="space-y-0.5">
@@ -89,7 +117,7 @@ export default function Layout() {
                                     <NavLink
                                         key={item.to}
                                         to={item.to}
-                                        end={'end' in item ? item.end : undefined}
+                                        end={item.end}
                                         className={() => cn(
                                             'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors',
                                             isNavActive(item)

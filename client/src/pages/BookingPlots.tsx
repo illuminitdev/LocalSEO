@@ -41,7 +41,7 @@ export default function BookingPlots() {
         ]);
         setData(d);
         setLinked(Boolean(business?.connected && business?.name));
-        setLinkedBusiness(business?.connected ? business : null);
+        setLinkedBusiness(business?.connected && business?.name ? business : null);
         setError('');
         setLoading(false);
         return d;

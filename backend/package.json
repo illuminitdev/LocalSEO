@@ -1,27 +1,37 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Local SEO (LocalPulse) API — TypeScript Express",
+  "main": "dist/server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js",
-    "dev": "nodemon server.js",
-    "migrate": "node -e \"require('dotenv').config({override:true}); require('./lib/db').migrate().then(()=>console.log('ok')).catch(e=>{console.error(e);process.exit(1)})\"",
-    "migrate:app-state": "node scripts/migrate-app-state.js"
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx watch server.ts",
+    "migrate": "tsx -e \"require('dotenv').config({override:true}); require('./lib/db').migrate().then(()=>console.log('ok')).catch(e=>{console.error(e);process.exit(1)})\"",
+    "migrate:app-state": "tsx scripts/migrate-app-state.ts",
+    "seed:subscription": "tsx scripts/seed-subscription.ts",
+    "prepare:lambda": "node scripts/prepare-lambda.js",
+    "deploy:dev": "npm run prepare:lambda && npm run deploy:dev --prefix infra",
+    "deploy:prod": "npm run prepare:lambda && npm run deploy:prod --prefix infra",
+    "cdk:synth": "npm run prepare:lambda && npm run synth --prefix infra -- -c stage=dev",
+    "cdk:diff": "npm run prepare:lambda && npm run diff --prefix infra -- -c stage=dev"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.901.0",
+    "@codegenie/serverless-express": "^5.0.0",
     "@google/genai": "^2.17.1",
+    "@googleapis/calendar": "^16.0.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "googleapis": "^176.0.0",
+    "google-auth-library": "^11.0.2",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^9.0.6",
     "pg": "^8.23.0",
@@ -30,7 +40,14 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
     "@types/jsonwebtoken": "^9.0.10",
-    "nodemon": "^3.1.14"
+    "@types/node": "^24.5.2",
+    "@types/pg": "^8.15.5",
+    "nodemon": "^3.1.14",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
   }
 }

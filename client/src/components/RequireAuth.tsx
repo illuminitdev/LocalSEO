@@ -1,5 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom';
-import { getToken } from '../lib/auth';
+import { getMustChangePassword, getToken } from '../lib/auth';
 
 /** Protects app routes — redirects to login when no session token. */
 export default function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -12,6 +12,10 @@ export default function RequireAuth({ children }: { children: React.ReactNode })
             ? `/?next=${encodeURIComponent(next)}`
             : '/';
         return <Navigate to={to} replace />;
+    }
+
+    if (getMustChangePassword() && location.pathname !== '/account') {
+        return <Navigate to="/account?forcePassword=1" replace />;
     }
 
     return <>{children}</>;

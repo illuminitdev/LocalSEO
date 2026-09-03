@@ -13,8 +13,13 @@ export default function ReportGenerator() {
         setIsGenerating(true);
         setError('');
         try {
+            const business = await apiGet('/api/business');
+            if (!business?.name?.trim()) {
+                throw new Error('Save your business profile first (required fields on Business profile page).');
+            }
+
             const stats = await apiGet('/api/dashboard/stats');
-            setBusinessName(stats.businessName || '');
+            setBusinessName(stats.businessName || business.name || '');
             const data = await apiPost('/api/ai/strategy-report', stats);
             setReportData(data);
             setReportReady(true);

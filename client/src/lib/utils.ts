@@ -4,7 +4,9 @@ import { twMerge } from "tailwind-merge"
 import { authHeaders, getToken } from './auth';
 import { bookingOrgHeaders } from './bookingHost';
 
-export const API_BASE = import.meta.env.VITE_API_BASE ?? '';
+import { API_BASE } from './apiConfig';
+
+export { API_BASE };
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
@@ -15,12 +17,19 @@ export function restrictPhoneInput(value: string, maxDigits = 11): string {
     return value.replace(/\D/g, '').slice(0, maxDigits);
 }
 
-async function readError(res: Response, path: string) {
+async function readError(res: Response, path: string): Promise<Error> {
     try {
         const data = await res.json();
-        return data.error || `Request failed: ${path}`;
+        if (data.error === 'upgrade_required') {
+            const err = new Error('Upgrade required') as Error & { code?: string; feature?: string; requiredPlanHint?: unknown };
+            err.code = 'upgrade_required';
+            err.feature = data.feature;
+            err.requiredPlanHint = data.requiredPlanHint;
+            return err;
+        }
+        return new Error(data.error || `Request failed: ${path}`);
     } catch {
-        return `Request failed: ${path}`;
+        return new Error(`Request failed: ${path}`);
     }
 }
 
@@ -31,7 +40,7 @@ function apiHeaders(token?: string | null) {
 export async function apiGet(path: string, token?: string | null) {
     const headers = apiHeaders(token);
     const res = await fetch(`${API_BASE}${path}`, { headers });
-    if (!res.ok) throw new Error(await readError(res, path));
+    if (!res.ok) throw await readError(res, path);
     return res.json();
 }
 
@@ -42,7 +51,7 @@ export async function apiPost(path: string, body: unknown = {}, token?: string |
         headers,
         body: JSON.stringify(body)
     });
-    if (!res.ok) throw new Error(await readError(res, path));
+    if (!res.ok) throw await readError(res, path);
     return res.json();
 }
 
@@ -53,7 +62,7 @@ export async function apiPut(path: string, body: unknown = {}, token?: string | 
         headers,
         body: JSON.stringify(body)
     });
-    if (!res.ok) throw new Error(await readError(res, path));
+    if (!res.ok) throw await readError(res, path);
     return res.json();
 }
 
@@ -64,14 +73,14 @@ export async function apiPatch(path: string, body: unknown = {}, token?: string 
         headers,
         body: JSON.stringify(body)
     });
-    if (!res.ok) throw new Error(await readError(res, path));
+    if (!res.ok) throw await readError(res, path);
     return res.json();
 }
 
 export async function apiDelete(path: string, token?: string | null) {
     const headers = apiHeaders(token);
     const res = await fetch(`${API_BASE}${path}`, { method: 'DELETE', headers });
-    if (!res.ok) throw new Error(await readError(res, path));
+    if (!res.ok) throw await readError(res, path);
     return res.json();
 }
 

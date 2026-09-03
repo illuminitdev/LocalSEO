@@ -1,0 +1,25 @@
+{
+  "name": "localseo-infra",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "synth": "npx cdk synth",
+    "diff": "npx cdk diff",
+    "deploy": "npx cdk deploy --all --require-approval never",
+    "deploy:dev": "npx cdk deploy LocalSeoApi-dev -c stage=dev --require-approval never",
+    "deploy:prod": "npx cdk deploy LocalSeoApi-prod -c stage=prod --require-approval never"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.210.0",
+    "constructs": "^10.4.2",
+    "source-map-support": "^0.5.21"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "aws-cdk": "^2.210.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}
