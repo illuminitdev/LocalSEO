@@ -1,6 +1,6 @@
 ﻿import { useState } from 'react';
 import { FileText, Download, BarChart3 } from 'lucide-react';
-import { apiGet, apiPost } from '../lib/utils';
+import { apiGet, apiPost, logDashboardActivity } from '../lib/utils';
 
 export default function ReportGenerator() {
     const [isGenerating, setIsGenerating] = useState(false);
@@ -23,7 +23,7 @@ export default function ReportGenerator() {
             const data = await apiPost('/api/ai/strategy-report', stats);
             setReportData(data);
             setReportReady(true);
-            await apiPost('/api/dashboard/activity', {
+            await logDashboardActivity({
                 type: 'report',
                 message: `Generated strategy report. Grade: ${data.grade}.`,
                 icon: 'CheckCircle',

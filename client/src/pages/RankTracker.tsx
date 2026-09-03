@@ -1,8 +1,10 @@
 ﻿import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Map, Crosshair, Users, Activity, Sparkles, TrendingUp, TrendingDown } from 'lucide-react';
-import { apiPost } from '../lib/utils';
+import { apiPost, logDashboardActivity } from '../lib/utils';
 
 export default function RankTracker() {
+    const navigate = useNavigate();
     const [isGeneratingGap, setIsGeneratingGap] = useState(false);
     const [gapAnalysis, setGapAnalysis] = useState<string | null>(null);
     const [gridData, setGridData] = useState<number[][]>([]);
@@ -24,7 +26,7 @@ export default function RankTracker() {
             setGapAnalysis(data.gapAnalysis || '');
             if (Array.isArray(data.grid)) setGridData(data.grid);
             if (Array.isArray(data.competitors)) setCompetitors(data.competitors);
-            await apiPost('/api/dashboard/activity', {
+            await logDashboardActivity({
                 type: 'rank',
                 message: `GeoGrid analysis for "${keyword}".`,
                 icon: 'TrendingUp',
@@ -62,7 +64,7 @@ export default function RankTracker() {
                         </h2>
                         <div className="flex gap-2 text-xs font-semibold">
                             <span className="flex items-center gap-1"><div className="w-3 h-3 bg-[#F59E0B] rounded-sm"></div> 1-3</span>
-                            <span className="flex items-center gap-1"><div className="w-3 h-3 bg-[#D97706] rounded-sm"></div> 4-10</span>
+                            <span className="flex items-center gap-1"><div className="w-3 h-3 bg-[#D97706] rounded-sm"></div> 4-5</span>
                             <span className="flex items-center gap-1"><div className="w-3 h-3 bg-red-500 rounded-sm"></div> 11+</span>
                         </div>
                     </div>
@@ -114,7 +116,13 @@ export default function RankTracker() {
                                 {gapAnalysis}
                             </p>
                             <div className="flex gap-3">
-                                <button className="px-4 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-white text-sm font-bold rounded-lg cursor-pointer">Draft Required Post</button>
+                                <button
+                                    type="button"
+                                    onClick={() => navigate('/posts')}
+                                    className="px-4 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-white text-sm font-bold rounded-lg cursor-pointer"
+                                >
+                                    Draft Required Post
+                                </button>
                                 <button onClick={() => setGapAnalysis(null)} className="px-4 py-2 bg-[#F1F5F9] hover:bg-[#E2E8F0] text-[#0F172A] text-sm font-bold rounded-lg cursor-pointer">Reset</button>
                             </div>
                         </div>

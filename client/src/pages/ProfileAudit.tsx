@@ -12,7 +12,7 @@ import {
     Clock,
     X
 } from 'lucide-react';
-import { apiGet, apiPost } from '../lib/utils';
+import { apiGet, apiPost, logDashboardActivity, updateDashboardStats } from '../lib/utils';
 
 const REQUIRED_FIELDS = ['name', 'category', 'address', 'phone', 'hours', 'attributes'] as const;
 
@@ -163,7 +163,7 @@ export default function ProfileAudit() {
             const data = await apiPost('/api/ai/audit', formData);
             setAuditResult(data);
             setMode('view');
-            await apiPost('/api/dashboard/activity', {
+            await logDashboardActivity({
                 type: 'audit',
                 message: `AI Profile Audit executed. Optimization Score: ${data.score}/100.`,
                 icon: 'Activity',
@@ -197,9 +197,9 @@ export default function ProfileAudit() {
         try {
             await saveBusinessProfile();
             if (auditResult?.score) {
-                await apiPost('/api/dashboard/update-stats', { completenessScore: auditResult.score });
+                await updateDashboardStats({ completenessScore: auditResult.score });
             }
-            await apiPost('/api/dashboard/activity', {
+            await logDashboardActivity({
                 type: 'audit',
                 message: 'Business profile saved and ready for AI Insights and other listing tools.',
                 icon: 'CheckCircle',

@@ -1,6 +1,6 @@
 ﻿import { useState } from 'react';
 import { Database, HelpCircle, Save, Sparkles, CheckCircle2 } from 'lucide-react';
-import { apiPost } from '../lib/utils';
+import { apiPost, logDashboardActivity } from '../lib/utils';
 import EmptyState from '../components/EmptyState';
 
 interface Question {
@@ -41,32 +41,28 @@ export default function QAAutoResponder() {
         }
     };
 
-    const handlePublishAnswer = async (id: number) => {
+    const handleSaveAnswerDraft = async (id: number) => {
         setQuestions(prev => prev.map(q => q.id === id ? { ...q, status: 'published' } : q));
         const targetQ = questions.find(q => q.id === id);
         if (!targetQ) return;
-        await apiPost('/api/dashboard/activity', {
+        await logDashboardActivity({
             type: 'qa',
-            message: `Published Q&A reply: ${targetQ.text}`,
+            message: `Saved Q&A draft: ${targetQ.text}`,
             icon: 'CheckCircle',
             color: 'text-[#F59E0B]'
-        }).catch(() => {});
+        });
     };
 
     const handleSaveKB = async () => {
         setIsSavingKB(true);
-        try {
-            await apiPost('/api/dashboard/activity', {
-                type: 'knowledge',
-                message: 'Saved business knowledge base.',
-                icon: 'Activity',
-                color: 'text-[#0F172A]'
-            });
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setIsSavingKB(false);
-        }
+        setError('');
+        await logDashboardActivity({
+            type: 'knowledge',
+            message: 'Saved business knowledge base.',
+            icon: 'Activity',
+            color: 'text-[#0F172A]'
+        });
+        setIsSavingKB(false);
     };
 
     return (
@@ -130,8 +126,8 @@ export default function QAAutoResponder() {
                                 <div className="pt-4">
                                     <textarea value={q.answer} onChange={(e) => setQuestions(prev => prev.map(item => item.id === q.id ? { ...item, answer: e.target.value } : item))} className="w-full text-sm border border-[#E2E8F0] p-3 rounded-lg h-24" />
                                     <div className="flex justify-end mt-2">
-                                        <button onClick={() => handlePublishAnswer(q.id)} className="px-4 py-2 bg-[#F59E0B] text-white rounded-lg font-bold cursor-pointer flex items-center gap-2">
-                                            <CheckCircle2 className="w-4 h-4" /> Publish Answer
+                                        <button onClick={() => handleSaveAnswerDraft(q.id)} className="px-4 py-2 bg-[#F59E0B] text-white rounded-lg font-bold cursor-pointer flex items-center gap-2">
+                                            <CheckCircle2 className="w-4 h-4" /> Save answer draft
                                         </button>
                                     </div>
                                 </div>

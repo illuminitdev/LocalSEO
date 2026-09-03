@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from 'react';
 import { Calendar, Image as ImageIcon, Send, Sparkles, MessageSquare, Tag } from 'lucide-react';
-import { cn, apiGet, apiPost } from '../lib/utils';
+import { cn, apiGet, apiPost, logDashboardActivity } from '../lib/utils';
 
 export default function PostAutomation() {
     const [postType, setPostType] = useState('offer');
@@ -10,7 +10,7 @@ export default function PostAutomation() {
     const [generatedImage, setGeneratedImage] = useState<string | null>(null);
     const [isGeneratingImage, setIsGeneratingImage] = useState(false);
     const [ctaValue, setCtaValue] = useState('Book');
-    const [isScheduling, setIsScheduling] = useState(false);
+    const [isSavingDraft, setIsSavingDraft] = useState(false);
     const [businessName, setBusinessName] = useState('');
     const [error, setError] = useState('');
 
@@ -24,7 +24,7 @@ export default function PostAutomation() {
         try {
             const data = await apiPost('/api/ai/post-copy', { postType, tone, businessName });
             setGeneratedText(data.copy || '');
-            await apiPost('/api/dashboard/activity', {
+            await logDashboardActivity({
                 type: 'post',
                 message: `Generated GBP ${postType} copy (${tone}).`,
                 icon: 'Activity',
@@ -43,7 +43,7 @@ export default function PostAutomation() {
         try {
             const data = await apiPost('/api/ai/post-image', { postType });
             setGeneratedImage(data.imageUrl || null);
-            await apiPost('/api/dashboard/activity', {
+            await logDashboardActivity({
                 type: 'media',
                 message: 'Generated a promotional post visual.',
                 icon: 'CheckCircle',
@@ -56,22 +56,19 @@ export default function PostAutomation() {
         }
     };
 
-    const handleSchedulePost = async () => {
-        setIsScheduling(true);
+    const handleSaveDraft = async () => {
+        setIsSavingDraft(true);
         try {
-            // Append a timeline activity
-            await apiPost('/api/dashboard/activity', {
+            await logDashboardActivity({
                 type: 'post',
-                message: `Scheduled GBP ${postType} post with CTA: "${ctaValue}".`,
+                message: `Saved draft GBP ${postType} post with CTA: "${ctaValue}".`,
                 icon: 'Clock',
                 color: 'text-[#F59E0B]'
             });
-        } catch (err) {
-            console.error(err);
         } finally {
             setTimeout(() => {
-                setIsScheduling(false);
-                alert('Post scheduled successfully on Google Business Profile Autopilot!');
+                setIsSavingDraft(false);
+                alert('Draft saved in the app. Not sent to Google yet.');
             }, 600);
         }
     };
@@ -152,10 +149,10 @@ export default function PostAutomation() {
                         </div>
                     </div>
 
-                    {/* Schedule / Finalize Card */}
+                    {/* Save draft card */}
                     <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-sm">
                         <h2 className="text-lg font-semibold mb-6 flex items-center gap-2">
-                            <Calendar className="w-5 h-5 text-[#D97706]" /> Finalize & Schedule
+                            <Calendar className="w-5 h-5 text-[#D97706]" /> Save draft
                         </h2>
 
                         <div className="space-y-4">
@@ -187,12 +184,13 @@ export default function PostAutomation() {
 
                         <div className="mt-8">
                             <button
-                                onClick={handleSchedulePost}
-                                disabled={isScheduling}
+                                onClick={handleSaveDraft}
+                                disabled={isSavingDraft}
                                 className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#F59E0B] hover:bg-[#D97706] text-white rounded-xl font-bold text-lg transition-colors cursor-pointer shadow-md disabled:opacity-50"
                             >
-                                <Send className="w-5 h-5" /> {isScheduling ? 'Scheduling...' : 'Schedule Post'}
+                                <Send className="w-5 h-5" /> {isSavingDraft ? 'Saving...' : 'Save draft'}
                             </button>
+                            <p className="mt-2 text-xs text-center text-gray-500">Drafts stay in this app until Google publish is connected.</p>
                         </div>
                     </div>
                 </div>
@@ -259,7 +257,7 @@ export default function PostAutomation() {
                                 )}
                             </div>
 
-                            {/* Fake CTA */}
+                            {/* Preview CTA */}
                             <div className="p-4 bg-[#F8FAFC] border-t border-[#E2E8F0]">
                                 <div className="w-full py-2 bg-white border border-[#0F172A] text-[#0F172A] font-bold text-center rounded-lg text-sm">
                                     {ctaValue}

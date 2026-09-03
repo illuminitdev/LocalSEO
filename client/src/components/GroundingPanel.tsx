@@ -1,6 +1,6 @@
 ﻿import { useState } from 'react';
 import { Search, MapPin, Star, Building, CheckCircle2 } from 'lucide-react';
-import { apiPost } from '../lib/utils';
+import { apiPost, logDashboardActivity, updateDashboardStats } from '../lib/utils';
 
 export default function GroundingPanel() {
   const [query, setQuery] = useState('');
@@ -27,11 +27,11 @@ export default function GroundingPanel() {
 
     try {
       await apiPost('/api/business/connect', results);
-      await apiPost('/api/dashboard/update-stats', {
+      await updateDashboardStats({
         completenessScore: 80,
         visibilityRank: 3.0
       });
-      await apiPost('/api/dashboard/activity', {
+      await logDashboardActivity({
         type: 'places',
         message: `Connected business profile "${results?.name || 'Business'}" via Google Places grounding.`,
         icon: 'CheckCircle',

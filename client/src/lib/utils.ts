@@ -84,6 +84,24 @@ export async function apiDelete(path: string, token?: string | null) {
     return res.json();
 }
 
+/** Best-effort activity feed — plans without `reporting` skip silently. */
+export async function logDashboardActivity(payload: object) {
+    try {
+        await apiPost('/api/dashboard/activity', payload);
+    } catch {
+        /* optional for plans without reporting */
+    }
+}
+
+/** Best-effort KPI update — plans without `reporting` skip silently. */
+export async function updateDashboardStats(payload: object) {
+    try {
+        await apiPost('/api/dashboard/update-stats', payload);
+    } catch {
+        /* optional for plans without reporting */
+    }
+}
+
 export function formatCents(cents: number, currency = 'GBP') {
     const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
     return `${symbol}${(cents / 100).toFixed(2)}`;
