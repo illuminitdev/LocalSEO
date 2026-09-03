@@ -1,6 +1,6 @@
 ﻿import { useState } from 'react';
 import { BookMarked, Sparkles, CheckCircle2, AlertTriangle, MinusCircle } from 'lucide-react';
-import { apiPost } from '../lib/utils';
+import { apiPost, logDashboardActivity } from '../lib/utils';
 
 export default function Citations() {
     const [loading, setLoading] = useState(false);
@@ -13,7 +13,7 @@ export default function Citations() {
         try {
             const data = await apiPost('/api/ai/citations', {});
             setResult(data);
-            await apiPost('/api/dashboard/activity', {
+            await logDashboardActivity({
                 type: 'citations',
                 message: `Citation audit complete. ${data.found || 0} found, ${data.missing || 0} missing.`,
                 icon: 'Activity',

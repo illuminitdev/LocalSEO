@@ -100,16 +100,22 @@ export default function Account() {
         features,
         subscriptionStatus,
         simulatePlan,
-        entitlementsDisabled
+        entitlementsDisabled,
+        hasFeature
     } = useEntitlements();
     const [simBusy, setSimBusy] = useState(false);
     const showSimulate = entitlementsDisabled;
+    const hasLocalPresence = hasFeature('local_presence');
 
     const hasOrgDetails = Boolean(
         org.name?.trim() || org.hostName?.trim() || org.phone?.trim() || org.tradeType?.trim()
     );
 
     const loadBusiness = () => {
+        if (!hasLocalPresence) {
+            setBusiness(null);
+            return;
+        }
         apiGet('/api/business').then(setBusiness).catch(() => setBusiness(null));
     };
 
@@ -150,7 +156,7 @@ export default function Account() {
 
     useEffect(() => {
         loadAccount();
-    }, []);
+    }, [hasLocalPresence]);
 
     const saveProfile = async (e: FormEvent) => {
         e.preventDefault();
@@ -567,36 +573,48 @@ export default function Account() {
                     subtitle="Connect your Google Business Profile for rankings, reviews, and listing tools."
                 >
                     <div className="space-y-4">
-                        {business?.connected ? (
-                            <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
-                                <p className="text-sm font-bold text-[#0F172A]">{business.name || 'Connected location'}</p>
-                                {business.address && (
-                                    <p className="mt-1 text-sm text-[#64748B]">{business.address}</p>
-                                )}
-                                {(business.rating || business.category) && (
-                                    <p className="mt-2 text-xs text-[#94A3B8]">
-                                        {[business.category, business.rating ? `${business.rating}★` : null]
-                                            .filter(Boolean)
-                                            .join(' · ')}
-                                    </p>
-                                )}
-                            </div>
-                        ) : (
+                        {!hasLocalPresence ? (
                             <div className="rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-5 py-6 text-center">
                                 <MapPin className="w-7 h-7 text-[#CBD5E1] mx-auto mb-2" />
                                 <p className="text-sm text-[#64748B]">
-                                    No location connected yet. Add one to power local SEO tools.
+                                    Connecting a Google listing needs the Local Presence plan (or higher).
+                                    See your current plan above.
                                 </p>
                             </div>
+                        ) : (
+                            <>
+                                {business?.connected ? (
+                                    <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
+                                        <p className="text-sm font-bold text-[#0F172A]">{business.name || 'Connected location'}</p>
+                                        {business.address && (
+                                            <p className="mt-1 text-sm text-[#64748B]">{business.address}</p>
+                                        )}
+                                        {(business.rating || business.category) && (
+                                            <p className="mt-2 text-xs text-[#94A3B8]">
+                                                {[business.category, business.rating ? `${business.rating}★` : null]
+                                                    .filter(Boolean)
+                                                    .join(' · ')}
+                                            </p>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-5 py-6 text-center">
+                                        <MapPin className="w-7 h-7 text-[#CBD5E1] mx-auto mb-2" />
+                                        <p className="text-sm text-[#64748B]">
+                                            No location connected yet. Add one to power local SEO tools.
+                                        </p>
+                                    </div>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => setLocationOpen(true)}
+                                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#F59E0B] text-white text-sm font-bold hover:bg-[#D97706]"
+                                >
+                                    <Search className="w-4 h-4" />
+                                    {business?.connected ? 'Change location' : 'Add location'}
+                                </button>
+                            </>
                         )}
-                        <button
-                            type="button"
-                            onClick={() => setLocationOpen(true)}
-                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#F59E0B] text-white text-sm font-bold hover:bg-[#D97706]"
-                        >
-                            <Search className="w-4 h-4" />
-                            {business?.connected ? 'Change location' : 'Add location'}
-                        </button>
                     </div>
                 </SectionCard>
 
@@ -616,13 +634,15 @@ export default function Account() {
                 </section>
             </div>
 
-            <GroundingModal
-                isOpen={locationOpen}
-                onClose={() => {
-                    setLocationOpen(false);
-                    loadBusiness();
-                }}
-            />
+            {hasLocalPresence && (
+                <GroundingModal
+                    isOpen={locationOpen}
+                    onClose={() => {
+                        setLocationOpen(false);
+                        loadBusiness();
+                    }}
+                />
+            )}
         </div>
     );
 }

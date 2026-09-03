@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from 'react';
 import { Star, MessageCircle, Sparkles, Check, CheckCircle2, AlertTriangle, Layers } from 'lucide-react';
-import { apiGet, apiPost } from '../lib/utils';
+import { apiGet, apiPost, logDashboardActivity } from '../lib/utils';
 import EmptyState from '../components/EmptyState';
 
 interface Review {
@@ -66,16 +66,16 @@ export default function ReviewManagement() {
         }
     };
 
-    const handlePublish = async (id: number) => {
+    const handleSaveReplyDraft = async (id: number) => {
         setReviews(prev => prev.map(r => r.id === id ? { ...r, status: 'published' } : r));
         const targetReview = reviews.find(r => r.id === id);
         if (!targetReview) return;
-        await apiPost('/api/dashboard/activity', {
+        await logDashboardActivity({
             type: 'review',
-            message: `Approved reply to ${targetReview.author}.`,
+            message: `Saved reply draft for ${targetReview.author}.`,
             icon: 'CheckCircle',
             color: 'text-[#F59E0B]'
-        }).catch(() => {});
+        });
     };
 
     const handleBatchDraft = async () => {
@@ -93,7 +93,7 @@ export default function ReviewManagement() {
                     setReviews([...updated]);
                 }
             }
-            await apiPost('/api/dashboard/activity', {
+            await logDashboardActivity({
                 type: 'review',
                 message: 'Generated replies for pending reviews.',
                 icon: 'TrendingUp',
@@ -170,8 +170,8 @@ export default function ReviewManagement() {
                                     <>
                                         <textarea value={review.draft} onChange={(e) => setReviews(prev => prev.map(r => r.id === review.id ? { ...r, draft: e.target.value } : r))} className="flex-1 w-full p-3 text-sm border border-[#E2E8F0] rounded-lg min-h-[100px]" />
                                         <div className="mt-4 flex gap-3">
-                                            <button onClick={() => handlePublish(review.id)} className="flex-1 py-2 bg-[#F59E0B] text-white rounded-lg font-bold cursor-pointer flex justify-center items-center gap-2">
-                                                <Check className="w-4 h-4" /> Approve
+                                            <button onClick={() => handleSaveReplyDraft(review.id)} className="flex-1 py-2 bg-[#F59E0B] text-white rounded-lg font-bold cursor-pointer flex justify-center items-center gap-2">
+                                                <Check className="w-4 h-4" /> Save reply draft
                                             </button>
                                             <button onClick={() => handleDraftSingle(review.id)} className="px-4 py-2 border border-[#E2E8F0] rounded-lg font-bold cursor-pointer">Regenerate</button>
                                         </div>

@@ -1,6 +1,6 @@
 ﻿import { useState } from 'react';
 import { Image as ImageIcon, Sparkles, MapPin, Tag as TagIcon, CheckCircle2, AlertCircle } from 'lucide-react';
-import { apiPost } from '../lib/utils';
+import { apiPost, logDashboardActivity } from '../lib/utils';
 
 interface CategoryStatus {
     name: string;
@@ -32,7 +32,7 @@ export default function MediaOptimization() {
                 setPhotos([data.photo, ...photos]);
                 setCategories((prev) => prev.map((c) => c.name === activeTab ? { ...c, count: c.count + 1 } : c));
             }
-            await apiPost('/api/dashboard/activity', {
+            await logDashboardActivity({
                 type: 'media',
                 message: `Generated ${activeTab} photo with alt-text.`,
                 icon: 'CheckCircle',
@@ -126,10 +126,12 @@ export default function MediaOptimization() {
                                                 <TagIcon className="w-4 h-4 text-[#F59E0B] shrink-0 mt-0.5" />
                                                 <span><span className="font-bold text-[#0F172A]">Auto Alt-Text:</span> {photo.altText}</span>
                                             </div>
-                                            <div className="flex items-start gap-2 text-xs text-gray-600 bg-white p-2 rounded border border-[#E2E8F0]">
-                                                <MapPin className="w-4 h-4 text-[#D97706] shrink-0 mt-0.5" />
-                                                <span><span className="font-bold text-[#0F172A]">EXIF Geotag:</span> {photo.lat}, {photo.lng}</span>
-                                            </div>
+                                            {photo.lat && photo.lng ? (
+                                                <div className="flex items-start gap-2 text-xs text-gray-600 bg-white p-2 rounded border border-[#E2E8F0]">
+                                                    <MapPin className="w-4 h-4 text-[#D97706] shrink-0 mt-0.5" />
+                                                    <span><span className="font-bold text-[#0F172A]">EXIF Geotag:</span> {photo.lat}, {photo.lng}</span>
+                                                </div>
+                                            ) : null}
                                         </div>
                                     </div>
                                 ))}
