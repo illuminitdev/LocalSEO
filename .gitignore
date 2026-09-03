@@ -11,6 +11,7 @@ dist/
 dist-ssr/
 backend/.lambda-dist/
 backend/infra/cdk.out/
+backend/infra/cdk.out-*/
 backend/infra/dist/
 *.local
 
@@ -38,4 +39,3 @@ cursor.md
 
 # Persisted app state (local dev)
 backend/data/*.json
-.neon
