@@ -124,6 +124,24 @@ export class LocalSeoApiStack extends cdk.Stack {
         // Stage-locked admin (dev email never works on prod and vice versa)
         ADMIN_EMAIL: stage === 'prod' ? 'admin@localseo.com' : 'admin@localseo.net',
         ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'localseo@2026',
+        // Stripe Connect booking deposits — injected from backend/.env at deploy (never commit keys)
+        ...(process.env.STRIPE_SECRET_KEY
+          ? { STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY }
+          : {}),
+        ...(process.env.STRIPE_PUBLISHABLE_KEY
+          ? { STRIPE_PUBLISHABLE_KEY: process.env.STRIPE_PUBLISHABLE_KEY }
+          : {}),
+        ...(process.env.STRIPE_WEBHOOK_SECRET
+          ? { STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET }
+          : {}),
+        STRIPE_PLATFORM_FEE_BPS: process.env.STRIPE_PLATFORM_FEE_BPS || '500',
+        STRIPE_CONNECT_DEFAULT_COUNTRY: process.env.STRIPE_CONNECT_DEFAULT_COUNTRY || 'GB',
+        ...(process.env.STRIPE_CONNECT_RETURN_URL
+          ? { STRIPE_CONNECT_RETURN_URL: process.env.STRIPE_CONNECT_RETURN_URL }
+          : {}),
+        ...(process.env.STRIPE_CONNECT_REFRESH_URL
+          ? { STRIPE_CONNECT_REFRESH_URL: process.env.STRIPE_CONNECT_REFRESH_URL }
+          : {}),
         // Dev-only test client + AI keys from env at deploy time (never hardcode keys in git)
         ...(stage === 'dev'
           ? {

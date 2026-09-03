@@ -5,7 +5,7 @@ import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { LocalSeoApiStack } from '../lib/local-seo-api-stack';
 
-/** Load backend/.env so deploy can inject GEMINI/Places keys without committing them. */
+/** Load backend/.env so deploy can inject Gemini/Places/Stripe keys without committing them. */
 function loadBackendEnv() {
   const envPath = path.join(__dirname, '..', '..', '.env');
   if (!fs.existsSync(envPath)) return;
