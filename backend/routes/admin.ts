@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query } from '../lib/db';
 import { signToken, comparePassword } from '../lib/authTokens';
 import { requireAdmin, adminConfigured, resolveAdminCredentials } from '../middleware/adminAuth';
-import { upsertOrgSubscription } from '../middleware/entitlements';
+import { upsertOrgSubscription, setOrgAutopay } from '../middleware/entitlements';
 import {
     PLANS,
     FEATURE_LABELS,
@@ -11,8 +11,45 @@ import {
     formatPrice,
     isValidPlanId
 } from '../lib/planCatalog';
+import Stripe from 'stripe';
 
 const router = Router();
+
+function getStripeClient() {
+    if (!process.env.STRIPE_SECRET_KEY) return null;
+    try {
+        return new Stripe(process.env.STRIPE_SECRET_KEY);
+    } catch {
+        return null;
+    }
+}
+
+function daysLeft(periodEnd?: string | null) {
+    if (!periodEnd) return null;
+    const ms = new Date(periodEnd).getTime() - Date.now();
+    return Math.ceil(ms / (1000 * 60 * 60 * 24));
+}
+
+function serviceModulesForPlan(planId: string | null | undefined) {
+    const features = planId ? getFeaturesForPlan(planId) : [];
+    const has = (k: string) => features.includes(k as any);
+    return [
+        { id: 'booking', name: 'Booking board', feature: 'bookings', enrolled: has('bookings') },
+        { id: 'profile', name: 'Business profile', feature: 'local_presence', enrolled: has('local_presence') },
+        { id: 'citations', name: 'Citations', feature: 'local_presence', enrolled: has('local_presence') },
+        { id: 'posts', name: 'GBP posts', feature: 'local_presence', enrolled: has('local_presence') },
+        { id: 'media', name: 'Photos', feature: 'local_presence', enrolled: has('local_presence') },
+        { id: 'reviews', name: 'Reviews', feature: 'local_presence', enrolled: has('local_presence') },
+        { id: 'qa', name: 'Q&A', feature: 'local_presence', enrolled: has('local_presence') },
+        { id: 'rank-tracker', name: 'Local Search Grid', feature: 'local_growth', enrolled: has('local_growth') },
+        {
+            id: 'report',
+            name: 'AI Insights',
+            feature: 'reporting',
+            enrolled: has('local_growth') && has('reporting')
+        }
+    ];
+}
 
 const PRODUCTS = [
     {
@@ -151,7 +188,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                     o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.setup_complete,
                     s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
-                    s.stripe_subscription_id, s.stripe_customer_id,
+                    s.stripe_subscription_id, s.stripe_customer_id, s.cancel_at_period_end,
                     p.name AS plan_name, p.price_cents, p.currency,
                     pi.id AS invite_id, pi.status AS invite_status, pi.claimed_at, pi.credentials_emailed_at,
                     pi.created_at AS invite_created_at,
@@ -192,7 +229,8 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                     pi.features AS invite_features,
                     p.name AS plan_name, p.price_cents, p.currency,
                     s.id AS subscription_id, s.status AS subscription_status,
-                    s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at
+                    s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
+                    s.cancel_at_period_end
              FROM portal_invites pi
              LEFT JOIN plans p ON p.id = pi.plan_id
              LEFT JOIN subscriptions s ON s.status = 'active'
@@ -234,9 +272,12 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                               : null,
                           periodStart: row.current_period_start,
                           periodEnd: row.current_period_end,
+                          daysLeft: daysLeft(row.current_period_end),
                           paidAt: row.subscription_created_at,
                           stripeSubscriptionId: row.stripe_subscription_id,
-                          stripeCustomerId: row.stripe_customer_id
+                          stripeCustomerId: row.stripe_customer_id,
+                          cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
+                          autopayEnabled: !row.cancel_at_period_end
                       }
                     : null,
                 invite: row.invite_id
@@ -257,6 +298,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                             : '£0.00'
                 },
                 features,
+                services: serviceModulesForPlan(row.plan_id),
                 products: [
                     { id: 'local_seo', name: 'Local SEO Portal', enrolled: features.length > 0 || Boolean(row.plan_id) },
                     {
@@ -289,9 +331,12 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                               : null,
                           periodStart: row.current_period_start,
                           periodEnd: row.current_period_end,
+                          daysLeft: daysLeft(row.current_period_end),
                           paidAt: row.subscription_created_at || row.invite_created_at,
                           stripeSubscriptionId: row.stripe_subscription_id,
-                          stripeCustomerId: row.stripe_customer_id
+                          stripeCustomerId: row.stripe_customer_id,
+                          cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
+                          autopayEnabled: !row.cancel_at_period_end
                       }
                     : null,
                 invite: {
@@ -303,6 +348,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                 },
                 invoices: { count: 0, totalCents: 0, totalLabel: '£0.00' },
                 features,
+                services: serviceModulesForPlan(row.plan_id),
                 products: [
                     { id: 'local_seo', name: 'Local SEO Portal', enrolled: features.length > 0 },
                     { id: 'website', name: 'ZappSites Website', enrolled: row.plan_id === 'website-essential' }
@@ -325,10 +371,33 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
 router.patch('/organizations/:orgId/subscription', requireAdmin, async (req: Request, res: Response) => {
     try {
         const orgId = req.params.orgId;
-        const planId = String(req.body?.planId || '').trim();
+        const planIdRaw = req.body?.planId;
+        const planId = planIdRaw === null || planIdRaw === undefined ? '' : String(planIdRaw).trim();
+        const hasAutopay = typeof req.body?.autopayEnabled === 'boolean' || typeof req.body?.cancelAtPeriodEnd === 'boolean';
+        const autopayEnabled =
+            typeof req.body?.autopayEnabled === 'boolean'
+                ? req.body.autopayEnabled
+                : typeof req.body?.cancelAtPeriodEnd === 'boolean'
+                  ? !req.body.cancelAtPeriodEnd
+                  : undefined;
 
         const { rows: orgRows } = await query('SELECT id, name, slug FROM organizations WHERE id = $1', [orgId]);
         if (!orgRows.length) return res.status(404).json({ error: 'Organization not found' });
+
+        // Autopay-only update (keep current plan)
+        if (!planId && hasAutopay && autopayEnabled !== undefined) {
+            const result = await setOrgAutopay(orgId, autopayEnabled, getStripeClient());
+            return res.json({
+                success: true,
+                organization: orgRows[0],
+                subscription: {
+                    status: result.subscription?.status || 'active',
+                    cancelAtPeriodEnd: result.cancelAtPeriodEnd,
+                    autopayEnabled: result.autopayEnabled,
+                    periodEnd: result.subscription?.current_period_end
+                }
+            });
+        }
 
         if (!planId) {
             await query(
@@ -348,14 +417,24 @@ router.patch('/organizations/:orgId/subscription', requireAdmin, async (req: Req
             return res.status(400).json({ error: `Invalid plan_id: ${planId}` });
         }
 
-        const result = await upsertOrgSubscription(orgId, planId);
+        const result = await upsertOrgSubscription(orgId, planId, {
+            cancelAtPeriodEnd: autopayEnabled === undefined ? false : !autopayEnabled
+        });
+
+        if (autopayEnabled !== undefined && result.subscription?.stripe_subscription_id) {
+            await setOrgAutopay(orgId, autopayEnabled, getStripeClient()).catch(() => {});
+        }
+
         res.json({
             success: true,
             organization: orgRows[0],
             subscription: {
                 planId: result.planId,
                 planName: result.planName,
-                status: 'active'
+                status: 'active',
+                cancelAtPeriodEnd: Boolean(result.subscription?.cancel_at_period_end),
+                autopayEnabled: !result.subscription?.cancel_at_period_end,
+                periodEnd: result.subscription?.current_period_end
             },
             features: result.features
         });

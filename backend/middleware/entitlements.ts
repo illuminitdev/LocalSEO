@@ -12,13 +12,23 @@ function emptyEntitlements() {
         features: [] as string[],
         subscriptionStatus: null,
         priceCents: null,
-        currency: null
+        currency: null,
+        currentPeriodStart: null as string | null,
+        currentPeriodEnd: null as string | null,
+        cancelAtPeriodEnd: false,
+        autopayEnabled: true
     };
+}
+
+function periodStillValid(periodEnd: any) {
+    if (!periodEnd) return true;
+    return new Date(periodEnd).getTime() > Date.now();
 }
 
 /**
  * Load active plan features from shared ZappSites tables.
  * Matches by org_id (post-claim) OR customer_email (pre-claim / email link).
+ * Expired periods (past current_period_end) yield no features and are marked canceled.
  */
 async function loadOrgEntitlements(orgId: any, email?: any) {
     if (!orgId && !email) {
@@ -26,7 +36,8 @@ async function loadOrgEntitlements(orgId: any, email?: any) {
     }
 
     const { rows } = await query(
-        `SELECT s.plan_id, s.status, s.current_period_start, s.current_period_end,
+        `SELECT s.id, s.plan_id, s.status, s.current_period_start, s.current_period_end,
+                s.cancel_at_period_end,
                 p.name AS plan_name, p.price_cents, p.currency,
                 pf.feature_key
          FROM subscriptions s
@@ -46,6 +57,27 @@ async function loadOrgEntitlements(orgId: any, email?: any) {
     }
 
     const row = rows[0];
+    if (!periodStillValid(row.current_period_end)) {
+        await query(
+            `UPDATE subscriptions
+             SET status = 'canceled', updated_at = NOW()
+             WHERE id = $1 AND status = 'active'`,
+            [row.id]
+        ).catch(() => {});
+        return {
+            ...emptyEntitlements(),
+            planId: row.plan_id,
+            planName: row.plan_name,
+            subscriptionStatus: 'canceled',
+            priceCents: row.price_cents,
+            currency: row.currency,
+            currentPeriodStart: row.current_period_start,
+            currentPeriodEnd: row.current_period_end,
+            cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
+            autopayEnabled: !row.cancel_at_period_end
+        };
+    }
+
     const featureSet = new Set<string>();
     for (const r of rows) {
         if (r.plan_id !== row.plan_id) continue;
@@ -54,9 +86,10 @@ async function loadOrgEntitlements(orgId: any, email?: any) {
 
     let features = [...featureSet];
     if (!features.length) {
-        // Fallback to catalog for plans with zero plan_features rows (e.g. website-essential)
         features = getFeaturesForPlan(row.plan_id);
     }
+
+    const cancelAtPeriodEnd = Boolean(row.cancel_at_period_end);
 
     return {
         planId: row.plan_id,
@@ -66,7 +99,9 @@ async function loadOrgEntitlements(orgId: any, email?: any) {
         priceCents: row.price_cents,
         currency: row.currency,
         currentPeriodStart: row.current_period_start,
-        currentPeriodEnd: row.current_period_end
+        currentPeriodEnd: row.current_period_end,
+        cancelAtPeriodEnd,
+        autopayEnabled: !cancelAtPeriodEnd
     };
 }
 
@@ -76,7 +111,9 @@ async function attachEntitlements(req: any) {
             planId: 'dev-bypass',
             planName: 'All features (dev bypass)',
             features: ['bookings', 'local_presence', 'local_growth', 'reporting'],
-            subscriptionStatus: 'active'
+            subscriptionStatus: 'active',
+            cancelAtPeriodEnd: false,
+            autopayEnabled: true
         };
         return req.entitlements;
     }
@@ -151,7 +188,11 @@ function allowDevSubscriptionWrites() {
     return process.env.NODE_ENV === 'development';
 }
 
-async function upsertOrgSubscription(orgId: any, planId: string) {
+async function upsertOrgSubscription(
+    orgId: any,
+    planId: string,
+    opts?: { cancelAtPeriodEnd?: boolean }
+) {
     if (!isValidPlanId(planId)) {
         throw new Error(`Invalid plan_id: ${planId}`);
     }
@@ -159,13 +200,13 @@ async function upsertOrgSubscription(orgId: any, planId: string) {
     const now = new Date();
     const periodEnd = new Date(now);
     periodEnd.setMonth(periodEnd.getMonth() + 1);
+    const cancelAtPeriodEnd = Boolean(opts?.cancelAtPeriodEnd);
 
     await query(
         `UPDATE subscriptions SET status = 'canceled', updated_at = NOW()
          WHERE org_id = $1 AND status = 'active'`,
         [orgId]
     );
-    // Also clear legacy LocalPulse spelling if present
     await query(
         `UPDATE subscriptions SET status = 'canceled', updated_at = NOW()
          WHERE org_id = $1 AND status = 'cancelled'`,
@@ -173,10 +214,11 @@ async function upsertOrgSubscription(orgId: any, planId: string) {
     ).catch(() => {});
 
     const { rows } = await query(
-        `INSERT INTO subscriptions (org_id, plan_id, status, current_period_start, current_period_end)
-         VALUES ($1, $2, 'active', $3, $4)
+        `INSERT INTO subscriptions (
+            org_id, plan_id, status, current_period_start, current_period_end, cancel_at_period_end
+         ) VALUES ($1, $2, 'active', $3, $4, $5)
          RETURNING *`,
-        [orgId, planId, now, periodEnd]
+        [orgId, planId, now, periodEnd, cancelAtPeriodEnd]
     );
 
     const plan = getPlanById(planId);
@@ -188,6 +230,73 @@ async function upsertOrgSubscription(orgId: any, planId: string) {
     };
 }
 
+async function setOrgAutopay(orgId: any, enabled: boolean, stripeClient?: any) {
+    const cancelAtPeriodEnd = !enabled;
+    const { rows } = await query(
+        `SELECT id, stripe_subscription_id, cancel_at_period_end, status, current_period_end
+         FROM subscriptions
+         WHERE org_id = $1 AND status = 'active'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [orgId]
+    );
+    if (!rows.length) {
+        throw new Error('No active subscription found.');
+    }
+
+    const sub = rows[0];
+    if (stripeClient && sub.stripe_subscription_id) {
+        await stripeClient.subscriptions.update(sub.stripe_subscription_id, {
+            cancel_at_period_end: cancelAtPeriodEnd
+        });
+    }
+
+    const { rows: updated } = await query(
+        `UPDATE subscriptions
+         SET cancel_at_period_end = $1, updated_at = NOW()
+         WHERE id = $2
+         RETURNING *`,
+        [cancelAtPeriodEnd, sub.id]
+    );
+
+    return {
+        subscription: updated[0],
+        cancelAtPeriodEnd,
+        autopayEnabled: !cancelAtPeriodEnd
+    };
+}
+
+async function syncStripeSubscriptionRecord(stripeSub: any) {
+    if (!stripeSub?.id) return null;
+
+    const periodStart = stripeSub.current_period_start
+        ? new Date(stripeSub.current_period_start * 1000)
+        : null;
+    const periodEnd = stripeSub.current_period_end
+        ? new Date(stripeSub.current_period_end * 1000)
+        : null;
+    const cancelAtPeriodEnd = Boolean(stripeSub.cancel_at_period_end);
+    const status =
+        stripeSub.status === 'active' || stripeSub.status === 'trialing'
+            ? 'active'
+            : stripeSub.status === 'canceled' || stripeSub.status === 'unpaid'
+              ? 'canceled'
+              : String(stripeSub.status || 'active');
+
+    const { rows } = await query(
+        `UPDATE subscriptions
+         SET status = $2,
+             cancel_at_period_end = $3,
+             current_period_start = COALESCE($4, current_period_start),
+             current_period_end = COALESCE($5, current_period_end),
+             updated_at = NOW()
+         WHERE stripe_subscription_id = $1
+         RETURNING *`,
+        [stripeSub.id, status, cancelAtPeriodEnd, periodStart, periodEnd]
+    );
+    return rows[0] || null;
+}
+
 export {
     entitlementsDisabled,
     loadOrgEntitlements,
@@ -197,5 +306,7 @@ export {
     requireFeature,
     requireAllFeatures,
     upsertOrgSubscription,
-    allowDevSubscriptionWrites
+    allowDevSubscriptionWrites,
+    setOrgAutopay,
+    syncStripeSubscriptionRecord
 };

@@ -9,12 +9,17 @@ export type EntitlementsState = {
     features: FeatureKey[];
     subscriptionStatus: string | null;
     priceLabel: string | null;
+    currentPeriodStart: string | null;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+    autopayEnabled: boolean;
     entitlementsDisabled: boolean;
     loading: boolean;
     hasFeature: (key: FeatureKey) => boolean;
     hasAllFeatures: (keys: FeatureKey[]) => boolean;
     refresh: () => Promise<void>;
     simulatePlan: (planId: string) => Promise<void>;
+    setAutopay: (enabled: boolean) => Promise<void>;
 };
 
 const EntitlementsContext = createContext<EntitlementsState | null>(null);
@@ -25,36 +30,52 @@ export function EntitlementsProvider({ children }: { children: ReactNode }) {
     const [features, setFeatures] = useState<FeatureKey[]>([]);
     const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
     const [priceLabel, setPriceLabel] = useState<string | null>(null);
+    const [currentPeriodStart, setCurrentPeriodStart] = useState<string | null>(null);
+    const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null);
+    const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false);
+    const [autopayEnabled, setAutopayEnabled] = useState(true);
     const [entitlementsDisabled, setEntitlementsDisabled] = useState(false);
     const [loading, setLoading] = useState(true);
+
+    const applyEntitlements = (data: any) => {
+        setPlanId(data.planId ?? null);
+        setPlanName(data.planName ?? null);
+        setFeatures(Array.isArray(data.features) ? data.features : []);
+        setSubscriptionStatus(data.subscriptionStatus ?? null);
+        setPriceLabel(data.priceLabel ?? null);
+        setCurrentPeriodStart(data.currentPeriodStart ?? null);
+        setCurrentPeriodEnd(data.currentPeriodEnd ?? null);
+        setCancelAtPeriodEnd(Boolean(data.cancelAtPeriodEnd));
+        setAutopayEnabled(data.autopayEnabled !== false && !data.cancelAtPeriodEnd);
+        setEntitlementsDisabled(Boolean(data.entitlementsDisabled));
+    };
+
+    const clearEntitlements = () => {
+        setPlanId(null);
+        setPlanName(null);
+        setFeatures([]);
+        setSubscriptionStatus(null);
+        setPriceLabel(null);
+        setCurrentPeriodStart(null);
+        setCurrentPeriodEnd(null);
+        setCancelAtPeriodEnd(false);
+        setAutopayEnabled(true);
+        setEntitlementsDisabled(false);
+    };
 
     const refresh = useCallback(async () => {
         const token = getToken();
         if (!token) {
-            setPlanId(null);
-            setPlanName(null);
-            setFeatures([]);
-            setSubscriptionStatus(null);
-            setPriceLabel(null);
-            setEntitlementsDisabled(false);
+            clearEntitlements();
             setLoading(false);
             return;
         }
         setLoading(true);
         try {
             const data = await apiGet('/api/auth/entitlements');
-            setPlanId(data.planId ?? null);
-            setPlanName(data.planName ?? null);
-            setFeatures(Array.isArray(data.features) ? data.features : []);
-            setSubscriptionStatus(data.subscriptionStatus ?? null);
-            setPriceLabel(data.priceLabel ?? null);
-            setEntitlementsDisabled(Boolean(data.entitlementsDisabled));
+            applyEntitlements(data);
         } catch {
-            setPlanId(null);
-            setPlanName(null);
-            setFeatures([]);
-            setSubscriptionStatus(null);
-            setPriceLabel(null);
+            clearEntitlements();
         } finally {
             setLoading(false);
         }
@@ -62,6 +83,11 @@ export function EntitlementsProvider({ children }: { children: ReactNode }) {
 
     const simulatePlan = useCallback(async (nextPlanId: string) => {
         await apiPatch('/api/auth/dev/subscription', { planId: nextPlanId });
+        await refresh();
+    }, [refresh]);
+
+    const setAutopay = useCallback(async (enabled: boolean) => {
+        await apiPatch('/api/auth/subscription/autopay', { enabled });
         await refresh();
     }, [refresh]);
 
@@ -75,13 +101,33 @@ export function EntitlementsProvider({ children }: { children: ReactNode }) {
         features,
         subscriptionStatus,
         priceLabel,
+        currentPeriodStart,
+        currentPeriodEnd,
+        cancelAtPeriodEnd,
+        autopayEnabled,
         entitlementsDisabled,
         loading,
         hasFeature: (key) => entitlementsDisabled || features.includes(key),
         hasAllFeatures: (keys) => entitlementsDisabled || keys.every((k) => features.includes(k)),
         refresh,
-        simulatePlan
-    }), [planId, planName, features, subscriptionStatus, priceLabel, entitlementsDisabled, loading, refresh, simulatePlan]);
+        simulatePlan,
+        setAutopay
+    }), [
+        planId,
+        planName,
+        features,
+        subscriptionStatus,
+        priceLabel,
+        currentPeriodStart,
+        currentPeriodEnd,
+        cancelAtPeriodEnd,
+        autopayEnabled,
+        entitlementsDisabled,
+        loading,
+        refresh,
+        simulatePlan,
+        setAutopay
+    ]);
 
     return (
         <EntitlementsContext.Provider value={value}>

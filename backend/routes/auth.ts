@@ -9,12 +9,23 @@ import {
     loadOrgEntitlements,
     upsertOrgSubscription,
     entitlementsDisabled,
-    allowDevSubscriptionWrites
+    allowDevSubscriptionWrites,
+    setOrgAutopay
 } from '../middleware/entitlements';
 import { isDevClientLogin, ensureDevClientAccount } from '../middleware/devClientAuth';
 import { PLANS, getPlanById, formatPrice, FEATURE_LABELS, getFeaturesForPlan } from '../lib/planCatalog';
+import Stripe from 'stripe';
 
 const router = Router();
+
+function getStripeClient() {
+    if (!process.env.STRIPE_SECRET_KEY) return null;
+    try {
+        return new Stripe(process.env.STRIPE_SECRET_KEY);
+    } catch {
+        return null;
+    }
+}
 
 function frontendOrigin() {
     return (process.env.FRONTEND_URL || process.env.CLIENT_ORIGIN || 'http://localhost:5173').replace(/\/$/, '');
@@ -323,6 +334,25 @@ router.get('/entitlements', requireAuth, async (req: Request, res: Response) => 
     } catch (err: any) {
         console.error('Entitlements error:', err);
         res.status(500).json({ error: err.message || 'Could not load entitlements' });
+    }
+});
+
+router.patch('/subscription/autopay', requireAuth, async (req: Request, res: Response) => {
+    try {
+        const enabled = Boolean(req.body?.enabled);
+        const result = await setOrgAutopay((req as any).orgId, enabled, getStripeClient());
+        const entitlements = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
+        res.json({
+            success: true,
+            autopayEnabled: result.autopayEnabled,
+            cancelAtPeriodEnd: result.cancelAtPeriodEnd,
+            currentPeriodEnd: result.subscription?.current_period_end || entitlements.currentPeriodEnd,
+            subscriptionStatus: entitlements.subscriptionStatus,
+            features: entitlements.features
+        });
+    } catch (err: any) {
+        console.error('Autopay update error:', err);
+        res.status(400).json({ error: err.message || 'Could not update autopay' });
     }
 });
 
