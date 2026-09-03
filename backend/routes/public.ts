@@ -261,6 +261,9 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     totalCents: eventType.total_cents
                 },
                 paymentsMode: stripeClient ? 'stripe' : 'simulated',
+                stripePaymentsReady: Boolean(
+                    stripeClient && org.stripe_account_id && org.stripe_charges_enabled
+                ),
                 stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || null,
                 maxDaysAhead: org.max_days_ahead,
                 minNoticeHours: org.min_notice_hours
@@ -320,14 +323,25 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             if (!valid) return res.status(409).json({ error: 'That time slot is no longer available' });
 
             const manageToken = newManageToken();
+            const depositCents = Number(eventType.deposit_cents) || 0;
+            const allowSimulated =
+                String(process.env.ALLOW_SIMULATED_PAYMENTS || '').toLowerCase() === 'true' ||
+                String(process.env.ALLOW_SIMULATED_PAYMENTS || '') === '1';
 
-            if (stripeClient) {
-                if (!org.stripe_account_id || !org.stripe_charges_enabled) {
-                    return res.status(400).json({
-                        error: 'This business has not finished connecting Stripe. Deposits cannot be collected yet.',
-                        code: 'stripe_not_connected'
+            if (!stripeClient) {
+                if (depositCents > 0 && !allowSimulated) {
+                    return res.status(503).json({
+                        error:
+                            'Card payments are not configured on the server yet. The business cannot collect this deposit until Stripe is set up.',
+                        code: 'payments_not_configured'
                     });
                 }
+            } else if (depositCents > 0 && (!org.stripe_account_id || !org.stripe_charges_enabled)) {
+                return res.status(400).json({
+                    error:
+                        'This business has not finished connecting Stripe. Ask them to open Booking → Settings → Integrations and connect Stripe.',
+                    code: 'stripe_not_connected'
+                });
             }
 
             const pendingRes = await query(
@@ -338,15 +352,20 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             );
             const booking = pendingRes.rows[0];
 
-            if (!stripeClient) {
+            if (!stripeClient || depositCents <= 0) {
                 await query(
                     `UPDATE bookings SET status = 'confirmed', deposit_paid = TRUE, updated_at = NOW() WHERE id = $1`,
                     [booking.id]
                 );
-                return res.json({ mode: 'simulated', success: true, bookingId: booking.id, manageToken });
+                return res.json({
+                    mode: stripeClient ? 'free' : 'simulated',
+                    success: true,
+                    bookingId: booking.id,
+                    manageToken
+                });
             }
 
-            const fee = applicationFeeAmount(eventType.deposit_cents);
+            const fee = applicationFeeAmount(depositCents);
             const session = await stripeClient.checkout.sessions.create(
                 {
                     mode: 'payment',
@@ -355,7 +374,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                         quantity: 1,
                         price_data: {
                             currency: (org.currency || 'GBP').toLowerCase(),
-                            unit_amount: eventType.deposit_cents,
+                            unit_amount: depositCents,
                             product_data: {
                                 name: `Deposit — ${eventType.name}`,
                                 description: `${org.name} on ${new Date(startAt).toLocaleString('en-GB')}`

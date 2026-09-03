@@ -58,6 +58,7 @@ export default function CustomerBookingFlow({
     const [activeEventSlug, setActiveEventSlug] = useState(initialEventSlug || '');
     const [eventType, setEventType] = useState<EventType | null>(initialEventType || null);
     const [paymentsMode, setPaymentsMode] = useState<'stripe' | 'simulated'>('stripe');
+    const [stripePaymentsReady, setStripePaymentsReady] = useState(true);
     const [maxDaysAhead, setMaxDaysAhead] = useState(60);
     const [hasAvailabilityRules, setHasAvailabilityRules] = useState(false);
     const [step, setStep] = useState<BookingStep>('schedule');
@@ -89,23 +90,24 @@ export default function CustomerBookingFlow({
         const fromList = eventTypes.find((e) => e.slug === activeEventSlug);
         if (fromList) {
             setEventType(fromList);
-            return;
-        }
-        if (initialEventType?.slug === activeEventSlug) {
+        } else if (initialEventType?.slug === activeEventSlug) {
             setEventType(initialEventType);
-            return;
         }
+
         apiGet(`/api/public/${hostSlug}/${activeEventSlug}`)
             .then((data) => {
-                setEventType({
-                    slug: data.eventType.slug,
-                    name: data.eventType.name,
-                    description: data.eventType.description,
-                    durationMinutes: data.eventType.durationMinutes,
-                    depositCents: data.eventType.depositCents,
-                    totalCents: data.eventType.totalCents
-                });
+                if (!fromList && initialEventType?.slug !== activeEventSlug) {
+                    setEventType({
+                        slug: data.eventType.slug,
+                        name: data.eventType.name,
+                        description: data.eventType.description,
+                        durationMinutes: data.eventType.durationMinutes,
+                        depositCents: data.eventType.depositCents,
+                        totalCents: data.eventType.totalCents
+                    });
+                }
                 setPaymentsMode(data.paymentsMode === 'simulated' ? 'simulated' : 'stripe');
+                setStripePaymentsReady(Boolean(data.stripePaymentsReady));
                 if (data.maxDaysAhead) setMaxDaysAhead(data.maxDaysAhead);
             })
             .catch((e) => setError(e.message));
@@ -578,6 +580,16 @@ export default function CustomerBookingFlow({
                             </div>
 
                             {error && <p className="text-sm text-red-600">{error}</p>}
+                            {!error && paymentsMode === 'simulated' && eventType.depositCents > 0 && (
+                                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                                    Card payments are not configured on the server yet. Pay will not open Stripe until keys are deployed.
+                                </p>
+                            )}
+                            {!error && paymentsMode === 'stripe' && !stripePaymentsReady && eventType.depositCents > 0 && (
+                                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                                    This business has not connected Stripe yet, so deposits cannot be collected.
+                                </p>
+                            )}
 
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => { setStep('details'); setError(''); }} className="inline-flex items-center gap-1.5 px-4 py-3 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]">
@@ -585,7 +597,11 @@ export default function CustomerBookingFlow({
                                 </button>
                                 <button
                                     type="button"
-                                    disabled={submitting}
+                                    disabled={
+                                        submitting ||
+                                        (eventType.depositCents > 0 &&
+                                            (paymentsMode === 'simulated' || !stripePaymentsReady))
+                                    }
                                     onClick={submit}
                                     className="flex-1 py-3.5 rounded-xl bg-[#F59E0B] text-white font-bold text-sm disabled:opacity-60 flex items-center justify-center gap-2"
                                 >
@@ -594,7 +610,11 @@ export default function CustomerBookingFlow({
                                 </button>
                             </div>
                             <p className="text-[11px] text-[#64748B] text-center">
-                                {paymentsMode === 'stripe' ? 'Secure payment via Stripe' : 'Test mode'}
+                                {paymentsMode === 'stripe' && stripePaymentsReady
+                                    ? 'You will be redirected to Stripe Checkout to pay securely'
+                                    : paymentsMode === 'stripe'
+                                      ? 'Waiting for business Stripe connection'
+                                      : 'Stripe is not configured on the server'}
                                 {isEmergency && ' · Emergency callout'}
                             </p>
                         </div>

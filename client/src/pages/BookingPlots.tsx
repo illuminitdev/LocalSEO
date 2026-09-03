@@ -290,6 +290,23 @@ export default function BookingPlots() {
 
                 {panel === 'board' && (
                 <aside className="space-y-4">
+                        {(!data?.stripeConfigured || !data?.stripeConnect?.ready) && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-2">
+                                <h3 className="text-xs font-bold uppercase text-amber-800">Stripe payouts</h3>
+                                <p className="text-xs text-amber-900">
+                                    {!data?.stripeConfigured
+                                        ? 'Card payments are not configured on the server yet. After Stripe keys are set and deployed, connect your account here.'
+                                        : 'Connect your Stripe account so customer deposits pay into your bank. Platform takes a small fee.'}
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => openSettings('integrations')}
+                                    className="w-full px-3 py-2 rounded-xl bg-[#0F172A] text-white text-xs font-bold"
+                                >
+                                    {data?.stripeConfigured ? 'Connect Stripe in Settings' : 'Open Integrations'}
+                                </button>
+                            </div>
+                        )}
                         <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4">
                             <div className="flex items-center gap-2 mb-2"><QrCode className="w-4 h-4 text-[#F59E0B]" /><h3 className="text-xs font-bold uppercase text-[#64748B]">Share</h3></div>
                             {qrUrl && <img src={qrUrl} alt="QR" className="w-full max-w-[180px] mx-auto rounded-lg border border-[#E2E8F0]" />}
