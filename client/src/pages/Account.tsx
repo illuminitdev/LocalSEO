@@ -99,13 +99,45 @@ export default function Account() {
         priceLabel,
         features,
         subscriptionStatus,
+        currentPeriodEnd,
+        autopayEnabled,
         simulatePlan,
+        setAutopay,
         entitlementsDisabled,
         hasFeature
     } = useEntitlements();
     const [simBusy, setSimBusy] = useState(false);
+    const [autopayBusy, setAutopayBusy] = useState(false);
+    const [autopayMsg, setAutopayMsg] = useState('');
+    const [autopayErr, setAutopayErr] = useState('');
     const showSimulate = entitlementsDisabled;
     const hasLocalPresence = hasFeature('local_presence');
+
+    const periodLabel = currentPeriodEnd
+        ? new Date(currentPeriodEnd).toLocaleDateString('en-GB', {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric'
+          })
+        : null;
+
+    const handleAutopay = async (enabled: boolean) => {
+        setAutopayBusy(true);
+        setAutopayMsg('');
+        setAutopayErr('');
+        try {
+            await setAutopay(enabled);
+            setAutopayMsg(
+                enabled
+                    ? 'Autopay is on. Your card will be charged each month and services stay active.'
+                    : 'Autopay is off. Services stay until the end of this paid month, then stop.'
+            );
+        } catch (err: any) {
+            setAutopayErr(err.message || 'Could not update autopay');
+        } finally {
+            setAutopayBusy(false);
+        }
+    };
 
     const hasOrgDetails = Boolean(
         org.name?.trim() || org.hostName?.trim() || org.phone?.trim() || org.tradeType?.trim()
@@ -285,6 +317,11 @@ export default function Account() {
                                 <div>
                                     <p className="text-xl font-black text-[#0F172A]">{planName}</p>
                                     {priceLabel && <p className="text-sm text-[#64748B] mt-0.5">{priceLabel}</p>}
+                                    {periodLabel && (
+                                        <p className="text-xs text-[#64748B] mt-1">
+                                            {autopayEnabled ? 'Next renewal' : 'Access until'}: {periodLabel}
+                                        </p>
+                                    )}
                                 </div>
                                 {subscriptionStatus && (
                                     <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 capitalize">
@@ -310,6 +347,33 @@ export default function Account() {
                                     Website plan — local SEO and booking tools are not included.
                                 </p>
                             )}
+
+                            {subscriptionStatus === 'active' && (
+                                <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-bold text-[#0F172A]">Autopay</p>
+                                        <p className="text-xs text-[#64748B] mt-0.5">
+                                            {autopayEnabled
+                                                ? 'On — we charge monthly and keep your services.'
+                                                : 'Off — no more charges; services end on the date above.'}
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        disabled={autopayBusy}
+                                        onClick={() => handleAutopay(!autopayEnabled)}
+                                        className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-[#0F172A] text-white text-sm font-bold disabled:opacity-50"
+                                    >
+                                        {autopayBusy
+                                            ? 'Updating…'
+                                            : autopayEnabled
+                                              ? 'Turn autopay off'
+                                              : 'Turn autopay on'}
+                                    </button>
+                                </div>
+                            )}
+                            {autopayMsg && <p className="text-sm text-emerald-700">{autopayMsg}</p>}
+                            {autopayErr && <p className="text-sm text-red-700">{autopayErr}</p>}
                         </div>
                     ) : (
                         <p className="text-sm text-[#64748B]">

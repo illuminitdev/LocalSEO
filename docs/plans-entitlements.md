@@ -32,8 +32,28 @@ Catalog kept in sync:
 
 1. After login, `EntitlementsContext` calls `GET /api/auth/entitlements`.
 2. Backend joins active `subscriptions` to `plan_features` / `plans` for the user’s org or customer email.
-3. `FeatureGate` and Layout nav filter on the returned feature list.
-4. Server middleware `requireFeature` / `requireAllFeatures` (`backend/middleware/entitlements.ts`) enforces the same on `/api/*`.
+3. A subscription only grants features if `status = 'active'` **and** `current_period_end` is null or in the future. Past-due rows are marked `canceled`.
+4. `FeatureGate` and Layout nav filter on the returned feature list.
+5. Server middleware `requireFeature` / `requireAllFeatures` (`backend/middleware/entitlements.ts`) enforces the same on `/api/*`.
+
+## Autopay (monthly renew)
+
+| Flag | Meaning |
+|------|---------|
+| `subscriptions.cancel_at_period_end = false` | Autopay **on** — Stripe Subscription keeps charging; portal keeps services |
+| `cancel_at_period_end = true` | Autopay **off** — access until `current_period_end`, then cut |
+
+Customer toggle: `PATCH /api/auth/subscription/autopay` `{ enabled: boolean }` (also updates Stripe when `stripe_subscription_id` exists).
+
+Admin: `PATCH /api/admin/organizations/:orgId/subscription` with `autopayEnabled` and/or `planId`.
+
+Stripe webhooks on LocalPulse (`POST /api/webhooks/stripe`):
+
+- `invoice.paid` (with subscription) → refresh period dates / keep active
+- `customer.subscription.updated` → sync `cancel_at_period_end` + periods
+- `customer.subscription.deleted` → mark canceled
+
+**ZappSites Payment must** create a real **monthly Stripe Subscription** at checkout, write `stripe_subscription_id` on `subscriptions` / `portal_invites`, and ensure renewal events reach this webhook (or update the shared DB the same way).
 
 ## Route → feature map
 
