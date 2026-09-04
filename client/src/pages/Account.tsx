@@ -14,6 +14,7 @@ import {
 import { apiGet, apiPatch } from '../lib/utils';
 import { clearToken, setMustChangePassword } from '../lib/auth';
 import GroundingModal from '../components/GroundingModal';
+import PlacesMap from '../components/PlacesMap';
 import { useEntitlements } from '../context/EntitlementsContext';
 import { FEATURE_LABELS, PLANS, type FeatureKey } from '../lib/planCatalog';
 
@@ -648,18 +649,25 @@ export default function Account() {
                         ) : (
                             <>
                                 {business?.connected ? (
-                                    <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
-                                        <p className="text-sm font-bold text-[#0F172A]">{business.name || 'Connected location'}</p>
-                                        {business.address && (
-                                            <p className="mt-1 text-sm text-[#64748B]">{business.address}</p>
-                                        )}
-                                        {(business.rating || business.category) && (
-                                            <p className="mt-2 text-xs text-[#94A3B8]">
-                                                {[business.category, business.rating ? `${business.rating}★` : null]
-                                                    .filter(Boolean)
-                                                    .join(' · ')}
-                                            </p>
-                                        )}
+                                    <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 space-y-3">
+                                        <div>
+                                            <p className="text-sm font-bold text-[#0F172A]">{business.name || 'Connected location'}</p>
+                                            {business.address && (
+                                                <p className="mt-1 text-sm text-[#64748B]">{business.address}</p>
+                                            )}
+                                            {(business.rating || business.category) && (
+                                                <p className="mt-2 text-xs text-[#94A3B8]">
+                                                    {[business.category, business.rating ? `${business.rating}★` : null]
+                                                        .filter(Boolean)
+                                                        .join(' · ')}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <PlacesMap
+                                            lat={business.lat}
+                                            lng={business.lng}
+                                            title={business.name}
+                                        />
                                     </div>
                                 ) : (
                                     <div className="rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-5 py-6 text-center">

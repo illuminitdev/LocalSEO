@@ -1,6 +1,7 @@
 ﻿import { useState } from 'react';
 import { X, Search, MapPin, Star, Building, CheckCircle2 } from 'lucide-react';
 import { apiPost } from '../lib/utils';
+import PlacesMap from './PlacesMap';
 
 interface GroundingModalProps {
     isOpen: boolean;
@@ -126,6 +127,13 @@ export default function GroundingModal({ isOpen, onClose }: GroundingModalProps)
                                     ))}
                                 </div>
                             )}
+
+                            <PlacesMap
+                                lat={results.lat}
+                                lng={results.lng}
+                                title={results.name}
+                                className="mb-4"
+                            />
 
                             <button
                                 onClick={handleConnect}

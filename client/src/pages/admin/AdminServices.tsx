@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Layers } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import { adminGet } from '../../lib/adminApi';
 import type { FeatureKey } from '../../lib/planCatalog';
+import { cn } from '../../lib/utils';
 
 type ServicesPayload = {
     stage?: string;
@@ -29,75 +30,103 @@ export default function AdminServices() {
     }, []);
 
     if (error) {
-        return <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-3">{error}</p>;
+        return <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{error}</p>;
     }
     if (!data) {
-        return <p className="text-sm text-[#64748B]">Loading services…</p>;
+        return <p className="text-sm text-[#64748B]">Loading plan guide…</p>;
     }
 
     return (
-        <div className="space-y-6">
-            <div>
-                <h1 className="text-2xl font-bold text-[#0F172A]">Services catalog</h1>
-                <p className="text-sm text-[#64748B] mt-1">
-                    Portal modules gated by ZappSites plan features. Customers only see what their paid plan includes.
-                    {data.stage ? ` (${data.stage})` : ''}
-                </p>
+        <div className="space-y-6 max-w-6xl">
+            <div className="rounded-2xl border border-[#FED7AA] bg-[#FFFBEB] px-4 py-3 text-sm text-amber-950">
+                Customers only see tools that are <strong>On</strong> for their plan. Change a person’s plan under{' '}
+                <strong>Customers</strong>.
+                {data.stage ? ` Viewing ${data.stage}.` : ''}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {data.services.map((svc) => (
-                    <div key={svc.key} className="bg-white border border-[#E2E8F0] rounded-2xl p-5">
-                        <div className="flex items-start gap-3">
-                            <div className="w-9 h-9 rounded-lg bg-[#0F172A] text-[#F59E0B] flex items-center justify-center shrink-0">
-                                <Layers className="w-4 h-4" />
-                            </div>
-                            <div className="min-w-0">
-                                <p className="text-sm font-bold text-[#0F172A]">{svc.label}</p>
-                                <p className="text-[10px] font-mono text-[#94A3B8] mt-0.5">{svc.key}</p>
-                                <p className="text-xs text-[#64748B] mt-3 mb-1.5">Included in</p>
+            <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-[#E2E8F0]">
+                    <h2 className="font-bold text-[#0F172A]">Plan × tool matrix</h2>
+                    <p className="text-xs text-[#64748B] mt-1">Green check = included. Dash = not included.</p>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm min-w-[720px]">
+                        <thead>
+                            <tr className="bg-[#F8FAFC] text-left">
+                                <th className="px-4 py-3 font-bold text-xs uppercase tracking-wide text-[#64748B] sticky left-0 bg-[#F8FAFC]">
+                                    Plan
+                                </th>
+                                <th className="px-3 py-3 font-bold text-xs uppercase tracking-wide text-[#64748B]">Price</th>
+                                {data.services.map((svc) => (
+                                    <th
+                                        key={svc.key}
+                                        className="px-3 py-3 font-bold text-[11px] text-[#64748B] text-center max-w-[7rem]"
+                                    >
+                                        {svc.label.replace(/\s*\(.*\)\s*$/, '')}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {data.plans.map((plan) => {
+                                const keys = new Set(plan.features.map((f) => f.key));
+                                return (
+                                    <tr key={plan.id} className="border-t border-[#F1F5F9]">
+                                        <td className="px-4 py-3.5 font-semibold text-[#0F172A] sticky left-0 bg-white">
+                                            {plan.name}
+                                        </td>
+                                        <td className="px-3 py-3.5 text-[#64748B] whitespace-nowrap">{plan.priceLabel}</td>
+                                        {data.services.map((svc) => {
+                                            const on = keys.has(svc.key);
+                                            return (
+                                                <td key={svc.key} className="px-3 py-3.5 text-center">
+                                                    <span
+                                                        className={cn(
+                                                            'inline-flex items-center justify-center w-7 h-7 rounded-lg',
+                                                            on
+                                                                ? 'bg-emerald-50 text-emerald-700'
+                                                                : 'bg-[#F8FAFC] text-[#CBD5E1]'
+                                                        )}
+                                                        title={on ? 'Included' : 'Not included'}
+                                                    >
+                                                        {on ? <Check className="w-4 h-4" /> : <X className="w-3.5 h-3.5" />}
+                                                    </span>
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div>
+                <h2 className="font-bold text-[#0F172A] mb-1">Tool details</h2>
+                <p className="text-xs text-[#64748B] mb-4">Which plans include each portal module</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {data.services.map((svc) => (
+                        <div key={svc.key} className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-sm">
+                            <p className="text-sm font-bold text-[#0F172A]">{svc.label}</p>
+                            <p className="text-[10px] font-mono text-[#94A3B8] mt-0.5">{svc.key}</p>
+                            <div className="mt-3 flex flex-wrap gap-1.5">
                                 {svc.plans.length ? (
-                                    <ul className="space-y-1">
-                                        {svc.plans.map((p) => (
-                                            <li key={p.id} className="text-sm text-[#334155] flex justify-between gap-2">
-                                                <span>{p.name}</span>
-                                                <span className="text-[#94A3B8] shrink-0">{p.priceLabel}</span>
-                                            </li>
-                                        ))}
-                                    </ul>
+                                    svc.plans.map((p) => (
+                                        <span
+                                            key={p.id}
+                                            className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-900 px-2 py-1 text-[11px] font-semibold"
+                                        >
+                                            {p.name}
+                                        </span>
+                                    ))
                                 ) : (
-                                    <p className="text-xs text-[#94A3B8]">Not included in any plan</p>
+                                    <span className="text-xs text-[#94A3B8]">Not on any plan</span>
                                 )}
                             </div>
                         </div>
-                    </div>
-                ))}
-            </div>
-
-            <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 overflow-x-auto">
-                <h2 className="font-bold text-[#0F172A] mb-4">Plans → services</h2>
-                <table className="w-full text-sm">
-                    <thead>
-                        <tr className="text-left text-[#64748B] border-b border-[#E2E8F0]">
-                            <th className="pb-2 pr-4 font-semibold">Plan</th>
-                            <th className="pb-2 pr-4 font-semibold">Price</th>
-                            <th className="pb-2 font-semibold">Portal services</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {data.plans.map((plan) => (
-                            <tr key={plan.id} className="border-b border-[#F8FAFC]">
-                                <td className="py-3 pr-4 font-medium">{plan.name}</td>
-                                <td className="py-3 pr-4 text-[#64748B]">{plan.priceLabel}</td>
-                                <td className="py-3 text-[#64748B]">
-                                    {plan.features.length
-                                        ? plan.features.map((f) => f.label).join(' · ')
-                                        : 'Website only — no Local SEO modules'}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                    ))}
+                </div>
             </div>
         </div>
     );

@@ -85,16 +85,28 @@ For Connect deposits, enable the webhook to receive **Connected account** events
 
 Direct charges on the business’s connected Express account + platform `application_fee_amount`.
 
+**Platform commission:** `STRIPE_PLATFORM_FEE_BPS` default **500 = 5%** of the deposit (QR / share / public book). Example: £50 deposit → **£2.50** to platform, £47.50 to host (before Stripe card fees).
+
+### Stripe Dashboard steps (test mode)
+
 1. Apply migration `009_stripe_connect.sql` (auto via `migrate()` / `npm run migrate` in backend).
-2. Dashboard (Test mode): enable Connect; set webhook events including `account.updated` and connected-account checkout events.
-3. Env: `STRIPE_SECRET_KEY` (test), `STRIPE_WEBHOOK_SECRET`, optional `STRIPE_PLATFORM_FEE_BPS` (default 500 = 5%).
-4. Host → Integrations → **Connect Stripe** → finish Stripe-hosted onboarding until charges enabled.
-5. Customer books → Checkout on `acct_…` → deposit to business; fee to platform.
-6. Verify in Stripe Test Dashboard: payment on connected account; application fee on platform.
+2. Stripe Dashboard → **Test mode ON** → enable **Connect** (Express).
+3. Webhooks → Add endpoint:
+   - Dev: `https://ud9zl0ww6d.execute-api.us-east-1.amazonaws.com/api/webhooks/stripe`
+   - Prod: `https://zw8pq7vyi2.execute-api.us-east-1.amazonaws.com/api/webhooks/stripe`
+   - Events: `checkout.session.completed`, `account.updated`, `invoice.paid`
+   - Enable **listening to events on Connected accounts**.
+4. Copy signing secret → `STRIPE_WEBHOOK_SECRET` in `backend/.env`; redeploy API.
+5. Keep existing **test** `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY`. Do **not** paste live keys from client Word docs — hosts onboard via Connect.
+6. Host → **Booking → Settings → Integrations → Connect Stripe** → finish onboarding until charges enabled.
+7. Customer books via QR/share → Checkout on `acct_…` → deposit to business; **5%** application fee to platform.
+8. Verify in Stripe Test Dashboard: payment on connected account; application fee on platform balance.
 
 Without Connect ready, `POST .../book` returns `stripe_not_connected` (does not charge the platform account).
 
 Simulated mode (no `STRIPE_SECRET_KEY`) still auto-confirms bookings.
+
+Live later: same code, swap to live keys + live webhook; businesses re-onboard under Live Connect.
 
 ## Supporting libs
 
@@ -111,8 +123,8 @@ Simulated mode (no `STRIPE_SECRET_KEY`) still auto-confirms bookings.
 | API | Env vars | Required? |
 |-----|----------|-----------|
 | Postgres | DB_* / `DATABASE_URL` | Yes |
-| Stripe | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, optional `STRIPE_PLATFORM_FEE_BPS`, Connect return URLs | For paid bookings / invoices |
-| Google OAuth + Calendar | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Optional calendar sync |
+| Stripe | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, optional `STRIPE_PLATFORM_FEE_BPS` (default 5%), Connect return URLs | For paid bookings / invoices |
+| Google OAuth + Calendar | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Optional calendar sync — add redirect URIs in GCP (local + dev/prod API callback paths) |
 | Frontend / API URLs | `FRONTEND_URL`, `CLIENT_ORIGIN`, `API_BASE_URL` | Emails, OAuth redirect, CORS |
 
 ## DB (LocalPulse migrations)
