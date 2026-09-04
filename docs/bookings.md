@@ -108,6 +108,19 @@ Simulated mode (no `STRIPE_SECRET_KEY`) still auto-confirms bookings.
 
 Live later: same code, swap to live keys + live webhook; businesses re-onboard under Live Connect.
 
+### Cancel & refund (money split)
+
+Host **Cancel & refund** or customer manage-link cancel refunds the **Connect direct charge** on the host’s Express account (must pass `stripeAccount`).
+
+| Who | On successful deposit (£45 example, 5% fee) | After cancel + refund |
+|-----|---------------------------------------------|------------------------|
+| **Customer** | Pays £45 | Gets **£45** back on card |
+| **Platform (you)** | Keeps **£2.25** application fee | **Still keeps £2.25** (`refund_application_fee: false`) |
+| **Host** | ~£45 − £2.25 − Stripe card fee | Balance reduced by full refund; fee already sent to platform is not returned to host |
+| **Stripe** | Card processing fee | Usually **keeps** processing fee (Stripe policy) |
+
+Refunds appear in Stripe **Test mode** under the **connected account** payment (and platform Payments when viewing Connect charges). If refund ran without `stripeAccount`, it failed silently / never showed — that is fixed in `refundBookingDeposit`.
+
 ## Supporting libs
 
 - `backend/lib/availability.ts` — slot math

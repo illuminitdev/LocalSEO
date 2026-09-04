@@ -360,11 +360,17 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 return res.json({ booking, alreadyCancelled: true });
             }
 
+            const { rows: orgRows } = await query(
+                'SELECT name, stripe_account_id, currency FROM organizations WHERE id = $1',
+                [(req as any).orgId]
+            );
+            const org = orgRows[0];
+
             let refund: any = null;
             let refundError: any = null;
             if (stripeClient && booking.deposit_paid) {
                 try {
-                    refund = await refundBookingDeposit(stripeClient, booking);
+                    refund = await refundBookingDeposit(stripeClient, booking, org?.stripe_account_id);
                 } catch (err: any) {
                     console.error('Refund error:', err.message);
                     refundError = err.message;
@@ -385,11 +391,10 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 await deleteCalendarEvent(userId, booking.google_event_id);
             }
 
-            const { rows: orgRows } = await query('SELECT name FROM organizations WHERE id = $1', [(req as any).orgId]);
             await sendCancellationEmail({
                 to: booking.customer_email,
                 customerName: booking.customer_name,
-                businessName: orgRows[0]?.name || 'Business',
+                businessName: org?.name || 'Business',
                 startAt: new Date(booking.start_at).toLocaleString('en-GB')
             });
 

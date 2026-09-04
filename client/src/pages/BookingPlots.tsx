@@ -27,6 +27,7 @@ export default function BookingPlots() {
     const panel = searchParams.get('panel') === 'settings' ? 'settings' : 'board';
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [info, setInfo] = useState('');
     const [data, setData] = useState<any>(null);
     const [linked, setLinked] = useState(false);
     const [linkedBusiness, setLinkedBusiness] = useState<any>(null);
@@ -129,15 +130,20 @@ export default function BookingPlots() {
     };
 
     const cancelBooking = async (id: string) => {
-        if (!window.confirm('Cancel this booking? If the customer paid a deposit, it will be refunded to their card.')) return;
+        if (!window.confirm('Cancel this booking? If the customer paid a deposit, it will be refunded to their card. Your platform commission is kept; Stripe card fees are usually not returned.')) return;
         setBusy(id);
         setError('');
+        setInfo('');
         try {
             const result = await apiPost(`/api/host/bookings/${id}/cancel`, {});
             if (result.refundError) {
-                setError(`Booking cancelled, but refund failed: ${result.refundError}. Refund manually in Stripe.`);
+                setError(`Booking cancelled, but refund failed: ${result.refundError}. Refund manually in Stripe (connected account).`);
             } else if (result.refund && !result.refund.skipped) {
-                setError('');
+                const toCustomer = ((result.refund.refundToCustomerCents || result.refund.amountCents || 0) / 100).toFixed(2);
+                const feeKept = ((result.refund.platformFeeKeptCents || 0) / 100).toFixed(2);
+                setInfo(
+                    `Refund sent to customer (£${toCustomer}). Platform keeps £${feeKept} commission. Check Stripe Test → Payments (connected account) for the refund.`
+                );
             }
             await load();
         } catch (e: any) {
@@ -196,6 +202,7 @@ export default function BookingPlots() {
             </div>
 
             {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
+            {info && <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2">{info}</p>}
 
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-4 items-start">
                 <div className="bg-white rounded-2xl border border-[#E2E8F0] overflow-hidden">
