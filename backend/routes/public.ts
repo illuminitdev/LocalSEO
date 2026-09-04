@@ -9,6 +9,7 @@ import {
 } from '../lib/bookingEmail';
 import { buildIcs } from '../lib/ics';
 import { confirmBookingPayment } from '../lib/confirmBooking';
+import { refundBookingDeposit } from '../lib/invoices';
 import {
     applicationFeeAmount,
     stripeAccountOpts
@@ -130,21 +131,41 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const { rows } = await query('SELECT * FROM bookings WHERE manage_token = $1', [req.params.token]);
             if (!rows.length) return res.status(404).json({ error: 'Booking not found' });
             const booking = rows[0];
-            if (booking.status === 'cancelled') return res.json({ booking });
+            if (booking.status === 'cancelled') return res.json({ booking, alreadyCancelled: true });
 
-            await query(`UPDATE bookings SET status = 'cancelled', updated_at = NOW() WHERE id = $1`, [booking.id]);
+            const { rows: orgRows } = await query(
+                'SELECT name, stripe_account_id FROM organizations WHERE id = $1',
+                [booking.org_id]
+            );
+            const org = orgRows[0];
+
+            let refund: any = null;
+            let refundError: any = null;
+            if (stripeClient && booking.deposit_paid) {
+                try {
+                    refund = await refundBookingDeposit(stripeClient, booking, org?.stripe_account_id);
+                } catch (err: any) {
+                    console.error('Public manage refund error:', err.message);
+                    refundError = err.message;
+                }
+            }
+
+            await query(
+                `UPDATE bookings SET status = 'cancelled', deposit_paid = FALSE, updated_at = NOW() WHERE id = $1`,
+                [booking.id]
+            );
             const userId = await getHostUserId(booking.org_id);
             if (userId && booking.google_event_id) await deleteCalendarEvent(userId, booking.google_event_id);
 
-            const { rows: orgRows } = await query('SELECT name FROM organizations WHERE id = $1', [booking.org_id]);
             await sendCancellationEmail({
                 to: booking.customer_email,
                 customerName: booking.customer_name,
-                businessName: orgRows[0]?.name || 'Business',
+                businessName: org?.name || 'Business',
                 startAt: new Date(booking.start_at).toLocaleString('en-GB')
             });
 
-            res.json({ success: true });
+            const updated = (await query('SELECT * FROM bookings WHERE id = $1', [booking.id])).rows[0];
+            res.json({ success: true, booking: updated, refund, refundError });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }

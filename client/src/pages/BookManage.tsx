@@ -19,12 +19,24 @@ export default function BookManage() {
     }, [token]);
 
     const cancel = async () => {
-        if (!token || !confirm('Cancel this booking?')) return;
+        if (!token || !confirm('Cancel this booking? If you paid a deposit, it will be refunded to your card.')) return;
         setBusy(true);
+        setError('');
         try {
-            await apiPost(`/api/public/manage/${token}/cancel`, {});
-            setMessage('Booking cancelled.');
-            setBooking((b: any) => ({ ...b, status: 'cancelled' }));
+            const result = await apiPost(`/api/public/manage/${token}/cancel`, {});
+            if (result.booking) {
+                setBooking(result.booking);
+            } else {
+                setBooking((b: any) => ({ ...b, status: 'cancelled' }));
+            }
+            if (result.refundError) {
+                setMessage('Booking cancelled, but the card refund failed. Contact the business.');
+            } else if (result.refund && !result.refund.skipped) {
+                const toCustomer = ((result.refund.refundToCustomerCents || result.refund.amountCents || 0) / 100).toFixed(2);
+                setMessage(`Booking cancelled. Refund of £${toCustomer} is on the way to your card.`);
+            } else {
+                setMessage('Booking cancelled.');
+            }
         } catch (e: any) {
             setError(e.message);
         } finally {

@@ -1,3 +1,5 @@
+import { applicationFeeAmount, stripeAccountOpts } from './stripeConnect';
+
 function formatMoney(cents: number, currency = 'GBP') {
     const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
     return `${symbol}${(cents / 100).toFixed(2)}`;
@@ -112,25 +114,66 @@ async function createBalanceInvoice(stripeClient: any, booking: any, eventType: 
     };
 }
 
-async function refundBookingDeposit(stripeClient: any, booking: any) {
+/**
+ * Refund a Connect direct-charge deposit.
+ * Must use the connected account id — charges live on the host Express account, not the platform.
+ * Platform keeps application fee (refund_application_fee: false).
+ */
+async function refundBookingDeposit(
+    stripeClient: any,
+    booking: any,
+    stripeAccountId?: string | null
+) {
     if (!booking.deposit_paid) {
         return { skipped: true, reason: 'No deposit was paid' };
     }
+    if (!stripeAccountId) {
+        throw new Error(
+            'Host Stripe Connect account missing — cannot refund Connect deposit. Open Integrations and connect Stripe.'
+        );
+    }
+
+    const accountOpts = stripeAccountOpts(stripeAccountId);
+    const depositCents = Number(booking.deposit_cents) || 0;
+    const platformFeeCents = applicationFeeAmount(depositCents);
 
     let paymentIntentId = booking.stripe_payment_intent_id;
     if (!paymentIntentId && booking.stripe_session_id) {
-        const session = await stripeClient.checkout.sessions.retrieve(booking.stripe_session_id);
-        paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id;
+        const session = await stripeClient.checkout.sessions.retrieve(
+            booking.stripe_session_id,
+            { expand: ['payment_intent'] },
+            accountOpts
+        );
+        paymentIntentId =
+            typeof session.payment_intent === 'string'
+                ? session.payment_intent
+                : session.payment_intent?.id;
     }
     if (!paymentIntentId) {
         return { skipped: true, reason: 'No Stripe payment found to refund' };
     }
 
-    const refund = await stripeClient.refunds.create({ payment_intent: paymentIntentId });
+    // Direct charge refund on connected account. Do NOT refund application fee — platform keeps commission.
+    const refund = await stripeClient.refunds.create(
+        {
+            payment_intent: paymentIntentId,
+            refund_application_fee: false,
+            reason: 'requested_by_customer'
+        },
+        accountOpts
+    );
+
     return {
         refundId: refund.id,
         amountCents: refund.amount,
-        status: refund.status
+        status: refund.status,
+        depositCents,
+        refundToCustomerCents: refund.amount,
+        platformFeeKeptCents: platformFeeCents,
+        // Host originally received deposit − fee − Stripe card fee; full deposit leaves their balance on refund.
+        hostNetAfterRefundNote:
+            'Host Express balance is reduced by the refund. Platform keeps the application fee. Stripe card fees are usually not returned.',
+        currency: (refund.currency || 'gbp').toUpperCase()
     };
 }
 
