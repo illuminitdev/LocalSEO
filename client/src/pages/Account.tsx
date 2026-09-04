@@ -191,6 +191,14 @@ export default function Account() {
         loadAccount();
     }, [hasLocalPresence]);
 
+    useEffect(() => {
+        if (window.location.hash !== '#password') return;
+        const t = window.setTimeout(() => {
+            document.getElementById('password')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+        return () => window.clearTimeout(t);
+    }, []);
+
     const saveProfile = async (e: FormEvent) => {
         e.preventDefault();
         setProfileBusy(true);
@@ -298,7 +306,7 @@ export default function Account() {
 
             {mustChangePassword && (
                 <p className="mb-6 text-sm text-amber-900 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
-                    Please change your temporary password before continuing.
+                    Please change your temporary password when you can — use the Password section below.
                 </p>
             )}
 
