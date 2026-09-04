@@ -39,10 +39,13 @@ Implementation: `backend/server.ts` + `backend/lib/googlePlaces.ts`.
 
 | API | Env | Role |
 |-----|-----|------|
-| **Google Places API** (New preferred) | `GOOGLE_PLACES_API_KEY` (or `GOOGLE_MAPS_API_KEY`) | Real listing search + details |
-| **Google Gemini** | `GEMINI_API_KEY` | Audit text; fallback search if Places fails / missing |
+| **Google Places API** (New preferred) | `GOOGLE_PLACES_API_KEY` (or `GOOGLE_MAPS_API_KEY`) | Real listing search + details (server) |
+| **Google Gemini** | `GEMINI_API_KEY` (dev) / `GEMINI_API_KEY_PROD` (paid, prod deploy only) | Audit text; fallback search if Places fails / missing |
+| **Maps JavaScript API** (optional) | `VITE_GOOGLE_MAPS_JS_KEY` | Browser map on Account / search results — hidden if unset |
 
-Enable **Places API** on the Google Cloud project for the key. Without Places, search falls back to Gemini with Google Search grounding when Gemini is configured.
+Enable **Places API** on the Google Cloud project for the server key. Without Places, search falls back to Gemini with Google Search grounding when Gemini is configured.
+
+Maps JS is a **separate browser key** (HTTP referrer restricted). Do not put the Places server key in `VITE_*`.
 
 ## How it connects
 

@@ -94,6 +94,40 @@ export class LocalSeoApiStack extends cdk.Stack {
       removalPolicy: stage === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
     });
 
+    // Stage-locked API bases (do not reuse localhost / wrong-stage API_BASE_URL from .env)
+    const apiBaseUrl =
+      (stage === 'prod'
+        ? process.env.API_BASE_URL_PROD
+        : process.env.API_BASE_URL_DEV) ||
+      (stage === 'prod'
+        ? 'https://zw8pq7vyi2.execute-api.us-east-1.amazonaws.com'
+        : 'https://ud9zl0ww6d.execute-api.us-east-1.amazonaws.com');
+
+    // Paid Gemini → prod only (GEMINI_API_KEY_PROD). Dev may use a separate free/test GEMINI_API_KEY.
+    const geminiKey =
+      stage === 'prod'
+        ? process.env.GEMINI_API_KEY_PROD || ''
+        : process.env.GEMINI_API_KEY || '';
+
+    // Stripe: test keys (STRIPE_*) → LocalSeoApi-dev only; live (*_PROD) → LocalSeoApi-prod only
+    const stripeSecretKey =
+      stage === 'prod'
+        ? process.env.STRIPE_SECRET_KEY_PROD || ''
+        : process.env.STRIPE_SECRET_KEY || '';
+    const stripePublishableKey =
+      stage === 'prod'
+        ? process.env.STRIPE_PUBLISHABLE_KEY_PROD || ''
+        : process.env.STRIPE_PUBLISHABLE_KEY || '';
+    const stripeWebhookSecret =
+      stage === 'prod'
+        ? process.env.STRIPE_WEBHOOK_SECRET_PROD || ''
+        : process.env.STRIPE_WEBHOOK_SECRET || '';
+
+    // Never use localhost GOOGLE_REDIRECT_URI from .env on Lambda
+    const googleRedirectUri =
+      process.env.GOOGLE_REDIRECT_URI_DEPLOY ||
+      `${apiBaseUrl.replace(/\/$/, '')}/api/integrations/google/callback`;
+
     const fn = new lambda.Function(this, 'ApiFn', {
       functionName: `localseo-api-${stage}`,
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -120,20 +154,15 @@ export class LocalSeoApiStack extends cdk.Stack {
         JWT_SECRET: jwtSecret.secretValue.unsafeUnwrap(),
         CLIENT_ORIGIN: cfg.clientOrigin,
         FRONTEND_URL: cfg.clientOrigin,
+        API_BASE_URL: apiBaseUrl,
         ENTITLEMENTS_DISABLED: 'false',
         // Stage-locked admin (dev email never works on prod and vice versa)
         ADMIN_EMAIL: stage === 'prod' ? 'admin@localseo.com' : 'admin@localseo.net',
         ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'localseo@2026',
-        // Stripe Connect booking deposits — injected from backend/.env at deploy (never commit keys)
-        ...(process.env.STRIPE_SECRET_KEY
-          ? { STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY }
-          : {}),
-        ...(process.env.STRIPE_PUBLISHABLE_KEY
-          ? { STRIPE_PUBLISHABLE_KEY: process.env.STRIPE_PUBLISHABLE_KEY }
-          : {}),
-        ...(process.env.STRIPE_WEBHOOK_SECRET
-          ? { STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET }
-          : {}),
+        // Stripe Connect — test keys on dev only; live keys via *_PROD on stage=prod (never commit)
+        ...(stripeSecretKey ? { STRIPE_SECRET_KEY: stripeSecretKey } : {}),
+        ...(stripePublishableKey ? { STRIPE_PUBLISHABLE_KEY: stripePublishableKey } : {}),
+        ...(stripeWebhookSecret ? { STRIPE_WEBHOOK_SECRET: stripeWebhookSecret } : {}),
         STRIPE_PLATFORM_FEE_BPS: process.env.STRIPE_PLATFORM_FEE_BPS || '500',
         STRIPE_CONNECT_DEFAULT_COUNTRY: process.env.STRIPE_CONNECT_DEFAULT_COUNTRY || 'GB',
         ...(process.env.STRIPE_CONNECT_RETURN_URL
@@ -142,18 +171,28 @@ export class LocalSeoApiStack extends cdk.Stack {
         ...(process.env.STRIPE_CONNECT_REFRESH_URL
           ? { STRIPE_CONNECT_REFRESH_URL: process.env.STRIPE_CONNECT_REFRESH_URL }
           : {}),
-        // Dev-only test client + AI keys from env at deploy time (never hardcode keys in git)
+        // Google Calendar OAuth (Booking → Integrations)
+        ...(process.env.GOOGLE_CLIENT_ID
+          ? { GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID }
+          : {}),
+        ...(process.env.GOOGLE_CLIENT_SECRET
+          ? { GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET }
+          : {}),
+        ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+          ? { GOOGLE_REDIRECT_URI: googleRedirectUri }
+          : {}),
+        // Places search (both stages when key present)
+        ...(process.env.GOOGLE_PLACES_API_KEY
+          ? { GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY }
+          : {}),
+        // Gemini: paid key on prod only via GEMINI_API_KEY_PROD
+        ...(geminiKey ? { GEMINI_API_KEY: geminiKey } : {}),
+        // Dev-only test portal client
         ...(stage === 'dev'
           ? {
               DEV_CLIENT_EMAIL: process.env.DEV_CLIENT_EMAIL || 'client@email.com',
               DEV_CLIENT_PASSWORD: process.env.DEV_CLIENT_PASSWORD || 'client@123',
               DEV_CLIENT_PLAN_ID: process.env.DEV_CLIENT_PLAN_ID || 'complete-growth-system',
-              ...(process.env.GEMINI_API_KEY
-                ? { GEMINI_API_KEY: process.env.GEMINI_API_KEY }
-                : {}),
-              ...(process.env.GOOGLE_PLACES_API_KEY
-                ? { GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY }
-                : {}),
             }
           : {}),
       },

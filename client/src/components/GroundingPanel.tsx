@@ -1,6 +1,7 @@
 ﻿import { useState } from 'react';
 import { Search, MapPin, Star, Building, CheckCircle2 } from 'lucide-react';
 import { apiPost, logDashboardActivity, updateDashboardStats } from '../lib/utils';
+import PlacesMap from './PlacesMap';
 
 export default function GroundingPanel() {
   const [query, setQuery] = useState('');
@@ -115,6 +116,7 @@ export default function GroundingPanel() {
                       <span className="font-bold">{results.rating}</span>
                     </div>
                   </div>
+                  <PlacesMap lat={results.lat} lng={results.lng} title={results.name} height={140} className="mb-3" />
                   <button
                     type="button"
                     onClick={handleConnect}

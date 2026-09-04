@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../lib/db';
-import { signToken, comparePassword } from '../lib/authTokens';
+import { signToken, comparePassword, hashPassword } from '../lib/authTokens';
 import { requireAdmin, adminConfigured, resolveAdminCredentials } from '../middleware/adminAuth';
 import { upsertOrgSubscription, setOrgAutopay } from '../middleware/entitlements';
 import {
@@ -67,9 +67,132 @@ const PRODUCTS = [
 ];
 
 async function verifyAdminPassword(password: string) {
+    try {
+        const { rows } = await query(
+            `SELECT password_hash FROM admin_settings WHERE id = 'default' LIMIT 1`
+        );
+        if (rows[0]?.password_hash) {
+            return comparePassword(password, rows[0].password_hash);
+        }
+    } catch {
+        /* table may not exist until migrate */
+    }
     const { passwordHash, password: plain } = resolveAdminCredentials();
     if (passwordHash) return comparePassword(password, passwordHash);
     return password === plain;
+}
+
+function mapRegisteredUser(row: any) {
+    const features = row.plan_id ? getFeaturesForPlan(row.plan_id) : [];
+    return {
+        kind: 'user' as const,
+        userId: row.user_id,
+        email: row.email,
+        name: row.user_name,
+        createdAt: row.user_created_at,
+        mustChangePassword: Boolean(row.must_change_password),
+        organization: row.org_id
+            ? {
+                  id: row.org_id,
+                  name: row.org_name,
+                  slug: row.org_slug,
+                  tradeType: row.trade_type,
+                  setupComplete: row.setup_complete
+              }
+            : null,
+        subscription: row.plan_id
+            ? {
+                  id: row.subscription_id,
+                  planId: row.plan_id,
+                  planName: row.plan_name,
+                  status: row.subscription_status,
+                  priceLabel: row.price_cents
+                      ? formatPrice({ priceCents: row.price_cents, currency: row.currency })
+                      : null,
+                  periodStart: row.current_period_start,
+                  periodEnd: row.current_period_end,
+                  daysLeft: daysLeft(row.current_period_end),
+                  paidAt: row.subscription_created_at,
+                  stripeSubscriptionId: row.stripe_subscription_id,
+                  stripeCustomerId: row.stripe_customer_id,
+                  cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
+                  autopayEnabled: !row.cancel_at_period_end
+              }
+            : null,
+        invite: row.invite_id
+            ? {
+                  id: row.invite_id,
+                  status: row.invite_status,
+                  claimedAt: row.claimed_at,
+                  credentialsEmailedAt: row.credentials_emailed_at,
+                  createdAt: row.invite_created_at
+              }
+            : null,
+        invoices: {
+            count: row.invoice_count || 0,
+            totalCents: row.invoice_total_cents || 0,
+            totalLabel:
+                row.invoice_total_cents != null
+                    ? `£${(Number(row.invoice_total_cents) / 100).toFixed(2)}`
+                    : '£0.00'
+        },
+        features,
+        services: serviceModulesForPlan(row.plan_id),
+        products: [
+            { id: 'local_seo', name: 'Local SEO Portal', enrolled: features.length > 0 || Boolean(row.plan_id) },
+            {
+                id: 'website',
+                name: 'ZappSites Website',
+                enrolled: row.plan_id === 'website-essential'
+            }
+        ]
+    };
+}
+
+function mapInviteUser(row: any) {
+    const features = row.plan_id ? getFeaturesForPlan(row.plan_id) : [];
+    return {
+        kind: 'invite' as const,
+        userId: null,
+        email: row.email,
+        name: row.full_name || '',
+        createdAt: row.invite_created_at,
+        mustChangePassword: true,
+        organization: null,
+        subscription: row.plan_id
+            ? {
+                  id: row.subscription_id,
+                  planId: row.plan_id,
+                  planName: row.plan_name,
+                  status: row.subscription_status || 'active',
+                  priceLabel: row.price_cents
+                      ? formatPrice({ priceCents: row.price_cents, currency: row.currency })
+                      : null,
+                  periodStart: row.current_period_start,
+                  periodEnd: row.current_period_end,
+                  daysLeft: daysLeft(row.current_period_end),
+                  paidAt: row.subscription_created_at || row.invite_created_at,
+                  stripeSubscriptionId: row.stripe_subscription_id,
+                  stripeCustomerId: row.stripe_customer_id,
+                  cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
+                  autopayEnabled: !row.cancel_at_period_end
+              }
+            : null,
+        invite: {
+            id: row.invite_id,
+            status: row.status,
+            claimedAt: row.claimed_at,
+            credentialsEmailedAt: row.credentials_emailed_at,
+            createdAt: row.invite_created_at
+        },
+        invoices: { count: 0, totalCents: 0, totalLabel: '£0.00' },
+        features,
+        services: serviceModulesForPlan(row.plan_id),
+        products: [
+            { id: 'local_seo', name: 'Local SEO Portal', enrolled: features.length > 0 },
+            { id: 'website', name: 'ZappSites Website', enrolled: row.plan_id === 'website-essential' }
+        ]
+    };
 }
 
 router.post('/login', async (req: Request, res: Response) => {
@@ -112,12 +235,59 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 });
 
-router.get('/me', requireAdmin, (req: Request, res: Response) => {
+router.get('/me', requireAdmin, async (req: Request, res: Response) => {
+    let passwordUpdatedAt: string | null = null;
+    try {
+        const { rows } = await query(
+            `SELECT updated_at FROM admin_settings WHERE id = 'default' LIMIT 1`
+        );
+        passwordUpdatedAt = rows[0]?.updated_at || null;
+    } catch {
+        /* ignore */
+    }
     res.json({
         admin: (req as any).admin,
         products: PRODUCTS,
-        stage: resolveAdminCredentials().stage
+        stage: resolveAdminCredentials().stage,
+        email: resolveAdminCredentials().email,
+        passwordUpdatedAt,
+        passwordSource: passwordUpdatedAt ? 'custom' : 'env'
     });
+});
+
+router.patch('/settings/password', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const currentPassword = String(req.body?.currentPassword || '');
+        const newPassword = String(req.body?.newPassword || '');
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: 'Current and new password are required.' });
+        }
+        if (newPassword.length < 8) {
+            return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+        }
+
+        const ok = await verifyAdminPassword(currentPassword);
+        if (!ok) {
+            return res.status(401).json({ error: 'Current password is incorrect.' });
+        }
+
+        const passwordHash = await hashPassword(newPassword);
+        await query(
+            `INSERT INTO admin_settings (id, password_hash, updated_at)
+             VALUES ('default', $1, NOW())
+             ON CONFLICT (id) DO UPDATE
+             SET password_hash = EXCLUDED.password_hash, updated_at = NOW()`,
+            [passwordHash]
+        );
+
+        res.json({
+            success: true,
+            message: 'Admin password updated. Use the new password next time you sign in.'
+        });
+    } catch (err: any) {
+        console.error('Admin password update error:', err);
+        res.status(500).json({ error: err.message || 'Could not update password' });
+    }
 });
 
 router.get('/overview', requireAdmin, async (_req: Request, res: Response) => {
@@ -241,120 +411,9 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
              ORDER BY pi.created_at DESC`
         ).catch(() => ({ rows: [] as any[] }));
 
-        const users = rows.map((row: any) => {
-            const features = row.plan_id
-                ? getFeaturesForPlan(row.plan_id)
-                : [];
-            return {
-                kind: 'user' as const,
-                userId: row.user_id,
-                email: row.email,
-                name: row.user_name,
-                createdAt: row.user_created_at,
-                mustChangePassword: Boolean(row.must_change_password),
-                organization: row.org_id
-                    ? {
-                          id: row.org_id,
-                          name: row.org_name,
-                          slug: row.org_slug,
-                          tradeType: row.trade_type,
-                          setupComplete: row.setup_complete
-                      }
-                    : null,
-                subscription: row.plan_id
-                    ? {
-                          id: row.subscription_id,
-                          planId: row.plan_id,
-                          planName: row.plan_name,
-                          status: row.subscription_status,
-                          priceLabel: row.price_cents
-                              ? formatPrice({ priceCents: row.price_cents, currency: row.currency })
-                              : null,
-                          periodStart: row.current_period_start,
-                          periodEnd: row.current_period_end,
-                          daysLeft: daysLeft(row.current_period_end),
-                          paidAt: row.subscription_created_at,
-                          stripeSubscriptionId: row.stripe_subscription_id,
-                          stripeCustomerId: row.stripe_customer_id,
-                          cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
-                          autopayEnabled: !row.cancel_at_period_end
-                      }
-                    : null,
-                invite: row.invite_id
-                    ? {
-                          id: row.invite_id,
-                          status: row.invite_status,
-                          claimedAt: row.claimed_at,
-                          credentialsEmailedAt: row.credentials_emailed_at,
-                          createdAt: row.invite_created_at
-                      }
-                    : null,
-                invoices: {
-                    count: row.invoice_count || 0,
-                    totalCents: row.invoice_total_cents || 0,
-                    totalLabel:
-                        row.invoice_total_cents != null
-                            ? `£${(Number(row.invoice_total_cents) / 100).toFixed(2)}`
-                            : '£0.00'
-                },
-                features,
-                services: serviceModulesForPlan(row.plan_id),
-                products: [
-                    { id: 'local_seo', name: 'Local SEO Portal', enrolled: features.length > 0 || Boolean(row.plan_id) },
-                    {
-                        id: 'website',
-                        name: 'ZappSites Website',
-                        enrolled: row.plan_id === 'website-essential'
-                    }
-                ]
-            };
-        });
+        const users = rows.map(mapRegisteredUser);
 
-        const pendingInvites = inviteOnly.rows.map((row: any) => {
-            const features = row.plan_id ? getFeaturesForPlan(row.plan_id) : [];
-            return {
-                kind: 'invite' as const,
-                userId: null,
-                email: row.email,
-                name: row.full_name || '',
-                createdAt: row.invite_created_at,
-                mustChangePassword: true,
-                organization: null,
-                subscription: row.plan_id
-                    ? {
-                          id: row.subscription_id,
-                          planId: row.plan_id,
-                          planName: row.plan_name,
-                          status: row.subscription_status || 'active',
-                          priceLabel: row.price_cents
-                              ? formatPrice({ priceCents: row.price_cents, currency: row.currency })
-                              : null,
-                          periodStart: row.current_period_start,
-                          periodEnd: row.current_period_end,
-                          daysLeft: daysLeft(row.current_period_end),
-                          paidAt: row.subscription_created_at || row.invite_created_at,
-                          stripeSubscriptionId: row.stripe_subscription_id,
-                          stripeCustomerId: row.stripe_customer_id,
-                          cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
-                          autopayEnabled: !row.cancel_at_period_end
-                      }
-                    : null,
-                invite: {
-                    id: row.invite_id,
-                    status: row.status,
-                    claimedAt: row.claimed_at,
-                    credentialsEmailedAt: row.credentials_emailed_at,
-                    createdAt: row.invite_created_at
-                },
-                invoices: { count: 0, totalCents: 0, totalLabel: '£0.00' },
-                features,
-                services: serviceModulesForPlan(row.plan_id),
-                products: [
-                    { id: 'local_seo', name: 'Local SEO Portal', enrolled: features.length > 0 },
-                    { id: 'website', name: 'ZappSites Website', enrolled: row.plan_id === 'website-essential' }
-                ]
-            };
-        });
+        const pendingInvites = inviteOnly.rows.map(mapInviteUser);
 
         res.json({
             stage: resolveAdminCredentials().stage,
@@ -364,6 +423,80 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
         });
     } catch (err: any) {
         console.error('Admin users error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const userId = req.params.userId;
+        const { rows } = await query(
+            `SELECT u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
+                    u.must_change_password,
+                    o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.setup_complete,
+                    s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
+                    s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
+                    s.stripe_subscription_id, s.stripe_customer_id, s.cancel_at_period_end,
+                    p.name AS plan_name, p.price_cents, p.currency,
+                    pi.id AS invite_id, pi.status AS invite_status, pi.claimed_at, pi.credentials_emailed_at,
+                    pi.created_at AS invite_created_at,
+                    (SELECT COUNT(*)::int FROM invoices inv
+                       JOIN bookings b ON b.id = inv.booking_id
+                       WHERE b.org_id = o.id) AS invoice_count,
+                    (SELECT COALESCE(SUM(inv.amount_cents), 0)::int FROM invoices inv
+                       JOIN bookings b ON b.id = inv.booking_id
+                       WHERE b.org_id = o.id) AS invoice_total_cents
+             FROM users u
+             LEFT JOIN memberships m ON m.user_id = u.id AND m.role = 'owner'
+             LEFT JOIN organizations o ON o.id = m.org_id
+             LEFT JOIN subscriptions s ON s.status = 'active' AND (
+                 (o.id IS NOT NULL AND s.org_id = o.id)
+                 OR LOWER(s.customer_email) = LOWER(u.email)
+             )
+             LEFT JOIN plans p ON p.id = s.plan_id
+             LEFT JOIN LATERAL (
+                 SELECT * FROM portal_invites
+                 WHERE LOWER(email) = LOWER(u.email)
+                 ORDER BY created_at DESC
+                 LIMIT 1
+             ) pi ON TRUE
+             WHERE u.id = $1
+             ORDER BY s.created_at DESC NULLS LAST
+             LIMIT 1`,
+            [userId]
+        );
+        if (!rows.length) return res.status(404).json({ error: 'Customer not found' });
+        res.json({ user: mapRegisteredUser(rows[0]), plans: PLANS });
+    } catch (err: any) {
+        console.error('Admin user detail error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.get('/users/invite/:inviteId', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const inviteId = req.params.inviteId;
+        const { rows } = await query(
+            `SELECT pi.id AS invite_id, pi.email, pi.full_name, pi.phone, pi.plan_id, pi.status,
+                    pi.claimed_at, pi.credentials_emailed_at, pi.created_at AS invite_created_at,
+                    pi.stripe_subscription_id, pi.stripe_customer_id, pi.stripe_session_id,
+                    p.name AS plan_name, p.price_cents, p.currency,
+                    s.id AS subscription_id, s.status AS subscription_status,
+                    s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
+                    s.cancel_at_period_end
+             FROM portal_invites pi
+             LEFT JOIN plans p ON p.id = pi.plan_id
+             LEFT JOIN subscriptions s ON s.status = 'active'
+               AND (LOWER(s.customer_email) = LOWER(pi.email)
+                    OR (pi.stripe_subscription_id IS NOT NULL AND s.stripe_subscription_id = pi.stripe_subscription_id))
+             WHERE pi.id = $1
+             LIMIT 1`,
+            [inviteId]
+        );
+        if (!rows.length) return res.status(404).json({ error: 'Invite not found' });
+        res.json({ user: mapInviteUser(rows[0]), plans: PLANS });
+    } catch (err: any) {
+        console.error('Admin invite detail error:', err);
         res.status(500).json({ error: err.message });
     }
 });
