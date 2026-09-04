@@ -17,6 +17,7 @@ import {
 import { cn } from '../lib/utils';
 import { hasRouteAccess, routeRequiresFeatures } from '../lib/planCatalog';
 import { useEntitlements } from '../context/EntitlementsContext';
+import MustChangePasswordBanner from './MustChangePasswordBanner';
 
 type NavItem = {
     name: string;
@@ -137,6 +138,7 @@ export default function Layout() {
 
             <div className="flex-1 flex flex-col min-w-0">
                 <main className="flex-1 overflow-auto p-6">
+                    <MustChangePasswordBanner />
                     <Outlet />
                 </main>
             </div>

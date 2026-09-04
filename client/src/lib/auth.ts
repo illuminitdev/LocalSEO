@@ -17,6 +17,9 @@ export function clearToken() {
 export function setMustChangePassword(value: boolean) {
     if (value) localStorage.setItem(MUST_CHANGE_KEY, '1');
     else localStorage.removeItem(MUST_CHANGE_KEY);
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('localpulse-auth'));
+    }
 }
 
 export function getMustChangePassword(): boolean {

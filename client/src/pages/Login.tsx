@@ -45,10 +45,6 @@ export default function Login() {
                 const mustChange = Boolean(data.user?.mustChangePassword);
                 setMustChangePassword(mustChange);
                 await refresh();
-                if (mustChange) {
-                    navigate('/account?forcePassword=1', { replace: true });
-                    return;
-                }
                 const next = params.get('next');
                 const safeNext =
                     next &&
