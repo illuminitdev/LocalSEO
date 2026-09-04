@@ -19,7 +19,7 @@ import { useEntitlements } from '../context/EntitlementsContext';
 import { FEATURE_LABELS, PLANS, type FeatureKey } from '../lib/planCatalog';
 
 const fieldClass =
-    'mt-1.5 w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3.5 py-2.5 text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/20 transition-shadow';
+    'mt-1.5 w-full rounded-xl border border-[#E2E8F0]/80 bg-white/90 px-3.5 py-2.5 text-sm text-[#0F172A] placeholder:text-[#94A3B8] shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25 transition-shadow';
 
 type OrgForm = {
     name: string;
@@ -44,17 +44,23 @@ function SectionCard({
     id?: string;
 }) {
     return (
-        <section id={id} className="rounded-2xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
-            <div className="px-6 py-5 border-b border-[#E2E8F0] bg-gradient-to-r from-[#FFFBEB]/80 to-white flex items-start gap-3">
-                <div className="h-9 w-9 rounded-xl bg-[#FFF7ED] border border-[#FED7AA] flex items-center justify-center shrink-0">
-                    <Icon className="w-4 h-4 text-[#D97706]" strokeWidth={1.75} />
+        <section
+            id={id}
+            className="relative rounded-2xl overflow-hidden border border-[#E2E8F0]/90 bg-white shadow-[0_10px_40px_-18px_rgba(15,23,42,0.28)]"
+        >
+            <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#F59E0B] via-[#FBBF24] to-[#FED7AA]" />
+            <div className="pl-1">
+                <div className="px-6 py-5 border-b border-[#F1F5F9] bg-gradient-to-br from-[#FFFBEB] via-white to-[#F8FAFC] flex items-start gap-3.5">
+                    <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white flex items-center justify-center shrink-0 shadow-[0_8px_16px_-6px_rgba(217,119,6,0.55)]">
+                        <Icon className="w-4 h-4" strokeWidth={2} />
+                    </div>
+                    <div className="min-w-0 pt-0.5">
+                        <h2 className="text-base font-black tracking-tight text-[#0F172A]">{title}</h2>
+                        <p className="text-xs text-[#64748B] mt-1 leading-relaxed">{subtitle}</p>
+                    </div>
                 </div>
-                <div>
-                    <h2 className="text-base font-bold text-[#0F172A]">{title}</h2>
-                    <p className="text-xs text-[#64748B] mt-0.5 leading-relaxed">{subtitle}</p>
-                </div>
+                <div className="p-6 bg-gradient-to-b from-white to-[#F8FAFC]/60">{children}</div>
             </div>
-            <div className="p-6">{children}</div>
         </section>
     );
 }
@@ -101,16 +107,11 @@ export default function Account() {
         features,
         subscriptionStatus,
         currentPeriodEnd,
-        autopayEnabled,
         simulatePlan,
-        setAutopay,
         entitlementsDisabled,
         hasFeature
     } = useEntitlements();
     const [simBusy, setSimBusy] = useState(false);
-    const [autopayBusy, setAutopayBusy] = useState(false);
-    const [autopayMsg, setAutopayMsg] = useState('');
-    const [autopayErr, setAutopayErr] = useState('');
     const showSimulate = entitlementsDisabled;
     const hasLocalPresence = hasFeature('local_presence');
 
@@ -121,24 +122,6 @@ export default function Account() {
               year: 'numeric'
           })
         : null;
-
-    const handleAutopay = async (enabled: boolean) => {
-        setAutopayBusy(true);
-        setAutopayMsg('');
-        setAutopayErr('');
-        try {
-            await setAutopay(enabled);
-            setAutopayMsg(
-                enabled
-                    ? 'Autopay is on. Your card will be charged each month and services stay active.'
-                    : 'Autopay is off. Services stay until the end of this paid month, then stop.'
-            );
-        } catch (err: any) {
-            setAutopayErr(err.message || 'Could not update autopay');
-        } finally {
-            setAutopayBusy(false);
-        }
-    };
 
     const hasOrgDetails = Boolean(
         org.name?.trim() || org.hostName?.trim() || org.phone?.trim() || org.tradeType?.trim()
@@ -282,22 +265,24 @@ export default function Account() {
 
     return (
         <div className="max-w-3xl mx-auto pb-12 animate-in fade-in duration-500">
-            <div className="relative overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white mb-8 shadow-sm">
-                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_#FFF7ED_0%,_transparent_55%)] pointer-events-none" />
-                <div className="relative px-6 py-7 sm:px-8">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#D97706]">Zappsites · Local SEO</p>
-                    <h1 className="text-3xl font-black tracking-tight text-[#0F172A] mt-2">Account settings</h1>
-                    <p className="mt-2 text-sm text-[#64748B] max-w-xl">
-                        Profile, plan, workspace business details, listing location, and password — all in one place.
+            <div className="relative overflow-hidden rounded-3xl mb-8 border border-[#FED7AA]/50 shadow-[0_20px_50px_-24px_rgba(217,119,6,0.45)]">
+                <div className="absolute inset-0 bg-gradient-to-br from-[#0F172A] via-[#1E293B] to-[#0F172A]" />
+                <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-[#F59E0B]/25 blur-3xl" />
+                <div className="absolute -left-10 bottom-0 h-40 w-40 rounded-full bg-[#FBBF24]/15 blur-2xl" />
+                <div className="relative px-6 py-8 sm:px-8">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FBBF24]">Zappsites · Local SEO</p>
+                    <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-white mt-2">Account settings</h1>
+                    <p className="mt-2 text-sm text-white/70 max-w-xl">
+                        Profile, plan, workspace details, listing location, and password.
                     </p>
                     {(displayName || email) && (
-                        <div className="mt-5 inline-flex items-center gap-3 rounded-xl border border-[#E2E8F0] bg-white/80 px-4 py-2.5">
-                            <div className="h-9 w-9 rounded-full bg-[#0F172A] text-white flex items-center justify-center text-sm font-bold">
+                        <div className="mt-6 inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/10 backdrop-blur-md px-4 py-3 shadow-lg">
+                            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white flex items-center justify-center text-sm font-black shadow-md">
                                 {(displayName || email).charAt(0).toUpperCase()}
                             </div>
                             <div className="min-w-0">
-                                <p className="text-sm font-semibold text-[#0F172A] truncate">{displayName || 'Your account'}</p>
-                                <p className="text-xs text-[#64748B] truncate">{email}</p>
+                                <p className="text-sm font-bold text-white truncate">{displayName || 'Your account'}</p>
+                                <p className="text-xs text-white/65 truncate">{email}</p>
                             </div>
                         </div>
                     )}
@@ -305,48 +290,48 @@ export default function Account() {
             </div>
 
             {mustChangePassword && (
-                <p className="mb-6 text-sm text-amber-900 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
+                <p className="mb-6 text-sm text-amber-950 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl px-4 py-3 shadow-sm">
                     Please change your temporary password when you can — use the Password section below.
                 </p>
             )}
 
             {loadError && (
-                <p className="mb-6 text-sm text-red-700 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{loadError}</p>
+                <p className="mb-6 text-sm text-red-700 bg-red-50 border border-red-100 rounded-2xl px-4 py-3">{loadError}</p>
             )}
 
-            <div className="space-y-6">
+            <div className="space-y-7">
                 <SectionCard
                     icon={CreditCard}
                     title="Your plan"
                     subtitle="Features included with your ZappSites subscription."
                 >
                     {planId ? (
-                        <div className="space-y-4">
-                            <div className="flex flex-wrap items-end justify-between gap-3">
-                                <div>
-                                    <p className="text-xl font-black text-[#0F172A]">{planName}</p>
-                                    {priceLabel && <p className="text-sm text-[#64748B] mt-0.5">{priceLabel}</p>}
-                                    {periodLabel && (
-                                        <p className="text-xs text-[#64748B] mt-1">
-                                            {autopayEnabled ? 'Next renewal' : 'Access until'}: {periodLabel}
-                                        </p>
+                        <div className="space-y-5">
+                            <div className="rounded-2xl border border-[#FED7AA]/70 bg-gradient-to-br from-[#FFFBEB] to-white p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+                                <div className="flex flex-wrap items-end justify-between gap-3">
+                                    <div>
+                                        <p className="text-2xl font-black tracking-tight text-[#0F172A]">{planName}</p>
+                                        {priceLabel && <p className="text-sm text-[#92400E] mt-1 font-medium">{priceLabel}</p>}
+                                        {periodLabel && (
+                                            <p className="text-xs text-[#64748B] mt-2">Access until {periodLabel}</p>
+                                        )}
+                                    </div>
+                                    {subscriptionStatus && (
+                                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200/80 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 capitalize shadow-sm">
+                                            <Check className="w-3 h-3" />
+                                            {subscriptionStatus}
+                                        </span>
                                     )}
                                 </div>
-                                {subscriptionStatus && (
-                                    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 capitalize">
-                                        <Check className="w-3 h-3" />
-                                        {subscriptionStatus}
-                                    </span>
-                                )}
                             </div>
                             {features.length > 0 ? (
-                                <ul className="grid sm:grid-cols-2 gap-2">
+                                <ul className="grid sm:grid-cols-2 gap-2.5">
                                     {features.map((f: FeatureKey) => (
                                         <li
                                             key={f}
-                                            className="text-sm text-[#334155] flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2"
+                                            className="text-sm text-[#334155] flex items-center gap-2.5 rounded-xl border border-[#E2E8F0] bg-white px-3.5 py-2.5 shadow-[0_4px_12px_-8px_rgba(15,23,42,0.35)]"
                                         >
-                                            <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] shrink-0" />
+                                            <span className="w-2 h-2 rounded-full bg-gradient-to-br from-[#F59E0B] to-[#D97706] shrink-0 shadow-sm" />
                                             {FEATURE_LABELS[f]}
                                         </li>
                                     ))}
@@ -356,33 +341,6 @@ export default function Account() {
                                     Website plan — local SEO and booking tools are not included.
                                 </p>
                             )}
-
-                            {subscriptionStatus === 'active' && (
-                                <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                    <div>
-                                        <p className="text-sm font-bold text-[#0F172A]">Autopay</p>
-                                        <p className="text-xs text-[#64748B] mt-0.5">
-                                            {autopayEnabled
-                                                ? 'On — we charge monthly and keep your services.'
-                                                : 'Off — no more charges; services end on the date above.'}
-                                        </p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        disabled={autopayBusy}
-                                        onClick={() => handleAutopay(!autopayEnabled)}
-                                        className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-[#0F172A] text-white text-sm font-bold disabled:opacity-50"
-                                    >
-                                        {autopayBusy
-                                            ? 'Updating…'
-                                            : autopayEnabled
-                                              ? 'Turn autopay off'
-                                              : 'Turn autopay on'}
-                                    </button>
-                                </div>
-                            )}
-                            {autopayMsg && <p className="text-sm text-emerald-700">{autopayMsg}</p>}
-                            {autopayErr && <p className="text-sm text-red-700">{autopayErr}</p>}
                         </div>
                     ) : (
                         <p className="text-sm text-[#64748B]">
@@ -520,8 +478,8 @@ export default function Account() {
 
                     {!editingOrg && hasOrgDetails ? (
                         <div className="space-y-4">
-                            <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 space-y-2">
-                                <p className="text-base font-bold text-[#0F172A]">{org.name || 'Untitled business'}</p>
+                            <div className="rounded-2xl border border-[#E2E8F0] bg-white p-4 space-y-2 shadow-[0_6px_20px_-12px_rgba(15,23,42,0.35)]">
+                                <p className="text-base font-black text-[#0F172A]">{org.name || 'Untitled business'}</p>
                                 <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm text-[#64748B]">
                                     {org.hostName && <p>Contact: {org.hostName}</p>}
                                     {org.tradeType && <p>Trade: {org.tradeType}</p>}
@@ -698,15 +656,15 @@ export default function Account() {
                     </div>
                 </SectionCard>
 
-                <section className="rounded-2xl border border-[#E2E8F0] bg-white shadow-sm p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <section className="relative overflow-hidden rounded-2xl border border-red-100 bg-gradient-to-br from-white to-red-50/40 p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-[0_10px_30px_-18px_rgba(127,29,29,0.35)]">
                     <div>
-                        <h2 className="text-base font-bold text-[#0F172A]">Sign out</h2>
+                        <h2 className="text-base font-black text-[#0F172A]">Sign out</h2>
                         <p className="text-xs text-[#64748B] mt-0.5">End your session on this device.</p>
                     </div>
                     <button
                         type="button"
                         onClick={logout}
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#0F172A] hover:bg-[#FEF2F2] hover:border-red-200 hover:text-red-700 transition-colors"
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 bg-white text-sm font-bold text-red-700 hover:bg-red-50 transition-colors shadow-sm"
                     >
                         <LogOut className="w-4 h-4" strokeWidth={1.75} />
                         Log out
