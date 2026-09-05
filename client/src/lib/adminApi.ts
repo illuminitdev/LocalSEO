@@ -38,3 +38,12 @@ export async function adminPatch(path: string, body: unknown = {}) {
     if (!res.ok) throw await readAdminError(res, path);
     return res.json();
 }
+
+export async function adminDelete(path: string) {
+    const res = await fetch(`${API_BASE}${path}`, {
+        method: 'DELETE',
+        headers: { ...adminAuthHeaders() }
+    });
+    if (!res.ok) throw await readAdminError(res, path);
+    return res.json();
+}
