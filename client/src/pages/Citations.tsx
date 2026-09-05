@@ -64,44 +64,46 @@ export default function Citations() {
 
             {result && (
                 <>
-                    <div className="grid grid-cols-3 gap-4 mb-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6">
                         <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4">
                             <p className="text-xs text-[#64748B] font-semibold">Citation score</p>
-                            <p className="text-3xl font-black text-[#0F172A]">{result.score ?? 0}</p>
+                            <p className="text-2xl sm:text-3xl font-black text-[#0F172A]">{result.score ?? 0}</p>
                         </div>
                         <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4">
                             <p className="text-xs text-[#64748B] font-semibold">Found</p>
-                            <p className="text-3xl font-black text-green-700">{result.found ?? 0}</p>
+                            <p className="text-2xl sm:text-3xl font-black text-green-700">{result.found ?? 0}</p>
                         </div>
                         <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4">
                             <p className="text-xs text-[#64748B] font-semibold">Missing</p>
-                            <p className="text-3xl font-black text-red-600">{result.missing ?? 0}</p>
+                            <p className="text-2xl sm:text-3xl font-black text-red-600">{result.missing ?? 0}</p>
                         </div>
                     </div>
 
                     <div className="bg-white border border-[#E2E8F0] rounded-2xl overflow-hidden">
-                        <table className="w-full text-sm">
+                        <div className="overflow-x-auto">
+                        <table className="w-full text-sm min-w-[480px]">
                             <thead className="bg-[#F8FAFC] text-[#64748B]">
                                 <tr>
-                                    <th className="text-left px-5 py-3 font-bold">Directory</th>
-                                    <th className="text-left px-5 py-3 font-bold">Status</th>
-                                    <th className="text-left px-5 py-3 font-bold">Note</th>
+                                    <th className="text-left px-4 sm:px-5 py-3 font-bold">Directory</th>
+                                    <th className="text-left px-4 sm:px-5 py-3 font-bold">Status</th>
+                                    <th className="text-left px-4 sm:px-5 py-3 font-bold">Note</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#E2E8F0]">
                                 {result.citations.map((row: any, i: number) => (
                                     <tr key={i}>
-                                        <td className="px-5 py-3 font-semibold">
+                                        <td className="px-4 sm:px-5 py-3 font-semibold">
                                             {row.url ? <a href={row.url} target="_blank" rel="noreferrer" className="text-[#0F172A] underline">{row.directory}</a> : row.directory}
                                         </td>
-                                        <td className="px-5 py-3">
+                                        <td className="px-4 sm:px-5 py-3">
                                             <span className="inline-flex items-center gap-1.5 capitalize">{statusIcon(row.status)} {row.status}</span>
                                         </td>
-                                        <td className="px-5 py-3 text-[#64748B]">{row.note}</td>
+                                        <td className="px-4 sm:px-5 py-3 text-[#64748B]">{row.note}</td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </>
             )}

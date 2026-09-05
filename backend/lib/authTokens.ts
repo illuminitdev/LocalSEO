@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'localpulse-dev-secret-change-me';
-const JWT_EXPIRES = process.env.JWT_EXPIRES || '30d';
+const JWT_EXPIRES = process.env.JWT_EXPIRES || '7d';
 
 function signToken(payload: any) {
     return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES as any });

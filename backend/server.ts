@@ -8,6 +8,7 @@ import { requirePlacesConfigured, searchBusiness, nearbyCompetitors } from './li
 import { createStripeWebhookHandler } from './routes/webhooks';
 import { requireAuth } from './middleware/auth';
 import { requireFeature, requireAllFeatures } from './middleware/entitlements';
+import { authRateLimit, corsOptions, globalRateLimit, securityHeaders } from './middleware/security';
 import createHostRouter from './routes/host';
 import createPublicRouter from './routes/public';
 import authRouter from './routes/auth';
@@ -52,10 +53,18 @@ if (requirePlacesConfigured()) {
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Behind API Gateway / proxies — needed for accurate rate-limit client IP
+app.set('trust proxy', 1);
+
 app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), createStripeWebhookHandler(stripeClient));
 
-app.use(cors());
-app.use(express.json({ limit: '8mb' }));
+app.use(securityHeaders());
+app.use(cors(corsOptions()));
+app.use(globalRateLimit());
+// Default 1mb; media/AI routes below raise their own limit
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '1mb' }));
+app.use('/api/auth', authRateLimit());
+app.use('/api/admin/login', authRateLimit());
 
 app.use((req: Request, res: Response, next: NextFunction) => {
     if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();

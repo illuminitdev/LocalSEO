@@ -67,7 +67,7 @@ export default function Dashboard() {
             <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
                 <div>
                     <p className="text-xs font-bold uppercase tracking-widest text-[#F59E0B]">Zappsites · Local SEO</p>
-                    <h1 className="text-3xl font-black tracking-tight mt-1">
+                    <h1 className="text-2xl sm:text-3xl font-black tracking-tight mt-1">
                         {business?.name || 'Your workspace'}
                     </h1>
                     <p className="text-[#64748B] mt-2 text-sm max-w-2xl">
@@ -99,7 +99,7 @@ export default function Dashboard() {
             )}
 
             {hasReporting && (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                     {[
                         { label: 'Avg Local Pack rank', value: stats?.visibilityRank ? `#${stats.visibilityRank}` : '—' },
                         { label: 'Top 3 coverage', value: `${stats?.top3Percentage || 0}%` },
@@ -137,7 +137,7 @@ export default function Dashboard() {
                     })}
                 </div>
             ) : (
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-8 text-center">
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 sm:p-8 text-center">
                     <p className="text-sm text-[#64748B]">
                         No local tools are included on your current plan.{' '}
                         <Link to="/account" className="font-semibold text-[#0F172A] hover:underline">View your plan</Link>.

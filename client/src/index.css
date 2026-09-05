@@ -11,9 +11,38 @@
   --color-line: #E2E8F0;
 }
 
+html {
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   @apply bg-white text-[#0F172A] antialiased;
   font-family: 'Inter', system-ui, sans-serif;
+  overflow-x: clip;
+  min-height: 100dvh;
+}
+
+#root {
+  min-height: 100dvh;
+  min-width: 0;
+}
+
+/* Notch / home-indicator safe areas on mobile */
+.safe-pt {
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+}
+
+.safe-pb {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+  height: auto;
 }
 
 button:not(:disabled),
@@ -27,4 +56,13 @@ summary,
 button:disabled,
 [disabled] {
   cursor: not-allowed;
+}
+
+/* Prefer comfortable tap targets on touch devices */
+@media (pointer: coarse) {
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
+  }
 }
