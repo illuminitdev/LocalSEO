@@ -16,8 +16,41 @@ function emptyEntitlements() {
         currentPeriodStart: null as string | null,
         currentPeriodEnd: null as string | null,
         cancelAtPeriodEnd: false,
-        autopayEnabled: true
+        autopayEnabled: true,
+        activeSubscriptions: [] as Array<{
+            id: string;
+            planId: string;
+            planName: string;
+            priceCents: number | null;
+            currency: string | null;
+            currentPeriodStart: string | null;
+            currentPeriodEnd: string | null;
+            cancelAtPeriodEnd: boolean;
+            status: string;
+        }>
     };
+}
+
+/** Dedupe join rows (one per feature) into unique subscriptions, preserving created_at DESC order. */
+function dedupeActiveSubscriptions(rows: any[]) {
+    const seen = new Set<string>();
+    const list: ReturnType<typeof emptyEntitlements>['activeSubscriptions'] = [];
+    for (const r of rows) {
+        if (!r?.id || seen.has(r.id)) continue;
+        seen.add(r.id);
+        list.push({
+            id: r.id,
+            planId: r.plan_id,
+            planName: r.plan_name,
+            priceCents: r.price_cents ?? null,
+            currency: r.currency ?? null,
+            currentPeriodStart: r.current_period_start ?? null,
+            currentPeriodEnd: r.current_period_end ?? null,
+            cancelAtPeriodEnd: Boolean(r.cancel_at_period_end),
+            status: r.status
+        });
+    }
+    return list;
 }
 
 function periodStillValid(periodEnd: any) {
@@ -56,52 +89,60 @@ async function loadOrgEntitlements(orgId: any, email?: any) {
         return emptyEntitlements();
     }
 
-    const row = rows[0];
-    if (!periodStillValid(row.current_period_end)) {
+    const featureSet = new Set<string>();
+    const validRows = rows.filter((r) => periodStillValid(r.current_period_end));
+
+    if (!validRows.length) {
+        // Latest row expired — mark that one canceled and return empty features
+        const expired = rows[0];
         await query(
             `UPDATE subscriptions
              SET status = 'canceled', updated_at = NOW()
              WHERE id = $1 AND status = 'active'`,
-            [row.id]
+            [expired.id]
         ).catch(() => {});
         return {
             ...emptyEntitlements(),
-            planId: row.plan_id,
-            planName: row.plan_name,
+            planId: expired.plan_id,
+            planName: expired.plan_name,
             subscriptionStatus: 'canceled',
-            priceCents: row.price_cents,
-            currency: row.currency,
-            currentPeriodStart: row.current_period_start,
-            currentPeriodEnd: row.current_period_end,
-            cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
-            autopayEnabled: !row.cancel_at_period_end
+            priceCents: expired.price_cents,
+            currency: expired.currency,
+            currentPeriodStart: expired.current_period_start,
+            currentPeriodEnd: expired.current_period_end,
+            cancelAtPeriodEnd: Boolean(expired.cancel_at_period_end),
+            autopayEnabled: !expired.cancel_at_period_end,
+            activeSubscriptions: []
         };
     }
 
-    const featureSet = new Set<string>();
-    for (const r of rows) {
-        if (r.plan_id !== row.plan_id) continue;
+    // Primary plan = latest by created_at (already ORDER BY created_at DESC)
+    // Features = union across all active non-expired stacked plans
+    const primary = validRows[0];
+    for (const r of validRows) {
         if (r.feature_key) featureSet.add(r.feature_key);
     }
 
     let features = [...featureSet];
     if (!features.length) {
-        features = getFeaturesForPlan(row.plan_id);
+        features = getFeaturesForPlan(primary.plan_id);
     }
 
-    const cancelAtPeriodEnd = Boolean(row.cancel_at_period_end);
+    const cancelAtPeriodEnd = Boolean(primary.cancel_at_period_end);
+    const activeSubscriptions = dedupeActiveSubscriptions(validRows);
 
     return {
-        planId: row.plan_id,
-        planName: row.plan_name,
+        planId: primary.plan_id,
+        planName: primary.plan_name,
         features,
-        subscriptionStatus: row.status,
-        priceCents: row.price_cents,
-        currency: row.currency,
-        currentPeriodStart: row.current_period_start,
-        currentPeriodEnd: row.current_period_end,
+        subscriptionStatus: primary.status,
+        priceCents: primary.price_cents,
+        currency: primary.currency,
+        currentPeriodStart: primary.current_period_start,
+        currentPeriodEnd: primary.current_period_end,
         cancelAtPeriodEnd,
-        autopayEnabled: !cancelAtPeriodEnd
+        autopayEnabled: !cancelAtPeriodEnd,
+        activeSubscriptions
     };
 }
 
@@ -113,7 +154,8 @@ async function attachEntitlements(req: any) {
             features: ['bookings', 'local_presence', 'local_growth', 'reporting'],
             subscriptionStatus: 'active',
             cancelAtPeriodEnd: false,
-            autopayEnabled: true
+            autopayEnabled: true,
+            activeSubscriptions: []
         };
         return req.entitlements;
     }

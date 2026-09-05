@@ -192,14 +192,6 @@ export class LocalSeoApiStack extends cdk.Stack {
         EMAIL_TRANSPORT: 'ses',
         BOOKING_EMAIL_FROM: process.env.BOOKING_EMAIL_FROM || 'info@zappsites.com',
         SES_REGION: process.env.SES_REGION || 'us-east-1',
-        // Dev-only test portal client
-        ...(stage === 'dev'
-          ? {
-              DEV_CLIENT_EMAIL: process.env.DEV_CLIENT_EMAIL || 'client@email.com',
-              DEV_CLIENT_PASSWORD: process.env.DEV_CLIENT_PASSWORD || 'client@123',
-              DEV_CLIENT_PLAN_ID: process.env.DEV_CLIENT_PLAN_ID || 'complete-growth-system',
-            }
-          : {}),
       },
       logGroup,
     });
