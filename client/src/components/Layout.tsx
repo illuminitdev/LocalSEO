@@ -24,7 +24,7 @@ import MustChangePasswordBanner from './MustChangePasswordBanner';
 type NavItem = {
     name: string;
     to: string;
-    icon: ComponentType<{ className?: string }>;
+    icon: ComponentType<{ className?: string; strokeWidth?: number }>;
     end?: boolean;
     match?: 'board' | 'settings';
     featurePath: string;
