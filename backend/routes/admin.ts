@@ -3,6 +3,7 @@ import { query } from '../lib/db';
 import { signToken, comparePassword, hashPassword } from '../lib/authTokens';
 import { requireAdmin, adminConfigured, resolveAdminCredentials } from '../middleware/adminAuth';
 import { upsertOrgSubscription, setOrgAutopay } from '../middleware/entitlements';
+import { uniqueOrgSlug } from '../lib/slug';
 import {
     PLANS,
     FEATURE_LABELS,
@@ -498,6 +499,142 @@ router.get('/users/invite/:inviteId', requireAdmin, async (req: Request, res: Re
     } catch (err: any) {
         console.error('Admin invite detail error:', err);
         res.status(500).json({ error: err.message });
+    }
+});
+
+router.post('/users', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const email = String(req.body?.email || '')
+            .trim()
+            .toLowerCase();
+        const name = String(req.body?.name || '').trim();
+        const password = String(req.body?.password || '');
+        const businessName = String(req.body?.businessName || name || 'My business').trim();
+        const planId = req.body?.planId ? String(req.body.planId).trim() : '';
+
+        if (!email || !name || !password) {
+            return res.status(400).json({ error: 'Name, email, and password are required.' });
+        }
+        if (password.length < 8) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+        }
+        if (planId && !isValidPlanId(planId)) {
+            return res.status(400).json({ error: 'Invalid plan.' });
+        }
+
+        const existing = await query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email]);
+        if (existing.rows.length) {
+            return res.status(409).json({ error: 'Email already registered.' });
+        }
+
+        const passwordHash = await hashPassword(password);
+        const userRes = await query(
+            `INSERT INTO users (email, password_hash, name, must_change_password)
+             VALUES ($1, $2, $3, TRUE)
+             RETURNING id, email, name, must_change_password, created_at`,
+            [email, passwordHash, name]
+        );
+        const user = userRes.rows[0];
+
+        const orgSlug = await uniqueOrgSlug(businessName, query);
+        const orgRes = await query(
+            `INSERT INTO organizations (slug, name, host_name, trade_type, phone, service_area, email, setup_complete)
+             VALUES ($1, $2, $3, '', '', '', $4, FALSE)
+             RETURNING id, slug, name`,
+            [orgSlug, businessName, name, email]
+        );
+        const org = orgRes.rows[0];
+
+        await query('INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, $3)', [
+            user.id,
+            org.id,
+            'owner'
+        ]);
+
+        if (planId) {
+            await upsertOrgSubscription(org.id, planId);
+        }
+
+        res.status(201).json({
+            success: true,
+            user: {
+                kind: 'user',
+                userId: user.id,
+                email: user.email,
+                name: user.name,
+                organization: { id: org.id, name: org.name, slug: org.slug }
+            }
+        });
+    } catch (err: any) {
+        console.error('Admin create user error:', err);
+        res.status(500).json({ error: err.message || 'Could not create user' });
+    }
+});
+
+router.delete('/users/user/:userId', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const userId = req.params.userId;
+        const { rows } = await query(
+            `SELECT u.id, u.email,
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT m.org_id), NULL) AS org_ids
+             FROM users u
+             LEFT JOIN memberships m ON m.user_id = u.id
+             WHERE u.id = $1
+             GROUP BY u.id, u.email`,
+            [userId]
+        );
+        if (!rows.length) return res.status(404).json({ error: 'Customer not found' });
+
+        const user = rows[0];
+        const orgIds: string[] = Array.isArray(user.org_ids) ? user.org_ids.filter(Boolean) : [];
+
+        await query(
+            `UPDATE subscriptions SET status = 'canceled', updated_at = NOW()
+             WHERE status = 'active'
+               AND (
+                 LOWER(COALESCE(customer_email, '')) = LOWER($1)
+                 OR ($2::uuid[] IS NOT NULL AND org_id = ANY($2))
+               )`,
+            [user.email, orgIds.length ? orgIds : null]
+        ).catch(() => {});
+
+        if (orgIds.length) {
+            await query(`DELETE FROM organizations WHERE id = ANY($1::uuid[])`, [orgIds]);
+        }
+
+        await query(`DELETE FROM portal_invites WHERE LOWER(email) = LOWER($1)`, [user.email]).catch(
+            () => {}
+        );
+        await query(`DELETE FROM users WHERE id = $1`, [userId]);
+
+        res.json({ success: true, deletedUserId: userId });
+    } catch (err: any) {
+        console.error('Admin delete user error:', err);
+        res.status(500).json({ error: err.message || 'Could not delete user' });
+    }
+});
+
+router.delete('/users/invite/:inviteId', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const inviteId = req.params.inviteId;
+        const { rows } = await query(
+            `SELECT id, email FROM portal_invites WHERE id = $1`,
+            [inviteId]
+        );
+        if (!rows.length) return res.status(404).json({ error: 'Invite not found' });
+
+        const invite = rows[0];
+        await query(
+            `UPDATE subscriptions SET status = 'canceled', updated_at = NOW()
+             WHERE status = 'active' AND LOWER(COALESCE(customer_email, '')) = LOWER($1)`,
+            [invite.email]
+        ).catch(() => {});
+        await query(`DELETE FROM portal_invites WHERE id = $1`, [inviteId]);
+
+        res.json({ success: true, deletedInviteId: inviteId });
+    } catch (err: any) {
+        console.error('Admin delete invite error:', err);
+        res.status(500).json({ error: err.message || 'Could not delete invite' });
     }
 });
 
