@@ -153,6 +153,7 @@ export class LocalSeoApiStack extends cdk.Stack {
         DB_NAME: 'zappsites',
         DB_USER: 'zappsites_admin',
         JWT_SECRET: jwtSecret.secretValue.unsafeUnwrap(),
+        JWT_EXPIRES: process.env.JWT_EXPIRES || '7d',
         CLIENT_ORIGIN: cfg.clientOrigin,
         FRONTEND_URL: cfg.clientOrigin,
         API_BASE_URL: apiBaseUrl,
@@ -209,20 +210,19 @@ export class LocalSeoApiStack extends cdk.Stack {
 
     const integration = new HttpLambdaIntegration('ApiIntegration', fn);
 
-    // Dev/staging: allow Vercel alias + previews + local Vite.
-    // Prod: lock to known app / marketing origins only.
-    const allowOrigins =
-      stage === 'dev'
-        ? ['*']
-        : Array.from(
-            new Set(
-              [
-                cfg.clientOrigin,
-                'https://app.zappsites.com',
-                'https://www.zappsites.com',
-              ].filter(Boolean)
-            )
-          );
+    // Explicit origins on both stages (no wildcard) — Express CORS mirrors this list.
+    const allowOrigins = Array.from(
+      new Set(
+        [
+          cfg.clientOrigin,
+          'http://localhost:5173',
+          'http://127.0.0.1:5173',
+          'https://zappsites-local-seo.vercel.app',
+          'https://app.zappsites.com',
+          'https://www.zappsites.com',
+        ].filter(Boolean)
+      )
+    );
 
     const httpApi = new apigwv2.HttpApi(this, 'HttpApi', {
       apiName: `localseo-api-${stage}`,
@@ -242,6 +242,16 @@ export class LocalSeoApiStack extends cdk.Stack {
       },
       defaultIntegration: integration,
     });
+
+    // Stage throttling (API Gateway rate limits). Note: AWS WAF does not support
+    // HTTP APIs (ApiGatewayV2) — only REST APIs — so security is Express + throttle.
+    const cfnStage = httpApi.defaultStage?.node.defaultChild as apigwv2.CfnStage | undefined;
+    if (cfnStage) {
+      cfnStage.defaultRouteSettings = {
+        throttlingBurstLimit: stage === 'prod' ? 200 : 100,
+        throttlingRateLimit: stage === 'prod' ? 50 : 25,
+      };
+    }
 
     new cdk.CfnOutput(this, 'LocalSeoApiUrl', {
       value: httpApi.apiEndpoint,
