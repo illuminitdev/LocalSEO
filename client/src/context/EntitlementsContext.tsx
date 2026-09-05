@@ -3,6 +3,19 @@ import { apiGet, apiPatch } from '../lib/utils';
 import { getToken } from '../lib/auth';
 import type { FeatureKey } from '../lib/planCatalog';
 
+export type ActiveSubscription = {
+    id: string;
+    planId: string;
+    planName: string;
+    priceCents: number | null;
+    currency: string | null;
+    priceLabel: string | null;
+    currentPeriodStart: string | null;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+    status: string;
+};
+
 export type EntitlementsState = {
     planId: string | null;
     planName: string | null;
@@ -13,6 +26,7 @@ export type EntitlementsState = {
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
     autopayEnabled: boolean;
+    activeSubscriptions: ActiveSubscription[];
     entitlementsDisabled: boolean;
     loading: boolean;
     hasFeature: (key: FeatureKey) => boolean;
@@ -34,6 +48,7 @@ export function EntitlementsProvider({ children }: { children: ReactNode }) {
     const [currentPeriodEnd, setCurrentPeriodEnd] = useState<string | null>(null);
     const [cancelAtPeriodEnd, setCancelAtPeriodEnd] = useState(false);
     const [autopayEnabled, setAutopayEnabled] = useState(true);
+    const [activeSubscriptions, setActiveSubscriptions] = useState<ActiveSubscription[]>([]);
     const [entitlementsDisabled, setEntitlementsDisabled] = useState(false);
     const [loading, setLoading] = useState(true);
 
@@ -47,6 +62,7 @@ export function EntitlementsProvider({ children }: { children: ReactNode }) {
         setCurrentPeriodEnd(data.currentPeriodEnd ?? null);
         setCancelAtPeriodEnd(Boolean(data.cancelAtPeriodEnd));
         setAutopayEnabled(data.autopayEnabled !== false && !data.cancelAtPeriodEnd);
+        setActiveSubscriptions(Array.isArray(data.activeSubscriptions) ? data.activeSubscriptions : []);
         setEntitlementsDisabled(Boolean(data.entitlementsDisabled));
     };
 
@@ -60,6 +76,7 @@ export function EntitlementsProvider({ children }: { children: ReactNode }) {
         setCurrentPeriodEnd(null);
         setCancelAtPeriodEnd(false);
         setAutopayEnabled(true);
+        setActiveSubscriptions([]);
         setEntitlementsDisabled(false);
     };
 
@@ -105,6 +122,7 @@ export function EntitlementsProvider({ children }: { children: ReactNode }) {
         currentPeriodEnd,
         cancelAtPeriodEnd,
         autopayEnabled,
+        activeSubscriptions,
         entitlementsDisabled,
         loading,
         hasFeature: (key) => entitlementsDisabled || features.includes(key),
@@ -122,6 +140,7 @@ export function EntitlementsProvider({ children }: { children: ReactNode }) {
         currentPeriodEnd,
         cancelAtPeriodEnd,
         autopayEnabled,
+        activeSubscriptions,
         entitlementsDisabled,
         loading,
         refresh,

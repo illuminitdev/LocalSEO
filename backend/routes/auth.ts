@@ -12,7 +12,6 @@ import {
     allowDevSubscriptionWrites,
     setOrgAutopay
 } from '../middleware/entitlements';
-import { isDevClientLogin, ensureDevClientAccount } from '../middleware/devClientAuth';
 import { PLANS, getPlanById, formatPrice, FEATURE_LABELS, getFeaturesForPlan } from '../lib/planCatalog';
 import Stripe from 'stripe';
 
@@ -170,23 +169,6 @@ router.post('/login', async (req: Request, res: Response) => {
 
         const normalizedEmail = String(email).trim().toLowerCase();
 
-        if (isDevClientLogin(normalizedEmail, String(password))) {
-            const session = await ensureDevClientAccount();
-            if (!session) {
-                return res.status(401).json({ error: 'Invalid email or password.' });
-            }
-            const token = signToken({ userId: session.user.id, orgId: session.org.id });
-            return res.json({
-                token,
-                user: authUserPayload(session.user),
-                organization: {
-                    id: session.org.id,
-                    slug: session.org.slug,
-                    name: session.org.name
-                }
-            });
-        }
-
         const { rows } = await query(
             `SELECT id, email, name, password_hash, must_change_password
              FROM users WHERE email = $1`,
@@ -318,8 +300,20 @@ router.get('/entitlements', requireAuth, async (req: Request, res: Response) => 
     try {
         const entitlements = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
         const plan = getPlanById(entitlements.planId);
+        const activeSubscriptions = (entitlements.activeSubscriptions || []).map((sub: any) => {
+            const catalogPlan = getPlanById(sub.planId);
+            return {
+                ...sub,
+                priceLabel: catalogPlan
+                    ? formatPrice(catalogPlan)
+                    : sub.priceCents != null
+                      ? `£${(Number(sub.priceCents) / 100).toFixed(0)}/mo`
+                      : null
+            };
+        });
         res.json({
             ...entitlements,
+            activeSubscriptions,
             priceLabel: plan ? formatPrice(plan) : null,
             entitlementsDisabled: entitlementsDisabled(),
             catalog: PLANS.map((p: any) => ({

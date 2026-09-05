@@ -107,6 +107,7 @@ export default function Account() {
         features,
         subscriptionStatus,
         currentPeriodEnd,
+        activeSubscriptions,
         simulatePlan,
         entitlementsDisabled,
         hasFeature
@@ -115,13 +116,32 @@ export default function Account() {
     const showSimulate = entitlementsDisabled;
     const hasLocalPresence = hasFeature('local_presence');
 
-    const periodLabel = currentPeriodEnd
-        ? new Date(currentPeriodEnd).toLocaleDateString('en-GB', {
-              day: 'numeric',
-              month: 'short',
-              year: 'numeric'
-          })
-        : null;
+    const formatPeriod = (value: string | null | undefined) =>
+        value
+            ? new Date(value).toLocaleDateString('en-GB', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric'
+              })
+            : null;
+
+    const periodLabel = formatPeriod(currentPeriodEnd);
+    const stackedPlans =
+        activeSubscriptions.length > 0
+            ? activeSubscriptions
+            : planId
+              ? [
+                    {
+                        id: planId,
+                        planId,
+                        planName: planName || planId,
+                        priceLabel,
+                        currentPeriodEnd,
+                        status: subscriptionStatus || 'active'
+                    }
+                ]
+              : [];
+    const showStackedList = stackedPlans.length > 1;
 
     const hasOrgDetails = Boolean(
         org.name?.trim() || org.hostName?.trim() || org.phone?.trim() || org.tradeType?.trim()
@@ -302,28 +322,72 @@ export default function Account() {
             <div className="space-y-7">
                 <SectionCard
                     icon={CreditCard}
-                    title="Your plan"
-                    subtitle="Features included with your ZappSites subscription."
+                    title={showStackedList ? 'Your plans' : 'Your plan'}
+                    subtitle={
+                        showStackedList
+                            ? 'Active ZappSites subscriptions on this account. Features below are combined across all plans.'
+                            : 'Features included with your ZappSites subscription.'
+                    }
                 >
-                    {planId ? (
+                    {stackedPlans.length > 0 ? (
                         <div className="space-y-5">
-                            <div className="rounded-2xl border border-[#FED7AA]/70 bg-gradient-to-br from-[#FFFBEB] to-white p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
-                                <div className="flex flex-wrap items-end justify-between gap-3">
-                                    <div>
-                                        <p className="text-2xl font-black tracking-tight text-[#0F172A]">{planName}</p>
-                                        {priceLabel && <p className="text-sm text-[#92400E] mt-1 font-medium">{priceLabel}</p>}
-                                        {periodLabel && (
-                                            <p className="text-xs text-[#64748B] mt-2">Access until {periodLabel}</p>
+                            {showStackedList ? (
+                                <ul className="space-y-3">
+                                    {stackedPlans.map((sub) => {
+                                        const subPeriod = formatPeriod(sub.currentPeriodEnd);
+                                        return (
+                                            <li
+                                                key={sub.id}
+                                                className="rounded-2xl border border-[#FED7AA]/70 bg-gradient-to-br from-[#FFFBEB] to-white p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
+                                            >
+                                                <div className="flex flex-wrap items-end justify-between gap-3">
+                                                    <div>
+                                                        <p className="text-xl font-black tracking-tight text-[#0F172A]">
+                                                            {sub.planName}
+                                                        </p>
+                                                        {'priceLabel' in sub && sub.priceLabel ? (
+                                                            <p className="text-sm text-[#92400E] mt-1 font-medium">
+                                                                {sub.priceLabel}
+                                                            </p>
+                                                        ) : null}
+                                                        {subPeriod && (
+                                                            <p className="text-xs text-[#64748B] mt-2">
+                                                                Access until {subPeriod}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                    {sub.status && (
+                                                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200/80 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 capitalize shadow-sm">
+                                                            <Check className="w-3 h-3" />
+                                                            {sub.status}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            ) : (
+                                <div className="rounded-2xl border border-[#FED7AA]/70 bg-gradient-to-br from-[#FFFBEB] to-white p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+                                    <div className="flex flex-wrap items-end justify-between gap-3">
+                                        <div>
+                                            <p className="text-2xl font-black tracking-tight text-[#0F172A]">{planName}</p>
+                                            {priceLabel && (
+                                                <p className="text-sm text-[#92400E] mt-1 font-medium">{priceLabel}</p>
+                                            )}
+                                            {periodLabel && (
+                                                <p className="text-xs text-[#64748B] mt-2">Access until {periodLabel}</p>
+                                            )}
+                                        </div>
+                                        {subscriptionStatus && (
+                                            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200/80 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 capitalize shadow-sm">
+                                                <Check className="w-3 h-3" />
+                                                {subscriptionStatus}
+                                            </span>
                                         )}
                                     </div>
-                                    {subscriptionStatus && (
-                                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200/80 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 capitalize shadow-sm">
-                                            <Check className="w-3 h-3" />
-                                            {subscriptionStatus}
-                                        </span>
-                                    )}
                                 </div>
-                            </div>
+                            )}
                             {features.length > 0 ? (
                                 <ul className="grid sm:grid-cols-2 gap-2.5">
                                     {features.map((f: FeatureKey) => (
