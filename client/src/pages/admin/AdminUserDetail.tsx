@@ -91,24 +91,6 @@ export default function AdminUserDetail() {
         }
     };
 
-    const toggleAutopay = async (enabled: boolean) => {
-        if (!user?.organization?.id) return;
-        setBusy(true);
-        setMsg('');
-        setError('');
-        try {
-            await adminPatch(`/api/admin/organizations/${user.organization.id}/subscription`, {
-                autopayEnabled: enabled
-            });
-            setMsg(enabled ? 'Autopay turned on.' : 'Autopay turned off.');
-            load();
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setBusy(false);
-        }
-    };
-
     if (error && !user) {
         return (
             <div className="max-w-3xl space-y-4">
@@ -300,24 +282,17 @@ export default function AdminUserDetail() {
                                 </select>
                             </label>
                             {user.subscription && (
-                                <button
-                                    type="button"
-                                    disabled={busy}
-                                    onClick={() => toggleAutopay(!autopayOn)}
-                                    className={cn(
-                                        'w-full sm:w-auto px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50',
-                                        autopayOn
-                                            ? 'bg-white border border-[#E2E8F0] text-[#0F172A]'
-                                            : 'bg-[#0F172A] text-white'
-                                    )}
-                                >
-                                    {busy ? 'Saving…' : autopayOn ? 'Turn autopay off' : 'Turn autopay on'}
-                                </button>
+                                <div className="flex justify-between gap-3 py-2.5 border-t border-[#E2E8F0] text-sm">
+                                    <span className="text-[#64748B]">Autopay</span>
+                                    <span className="font-semibold text-[#0F172A]">
+                                        {autopayOn ? 'On' : 'Off'}
+                                    </span>
+                                </div>
                             )}
                         </form>
                     ) : (
                         <p className="text-sm text-[#64748B] rounded-xl border border-dashed border-[#E2E8F0] px-4 py-3">
-                            Customer must log in once before you can change plan or autopay here.
+                            Customer must log in once before you can change plan here.
                         </p>
                     )}
                 </div>

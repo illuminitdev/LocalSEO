@@ -45,7 +45,6 @@ function detailPath(user: AdminUser) {
 
 export default function AdminUsers() {
     const [users, setUsers] = useState<AdminUser[]>([]);
-    const [stage, setStage] = useState('');
     const [error, setError] = useState('');
     const [query, setQuery] = useState('');
     const [filter, setFilter] = useState<FilterKey>('all');
@@ -54,7 +53,6 @@ export default function AdminUsers() {
         adminGet('/api/admin/users')
             .then((data) => {
                 setUsers(data.users || []);
-                setStage(data.stage || '');
             })
             .catch((err: Error) => setError(err.message));
     };
@@ -98,11 +96,6 @@ export default function AdminUsers() {
                         <Mail className="w-4 h-4" />
                         <strong>{pending}</strong> waiting to claim
                     </span>
-                    {stage && (
-                        <span className="inline-flex items-center rounded-xl bg-[#0F172A] text-white px-3 py-2 text-xs font-bold uppercase">
-                            {stage}
-                        </span>
-                    )}
                 </div>
                 <button
                     type="button"
