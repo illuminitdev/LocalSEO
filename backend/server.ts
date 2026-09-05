@@ -8,7 +8,7 @@ import { requirePlacesConfigured, searchBusiness, nearbyCompetitors } from './li
 import { createStripeWebhookHandler } from './routes/webhooks';
 import { requireAuth } from './middleware/auth';
 import { requireFeature, requireAllFeatures } from './middleware/entitlements';
-import { authRateLimit, corsOptions, globalRateLimit, securityHeaders } from './middleware/security';
+import { authRateLimit, corsOptions, globalRateLimit, parseJsonBodyFallback, securityHeaders } from './middleware/security';
 import createHostRouter from './routes/host';
 import createPublicRouter from './routes/public';
 import authRouter from './routes/auth';
@@ -61,8 +61,18 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), crea
 app.use(securityHeaders());
 app.use(cors(corsOptions()));
 app.use(globalRateLimit());
-// Default 1mb; media/AI routes below raise their own limit
-app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '1mb' }));
+// JSON body — also accept text/plain so API Gateway odd Content-Types still parse
+app.use(
+    express.json({
+        limit: process.env.JSON_BODY_LIMIT || '1mb',
+        type: (req) => {
+            const ct = String(req.headers['content-type'] || '').toLowerCase();
+            // Empty Content-Type still try JSON (common behind some proxies)
+            return !ct || ct.includes('json') || ct.includes('text/plain');
+        }
+    })
+);
+app.use(parseJsonBodyFallback());
 app.use('/api/auth', authRateLimit());
 app.use('/api/admin/login', authRateLimit());
 

@@ -64,6 +64,8 @@ function globalRateLimit() {
         max: Number(process.env.RATE_LIMIT_GLOBAL_MAX || 180),
         standardHeaders: true,
         legacyHeaders: false,
+        // Lambda / API Gateway multi-IP X-Forwarded-For trips default validations
+        validate: false,
         message: { error: 'Too many requests. Please try again shortly.' }
     });
 }
@@ -75,8 +77,43 @@ function authRateLimit() {
         max: Number(process.env.RATE_LIMIT_AUTH_MAX || 40),
         standardHeaders: true,
         legacyHeaders: false,
+        validate: false,
         message: { error: 'Too many auth attempts. Please wait and try again.' }
     });
 }
 
-export { corsOptions, securityHeaders, globalRateLimit, authRateLimit, resolveCorsOrigins };
+/** If API Gateway / serverless left body as a raw JSON string, parse it. */
+function parseJsonBodyFallback(): RequestHandler {
+    return (req, _res, next) => {
+        if (typeof req.body === 'string') {
+            const raw = req.body.trim();
+            if (!raw) {
+                req.body = {};
+            } else {
+                try {
+                    req.body = JSON.parse(raw);
+                } catch {
+                    /* leave string; route will 400 */
+                }
+            }
+        } else if (Buffer.isBuffer(req.body)) {
+            try {
+                req.body = JSON.parse(req.body.toString('utf8') || '{}');
+            } catch {
+                req.body = {};
+            }
+        } else if (req.body == null) {
+            req.body = {};
+        }
+        next();
+    };
+}
+
+export {
+    corsOptions,
+    securityHeaders,
+    globalRateLimit,
+    authRateLimit,
+    parseJsonBodyFallback,
+    resolveCorsOrigins
+};
