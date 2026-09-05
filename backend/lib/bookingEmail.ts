@@ -1,20 +1,17 @@
-import nodemailer from 'nodemailer';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 
-let transporter: any = null;
+let sesClient: SESv2Client | null = null;
 
-function getTransporter() {
-    if (transporter) return transporter;
-    const host = process.env.SMTP_HOST;
-    const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASS;
-    if (!host || !user || !pass) return null;
-    transporter = nodemailer.createTransport({
-        host,
-        port: Number(process.env.SMTP_PORT || 587),
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: { user, pass }
+function emailFrom() {
+    return process.env.BOOKING_EMAIL_FROM || 'info@zappsites.com';
+}
+
+function getSesClient() {
+    if (sesClient) return sesClient;
+    sesClient = new SESv2Client({
+        region: process.env.AWS_REGION || process.env.SES_REGION || 'us-east-1'
     });
-    return transporter;
+    return sesClient;
 }
 
 function formatMoneyFromCents(cents: number, currency = 'GBP') {
@@ -27,17 +24,34 @@ function formatDeposit(depositAmount: any, currency = 'GBP') {
 }
 
 async function sendMail({ to, subject, text, html }: any) {
-    const from = process.env.BOOKING_EMAIL_FROM || process.env.SMTP_USER || 'bookings@localpulse.app';
-    const transport = getTransporter();
-    if (!transport) {
-        console.log('[booking-email] SMTP not configured — email logged:');
+    const from = emailFrom();
+    try {
+        const client = getSesClient();
+        await client.send(
+            new SendEmailCommand({
+                FromEmailAddress: from,
+                Destination: { ToAddresses: [to] },
+                Content: {
+                    Simple: {
+                        Subject: { Data: subject, Charset: 'UTF-8' },
+                        Body: {
+                            Text: { Data: text || '', Charset: 'UTF-8' },
+                            ...(html ? { Html: { Data: html, Charset: 'UTF-8' } } : {})
+                        }
+                    }
+                }
+            })
+        );
+        return { sent: true, mode: 'ses', to };
+    } catch (err: any) {
+        console.error('[booking-email] SES send failed:', err?.message || err);
+        console.log('[booking-email] email logged (not delivered):');
+        console.log(`  From: ${from}`);
         console.log(`  To: ${to}`);
         console.log(`  Subject: ${subject}`);
         console.log(text);
         return { sent: false, mode: 'logged', to };
     }
-    await transport.sendMail({ from, to, subject, text, html });
-    return { sent: true, mode: 'smtp', to };
 }
 
 async function sendBookingConfirmationEmail({
@@ -71,7 +85,7 @@ async function sendBookingConfirmationEmail({
         'Your payment was successful and your booking is confirmed.',
         '',
         `Business: ${businessName}`,
-        tradespersonName && tradespersonName !== businessName ? `With: ${tradespersonName}` : '',
+        tradespersonName ? `Engineer / provider: ${tradespersonName}` : '',
         `Service: ${service}`,
         `When: ${whenLabel}`,
         address ? `Address: ${address}` : '',
@@ -92,6 +106,7 @@ async function sendBookingConfirmationEmail({
             <p>Your deposit payment was <strong>successful</strong> and your booking is confirmed.</p>
             <table style="width:100%;border-collapse:collapse;margin:20px 0">
                 <tr><td style="padding:8px 0;color:#64748B">Business</td><td style="padding:8px 0;font-weight:600">${businessName}</td></tr>
+                ${tradespersonName ? `<tr><td style="padding:8px 0;color:#64748B">Engineer / provider</td><td style="padding:8px 0;font-weight:600">${tradespersonName}</td></tr>` : ''}
                 <tr><td style="padding:8px 0;color:#64748B">Service</td><td style="padding:8px 0;font-weight:600">${service}</td></tr>
                 <tr><td style="padding:8px 0;color:#64748B">When</td><td style="padding:8px 0;font-weight:600">${whenLabel}</td></tr>
                 ${address ? `<tr><td style="padding:8px 0;color:#64748B">Address</td><td style="padding:8px 0;font-weight:600">${address}</td></tr>` : ''}
@@ -117,14 +132,16 @@ async function sendHostBookingNotification({
     address,
     depositAmount,
     currency,
-    businessName
+    businessName,
+    hostName
 }: any) {
     const paid = formatDeposit(depositAmount, currency || 'GBP');
     const subject = `New booking — ${customerName}`;
     const text = [
-        'New booking confirmed.',
+        'A customer paid and booked a service.',
         '',
         businessName ? `Business: ${businessName}` : '',
+        hostName ? `Assigned to: ${hostName}` : '',
         `Customer: ${customerName}`,
         customerEmail ? `Customer email: ${customerEmail}` : '',
         customerPhone ? `Customer phone: ${customerPhone}` : '',
@@ -138,9 +155,10 @@ async function sendHostBookingNotification({
 
     const html = `
         <div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0F172A">
-            <h1 style="font-size:20px">New booking</h1>
+            <h1 style="font-size:20px">New booking paid</h1>
             <p>A customer paid and confirmed a booking${businessName ? ` for <strong>${businessName}</strong>` : ''}.</p>
             <table style="width:100%;border-collapse:collapse;margin:16px 0">
+                ${hostName ? `<tr><td style="padding:8px 0;color:#64748B">Assigned to</td><td style="padding:8px 0;font-weight:600">${hostName}</td></tr>` : ''}
                 <tr><td style="padding:8px 0;color:#64748B">Customer</td><td style="padding:8px 0;font-weight:600">${customerName}</td></tr>
                 ${customerEmail ? `<tr><td style="padding:8px 0;color:#64748B">Email</td><td style="padding:8px 0;font-weight:600">${customerEmail}</td></tr>` : ''}
                 ${customerPhone ? `<tr><td style="padding:8px 0;color:#64748B">Phone</td><td style="padding:8px 0;font-weight:600">${customerPhone}</td></tr>` : ''}

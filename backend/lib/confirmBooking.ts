@@ -96,7 +96,8 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
                     address: booking.customer_address,
                     depositAmount: booking.deposit_cents,
                     currency,
-                    businessName: meta.org_name
+                    businessName: meta.org_name,
+                    hostName: meta.org_host_name || meta.org_name
                 });
             } else {
                 console.log(

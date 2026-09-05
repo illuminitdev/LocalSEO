@@ -8,6 +8,7 @@ import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as iam from 'aws-cdk-lib/aws-iam';
 
 export type Stage = 'dev' | 'prod';
 
@@ -187,6 +188,10 @@ export class LocalSeoApiStack extends cdk.Stack {
           : {}),
         // Gemini: paid key on prod only via GEMINI_API_KEY_PROD
         ...(geminiKey ? { GEMINI_API_KEY: geminiKey } : {}),
+        // Booking emails via AWS SES — from info@zappsites.com on both stages
+        EMAIL_TRANSPORT: 'ses',
+        BOOKING_EMAIL_FROM: process.env.BOOKING_EMAIL_FROM || 'info@zappsites.com',
+        SES_REGION: process.env.SES_REGION || 'us-east-1',
         // Dev-only test portal client
         ...(stage === 'dev'
           ? {
@@ -201,6 +206,14 @@ export class LocalSeoApiStack extends cdk.Stack {
 
     dbSecret.grantRead(fn);
     jwtSecret.grantRead(fn);
+
+    // Allow Lambda to send booking emails through SES
+    fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+        resources: ['*'],
+      })
+    );
 
     const integration = new HttpLambdaIntegration('ApiIntegration', fn);
 
