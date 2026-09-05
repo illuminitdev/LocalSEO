@@ -1,10 +1,22 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Calendar, CheckCircle2, Copy, ExternalLink, QrCode, Settings, User, Wrench } from 'lucide-react';
+import { Calendar, CheckCircle2, Copy, ExternalLink, LogIn, Plus, QrCode, Settings, User, Wrench } from 'lucide-react';
 import { apiGet, apiPost, formatCents, cn } from '../lib/utils';
 import { setBookingOrgSlug } from '../lib/bookingHost';
 import BookingSetupWizard, { type SetupForm } from '../components/BookingSetupWizard';
 import BookingSettingsPanel from '../components/BookingSettingsPanel';
+
+type BookingService = {
+    id: string;
+    slug: string;
+    name: string;
+    host_name?: string;
+    trade_type?: string;
+    service_area?: string;
+    setup_complete?: boolean;
+    canResume?: boolean;
+    ready?: boolean;
+};
 
 function bookingStatusBadge(b: { status: string; deposit_paid?: boolean }) {
     if (b.status === 'confirmed' && b.deposit_paid) {
@@ -29,11 +41,24 @@ export default function BookingPlots() {
     const [error, setError] = useState('');
     const [info, setInfo] = useState('');
     const [data, setData] = useState<any>(null);
+    const [services, setServices] = useState<BookingService[]>([]);
+    const [addingService, setAddingService] = useState(false);
     const [linked, setLinked] = useState(false);
     const [linkedBusiness, setLinkedBusiness] = useState<any>(null);
     const [filter, setFilter] = useState<'upcoming' | 'past' | 'cancelled'>('upcoming');
     const [copied, setCopied] = useState(false);
     const [busy, setBusy] = useState('');
+
+    const loadServices = async () => {
+        try {
+            const res = await apiGet('/api/host/organizations');
+            setServices(res.organizations || []);
+            return res.organizations || [];
+        } catch {
+            setServices([]);
+            return [];
+        }
+    };
 
     const load = async () => {
         const [d, business] = await Promise.all([
@@ -43,6 +68,9 @@ export default function BookingPlots() {
         setData(d);
         setLinked(Boolean(business?.connected && business?.name));
         setLinkedBusiness(business?.connected && business?.name ? business : null);
+        if (!d?.ready) {
+            await loadServices();
+        }
         setError('');
         setLoading(false);
         return d;
@@ -59,6 +87,23 @@ export default function BookingPlots() {
     const org = data?.organization;
     const eventTypes = data?.eventTypes || [];
     const bookings = data?.bookings || [];
+    const displayServices: BookingService[] =
+        services.filter((s) => s.canResume).length > 0
+            ? services.filter((s) => s.canResume)
+            : data?.canResume && data?.organization
+              ? [
+                    {
+                        id: data.organization.id,
+                        slug: data.organization.slug,
+                        name: data.organization.name,
+                        host_name: data.organization.host_name,
+                        trade_type: data.organization.trade_type,
+                        service_area: data.organization.service_area,
+                        canResume: true
+                    }
+                ]
+              : [];
+    const hasSavedServices = displayServices.length > 0;
 
     const filtered = useMemo(() => {
         const now = Date.now();
@@ -83,13 +128,47 @@ export default function BookingPlots() {
         setBusy('setup');
         setError('');
         try {
-            const result = await apiPost('/api/host/setup', form);
+            const endpoint = addingService || hasSavedServices ? '/api/host/organizations' : '/api/host/setup';
+            const result = await apiPost(endpoint, { ...form, createNew: addingService || hasSavedServices });
             if (result.orgSlug) setBookingOrgSlug(result.orgSlug);
+            setAddingService(false);
             setData(result);
+            setSearchParams({});
         } catch (e: any) {
             setError(e.message);
         } finally {
             setBusy('');
+        }
+    };
+
+    const resumeBooking = async (service: BookingService) => {
+        setBusy(service.id);
+        setError('');
+        try {
+            if (service.slug) setBookingOrgSlug(service.slug);
+            const result = await apiPost('/api/host/resume', { orgId: service.id, slug: service.slug });
+            if (result?.organization?.slug || result?.orgSlug) {
+                setBookingOrgSlug(result.organization?.slug || result.orgSlug);
+            }
+            setData(result);
+            setAddingService(false);
+            setSearchParams({});
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setBusy('');
+        }
+    };
+
+    const handleBookingLoggedOut = async () => {
+        setSearchParams({});
+        setAddingService(false);
+        try {
+            await load();
+        } catch (e: any) {
+            setData({ ready: false });
+            await loadServices();
+            setError(e.message);
         }
     };
 
@@ -156,14 +235,86 @@ export default function BookingPlots() {
     if (loading) return <div className="flex items-center justify-center py-24 font-bold text-[#0F172A]">Loading Booking Plots…</div>;
 
     if (!ready) {
+        if (addingService || (!hasSavedServices && !data?.canResume)) {
+            return (
+                <div className="space-y-4">
+                    {addingService && (
+                        <div className="max-w-lg mx-auto px-4 pt-4">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setAddingService(false);
+                                    setError('');
+                                }}
+                                className="text-sm font-semibold text-[#64748B] hover:text-[#0F172A]"
+                            >
+                                ← Back to your services
+                            </button>
+                        </div>
+                    )}
+                    <BookingSetupWizard
+                        linked={linked && !addingService}
+                        linkedBusiness={addingService ? null : linkedBusiness}
+                        busy={busy === 'setup'}
+                        error={error}
+                        onComplete={completeSetup}
+                    />
+                </div>
+            );
+        }
+
         return (
-            <BookingSetupWizard
-                linked={linked}
-                linkedBusiness={linkedBusiness}
-                busy={busy === 'setup'}
-                error={error}
-                onComplete={completeSetup}
-            />
+            <div className="max-w-lg mx-auto py-10 px-4">
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-6 space-y-4">
+                    <div>
+                        <p className="text-[11px] font-bold uppercase tracking-widest text-[#F59E0B]">Booking Plots</p>
+                        <h1 className="text-2xl font-black text-[#0F172A] mt-1.5 tracking-tight">Welcome back</h1>
+                        <p className="text-sm text-[#64748B] mt-2 leading-relaxed">
+                            Your booking settings, payments, and customer data are still saved. Open any service below — this does not sign you out of other portal tools.
+                        </p>
+                    </div>
+
+                    <div className="space-y-2">
+                        {displayServices.map((service) => {
+                            const subtitle = [service.host_name, service.trade_type].filter(Boolean).join(' · ');
+                            return (
+                                <div
+                                    key={service.id}
+                                    className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+                                >
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-[#0F172A] truncate">{service.name || 'Booking service'}</p>
+                                        {subtitle && <p className="text-xs text-[#64748B] mt-0.5 truncate">{subtitle}</p>}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        disabled={busy === service.id}
+                                        onClick={() => resumeBooking(service)}
+                                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#F59E0B] text-[#0F172A] px-4 py-2.5 text-sm font-bold disabled:opacity-50 shrink-0"
+                                    >
+                                        <LogIn className="w-4 h-4" />
+                                        {busy === service.id ? 'Opening…' : 'Continue'}
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
+
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setError('');
+                            setAddingService(true);
+                        }}
+                        className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[#E2E8F0] bg-white text-[#0F172A] py-3 text-sm font-bold hover:bg-[#F8FAFC]"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Add a new service
+                    </button>
+                </div>
+            </div>
         );
     }
 
@@ -211,6 +362,7 @@ export default function BookingPlots() {
                             <BookingSettingsPanel
                                 embedded
                                 onBack={backToBoard}
+                                onLoggedOut={handleBookingLoggedOut}
                                 initialDashboard={data}
                                 onRefresh={load}
                             />

@@ -34,14 +34,16 @@ async function createBookingOrg({
     acceptingEmergencies = true,
     emergencyNote = '',
     email = '',
-    orgId = null
+    orgId = null,
+    userId = null,
+    createNew = false
 }: any) {
     const standardDepositCents = Math.round(Number(standardDeposit) * 100) || 4500;
     const emergencyDepositCents = Math.round(Number(emergencyDeposit) * 100) || 6000;
     const currencyCode = currency === '£' || currency === 'GBP' ? 'GBP' : currency === '€' || currency === 'EUR' ? 'EUR' : 'USD';
 
-    let org: any;
-    if (orgId) {
+    // Update existing org only when completing first-time setup on that org (not createNew).
+    if (orgId && !createNew) {
         const orgRes = await query(
             `UPDATE organizations SET
               name = $1, host_name = $2, trade_type = $3, phone = $4, service_area = $5,
@@ -63,7 +65,7 @@ async function createBookingOrg({
                 orgId
             ]
         );
-        org = orgRes.rows[0];
+        const org = orgRes.rows[0];
         if (!org) throw new Error('Organization not found');
         const { rows: existingTypes } = await query('SELECT id FROM event_types WHERE org_id = $1 LIMIT 1', [org.id]);
         if (!existingTypes.length) {
@@ -94,17 +96,66 @@ async function createBookingOrg({
             String(emergencyNote || '').trim()
         ]
     );
-    org = orgRes.rows[0];
+    const org = orgRes.rows[0];
     await seedDefaultEventTypes(org.id, {
         standardDepositCents,
         emergencyDepositCents,
         acceptingEmergencies: acceptingEmergencies !== false
     });
+
+    if (userId) {
+        await query(
+            `INSERT INTO memberships (user_id, org_id, role)
+             VALUES ($1, $2, 'owner')
+             ON CONFLICT (user_id, org_id) DO NOTHING`,
+            [userId, org.id]
+        );
+    }
+
     return org;
+}
+
+async function listUserBookingOrgs(userId: string) {
+    const { rows } = await query(
+        `SELECT o.id, o.slug, o.name, o.host_name, o.trade_type, o.service_area, o.setup_complete,
+                EXISTS (
+                    SELECT 1 FROM event_types et WHERE et.org_id = o.id LIMIT 1
+                ) AS has_events
+         FROM memberships m
+         JOIN organizations o ON o.id = m.org_id
+         WHERE m.user_id = $1
+         ORDER BY o.created_at ASC NULLS LAST, o.name ASC`,
+        [userId]
+    );
+
+    return rows.map((o: any) => {
+        const hasBookingData = Boolean(String(o.trade_type || '').trim() && o.has_events);
+        return {
+            id: o.id,
+            slug: o.slug,
+            name: o.name,
+            host_name: o.host_name,
+            trade_type: o.trade_type,
+            service_area: o.service_area,
+            setup_complete: Boolean(o.setup_complete),
+            canResume: hasBookingData,
+            ready: Boolean(o.setup_complete && hasBookingData)
+        };
+    });
+}
+
+async function assertUserOrgMembership(userId: string, orgId: string) {
+    const { rows } = await query(
+        `SELECT m.org_id FROM memberships m WHERE m.user_id = $1 AND m.org_id = $2::uuid LIMIT 1`,
+        [userId, orgId]
+    );
+    return rows[0]?.org_id || null;
 }
 
 export {
     seedDefaultAvailability,
     seedDefaultEventTypes,
-    createBookingOrg
+    createBookingOrg,
+    listUserBookingOrgs,
+    assertUserOrgMembership
 };
