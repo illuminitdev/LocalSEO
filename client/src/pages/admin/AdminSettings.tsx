@@ -4,9 +4,6 @@ import { adminGet, adminPatch } from '../../lib/adminApi';
 
 export default function AdminSettings() {
     const [email, setEmail] = useState('');
-    const [stage, setStage] = useState('');
-    const [passwordSource, setPasswordSource] = useState<'env' | 'custom'>('env');
-    const [passwordUpdatedAt, setPasswordUpdatedAt] = useState<string | null>(null);
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -19,9 +16,6 @@ export default function AdminSettings() {
         adminGet('/api/admin/me')
             .then((data) => {
                 setEmail(data.email || data.admin?.email || '');
-                setStage(data.stage || data.admin?.stage || '');
-                setPasswordSource(data.passwordSource === 'custom' ? 'custom' : 'env');
-                setPasswordUpdatedAt(data.passwordUpdatedAt || null);
             })
             .catch((err: Error) => setLoadError(err.message));
     }, []);
@@ -44,8 +38,6 @@ export default function AdminSettings() {
             setCurrentPassword('');
             setNewPassword('');
             setConfirmPassword('');
-            setPasswordSource('custom');
-            setPasswordUpdatedAt(new Date().toISOString());
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -70,24 +62,12 @@ export default function AdminSettings() {
                     </div>
                 </div>
                 <div className="p-5 space-y-3 text-sm">
-                    <div className="flex justify-between gap-3 py-2 border-b border-[#F1F5F9]">
-                        <span className="text-[#64748B]">Email</span>
-                        <span className="font-semibold text-[#0F172A]">{email || '—'}</span>
-                    </div>
-                    <div className="flex justify-between gap-3 py-2 border-b border-[#F1F5F9]">
-                        <span className="text-[#64748B]">Environment</span>
-                        <span className="font-semibold uppercase text-[#0F172A]">{stage || '—'}</span>
-                    </div>
                     <div className="flex justify-between gap-3 py-2">
-                        <span className="text-[#64748B]">Password</span>
-                        <span className="font-semibold text-[#0F172A]">
-                            {passwordSource === 'custom'
-                                ? `Changed${passwordUpdatedAt ? ` · ${new Date(passwordUpdatedAt).toLocaleDateString('en-GB')}` : ''}`
-                                : 'Using deploy default'}
-                        </span>
+                        <span className="text-[#64748B]">Email</span>
+                        <span className="font-semibold text-[#0F172A] text-right break-all">{email || '—'}</span>
                     </div>
                     <p className="text-xs text-[#94A3B8] pt-1">
-                        Email is locked to this stage (dev vs prod). You can change the password below.
+                        Email is locked for this admin account. You can change the password below.
                     </p>
                 </div>
             </section>

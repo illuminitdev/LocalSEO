@@ -1,18 +1,18 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, LogOut, Shield, Layers, Settings } from 'lucide-react';
+import { LayoutDashboard, Users, LogOut, Layers, Settings } from 'lucide-react';
 import { clearAdminToken } from '../lib/adminAuth';
 import { cn } from '../lib/utils';
 
 const NAV = [
-    { name: 'Overview', to: '/admin', icon: LayoutDashboard, end: true, hint: 'Numbers at a glance' },
-    { name: 'Customers', to: '/admin/users', icon: Users, hint: 'Plans & renewals' },
-    { name: 'Plan guide', to: '/admin/services', icon: Layers, hint: 'What each plan unlocks' },
-    { name: 'Settings', to: '/admin/settings', icon: Settings, hint: 'Admin password' }
+    { name: 'Overview', to: '/admin', icon: LayoutDashboard, end: true },
+    { name: 'Customers', to: '/admin/users', icon: Users },
+    { name: 'Plan guide', to: '/admin/services', icon: Layers },
+    { name: 'Settings', to: '/admin/settings', icon: Settings }
 ];
 
 function pageTitle(pathname: string) {
     if (pathname.match(/\/admin\/users\/(user|invite)\//)) {
-        return { title: 'Customer details', subtitle: 'Plan, renew date, autopay, and tools for this customer.' };
+        return { title: 'Customer details', subtitle: 'Plan, renew date, autopay status, and tools for this customer.' };
     }
     if (pathname.startsWith('/admin/users')) {
         return { title: 'Customers', subtitle: 'Click a customer to open their plan and billing page.' };
@@ -38,21 +38,23 @@ export default function AdminLayout() {
 
     return (
         <div className="flex h-screen bg-[#EEF2F6] text-[#0F172A]">
-            <aside className="w-[248px] h-screen shrink-0 bg-[#0B1220] text-white flex flex-col overflow-hidden">
-                <div className="px-4 py-5 border-b border-white/10 shrink-0">
-                    <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-[#F59E0B] flex items-center justify-center shrink-0 shadow-sm">
-                            <Shield className="w-4 h-4" />
+            <aside className="w-[260px] h-screen shrink-0 bg-white border-r border-[#E2E8F0] flex flex-col overflow-hidden">
+                {/* Brand */}
+                <div className="px-5 pt-5 pb-4 shrink-0">
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-lg bg-[#F59E0B] text-white flex items-center justify-center font-bold text-sm shrink-0">
+                            z
                         </div>
-                        <div className="min-w-0">
-                            <p className="font-semibold text-[15px] tracking-tight truncate">ZappSites Admin</p>
-                            <p className="text-[10px] uppercase tracking-[0.14em] text-[#F59E0B]/90 mt-1">Local SEO desk</p>
+                        <div className="min-w-0 leading-tight">
+                            <p className="font-bold text-[15px] text-[#0F172A] tracking-tight truncate">ZappSites</p>
+                            <p className="text-[11px] text-[#94A3B8] mt-0.5 truncate">Local SEO simplified.</p>
                         </div>
                     </div>
+                    <p className="mt-5 text-[13px] font-medium text-[#94A3B8]">Admin Portal</p>
                 </div>
 
-                <nav className="px-3 py-4 space-y-1 flex-1 overflow-y-auto">
-                    <p className="px-2.5 mb-2 text-[10px] font-bold uppercase tracking-wider text-white/35">Manage</p>
+                {/* Nav */}
+                <nav className="px-3 flex-1 overflow-y-auto space-y-0.5">
                     {NAV.map((item) => (
                         <NavLink
                             key={item.to}
@@ -64,30 +66,37 @@ export default function AdminLayout() {
                                         ? location.pathname.startsWith('/admin/users')
                                         : isActive;
                                 return cn(
-                                    'flex items-start gap-3 px-2.5 py-2.5 rounded-xl text-sm transition-colors',
+                                    'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors',
                                     active
-                                        ? 'bg-[#F59E0B] text-white shadow-sm'
-                                        : 'text-white/75 hover:bg-white/10 hover:text-white'
+                                        ? 'bg-[#F59E0B] text-[#0F172A] font-semibold'
+                                        : 'text-[#64748B] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
                                 );
                             }}
                         >
-                            <item.icon className="w-4 h-4 shrink-0 mt-0.5" />
-                            <span className="min-w-0">
-                                <span className="block font-semibold leading-tight">{item.name}</span>
-                                <span className="block text-[11px] mt-0.5 opacity-80 leading-snug">{item.hint}</span>
-                            </span>
+                            <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
+                            <span>{item.name}</span>
                         </NavLink>
                     ))}
                 </nav>
 
-                <div className="px-3 py-4 border-t border-white/10 shrink-0">
+                {/* Footer: user + logout */}
+                <div className="px-4 pb-4 pt-3 shrink-0 space-y-3">
+                    <div className="flex items-center gap-3 px-1">
+                        <div className="w-9 h-9 rounded-full bg-[#0F172A] text-white flex items-center justify-center text-xs font-bold shrink-0">
+                            AD
+                        </div>
+                        <div className="min-w-0 leading-tight">
+                            <p className="text-sm font-semibold text-[#0F172A] truncate">Admin</p>
+                            <p className="text-xs text-[#94A3B8] mt-0.5 truncate">Admin</p>
+                        </div>
+                    </div>
                     <button
                         type="button"
                         onClick={logout}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-sm font-medium text-white/65 hover:bg-white/10 hover:text-white"
+                        className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl border border-[#E2E8F0] bg-white text-sm font-semibold text-[#0F172A] hover:bg-[#F8FAFC] transition-colors"
                     >
-                        <LogOut className="w-4 h-4" />
-                        Sign out
+                        <LogOut className="w-4 h-4" strokeWidth={1.75} />
+                        Log out
                     </button>
                 </div>
             </aside>
