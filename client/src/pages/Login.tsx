@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { API_BASE, apiPost } from '../lib/utils';
@@ -24,22 +24,35 @@ export default function Login() {
     const navigate = useNavigate();
     const { refresh } = useEntitlements();
     const [params] = useSearchParams();
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
+    const emailRef = useRef<HTMLInputElement>(null);
+    const passwordRef = useRef<HTMLInputElement>(null);
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
 
-    const submit = async (e: FormEvent) => {
+    const submit = async (e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setBusy(true);
         setError('');
-        const trimmedEmail = email.trim().toLowerCase();
+
+        // Read DOM values (works with browser autofill; controlled React state often lags)
+        const fd = new FormData(e.currentTarget);
+        const trimmedEmail = String(
+            fd.get('email') || emailRef.current?.value || ''
+        )
+            .trim()
+            .toLowerCase();
+        const pwd = String(fd.get('password') || passwordRef.current?.value || '');
+
+        if (!trimmedEmail || !pwd) {
+            setError('Email and password are required.');
+            setBusy(false);
+            return;
+        }
 
         try {
-            // 1) Customer / plan portal login
             try {
-                const data = await apiPost('/api/auth/login', { email: trimmedEmail, password });
+                const data = await apiPost('/api/auth/login', { email: trimmedEmail, password: pwd });
                 clearAdminToken();
                 setToken(data.token);
                 const mustChange = Boolean(data.user?.mustChangePassword);
@@ -60,8 +73,7 @@ export default function Login() {
                 // Fall through to admin if customer auth failed
             }
 
-            // 2) Same form → admin panel when admin credentials match this STAGE
-            const adminData = await tryAdminLogin(trimmedEmail, password);
+            const adminData = await tryAdminLogin(trimmedEmail, pwd);
             clearToken();
             setMustChangePassword(false);
             setAdminToken(adminData.token);
@@ -79,7 +91,7 @@ export default function Login() {
             title="Welcome back"
             subtitle="Sign in to your account."
         >
-            <form onSubmit={submit} className="space-y-4">
+            <form onSubmit={submit} className="space-y-4" autoComplete="on">
                 {error && (
                     <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>
                 )}
@@ -87,11 +99,11 @@ export default function Login() {
                     Email
                     <AuthFieldWrap>
                         <input
+                            ref={emailRef}
+                            name="email"
                             type="email"
                             required
-                            autoComplete="email"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
+                            autoComplete="username"
                             className={authFieldClass}
                             placeholder="you@business.com"
                         />
@@ -107,11 +119,11 @@ export default function Login() {
                     <AuthFieldWrap>
                         <div className="relative mt-1.5">
                             <input
+                                ref={passwordRef}
+                                name="password"
                                 type={showPassword ? 'text' : 'password'}
                                 required
                                 autoComplete="current-password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
                                 className={`${authFieldClass} mt-0 pr-11`}
                                 placeholder="Your password"
                             />
