@@ -1,6 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Calendar, Check, CreditCard, Flame, Pencil, Plus, Settings, ShieldAlert, Wallet, Wrench, X } from 'lucide-react';
+import {
+    ArrowLeft,
+    Calendar,
+    Check,
+    CreditCard,
+    Flame,
+    LogOut,
+    Pencil,
+    Plus,
+    Settings,
+    ShieldAlert,
+    Wallet,
+    Wrench,
+    X
+} from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiPut, cn, formatCents } from '../lib/utils';
 import AvailabilityEditor, { type AvailabilitySettings } from './AvailabilityEditor';
 
@@ -55,6 +69,7 @@ function poundsToCents(value: string) {
 type Props = {
     embedded?: boolean;
     onBack?: () => void;
+    onLoggedOut?: () => void;
     initialDashboard?: {
         organization?: any;
         eventTypes?: any[];
@@ -63,7 +78,7 @@ type Props = {
     onRefresh?: () => void;
 };
 
-export default function BookingSettingsPanel({ embedded, onBack, initialDashboard, onRefresh }: Props) {
+export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, initialDashboard, onRefresh }: Props) {
     const [searchParams, setSearchParams] = useSearchParams();
     const tabParam = searchParams.get('tab');
     const tab: Tab = tabParam === 'availability' || tabParam === 'integrations' || tabParam === 'profile' ? tabParam : 'events';
@@ -97,6 +112,7 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
     const [savingEdit, setSavingEdit] = useState(false);
     const [savingProfile, setSavingProfile] = useState(false);
     const [savingAvailability, setSavingAvailability] = useState(false);
+    const [loggingOut, setLoggingOut] = useState(false);
 
     const applyDashboard = (dash: NonNullable<Props['initialDashboard']>) => {
         setOrg(dash.organization);
@@ -260,6 +276,18 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
         } catch (e: any) {
             setError(e.message);
             setSavingProfile(false);
+        }
+    };
+
+    const logoutBooking = async () => {
+        setLoggingOut(true);
+        setError('');
+        try {
+            await apiPost('/api/host/logout', {});
+            onLoggedOut?.();
+        } catch (e: any) {
+            setError(e.message || 'Could not leave booking');
+            setLoggingOut(false);
         }
     };
 
@@ -608,8 +636,8 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
                             ['host_name', 'Your full name', 'e.g. Dave Miller'],
                             ['name', 'Business name', 'e.g. Miller Heating Ltd'],
                             ['trade_type', 'Service type', 'e.g. Electrician'],
-                            ['phone', 'Phone', 'e.g. 07700900123'],
-                            ['email', 'Email', 'e.g. hello@yourbusiness.com'],
+                            ['phone', 'Phone number', 'e.g. 07700900123'],
+                            ['email', 'Notification email', 'e.g. hello@yourbusiness.com'],
                             ['service_area', 'Service area', 'e.g. Greater Manchester']
                         ] as const).map(([field, label, placeholder]) => (
                             <label key={field} className="block text-xs font-bold uppercase text-[#64748B]">
@@ -622,6 +650,11 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
                                 />
                             </label>
                         ))}
+                        <p className="text-xs text-[#94A3B8] leading-relaxed">
+                            Add your <strong className="text-[#64748B]">phone</strong> and{' '}
+                            <strong className="text-[#64748B]">notification email</strong>. When a customer books and pays,
+                            confirmation emails go to you and the customer with the service, time, and payment details.
+                        </p>
                         <div className="flex flex-wrap gap-2 pt-1">
                             <button
                                 type="button"
@@ -636,6 +669,26 @@ export default function BookingSettingsPanel({ embedded, onBack, initialDashboar
                                     Back to board
                                 </button>
                             )}
+                        </div>
+
+                        <div className="mt-6 pt-5 border-t border-[#E2E8F0]">
+                            <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                <div>
+                                    <p className="text-sm font-bold text-[#0F172A]">Leave booking</p>
+                                    <p className="text-xs text-[#64748B] mt-0.5 leading-relaxed">
+                                        Log out of Booking Plots only. Your settings, Stripe, and bookings stay saved — you can come back anytime. Other portal tools stay signed in.
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    disabled={loggingOut}
+                                    onClick={logoutBooking}
+                                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-[#E2E8F0] bg-white text-sm font-bold text-[#0F172A] hover:bg-white shrink-0 disabled:opacity-50"
+                                >
+                                    <LogOut className="w-4 h-4" strokeWidth={1.75} />
+                                    {loggingOut ? 'Leaving…' : 'Log out of booking'}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}

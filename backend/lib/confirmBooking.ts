@@ -20,10 +20,12 @@ async function getHostUserId(orgId: any) {
     return rows[0]?.user_id || null;
 }
 
-/** Mark booking confirmed after successful Stripe payment; sync calendar & send emails once. */
+/** Mark booking confirmed after successful Stripe payment (or free/sim); sync calendar & send emails once. */
 async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntentId }: any) {
     const { rows } = await query(
-        `SELECT b.*, e.name AS event_name, o.name AS org_name, o.slug AS org_slug, o.email AS org_email
+        `SELECT b.*, e.name AS event_name,
+                o.name AS org_name, o.slug AS org_slug, o.email AS org_email,
+                o.phone AS org_phone, o.host_name AS org_host_name, o.currency AS org_currency
          FROM bookings b
          JOIN event_types e ON e.id = b.event_type_id
          JOIN organizations o ON o.id = b.org_id
@@ -35,18 +37,17 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
 
     let booking = rows[0];
     const meta = rows[0];
+    const alreadyConfirmed = booking.deposit_paid && booking.status === 'confirmed';
 
-    if (booking.deposit_paid && booking.status === 'confirmed') {
-        return booking;
+    if (!alreadyConfirmed) {
+        await query(
+            `UPDATE bookings SET status = 'confirmed', deposit_paid = TRUE,
+             stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id), updated_at = NOW()
+             WHERE id = $2`,
+            [paymentIntentId || null, booking.id]
+        );
+        booking = (await query('SELECT * FROM bookings WHERE id = $1', [booking.id])).rows[0];
     }
-
-    await query(
-        `UPDATE bookings SET status = 'confirmed', deposit_paid = TRUE,
-         stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id), updated_at = NOW()
-         WHERE id = $2`,
-        [paymentIntentId || null, booking.id]
-    );
-    booking = (await query('SELECT * FROM bookings WHERE id = $1', [booking.id])).rows[0];
 
     const userId = await getHostUserId(booking.org_id);
     if (userId && !booking.google_event_id) {
@@ -61,18 +62,25 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
         try {
             const manageUrl = `${frontendOrigin()}/book/manage/${booking.manage_token}`;
             const icsUrl = `${frontendOrigin()}/api/public/bookings/${booking.id}/calendar.ics`;
-            const slotLabel = new Date(booking.start_at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+            const whenLabel = new Date(booking.start_at).toLocaleString('en-GB', {
+                dateStyle: 'medium',
+                timeStyle: 'short'
+            });
+            const currency = meta.org_currency || 'GBP';
 
             await sendBookingConfirmationEmail({
                 to: booking.customer_email,
                 customerName: booking.customer_name,
                 businessName: meta.org_name,
-                tradespersonName: meta.org_name,
+                tradespersonName: meta.org_host_name || meta.org_name,
+                serviceName: meta.event_name,
                 date: datePart(booking.start_at),
-                slotLabel,
+                slotLabel: whenLabel,
                 depositAmount: booking.deposit_cents,
-                currency: 'GBP',
+                currency,
                 address: booking.customer_address,
+                hostPhone: meta.org_phone,
+                hostEmail: meta.org_email,
                 manageUrl,
                 icsUrl
             });
@@ -81,10 +89,19 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
                 await sendHostBookingNotification({
                     to: meta.org_email,
                     customerName: booking.customer_name,
+                    customerEmail: booking.customer_email,
+                    customerPhone: booking.customer_phone,
                     eventName: meta.event_name,
-                    startAt: slotLabel,
-                    address: booking.customer_address
+                    startAt: whenLabel,
+                    address: booking.customer_address,
+                    depositAmount: booking.deposit_cents,
+                    currency,
+                    businessName: meta.org_name
                 });
+            } else {
+                console.log(
+                    `[booking-email] Host notification skipped — set organizations.email for org ${booking.org_id}`
+                );
             }
 
             await query('UPDATE bookings SET confirmation_email_sent = TRUE WHERE id = $1', [booking.id]);

@@ -5,8 +5,37 @@ function authRequired() {
     return process.env.AUTH_REQUIRED === 'true';
 }
 
-async function attachUserFromToken(req: any, token: string) {
-    const decoded: any = verifyToken(token);
+async function loadUserMembership(userId: string, opts: { orgId?: string | null; orgSlug?: string | null } = {}) {
+    const { orgId, orgSlug } = opts;
+
+    if (orgSlug) {
+        const { rows } = await query(
+            `SELECT u.id, u.email, u.name, u.must_change_password,
+                    m.org_id, m.role, o.slug AS org_slug, o.name AS org_name
+             FROM users u
+             JOIN memberships m ON m.user_id = u.id
+             JOIN organizations o ON o.id = m.org_id
+             WHERE u.id = $1 AND o.slug = $2
+             LIMIT 1`,
+            [userId, orgSlug]
+        );
+        if (rows.length) return rows[0];
+    }
+
+    if (orgId) {
+        const { rows } = await query(
+            `SELECT u.id, u.email, u.name, u.must_change_password,
+                    m.org_id, m.role, o.slug AS org_slug, o.name AS org_name
+             FROM users u
+             JOIN memberships m ON m.user_id = u.id
+             JOIN organizations o ON o.id = m.org_id
+             WHERE u.id = $1 AND m.org_id = $2::uuid
+             LIMIT 1`,
+            [userId, orgId]
+        );
+        if (rows.length) return rows[0];
+    }
+
     const { rows } = await query(
         `SELECT u.id, u.email, u.name, u.must_change_password,
                 m.org_id, m.role, o.slug AS org_slug, o.name AS org_name
@@ -14,12 +43,26 @@ async function attachUserFromToken(req: any, token: string) {
          JOIN memberships m ON m.user_id = u.id
          JOIN organizations o ON o.id = m.org_id
          WHERE u.id = $1
+         ORDER BY m.org_id
          LIMIT 1`,
-        [decoded.userId]
+        [userId]
     );
-    if (!rows.length) return false;
-    req.user = rows[0];
-    req.orgId = rows[0].org_id;
+    return rows[0] || null;
+}
+
+async function attachUserFromToken(req: any, token: string) {
+    const decoded: any = verifyToken(token);
+    const headerSlug = String(req.headers['x-booking-org'] || '').trim() || null;
+    const jwtOrgId = decoded.orgId ? String(decoded.orgId) : null;
+
+    const row = await loadUserMembership(decoded.userId, {
+        orgSlug: headerSlug,
+        orgId: jwtOrgId
+    });
+    if (!row) return false;
+    req.user = row;
+    req.orgId = row.org_id;
+    req.orgSlug = row.org_slug;
     return true;
 }
 

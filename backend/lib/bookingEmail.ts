@@ -19,11 +19,11 @@ function getTransporter() {
 
 function formatMoneyFromCents(cents: number, currency = 'GBP') {
     const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
-    return `${symbol}${(cents / 100).toFixed(2)}`;
+    return `${symbol}${(Number(cents || 0) / 100).toFixed(2)}`;
 }
 
-function formatMoney(amount: any, currencySymbol: any) {
-    return `${currencySymbol || '£'}${Number(amount).toFixed(2)}`;
+function formatDeposit(depositAmount: any, currency = 'GBP') {
+    return formatMoneyFromCents(Number(depositAmount || 0), currency);
 }
 
 async function sendMail({ to, subject, text, html }: any) {
@@ -40,24 +40,50 @@ async function sendMail({ to, subject, text, html }: any) {
     return { sent: true, mode: 'smtp', to };
 }
 
-async function sendBookingConfirmationEmail({ to, customerName, businessName, tradespersonName, date, slotLabel, depositAmount, currency, address, manageUrl, icsUrl }: any) {
+async function sendBookingConfirmationEmail({
+    to,
+    customerName,
+    businessName,
+    tradespersonName,
+    serviceName,
+    date,
+    slotLabel,
+    depositAmount,
+    currency,
+    address,
+    hostPhone,
+    hostEmail,
+    manageUrl,
+    icsUrl
+}: any) {
+    const whenLabel = [date, slotLabel].filter(Boolean).join(' — ');
+    const paid = formatDeposit(depositAmount, currency || 'GBP');
+    const service = serviceName || slotLabel || 'Booking';
     const subject = `Booking confirmed — ${businessName}`;
-    const manageLine = manageUrl ? `\nManage booking: ${manageUrl}` : '';
+    const contactLines = [
+        hostPhone ? `Phone: ${hostPhone}` : '',
+        hostEmail ? `Email: ${hostEmail}` : ''
+    ].filter(Boolean);
+
     const text = [
         `Hi ${customerName},`,
         '',
         'Your payment was successful and your booking is confirmed.',
         '',
         `Business: ${businessName}`,
-        `Service: ${slotLabel}`,
-        `Date: ${date}`,
-        `Address: ${address}`,
-        `Deposit paid: ${typeof depositAmount === 'number' && depositAmount > 100 ? formatMoneyFromCents(depositAmount, currency) : formatMoney(depositAmount, currency === 'GBP' ? '£' : currency)}`,
-        manageLine,
-        icsUrl ? `\nAdd to calendar: ${icsUrl}` : '',
+        tradespersonName && tradespersonName !== businessName ? `With: ${tradespersonName}` : '',
+        `Service: ${service}`,
+        `When: ${whenLabel}`,
+        address ? `Address: ${address}` : '',
+        `Deposit paid: ${paid}`,
+        ...contactLines,
+        manageUrl ? `\nManage booking: ${manageUrl}` : '',
+        icsUrl ? `Add to calendar: ${icsUrl}` : '',
         '',
-        `${tradespersonName || businessName} has been notified.`
-    ].join('\n');
+        'Please arrive at the time above. If you need to change anything, use the manage link.'
+    ]
+        .filter((line) => line !== '')
+        .join('\n');
 
     const html = `
         <div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0F172A">
@@ -66,9 +92,13 @@ async function sendBookingConfirmationEmail({ to, customerName, businessName, tr
             <p>Your deposit payment was <strong>successful</strong> and your booking is confirmed.</p>
             <table style="width:100%;border-collapse:collapse;margin:20px 0">
                 <tr><td style="padding:8px 0;color:#64748B">Business</td><td style="padding:8px 0;font-weight:600">${businessName}</td></tr>
-                <tr><td style="padding:8px 0;color:#64748B">When</td><td style="padding:8px 0;font-weight:600">${date} — ${slotLabel}</td></tr>
-                <tr><td style="padding:8px 0;color:#64748B">Address</td><td style="padding:8px 0;font-weight:600">${address}</td></tr>
+                <tr><td style="padding:8px 0;color:#64748B">Service</td><td style="padding:8px 0;font-weight:600">${service}</td></tr>
+                <tr><td style="padding:8px 0;color:#64748B">When</td><td style="padding:8px 0;font-weight:600">${whenLabel}</td></tr>
+                ${address ? `<tr><td style="padding:8px 0;color:#64748B">Address</td><td style="padding:8px 0;font-weight:600">${address}</td></tr>` : ''}
+                <tr><td style="padding:8px 0;color:#64748B">Deposit paid</td><td style="padding:8px 0;font-weight:600">${paid}</td></tr>
+                ${hostPhone ? `<tr><td style="padding:8px 0;color:#64748B">Business phone</td><td style="padding:8px 0;font-weight:600">${hostPhone}</td></tr>` : ''}
             </table>
+            <p style="color:#64748B;font-size:14px">Please come at the appointment time above.</p>
             ${manageUrl ? `<p><a href="${manageUrl}" style="color:#F59E0B;font-weight:600">Reschedule or cancel your booking</a></p>` : ''}
             ${icsUrl ? `<p><a href="${icsUrl}" style="color:#0F172A">Download calendar invite (.ics)</a></p>` : ''}
         </div>
@@ -77,10 +107,50 @@ async function sendBookingConfirmationEmail({ to, customerName, businessName, tr
     return sendMail({ to, subject, text, html });
 }
 
-async function sendHostBookingNotification({ to, customerName, eventName, startAt, address }: any) {
+async function sendHostBookingNotification({
+    to,
+    customerName,
+    customerEmail,
+    customerPhone,
+    eventName,
+    startAt,
+    address,
+    depositAmount,
+    currency,
+    businessName
+}: any) {
+    const paid = formatDeposit(depositAmount, currency || 'GBP');
     const subject = `New booking — ${customerName}`;
-    const text = `New booking confirmed.\n\nCustomer: ${customerName}\nService: ${eventName}\nWhen: ${startAt}\nAddress: ${address}`;
-    const html = `<p><strong>New booking</strong> from ${customerName}</p><p>${eventName}<br>${startAt}<br>${address}</p>`;
+    const text = [
+        'New booking confirmed.',
+        '',
+        businessName ? `Business: ${businessName}` : '',
+        `Customer: ${customerName}`,
+        customerEmail ? `Customer email: ${customerEmail}` : '',
+        customerPhone ? `Customer phone: ${customerPhone}` : '',
+        `Service: ${eventName}`,
+        `When: ${startAt}`,
+        address ? `Address: ${address}` : '',
+        `Deposit paid: ${paid}`
+    ]
+        .filter((line) => line !== '')
+        .join('\n');
+
+    const html = `
+        <div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0F172A">
+            <h1 style="font-size:20px">New booking</h1>
+            <p>A customer paid and confirmed a booking${businessName ? ` for <strong>${businessName}</strong>` : ''}.</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0">
+                <tr><td style="padding:8px 0;color:#64748B">Customer</td><td style="padding:8px 0;font-weight:600">${customerName}</td></tr>
+                ${customerEmail ? `<tr><td style="padding:8px 0;color:#64748B">Email</td><td style="padding:8px 0;font-weight:600">${customerEmail}</td></tr>` : ''}
+                ${customerPhone ? `<tr><td style="padding:8px 0;color:#64748B">Phone</td><td style="padding:8px 0;font-weight:600">${customerPhone}</td></tr>` : ''}
+                <tr><td style="padding:8px 0;color:#64748B">Service</td><td style="padding:8px 0;font-weight:600">${eventName}</td></tr>
+                <tr><td style="padding:8px 0;color:#64748B">When</td><td style="padding:8px 0;font-weight:600">${startAt}</td></tr>
+                ${address ? `<tr><td style="padding:8px 0;color:#64748B">Address</td><td style="padding:8px 0;font-weight:600">${address}</td></tr>` : ''}
+                <tr><td style="padding:8px 0;color:#64748B">Deposit paid</td><td style="padding:8px 0;font-weight:600">${paid}</td></tr>
+            </table>
+        </div>
+    `;
     return sendMail({ to, subject, text, html });
 }
 

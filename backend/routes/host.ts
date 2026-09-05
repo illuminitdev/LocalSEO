@@ -4,7 +4,7 @@ import { requireHost } from '../middleware/auth';
 import { uniqueEventSlug } from '../lib/slug';
 import { createBalanceInvoice, refundBookingDeposit } from '../lib/invoices';
 import { sendInvoiceEmail, sendCancellationEmail } from '../lib/bookingEmail';
-import { createBookingOrg } from '../lib/seed';
+import { createBookingOrg, listUserBookingOrgs, assertUserOrgMembership } from '../lib/seed';
 import { confirmBookingPayment } from '../lib/confirmBooking';
 import { deleteCalendarEvent } from '../lib/googleCalendar';
 import { requireFeature } from '../middleware/entitlements';
@@ -83,23 +83,37 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
     router.get('/dashboard', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) {
-                return res.json({ ready: false });
+                return res.json({ ready: false, canResume: false });
             }
             const data = await loadDashboard((req as any).orgId);
             const org = data?.organization;
-            const bookingReady = Boolean(
-                org?.setup_complete &&
-                String(org?.trade_type || '').trim() &&
-                (data?.eventTypes || []).length > 0
+            const hasBookingData = Boolean(
+                String(org?.trade_type || '').trim() && (data?.eventTypes || []).length > 0
             );
+            const bookingReady = Boolean(org?.setup_complete && hasBookingData);
             if (!bookingReady) {
-                return res.json({ ready: false });
+                return res.json({
+                    ready: false,
+                    canResume: hasBookingData,
+                    organization: hasBookingData
+                        ? {
+                              id: org.id,
+                              slug: org.slug,
+                              name: org.name,
+                              host_name: org.host_name,
+                              trade_type: org.trade_type,
+                              service_area: org.service_area
+                          }
+                        : null,
+                    stripeConfigured: Boolean(stripeClient)
+                });
             }
             reconcilePendingPayments((req as any).orgId, stripeClient).catch((err: any) => {
                 console.error('Background payment reconcile error:', err.message);
             });
             res.json({
                 ready: true,
+                canResume: false,
                 ...data,
                 stripeConfigured: Boolean(stripeClient),
                 stripeConnect: connectStatusPayload(org)
@@ -176,7 +190,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 deposit,
                 currency,
                 acceptingEmergencies,
-                emergencyNote
+                emergencyNote,
+                createNew
             } = req.body || {};
 
             const rawContact = String(contact || phone || '').trim();
@@ -186,6 +201,24 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
 
             if (!String(name || '').trim() || !String(businessName || '').trim() || !String(tradeType || '').trim()) {
                 return res.status(400).json({ error: 'Your name, business name, and service type are required.' });
+            }
+
+            const userId = (req as any).user?.id || null;
+            const forceNew = Boolean(createNew);
+            let orgIdForUpdate: string | null = forceNew ? null : (req as any).orgId || null;
+
+            // If current org already has a completed booking service, adding another must create new.
+            if (orgIdForUpdate && !forceNew) {
+                const { rows: existing } = await query(
+                    `SELECT trade_type,
+                            EXISTS (SELECT 1 FROM event_types et WHERE et.org_id = organizations.id LIMIT 1) AS has_events
+                     FROM organizations WHERE id = $1`,
+                    [orgIdForUpdate]
+                );
+                const row = existing[0];
+                if (row && String(row.trade_type || '').trim() && row.has_events) {
+                    orgIdForUpdate = null;
+                }
             }
 
             const org = await createBookingOrg({
@@ -200,7 +233,9 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 currency,
                 acceptingEmergencies,
                 emergencyNote,
-                orgId: (req as any).orgId || null
+                orgId: orgIdForUpdate,
+                userId,
+                createNew: forceNew || !orgIdForUpdate
             });
 
             const data = await loadDashboard(org.id);
@@ -211,12 +246,183 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
+    router.get('/organizations', async (req: Request, res: Response) => {
+        try {
+            const userId = (req as any).user?.id;
+            if (!userId) {
+                // Dev slug-only auth: return current org if any
+                if (!(req as any).orgId) return res.json({ organizations: [] });
+                const data = await loadDashboard((req as any).orgId);
+                const org = data?.organization;
+                if (!org) return res.json({ organizations: [] });
+                const hasBookingData = Boolean(
+                    String(org.trade_type || '').trim() && (data?.eventTypes || []).length > 0
+                );
+                return res.json({
+                    organizations: [
+                        {
+                            id: org.id,
+                            slug: org.slug,
+                            name: org.name,
+                            host_name: org.host_name,
+                            trade_type: org.trade_type,
+                            service_area: org.service_area,
+                            setup_complete: Boolean(org.setup_complete),
+                            canResume: hasBookingData,
+                            ready: Boolean(org.setup_complete && hasBookingData)
+                        }
+                    ]
+                });
+            }
+            const organizations = await listUserBookingOrgs(userId);
+            res.json({ organizations });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    router.post('/organizations', async (req: Request, res: Response) => {
+        try {
+            const {
+                name,
+                businessName,
+                tradeType,
+                contact,
+                phone,
+                serviceArea,
+                standardDeposit,
+                emergencyDeposit,
+                deposit,
+                currency,
+                acceptingEmergencies,
+                emergencyNote
+            } = req.body || {};
+
+            const rawContact = String(contact || phone || '').trim();
+            const isEmail = rawContact.includes('@');
+            const parsedPhone = isEmail ? '' : rawContact;
+            const parsedEmail = isEmail ? rawContact.toLowerCase() : '';
+
+            if (!String(name || '').trim() || !String(businessName || '').trim() || !String(tradeType || '').trim()) {
+                return res.status(400).json({ error: 'Your name, business name, and service type are required.' });
+            }
+
+            const userId = (req as any).user?.id || null;
+            if (!userId) {
+                return res.status(401).json({ error: 'Login required to add another booking service' });
+            }
+
+            const org = await createBookingOrg({
+                hostName: name,
+                businessName,
+                tradeType,
+                phone: parsedPhone,
+                email: parsedEmail,
+                serviceArea,
+                standardDeposit: standardDeposit ?? deposit ?? 45,
+                emergencyDeposit: emergencyDeposit ?? 60,
+                currency,
+                acceptingEmergencies,
+                emergencyNote,
+                userId,
+                createNew: true
+            });
+
+            const data = await loadDashboard(org.id);
+            res.status(201).json({ ready: true, orgSlug: org.slug, ...data, stripeConfigured: Boolean(stripeClient) });
+        } catch (err: any) {
+            console.error('Create organization error:', err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    /** Leave booking board only — keeps settings, Stripe, bookings, and event types. */
+    router.post('/logout', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) {
+                return res.json({ ready: false, canResume: false, success: true });
+            }
+            const orgId = (req as any).orgId;
+            await query(`UPDATE organizations SET setup_complete = FALSE WHERE id = $1`, [orgId]);
+            const userId = (req as any).user?.id;
+            const organizations = userId ? await listUserBookingOrgs(userId) : [];
+            res.json({
+                ready: false,
+                canResume: organizations.some((o: any) => o.canResume),
+                success: true,
+                organizations
+            });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    /** Re-enter booking board with existing saved data (after booking logout). */
+    router.post('/resume', async (req: Request, res: Response) => {
+        try {
+            const userId = (req as any).user?.id;
+            let orgId = (req as any).orgId as string | null;
+            const bodyOrgId = req.body?.orgId ? String(req.body.orgId) : null;
+            const bodySlug = req.body?.slug ? String(req.body.slug).trim() : null;
+
+            if (bodyOrgId || bodySlug) {
+                if (userId) {
+                    if (bodyOrgId) {
+                        const allowed = await assertUserOrgMembership(userId, bodyOrgId);
+                        if (!allowed) return res.status(403).json({ error: 'Not a member of that booking service' });
+                        orgId = bodyOrgId;
+                    } else if (bodySlug) {
+                        const { rows } = await query(
+                            `SELECT o.id FROM organizations o
+                             JOIN memberships m ON m.org_id = o.id
+                             WHERE m.user_id = $1 AND o.slug = $2 LIMIT 1`,
+                            [userId, bodySlug]
+                        );
+                        if (!rows.length) return res.status(403).json({ error: 'Not a member of that booking service' });
+                        orgId = rows[0].id;
+                    }
+                } else if (bodySlug) {
+                    const { rows } = await query('SELECT id FROM organizations WHERE slug = $1 LIMIT 1', [bodySlug]);
+                    orgId = rows[0]?.id || null;
+                } else if (bodyOrgId) {
+                    orgId = bodyOrgId;
+                }
+            }
+
+            if (!orgId) {
+                return res.status(400).json({ error: 'No booking organization' });
+            }
+            const { rows: orgs } = await query('SELECT * FROM organizations WHERE id = $1', [orgId]);
+            const org = orgs[0];
+            if (!org) return res.status(404).json({ error: 'Organization not found' });
+
+            const { rows: types } = await query('SELECT id FROM event_types WHERE org_id = $1 LIMIT 1', [orgId]);
+            if (!String(org.trade_type || '').trim() || !types.length) {
+                return res.status(400).json({ error: 'Complete booking setup first.' });
+            }
+
+            await query(`UPDATE organizations SET setup_complete = TRUE WHERE id = $1`, [orgId]);
+            const data = await loadDashboard(orgId);
+            res.json({
+                ready: true,
+                canResume: false,
+                orgSlug: org.slug,
+                ...data,
+                stripeConfigured: Boolean(stripeClient),
+                stripeConnect: connectStatusPayload(data?.organization)
+            });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    /** @deprecated Prefer /logout — no longer deletes org data. */
     router.post('/reset', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) {
-                return res.json({ ready: false, success: true });
+                return res.json({ ready: false, canResume: false, success: true });
             }
-            await query('DELETE FROM organizations WHERE id = $1', [(req as any).orgId]);
+            await query(`UPDATE organizations SET setup_complete = FALSE WHERE id = $1`, [(req as any).orgId]);
             res.json({ ready: false, success: true });
         } catch (err: any) {
             res.status(500).json({ error: err.message });

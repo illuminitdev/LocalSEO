@@ -374,10 +374,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const booking = pendingRes.rows[0];
 
             if (!stripeClient || depositCents <= 0) {
-                await query(
-                    `UPDATE bookings SET status = 'confirmed', deposit_paid = TRUE, updated_at = NOW() WHERE id = $1`,
-                    [booking.id]
-                );
+                await confirmBookingPayment({ bookingId: booking.id });
                 return res.json({
                     mode: stripeClient ? 'free' : 'simulated',
                     success: true,
