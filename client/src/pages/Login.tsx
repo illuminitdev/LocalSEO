@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { API_BASE, apiPost } from '../lib/utils';
@@ -10,7 +10,7 @@ import AuthShell, { AuthFieldWrap, authFieldClass } from '../components/AuthShel
 async function tryAdminLogin(email: string, password: string) {
     const res = await fetch(`${API_BASE}/api/admin/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ email, password })
     });
     const data = await res.json().catch(() => ({}));
@@ -24,8 +24,6 @@ export default function Login() {
     const navigate = useNavigate();
     const { refresh } = useEntitlements();
     const [params] = useSearchParams();
-    const emailRef = useRef<HTMLInputElement>(null);
-    const passwordRef = useRef<HTMLInputElement>(null);
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
@@ -35,14 +33,11 @@ export default function Login() {
         setBusy(true);
         setError('');
 
-        // Read DOM values (works with browser autofill; controlled React state often lags)
-        const fd = new FormData(e.currentTarget);
-        const trimmedEmail = String(
-            fd.get('email') || emailRef.current?.value || ''
-        )
-            .trim()
-            .toLowerCase();
-        const pwd = String(fd.get('password') || passwordRef.current?.value || '');
+        const form = e.currentTarget;
+        const emailEl = form.elements.namedItem('email') as HTMLInputElement | null;
+        const passwordEl = form.elements.namedItem('password') as HTMLInputElement | null;
+        const trimmedEmail = String(emailEl?.value || '').trim().toLowerCase();
+        const pwd = String(passwordEl?.value || '');
 
         if (!trimmedEmail || !pwd) {
             setError('Email and password are required.');
@@ -50,9 +45,11 @@ export default function Login() {
             return;
         }
 
+        const payload = { email: trimmedEmail, password: pwd };
+
         try {
             try {
-                const data = await apiPost('/api/auth/login', { email: trimmedEmail, password: pwd });
+                const data = await apiPost('/api/auth/login', payload);
                 clearAdminToken();
                 setToken(data.token);
                 const mustChange = Boolean(data.user?.mustChangePassword);
@@ -69,11 +66,13 @@ export default function Login() {
                         : '/dashboard';
                 navigate(safeNext, { replace: true });
                 return;
-            } catch {
-                // Fall through to admin if customer auth failed
+            } catch (customerErr: any) {
+                const msg = String(customerErr?.message || '');
+                // Don't try admin if body never arrived / validation failed
+                if (/required/i.test(msg)) throw customerErr;
             }
 
-            const adminData = await tryAdminLogin(trimmedEmail, pwd);
+            const adminData = await tryAdminLogin(payload.email, payload.password);
             clearToken();
             setMustChangePassword(false);
             setAdminToken(adminData.token);
@@ -87,10 +86,8 @@ export default function Login() {
     };
 
     return (
-        <AuthShell
-            title="Welcome back"
-            subtitle="Sign in to your account."
-        >
+        <AuthShell title="Welcome back" subtitle="Sign in to your account.">
+            {/* Uncontrolled inputs — browser autofill writes DOM values React controlled state often misses */}
             <form onSubmit={submit} className="space-y-4" autoComplete="on">
                 {error && (
                     <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>
@@ -99,11 +96,11 @@ export default function Login() {
                     Email
                     <AuthFieldWrap>
                         <input
-                            ref={emailRef}
                             name="email"
                             type="email"
                             required
                             autoComplete="username"
+                            defaultValue=""
                             className={authFieldClass}
                             placeholder="you@business.com"
                         />
@@ -112,18 +109,21 @@ export default function Login() {
                 <div>
                     <div className="flex items-center justify-between gap-3">
                         <label className="text-sm font-medium text-[#334155]">Password</label>
-                        <Link to="/forgot-password" className="text-xs font-medium text-[#64748B] hover:text-[#0F172A] hover:underline">
+                        <Link
+                            to="/forgot-password"
+                            className="text-xs font-medium text-[#64748B] hover:text-[#0F172A] hover:underline"
+                        >
                             Forgot password?
                         </Link>
                     </div>
                     <AuthFieldWrap>
                         <div className="relative mt-1.5">
                             <input
-                                ref={passwordRef}
                                 name="password"
                                 type={showPassword ? 'text' : 'password'}
                                 required
                                 autoComplete="current-password"
+                                defaultValue=""
                                 className={`${authFieldClass} mt-0 pr-11`}
                                 placeholder="Your password"
                             />
