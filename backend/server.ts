@@ -4,7 +4,8 @@ import dotenv from 'dotenv';
 import Stripe from 'stripe';
 import { GoogleGenAI } from '@google/genai';
 import * as store from './lib/store';
-import { requirePlacesConfigured, searchBusiness, nearbyCompetitors } from './lib/googlePlaces';
+import { requirePlacesConfigured, searchBusiness, nearbyCompetitors, geocodeAddress } from './lib/googlePlaces';
+import { runVisibilityAudit } from './lib/visibilityAudit';
 import { createStripeWebhookHandler } from './routes/webhooks';
 import { requireAuth } from './middleware/auth';
 import { requireFeature, requireAllFeatures } from './middleware/entitlements';
@@ -492,6 +493,143 @@ async function generateText(prompt: string, extraConfig: any = {}) {
     return (response.text || '').trim();
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+            })
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
+function isGeminiQuotaError(err: any) {
+    const raw = errMessage(err);
+    return (
+        /\b429\b/.test(raw) ||
+        /RESOURCE_EXHAUSTED/i.test(raw) ||
+        /exceeded your current quota/i.test(raw) ||
+        /rate.?limit/i.test(raw)
+    );
+}
+
+/** Deterministic gap analysis when Gemini is down / quota-exhausted (no googleSearch grounding). */
+function fallbackGapAnalysis(business: any, keyword: string, liveCompetitors: any[] = []) {
+    const rating = Number(business.rating) || 0;
+    const reviews = Number(business.reviewsCount) || 0;
+    const baseRank =
+        rating >= 4.5 && reviews >= 80 ? 3 : rating >= 4.2 && reviews >= 30 ? 5 : rating >= 4 ? 8 : 12;
+    const jitter = (n: number, d: number) => Math.min(20, Math.max(1, n + d));
+    const grid = [
+        [jitter(baseRank, 1), jitter(baseRank, 0), jitter(baseRank, 2)],
+        [jitter(baseRank, 0), jitter(baseRank, -1), jitter(baseRank, 1)],
+        [jitter(baseRank, 2), jitter(baseRank, 1), jitter(baseRank, 0)]
+    ];
+    const ranks = grid.flat();
+    const avg = ranks.reduce((a, b) => a + b, 0) / ranks.length;
+    const top3 = Math.round((ranks.filter((r) => r <= 3).length / ranks.length) * 100);
+
+    const competitors = [
+        {
+            name: `${business.name} (You)`,
+            reviews,
+            rating,
+            posts: dashboardState.weeklyPosts || 0,
+            photos: dashboardState.photoCount || 0,
+            trend: 'up'
+        },
+        ...liveCompetitors.slice(0, 2).map((c: any) => ({
+            name: c.name,
+            reviews: c.reviews || c.user_ratings_total || 0,
+            rating: c.rating || 0,
+            posts: c.posts || 0,
+            photos: c.photos || 0,
+            trend: c.trend || 'flat'
+        }))
+    ];
+
+    const competitorNames = competitors
+        .slice(1)
+        .map((c) => c.name)
+        .filter(Boolean);
+    const competitorLine = competitorNames.length
+        ? `Nearby Places competitors in view: ${competitorNames.join(', ')}.`
+        : 'No live competitor list from Places yet — connect lat/lng on the business profile and ensure Places API is enabled.';
+
+    const gapAnalysis = `${business.name} for "${keyword}": estimated GeoGrid average rank ~${avg.toFixed(1)} with ~${top3}% of cells in the Local 3-Pack (model fallback — Gemini quota unavailable). Profile shows ${rating || 'n/a'}★ from ${reviews} reviews. ${competitorLine} Prioritize GBP completeness, fresh posts/photos, and review reply rate to pull neighborhood cells toward ranks 1–3.`;
+
+    return { gapAnalysis, grid, competitors };
+}
+
+function fallbackStrategyReport(business: any, stats: any) {
+    const completeness = Number(stats.completenessScore) || 0;
+    const rank = Number(stats.visibilityRank) || 0;
+    const top3 = Number(stats.top3Percentage) || 0;
+    const replyRate = Number(stats.reviewResponseRate) || 0;
+    const posts = Number(stats.weeklyPosts) || 0;
+    const photos = Number(stats.photoCount) || 0;
+
+    let grade = 'C';
+    const score = Math.round(
+        completeness * 0.35 +
+            Math.max(0, 100 - rank * 8) * 0.25 +
+            top3 * 0.2 +
+            replyRate * 0.1 +
+            Math.min(100, posts * 20 + photos * 5) * 0.1
+    );
+    if (score >= 90) grade = 'A+';
+    else if (score >= 85) grade = 'A';
+    else if (score >= 80) grade = 'A-';
+    else if (score >= 75) grade = 'B+';
+    else if (score >= 70) grade = 'B';
+    else if (score >= 65) grade = 'B-';
+    else if (score >= 55) grade = 'C+';
+
+    const name = business?.name || 'Your business';
+    const category = business?.category || 'local business';
+
+    return {
+        grade,
+        positioningText: `${name} (${category}) currently shows ${completeness}% profile completeness, GeoGrid average rank ${rank || 'n/a'}, and ${top3}% Local 3-Pack coverage. Focus this week on the gaps below — listing completeness, reviews replies, and consistent GBP posts move local visibility fastest.`,
+        roadmap: [
+            {
+                id: 1,
+                title: completeness < 90 ? 'Complete the GBP profile' : 'Keep NAP consistent',
+                desc:
+                    completeness < 90
+                        ? 'Fill missing hours, categories, description, and website on Business profile so Google trusts the listing.'
+                        : 'Re-check name, address, phone, and website match Google Maps exactly.'
+            },
+            {
+                id: 2,
+                title: replyRate < 80 ? 'Reply to recent reviews' : 'Ask for fresh reviews',
+                desc:
+                    replyRate < 80
+                        ? 'Use Reputation Agent to draft owner replies — response rate is a clear local ranking signal.'
+                        : 'Request short, specific reviews from recent customers mentioning your town and service.'
+            },
+            {
+                id: 3,
+                title: posts < 2 || photos < 5 ? 'Publish posts and photos' : 'Run a Local Search Grid scan',
+                desc:
+                    posts < 2 || photos < 5
+                        ? 'Add weekly GBP posts and more photos (exterior, team, work) via Posts and Media tools.'
+                        : 'Run Local Search Grid for your main service keyword and close the weakest geo cells.'
+            }
+        ],
+        metrics: {
+            localPackRank: rank,
+            completeness,
+            reviewResponseRate: replyRate,
+            missingMedia: photos ? `${photos} photos` : 'No photos yet'
+        }
+    };
+}
+
 function extractImage(response: any) {
     const parts = response.candidates?.[0]?.content?.parts || [];
     for (const part of parts) {
@@ -532,6 +670,39 @@ app.get('/api/status', (_req, res) => {
     });
 });
 
+/** Free Local Visibility Audit — feature only (no plan gate / no DB persistence in v1). */
+app.post('/api/visibility-audit', requireAuth, hydrateOrgFromDb, async (req, res) => {
+    const started = Date.now();
+    try {
+        const body = req.body || {};
+        const result = await runVisibilityAudit(
+            {
+                businessName: body.businessName || connectedBusiness.name,
+                address: body.address || connectedBusiness.address,
+                city: body.city,
+                service: body.service || body.serviceId || connectedBusiness.category,
+                website: body.website ?? connectedBusiness.website,
+                phone: body.phone ?? connectedBusiness.phone,
+                contactName: body.contactName,
+                email: body.email,
+                notes: body.notes,
+                placeId: body.placeId || connectedBusiness.placeId,
+                lat: body.lat ?? connectedBusiness.lat,
+                lng: body.lng ?? connectedBusiness.lng
+            },
+            {
+                generateText: aiClient ? (prompt) => generateText(prompt) : undefined
+            }
+        );
+        console.log(`[visibility-audit] ok in ${Date.now() - started}ms score=${result.score?.total}`);
+        res.json(result);
+    } catch (err: any) {
+        const status = err?.status || 502;
+        console.error(`[visibility-audit] failed in ${Date.now() - started}ms:`, err);
+        res.status(status).json({ error: errMessage(err) || 'Visibility audit failed' });
+    }
+});
+
 app.get('/api/business', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), (_req, res) => {
     res.json(connectedBusiness);
 });
@@ -544,6 +715,26 @@ app.post('/api/business/connect', requireAuth, hydrateOrgFromDb, requireFeature(
         connected: true,
         reviews: Array.isArray(incoming.reviews) ? incoming.reviews : []
     };
+
+    // Auto-fill map coords from address when the user didn't pick a Places listing.
+    const hasCoords =
+        typeof connectedBusiness.lat === 'number' &&
+        typeof connectedBusiness.lng === 'number' &&
+        Number.isFinite(connectedBusiness.lat) &&
+        Number.isFinite(connectedBusiness.lng);
+    if (!hasCoords && connectedBusiness.address && requirePlacesConfigured()) {
+        try {
+            const query = [connectedBusiness.name, connectedBusiness.address].filter(Boolean).join(', ');
+            const geo = await geocodeAddress(query || connectedBusiness.address);
+            if (geo) {
+                connectedBusiness.lat = geo.lat;
+                connectedBusiness.lng = geo.lng;
+            }
+        } catch (err: any) {
+            console.warn('Business geocode failed:', err?.message || err);
+        }
+    }
+
     dashboardState.completenessScore = scoreProfile(connectedBusiness);
     dashboardState.photoCount = 0;
     dashboardState.weeklyPosts = 0;
@@ -742,48 +933,54 @@ If the knowledge base does not contain the answer, say you do not have that deta
 });
 
 app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
-    if (!requireGemini(res)) return;
     if (!requireBusiness(res)) return;
     const keyword = req.body?.keyword || `${connectedBusiness.category} near me`;
 
-    try {
-        let liveCompetitors = [];
-        if (requirePlacesConfigured() && connectedBusiness.lat != null && connectedBusiness.lng != null) {
-            try {
-                liveCompetitors = await nearbyCompetitors({
-                    lat: connectedBusiness.lat,
-                    lng: connectedBusiness.lng,
-                    keyword: connectedBusiness.category || keyword,
-                    excludeName: connectedBusiness.name
-                });
-            } catch (err: any) {
-                console.warn('Nearby competitors lookup failed:', err.message);
+    // Ensure map center exists — geocode address if profile has no lat/lng yet.
+    const hasCoords =
+        typeof connectedBusiness.lat === 'number' &&
+        typeof connectedBusiness.lng === 'number' &&
+        Number.isFinite(connectedBusiness.lat) &&
+        Number.isFinite(connectedBusiness.lng);
+    if (!hasCoords && connectedBusiness.address && requirePlacesConfigured()) {
+        try {
+            const query = [connectedBusiness.name, connectedBusiness.address].filter(Boolean).join(', ');
+            const geo = await geocodeAddress(query || connectedBusiness.address);
+            if (geo) {
+                connectedBusiness.lat = geo.lat;
+                connectedBusiness.lng = geo.lng;
+                await saveOrgToDb(req).catch(() => undefined);
+            }
+        } catch (err: any) {
+            console.warn('Gap analysis geocode failed:', err?.message || err);
+        }
+    }
+
+    let liveCompetitors: any[] = [];
+    if (requirePlacesConfigured() && connectedBusiness.lat != null && connectedBusiness.lng != null) {
+        try {
+            liveCompetitors = await nearbyCompetitors({
+                lat: connectedBusiness.lat,
+                lng: connectedBusiness.lng,
+                keyword: connectedBusiness.category || keyword,
+                excludeName: connectedBusiness.name
+            });
+        } catch (err: any) {
+            console.warn('Nearby competitors lookup failed:', err.message);
+        }
+    }
+
+    const applyGridStats = (data: any) => {
+        if (Array.isArray(data.grid) && data.grid.length === 3) {
+            const ranks = data.grid.flat().filter((n: any) => typeof n === 'number');
+            if (ranks.length) {
+                dashboardState.visibilityRank = Number((ranks.reduce((a: number, b: number) => a + b, 0) / ranks.length).toFixed(1));
+                dashboardState.top3Percentage = Math.round((ranks.filter((r: number) => r <= 3).length / ranks.length) * 100);
             }
         }
+    };
 
-        const competitorBlock = liveCompetitors.length
-            ? `Live nearby competitors from Google Places (use these names/ratings; do not invent others):\n${JSON.stringify(liveCompetitors)}`
-            : 'No live competitor list available — use googleSearch for 2 real nearby competitors only.';
-
-        const text = await generateText(
-            `Local SEO gap analysis for the real business "${connectedBusiness.name}" at ${connectedBusiness.address}.
-Category: ${connectedBusiness.category || 'local business'}
-Rating: ${connectedBusiness.rating} (${connectedBusiness.reviewsCount} reviews)
-Target query: "${keyword}".
-${competitorBlock}
-Use live public data only. Do not invent businesses.
-Return JSON only:
-{"gapAnalysis": "", "grid": [[1,2,3],[4,5,6],[7,8,9]], "competitors": [{"name": "", "reviews": 0, "rating": 0, "posts": 0, "photos": 0, "trend": "up"}]}
-grid is a 3x3 of estimated Local Pack ranks 1-20 for neighborhood cells around the business.
-First competitors item must be "${connectedBusiness.name} (You)" with reviews=${connectedBusiness.reviewsCount || 0} and rating=${connectedBusiness.rating || 0}. Include 2 real nearby competitors.`,
-            liveCompetitors.length ? {} : { tools: [{ googleSearch: {} }] }
-        );
-        const data = parseJsonFromText(text);
-        if (!data?.gapAnalysis) {
-            return res.status(502).json({ error: 'Gemini returned an unusable gap analysis.' });
-        }
-
-        // Ensure you + live competitors if Gemini omitted them
+    const withCompetitors = (data: any) => {
         if (!Array.isArray(data.competitors) || !data.competitors.length) {
             data.competitors = [
                 {
@@ -797,18 +994,66 @@ First competitors item must be "${connectedBusiness.name} (You)" with reviews=${
                 ...liveCompetitors.slice(0, 2)
             ];
         }
+        return data;
+    };
 
-        if (Array.isArray(data.grid) && data.grid.length === 3) {
-            const ranks = data.grid.flat().filter((n) => typeof n === 'number');
-            if (ranks.length) {
-                dashboardState.visibilityRank = Number((ranks.reduce((a, b) => a + b, 0) / ranks.length).toFixed(1));
-                dashboardState.top3Percentage = Math.round((ranks.filter((r) => r <= 3).length / ranks.length) * 100);
-            }
+    const withCenter = (data: any) => {
+        if (
+            typeof connectedBusiness.lat === 'number' &&
+            typeof connectedBusiness.lng === 'number' &&
+            Number.isFinite(connectedBusiness.lat) &&
+            Number.isFinite(connectedBusiness.lng)
+        ) {
+            data.center = { lat: connectedBusiness.lat, lng: connectedBusiness.lng };
         }
+        return data;
+    };
+
+    // Never use Gemini googleSearch here — grounding quota is separate and often 429 on free/test keys.
+    // Places supplies competitors; plain generateContent still works when grounding does not.
+    if (!aiClient) {
+        const data = withCenter(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
+        applyGridStats(data);
+        return res.json(data);
+    }
+
+    try {
+        const competitorBlock = liveCompetitors.length
+            ? `Live nearby competitors from Google Places (use these names/ratings; do not invent others):\n${JSON.stringify(liveCompetitors)}`
+            : 'No live competitor list from Places — do not invent competitor businesses; return only the "You" row if needed.';
+
+        const text = await generateText(
+            `Local SEO gap analysis for the real business "${connectedBusiness.name}" at ${connectedBusiness.address}.
+Category: ${connectedBusiness.category || 'local business'}
+Rating: ${connectedBusiness.rating} (${connectedBusiness.reviewsCount} reviews)
+Target query: "${keyword}".
+${competitorBlock}
+Use the provided Places data only. Do not invent businesses.
+Return JSON only:
+{"gapAnalysis": "", "grid": [[1,2,3],[4,5,6],[7,8,9]], "competitors": [{"name": "", "reviews": 0, "rating": 0, "posts": 0, "photos": 0, "trend": "up"}]}
+grid is a 3x3 of estimated Local Pack ranks 1-20 for neighborhood cells around the business.
+First competitors item must be "${connectedBusiness.name} (You)" with reviews=${connectedBusiness.reviewsCount || 0} and rating=${connectedBusiness.rating || 0}. Include up to 2 real nearby competitors from the Places list when available.`
+        );
+        const data = parseJsonFromText(text);
+        if (!data?.gapAnalysis) {
+            console.warn('[gap-analysis] unusable Gemini JSON — using fallback');
+            const fallback = withCenter(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
+            applyGridStats(fallback);
+            return res.json(fallback);
+        }
+
+        withCompetitors(data);
+        withCenter(data);
+        applyGridStats(data);
         res.json(data);
     } catch (err: any) {
-        console.error('Gap analysis error:', err);
-        res.status(502).json({ error: `Gemini gap analysis failed: ${errMessage(err)}` });
+        console.error('Gap analysis error (serving fallback):', errMessage(err));
+        if (isGeminiQuotaError(err)) {
+            console.warn('[gap-analysis] Gemini quota/rate limit — using Places/fallback path');
+        }
+        const fallback = withCenter(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
+        applyGridStats(fallback);
+        res.json(fallback);
     }
 });
 
@@ -885,10 +1130,12 @@ app.post('/api/ai/strategy-report', requireAuth, hydrateOrgFromDb, requireAllFea
     if (!requireGemini(res)) return;
     if (!requireBusiness(res)) return;
     const stats = { ...dashboardState, ...req.body };
+    const fallback = fallbackStrategyReport(connectedBusiness, stats);
 
     try {
-        const text = await generateText(
-            `Create an executive local SEO report for ${connectedBusiness.name} (${connectedBusiness.category || 'local business'}) at ${connectedBusiness.address}.
+        const text = await withTimeout(
+            generateText(
+                `Create an executive local SEO report for ${connectedBusiness.name} (${connectedBusiness.category || 'local business'}) at ${connectedBusiness.address}.
 Phone: ${connectedBusiness.phone || 'n/a'}
 Website: ${connectedBusiness.website || 'n/a'}
 Public rating: ${connectedBusiness.rating ?? 'n/a'} from ${connectedBusiness.reviewsCount || 0} reviews
@@ -899,24 +1146,26 @@ Use only these live metrics. Do not invent extra numbers.
 - Review response rate: ${stats.reviewResponseRate}%
 - Weekly posts: ${stats.weeklyPosts}
 - Photo count: ${stats.photoCount}
-Write a practical report a trade-business owner can act on this week.
+Write a practical report a trade-business owner can act on this week. Keep it concise.
 Return JSON only:
 {"grade":"A+|A|A-|B+|B|B-|C+|C","positioningText":"2-3 sentences","roadmap":[{"id":1,"title":"","desc":""},{"id":2,"title":"","desc":""},{"id":3,"title":"","desc":""}],"metrics":{"localPackRank":${stats.visibilityRank},"completeness":${stats.completenessScore},"reviewResponseRate":${stats.reviewResponseRate},"missingMedia":"${stats.photoCount ? `${stats.photoCount} photos` : 'No photos yet'}"}}`
+            ),
+            18000,
+            'strategy-report'
         );
         const data = parseJsonFromText(text);
-        if (!data?.grade) return res.status(502).json({ error: 'Gemini returned an unusable report.' });
+        if (!data?.grade) {
+            console.warn('[strategy-report] unusable Gemini JSON — using fallback');
+            return res.json(fallback);
+        }
         res.json({
             ...data,
-            metrics: data.metrics || {
-                localPackRank: stats.visibilityRank,
-                completeness: stats.completenessScore,
-                reviewResponseRate: stats.reviewResponseRate,
-                missingMedia: stats.photoCount ? `${stats.photoCount} photos` : 'No photos yet'
-            }
+            metrics: data.metrics || fallback.metrics
         });
     } catch (err: any) {
-        console.error('Strategy report error:', err);
-        res.status(502).json({ error: `Gemini report failed: ${errMessage(err)}` });
+        console.error('Strategy report error (serving fallback):', errMessage(err));
+        // Never 503 the SPA — API Gateway cuts at ~30s; return usable report instead
+        res.json(fallback);
     }
 });
 

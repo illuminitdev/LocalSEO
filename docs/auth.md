@@ -61,5 +61,6 @@ No third-party identity provider for host login.
 
 - `users`, orgs/memberships (LocalPulse migrations)
 - `portal_invites`, `subscriptions`, `plans` / `plan_features` (owned by ZappSites on shared RDS)
+- `submissions` / `audits` (ZappSites-owned Free Growth Audit leads; Local SEO admin **reads** via `GET /api/admin/growth-audit-leads` — report links use `ZAPP_SITES_ORIGIN`)
 - `password_reset` tokens (`004_password_reset.sql`)
 - `must_change_password` (`007_must_change_password.sql`)

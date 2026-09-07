@@ -26,7 +26,8 @@ function loadBackendEnv() {
     ) {
       value = value.slice(1, -1);
     }
-    if (!(key in process.env)) process.env[key] = value;
+    // Prefer backend/.env on deploy so rotated keys (e.g. Gemini) always win over stale shell env.
+    process.env[key] = value;
   }
 }
 

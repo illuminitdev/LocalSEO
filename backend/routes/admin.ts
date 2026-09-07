@@ -502,6 +502,129 @@ router.get('/users/invite/:inviteId', requireAdmin, async (req: Request, res: Re
     }
 });
 
+function zappSitesOrigin() {
+    const fromEnv = String(process.env.ZAPP_SITES_ORIGIN || '').trim().replace(/\/$/, '');
+    if (fromEnv) return fromEnv;
+    const stage = (process.env.STAGE || 'dev').toLowerCase();
+    return stage === 'prod' ? 'https://www.zappsites.com' : 'https://staging.zappsites.com';
+}
+
+function growthAuditTablesMissing(err: any) {
+    const msg = String(err?.message || err || '');
+    return /relation ["']?(submissions|audits)["']? does not exist/i.test(msg);
+}
+
+function mapGrowthAuditLead(row: any, origin: string) {
+    const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+    const auditData = row.audit_data && typeof row.audit_data === 'object' ? row.audit_data : {};
+    const business =
+        auditData.business && typeof auditData.business === 'object' ? auditData.business : {};
+
+    const email =
+        String(payload.email || row.submission_email || business.email || '')
+            .trim()
+            .toLowerCase() || null;
+    const phone = String(payload.phone || business.phone || '').trim() || null;
+    const sharePath = String(payload.sharePath || '').trim() || null;
+    const scoreRaw = payload.scoreTotal ?? auditData.scoreTotal ?? auditData.score?.total ?? null;
+    const scoreTotal =
+        scoreRaw == null || scoreRaw === ''
+            ? null
+            : Number.isFinite(Number(scoreRaw))
+              ? Number(scoreRaw)
+              : null;
+
+    return {
+        id: row.id,
+        createdAt: row.created_at,
+        businessName: String(payload.businessName || business.name || '').trim() || null,
+        service: String(payload.service || '').trim() || null,
+        serviceLabel: String(payload.serviceLabel || payload.service || '').trim() || null,
+        address: String(payload.address || business.address || '').trim() || null,
+        city: String(payload.city || business.city || '').trim() || null,
+        website: String(payload.website || business.website || '').trim() || null,
+        email,
+        phone,
+        scoreTotal,
+        sharePath,
+        reportUrl: sharePath ? `${origin}${sharePath.startsWith('/') ? '' : '/'}${sharePath}` : null,
+        source: String(payload.source || '').trim() || null,
+        auditId: String(payload.auditId || row.audit_id || '').trim() || null
+    };
+}
+
+/** Read-only list of ZappSites Free Growth Audit leads (shared RDS submissions + audits). */
+router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const q = String(req.query.q || '').trim();
+        const hasContact = String(req.query.hasContact || 'any').trim().toLowerCase();
+        const contactFilter =
+            hasContact === 'email' || hasContact === 'phone' || hasContact === 'both'
+                ? hasContact
+                : 'any';
+
+        const params: any[] = [];
+        const where: string[] = [`s.type = 'growth_audit_lead'`];
+
+        where.push(`(
+            NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', '')), '') IS NOT NULL
+            OR NULLIF(TRIM(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', '')), '') IS NOT NULL
+        )`);
+
+        if (contactFilter === 'email') {
+            where.push(
+                `NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', '')), '') IS NOT NULL`
+            );
+        } else if (contactFilter === 'phone') {
+            where.push(
+                `NULLIF(TRIM(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', '')), '') IS NOT NULL`
+            );
+        } else if (contactFilter === 'both') {
+            where.push(
+                `NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', '')), '') IS NOT NULL`
+            );
+            where.push(
+                `NULLIF(TRIM(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', '')), '') IS NOT NULL`
+            );
+        }
+
+        if (q) {
+            params.push(`%${q.toLowerCase()}%`);
+            const p = `$${params.length}`;
+            where.push(`(
+                LOWER(COALESCE(s.payload->>'businessName', '')) LIKE ${p}
+                OR LOWER(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', '')) LIKE ${p}
+                OR LOWER(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', '')) LIKE ${p}
+            )`);
+        }
+
+        const { rows } = await query(
+            `SELECT s.id, s.created_at, s.email AS submission_email, s.payload,
+                    a.id AS audit_id, a.data AS audit_data
+             FROM submissions s
+             LEFT JOIN audits a ON a.id::text = s.payload->>'auditId'
+             WHERE ${where.join(' AND ')}
+             ORDER BY s.created_at DESC
+             LIMIT 500`,
+            params
+        );
+
+        const origin = zappSitesOrigin();
+        res.json({
+            stage: resolveAdminCredentials().stage,
+            leads: rows.map((row) => mapGrowthAuditLead(row, origin))
+        });
+    } catch (err: any) {
+        console.error('Admin growth-audit-leads error:', err);
+        if (growthAuditTablesMissing(err)) {
+            return res.status(503).json({
+                error: "Growth audit tables are not available on this environment's database."
+            });
+        }
+        res.status(500).json({ error: err.message || 'Failed to load growth audit leads' });
+    }
+});
+
 router.post('/users', requireAdmin, async (req: Request, res: Response) => {
     try {
         const email = String(req.body?.email || '')
