@@ -25,6 +25,7 @@ const STAGE_CONFIG: Record<
     proxyEndpoint: string;
     dbSecretName: string;
     clientOrigin: string;
+    zappSitesOrigin: string;
   }
 > = {
   dev: {
@@ -35,6 +36,7 @@ const STAGE_CONFIG: Record<
     dbSecretName: 'ZappsitesDatabase-dev/credentials',
     // Staging SPA on Vercel (dev branch) — override with CLIENT_ORIGIN if needed
     clientOrigin: process.env.CLIENT_ORIGIN || 'https://zappsites-local-seo.vercel.app',
+    zappSitesOrigin: process.env.ZAPP_SITES_ORIGIN || 'https://staging.zappsites.com',
   },
   prod: {
     vpcId: 'vpc-00cb8c1fb56aa6e38',
@@ -43,6 +45,7 @@ const STAGE_CONFIG: Record<
     proxyEndpoint: 'zappsites-prod-proxy.proxy-cehyac2sc676.us-east-1.rds.amazonaws.com',
     dbSecretName: 'ZappsitesDatabase-prod/credentials',
     clientOrigin: process.env.CLIENT_ORIGIN || 'https://app.zappsites.com',
+    zappSitesOrigin: process.env.ZAPP_SITES_ORIGIN || 'https://www.zappsites.com',
   },
 };
 
@@ -129,6 +132,14 @@ export class LocalSeoApiStack extends cdk.Stack {
       process.env.GOOGLE_REDIRECT_URI_DEPLOY ||
       `${apiBaseUrl.replace(/\/$/, '')}/api/integrations/google/callback`;
 
+    const adminPassword = String(process.env.ADMIN_PASSWORD || '').trim();
+    const adminPasswordHash = String(process.env.ADMIN_PASSWORD_HASH || '').trim();
+    if (!adminPassword && !adminPasswordHash) {
+      throw new Error(
+        `Set ADMIN_PASSWORD or ADMIN_PASSWORD_HASH in backend/.env before deploying LocalSeoApi-${stage} (no hardcoded admin password).`
+      );
+    }
+
     const fn = new lambda.Function(this, 'ApiFn', {
       functionName: `localseo-api-${stage}`,
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -156,11 +167,15 @@ export class LocalSeoApiStack extends cdk.Stack {
         JWT_EXPIRES: process.env.JWT_EXPIRES || '7d',
         CLIENT_ORIGIN: cfg.clientOrigin,
         FRONTEND_URL: cfg.clientOrigin,
+        ZAPP_SITES_ORIGIN: cfg.zappSitesOrigin,
         API_BASE_URL: apiBaseUrl,
         ENTITLEMENTS_DISABLED: 'false',
-        // Stage-locked admin (dev email never works on prod and vice versa)
-        ADMIN_EMAIL: stage === 'prod' ? 'admin@localseo.com' : 'admin@localseo.net',
-        ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'localseo@2026',
+        // Stage-locked admin — password only from env (no hardcoded default)
+        ADMIN_EMAIL:
+          process.env.ADMIN_EMAIL ||
+          (stage === 'prod' ? 'admin@localseo.com' : 'admin@localseo.net'),
+        ...(adminPassword ? { ADMIN_PASSWORD: adminPassword } : {}),
+        ...(adminPasswordHash ? { ADMIN_PASSWORD_HASH: adminPasswordHash } : {}),
         // Stripe Connect — test keys on dev only; live keys via *_PROD on stage=prod (never commit)
         ...(stripeSecretKey ? { STRIPE_SECRET_KEY: stripeSecretKey } : {}),
         ...(stripePublishableKey ? { STRIPE_PUBLISHABLE_KEY: stripePublishableKey } : {}),

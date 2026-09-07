@@ -1,34 +1,38 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import Layout from './components/Layout';
-import RequireAuth from './components/RequireAuth';
-import FeatureGate from './components/FeatureGate';
-import Dashboard from './pages/Dashboard';
-import ProfileAudit from './pages/ProfileAudit';
-import PostAutomation from './pages/PostAutomation';
-import ReviewManagement from './pages/ReviewManagement';
-import QAAutoResponder from './pages/QAAutoResponder';
-import RankTracker from './pages/RankTracker';
-import MediaOptimization from './pages/MediaOptimization';
-import ReportGenerator from './pages/ReportGenerator';
-import Citations from './pages/Citations';
-import BookingPlots from './pages/BookingPlots';
-import BookingSettings from './pages/BookingSettings';
-import PublicBookHost, { PublicBookEvent } from './pages/PublicBook';
-import BookSuccess from './pages/BookSuccess';
-import BookManage from './pages/BookManage';
-import Login from './pages/Login';
-import ForgotPassword from './pages/ForgotPassword';
-import ResetPassword from './pages/ResetPassword';
-import Account from './pages/Account';
-import Privacy from './pages/Privacy';
-import Terms from './pages/Terms';
-import AdminDashboard from './pages/admin/AdminDashboard';
-import AdminUsers from './pages/admin/AdminUsers';
-import AdminUserDetail from './pages/admin/AdminUserDetail';
-import AdminServices from './pages/admin/AdminServices';
-import AdminSettings from './pages/admin/AdminSettings';
-import AdminLayout from './components/AdminLayout';
-import RequireAdmin from './components/RequireAdmin';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import Layout from './shared/Layout';
+import { RequireAuth, RequireAdmin } from './shared/AuthGuards';
+import FeatureGate from './shared/FeatureGate';
+import Dashboard from './features/dashboard/Dashboard';
+import ProfileAudit from './features/local-presence/ProfileAudit';
+import PostAutomation from './features/local-presence/PostAutomation';
+import { ReviewManagement, QAAutoResponder } from './features/local-presence/ReviewsAndQA';
+import RankTracker from './features/visibility/RankTracker';
+import VisibilityAuditReport from './features/visibility/VisibilityAuditReport';
+import MediaOptimization from './features/local-presence/MediaOptimization';
+import ReportGenerator from './features/report/ReportGenerator';
+import Citations from './features/local-presence/Citations';
+import BookingPlots from './features/bookings/BookingPlots';
+import PublicBookHost, { PublicBookEvent, BookSuccess, BookManage } from './features/bookings/PublicBooking';
+import Login from './features/auth/Login';
+import { ForgotPassword, ResetPassword } from './features/auth/PasswordReset';
+import Account from './features/account/Account';
+import { Privacy, Terms } from './features/auth/Legal';
+import AdminDashboard from './features/admin/AdminDashboard';
+import AdminUsers from './features/admin/AdminUsers';
+import AdminUserDetail from './features/admin/AdminUserDetail';
+import AdminServices from './features/admin/AdminServices';
+import AdminSettings from './features/admin/AdminSettings';
+import AdminGrowthAuditLeads from './features/admin/AdminGrowthAuditLeads';
+import AdminLayout from './features/admin/AdminLayout';
+
+/** Old /booking/settings URL → /booking?panel=settings */
+function BookingSettingsRedirect() {
+  const location = useLocation();
+  const search = location.search.replace(/^\?/, '');
+  const params = new URLSearchParams(search);
+  params.set('panel', 'settings');
+  return <Navigate to={`/booking?${params.toString()}`} replace />;
+}
 
 export default function App() {
   return (
@@ -45,6 +49,7 @@ export default function App() {
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/admin/users/:kind/:id" element={<AdminUserDetail />} />
+          <Route path="/admin/growth-audit-leads" element={<AdminGrowthAuditLeads />} />
           <Route path="/admin/services" element={<AdminServices />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
         </Route>
@@ -71,12 +76,13 @@ export default function App() {
         >
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/account" element={<Account />} />
-          <Route path="/booking/settings" element={<FeatureGate feature="bookings"><BookingSettings /></FeatureGate>} />
+          <Route path="/booking/settings" element={<FeatureGate feature="bookings"><BookingSettingsRedirect /></FeatureGate>} />
           <Route path="/profile" element={<FeatureGate feature="local_presence"><ProfileAudit /></FeatureGate>} />
           <Route path="/posts" element={<FeatureGate feature="local_presence"><PostAutomation /></FeatureGate>} />
           <Route path="/reviews" element={<FeatureGate feature="local_presence"><ReviewManagement /></FeatureGate>} />
           <Route path="/qa" element={<FeatureGate feature="local_presence"><QAAutoResponder /></FeatureGate>} />
           <Route path="/rank-tracker" element={<FeatureGate feature="local_growth"><RankTracker /></FeatureGate>} />
+          <Route path="/visibility-audit/report" element={<VisibilityAuditReport />} />
           <Route path="/media" element={<FeatureGate feature="local_presence"><MediaOptimization /></FeatureGate>} />
           <Route path="/report" element={<FeatureGate features={['local_growth', 'reporting']}><ReportGenerator /></FeatureGate>} />
           <Route path="/citations" element={<FeatureGate feature="local_presence"><Citations /></FeatureGate>} />
