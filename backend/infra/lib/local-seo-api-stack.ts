@@ -170,10 +170,9 @@ export class LocalSeoApiStack extends cdk.Stack {
         ZAPP_SITES_ORIGIN: cfg.zappSitesOrigin,
         API_BASE_URL: apiBaseUrl,
         ENTITLEMENTS_DISABLED: 'false',
-        // Stage-locked admin — password only from env (no hardcoded default)
-        ADMIN_EMAIL:
-          process.env.ADMIN_EMAIL ||
-          (stage === 'prod' ? 'admin@localseo.com' : 'admin@localseo.net'),
+        // Stage-locked admin email (never copy ADMIN_EMAIL from shared .env —
+        // that file usually has .net and would break prod login with .com).
+        ADMIN_EMAIL: stage === 'prod' ? 'admin@localseo.com' : 'admin@localseo.net',
         ...(adminPassword ? { ADMIN_PASSWORD: adminPassword } : {}),
         ...(adminPasswordHash ? { ADMIN_PASSWORD_HASH: adminPasswordHash } : {}),
         // Stripe Connect — test keys on dev only; live keys via *_PROD on stage=prod (never commit)

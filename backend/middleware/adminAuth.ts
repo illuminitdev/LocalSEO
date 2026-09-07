@@ -1,20 +1,18 @@
 import { verifyToken } from '../lib/authTokens';
 
 /**
- * Admin credentials come only from env (never hardcoded secrets).
- * Stage-locked emails: set ADMIN_EMAIL, or default to .net (dev) / .com (prod).
- * Password: ADMIN_PASSWORD and/or ADMIN_PASSWORD_HASH required — no code fallback.
+ * Admin credentials: password only from env (never hardcoded).
+ * Email is always stage-locked (.net on dev, .com on prod) so a shared
+ * backend/.env ADMIN_EMAIL cannot bleed the wrong address into the other stage.
  */
 function resolveAdminCredentials() {
     const stage = (process.env.STAGE || 'dev').toLowerCase();
 
-    const email =
-        process.env.ADMIN_EMAIL ||
-        (stage === 'prod' ? 'admin@localseo.com' : 'admin@localseo.net');
+    const email = stage === 'prod' ? 'admin@localseo.com' : 'admin@localseo.net';
 
     return {
         stage,
-        email: String(email).trim().toLowerCase(),
+        email,
         password: String(process.env.ADMIN_PASSWORD || ''),
         passwordHash: String(process.env.ADMIN_PASSWORD_HASH || '')
     };

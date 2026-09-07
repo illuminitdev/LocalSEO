@@ -90,7 +90,10 @@ Login with `tester@example.com` / `Zs-TestPass1!` → only local presence module
 
 ## Admin
 
-`/admin` — set `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `.env`.
+`/admin` — set `ADMIN_PASSWORD` in `backend/.env` (required for deploy).
+- **Prod / main** (`app.zappsites.com`): `admin@localseo.com`
+- **Dev / testing**: `admin@localseo.net`
+Emails are stage-locked in code (not taken from `.env`).
 
 ## Neon
 
