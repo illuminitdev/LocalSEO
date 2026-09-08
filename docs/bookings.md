@@ -2,34 +2,41 @@
 
 ## What it does
 
-End-to-end **online booking** for service businesses:
+End-to-end **online booking** for service businesses (Jobber Phase 1–5 scope in LocalPulse):
 
 - Host configures organization, event types, weekly availability
-- Optional **Google Calendar** sync
-- Optional **Stripe** checkout for paid bookings / invoices
-- Public booking pages for customers (`/book/:hostSlug/...`)
-- Manage / cancel / reschedule via magic token
-- Host board to complete, cancel, or invoice bookings
+- **Clients CRM** with **multi-property** addresses, quotes, referrals
+- **Quotes**, **Inbox** (SMS), **Team**, **Dispatch**, **Field**, **Jobs & money**, **Marketing** mini-site
+- Public book / portal / quote / `/s/:orgSlug` site
+- Email + optional **Amazon SNS** outbound SMS reminders; S3 avatars/job photos when `MEDIA_BUCKET` set
+- Client merge, Dispatch map pins, Zapier webhooks, QBO OAuth (paid invoice push)
+
+Roadmap: [jobber-roadmap.md](./jobber-roadmap.md)
 
 ## Feature gate
 
-Host UI & host/integration APIs: **`bookings`**
+Host UI & host/integration APIs: **`bookings`** (Clients CRM + Quotes use the same key)
 
 Public customer booking (`/api/public/*`) is **not** entitlement-gated.
 
 Plans: `booking-solo`, `booking-solo-plus`, `booking-pro`, `complete-growth-system`.
 
+**Pricing deferred:** Starter/Growth/Pro matrix is not finalized — keep current plan IDs until product + ZappSites + Stripe are ready.
+
 ## Frontend
 
 | UI | Path |
 |----|------|
-| Booking board | `client/src/pages/BookingPlots.tsx` → `/booking` |
-| Schedule settings panel | `client/src/components/BookingSettingsPanel.tsx` |
-| Dedicated settings route | `/booking/settings` → `BookingSettings.tsx` |
-| Public host / event | `client/src/pages/PublicBook.tsx` → `/book/:hostSlug`… |
-| Booking flow | `client/src/components/CustomerBookingFlow.tsx` |
-| Success / ICS | `client/src/pages/BookSuccess.tsx` |
-| Manage booking | `client/src/pages/BookManage.tsx` → `/book/manage/:token` |
+| Booking board | `client/src/features/bookings/BookingPlots.tsx` → `/booking` |
+| Clients CRM | `client/src/features/clients/Clients.tsx` → `/clients`, `/clients/:id` |
+| Quotes | `client/src/features/quotes/Quotes.tsx` → `/quotes`, `/quotes/new`, `/quotes/:id` |
+| Public quote | `client/src/features/quotes/PublicQuote.tsx` → `/quote/:token` |
+| Schedule settings panel | `client/src/features/bookings/BookingSettings.tsx` |
+| Dedicated settings route | `/booking/settings` → redirect to `?panel=settings` |
+| Public host / event | `client/src/features/bookings/PublicBooking.tsx` → `/book/:hostSlug`… |
+| Success / ICS | same module — BookSuccess |
+| Manage booking | same module — BookManage |
+| Client hub | `client/src/features/bookings/ClientPortal.tsx` → `/book/portal/:token` |
 
 ## Backend connection
 
@@ -48,8 +55,16 @@ Requires host auth + `bookings` feature (via router middleware).
 | `GET/POST/PATCH/DELETE` | `/api/host/event-types`… | Event type CRUD |
 | `GET/PUT` | `/api/host/availability` | Weekly windows |
 | `PATCH` | `/api/host/organization` | Org / booking settings |
-| `PATCH` | `/api/host/bookings/:id` | Update booking |
-| `POST` | `/api/host/bookings/:id/cancel` | Cancel |
+| `GET/POST` | `/api/host/clients` | List / create clients |
+| `GET/PATCH` | `/api/host/clients/:id` | Client detail + update (single property) |
+| `POST` | `/api/host/clients/:id/portal-link` | Issue magic hub link (+ optional email) |
+| `GET/POST` | `/api/host/quotes` | List / create quotes |
+| `GET/PATCH` | `/api/host/quotes/:id` | Quote detail + update line items |
+| `POST` | `/api/host/quotes/:id/send` | Email quote + schedule 3-day follow-up |
+| `POST` | `/api/host/bookings` | Manual booking or request |
+| `PATCH` | `/api/host/bookings/:id` | Update booking / job fields |
+| `POST` | `/api/host/bookings/:id/start` | Mark job in progress |
+| `POST` | `/api/host/bookings/:id/cancel` | Cancel (+ refund) |
 | `POST` | `/api/host/bookings/:id/complete` | Mark complete |
 | `POST` | `/api/host/bookings/:id/invoice` | Create Stripe invoice |
 
@@ -60,8 +75,14 @@ Requires host auth + `bookings` feature (via router middleware).
 | `GET` | `/api/public/:hostSlug` | Public host page data |
 | `GET` | `/api/public/:hostSlug/:eventSlug` | Event page |
 | `GET` | `/api/public/:hostSlug/:eventSlug/availability` | Open slots |
-| `POST` | `/api/public/:hostSlug/:eventSlug/book` | Create booking (± Stripe session) |
+| `POST` | `/api/public/:hostSlug/:eventSlug/book` | Create booking or request (`intakeType`: `instant` \| `request`); upserts client |
+| `GET` | `/api/public/portal/:token` | Client hub payload |
+| `POST` | `/api/public/portal/:token/request` | New work request from hub |
 | `GET` | `/api/public/checkout/verify` | Verify Stripe session |
+| `GET` | `/api/public/quotes/checkout/verify` | Verify quote deposit Checkout session |
+| `GET` | `/api/public/quotes/:token` | Public quote payload |
+| `POST` | `/api/public/quotes/:token/approve` | Approve (+ optional Connect deposit Checkout) |
+| `POST` | `/api/public/quotes/:token/decline` | Decline quote |
 | `GET` | `/api/public/manage/:token` | Guest manage view |
 | `POST` | `/api/public/manage/:token/cancel` | Guest cancel |
 | `POST` | `/api/public/manage/:token/reschedule` | Guest reschedule |
@@ -78,6 +99,8 @@ Requires host auth + `bookings` feature (via router middleware).
 ### Stripe webhook
 
 `POST /api/webhooks/stripe` — `checkout.session.completed` / `invoice.paid` / `account.updated` (`backend/routes/webhooks.ts`).
+
+Quote deposits: same webhook — when `metadata.quoteId` is set, calls `confirmQuoteDeposit` and creates a job stub linked to the quote.
 
 For Connect deposits, enable the webhook to receive **Connected account** events (or a Connect endpoint) so checkout completion still arrives.
 
@@ -123,6 +146,9 @@ Refunds appear in Stripe **Test mode** under the **connected account** payment (
 
 ## Supporting libs
 
+- `backend/lib/clients.ts` — CRM CRUD + client detail (bookings, invoices, quotes)
+- `backend/lib/quotes.ts` — quote CRUD, send email, approve/decline, deposit Checkout, job stub
+- `backend/lib/bookingReminders.ts` — `scheduled_messages` (visit / invoice / quote_followup)
 - `backend/lib/availability.ts` — slot math
 - `backend/lib/confirmBooking.ts` — post-payment confirmation
 - `backend/lib/bookingEmail.ts` — transactional email hooks
@@ -143,21 +169,26 @@ Refunds appear in Stripe **Test mode** under the **connected account** payment (
 ## DB (LocalPulse migrations)
 
 - `002_booking_setup.sql`, `003_availability_dates.sql`, `009_stripe_connect.sql`
-- Tables for orgs (incl. Connect columns), event types, availability, bookings, invoices, calendar connections, manage tokens
+- `013_phase1_crm_jobs.sql` — `clients`, `client_properties`, booking job/intake columns, `invoices.client_id` + backfill
+- `014_phase2_portal_reminders.sql` — portal tokens, reminder org settings, `message_templates`, `scheduled_messages`
+- `015_quotes.sql` — `quotes`, `quote_line_items`, `bookings.quote_id`
+- Tables for orgs (incl. Connect columns), event types, availability, bookings, invoices, calendar connections, manage tokens, clients, quotes
 
 ## Connection diagram
 
 ```
-Host SPA (/booking)
-  → JWT + /api/host/*
+Host SPA (/booking, /clients, /quotes)
+  → JWT + /api/host/* (+ /clients + /quotes CRUD)
   → Stripe Connect onboarding (Express Account Link)
-  → RDS bookings schema
+  → RDS bookings + clients + quotes schema
   → optional Google Calendar API
-  → optional Stripe (invoices)
+  → optional Stripe (invoices with client_id; quote deposits)
 
-Customer (/book/...)
+Customer (/book/..., /quote/:token)
   → /api/public/* (no plan gate)
-  → Stripe Checkout on connected account + application_fee
-  → webhook → confirmBooking
+  → upsert client + book or request intake
+  → review/approve/decline quote (+ optional deposit Checkout)
+  → Stripe Checkout on connected account + application_fee (instant book / quote deposit)
+  → webhook → confirmBooking or confirmQuoteDeposit
   → email + ICS + optional Calendar event
 ```

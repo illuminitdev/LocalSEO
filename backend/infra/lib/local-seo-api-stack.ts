@@ -1,3 +1,4 @@
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as cdk from 'aws-cdk-lib';
@@ -140,6 +141,48 @@ export class LocalSeoApiStack extends cdk.Stack {
       );
     }
 
+    const spaOrigins = Array.from(
+      new Set(
+        [
+          cfg.clientOrigin,
+          'http://localhost:5173',
+          'http://127.0.0.1:5173',
+          'https://zappsites-local-seo.vercel.app',
+          'https://app.zappsites.com',
+          'https://www.zappsites.com',
+        ].filter(Boolean)
+      )
+    );
+
+    const mediaBucket = new s3.Bucket(this, 'MediaBucket', {
+      bucketName: `localseo-${stage}-media-${this.account}`,
+      blockPublicAccess: new s3.BlockPublicAccess({
+        blockPublicAcls: false,
+        ignorePublicAcls: false,
+        blockPublicPolicy: false,
+        restrictPublicBuckets: false,
+      }),
+      objectOwnership: s3.ObjectOwnership.OBJECT_WRITER,
+      cors: [
+        {
+          allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.GET, s3.HttpMethods.HEAD],
+          allowedOrigins: spaOrigins,
+          allowedHeaders: ['*'],
+          maxAge: 3000,
+        },
+      ],
+      removalPolicy: stage === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
+      autoDeleteObjects: stage === 'dev',
+    });
+
+    mediaBucket.addToResourcePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:GetObject'],
+        resources: [`${mediaBucket.bucketArn}/avatars/*`, `${mediaBucket.bucketArn}/jobs/*`],
+        principals: [new iam.AnyPrincipal()],
+      })
+    );
+
     const fn = new lambda.Function(this, 'ApiFn', {
       functionName: `localseo-api-${stage}`,
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -170,12 +213,10 @@ export class LocalSeoApiStack extends cdk.Stack {
         ZAPP_SITES_ORIGIN: cfg.zappSitesOrigin,
         API_BASE_URL: apiBaseUrl,
         ENTITLEMENTS_DISABLED: 'false',
-        // Stage-locked admin email (never copy ADMIN_EMAIL from shared .env —
-        // that file usually has .net and would break prod login with .com).
+        MEDIA_BUCKET: mediaBucket.bucketName,
         ADMIN_EMAIL: stage === 'prod' ? 'admin@localseo.com' : 'admin@localseo.net',
         ...(adminPassword ? { ADMIN_PASSWORD: adminPassword } : {}),
         ...(adminPasswordHash ? { ADMIN_PASSWORD_HASH: adminPasswordHash } : {}),
-        // Stripe Connect — test keys on dev only; live keys via *_PROD on stage=prod (never commit)
         ...(stripeSecretKey ? { STRIPE_SECRET_KEY: stripeSecretKey } : {}),
         ...(stripePublishableKey ? { STRIPE_PUBLISHABLE_KEY: stripePublishableKey } : {}),
         ...(stripeWebhookSecret ? { STRIPE_WEBHOOK_SECRET: stripeWebhookSecret } : {}),
@@ -187,7 +228,6 @@ export class LocalSeoApiStack extends cdk.Stack {
         ...(process.env.STRIPE_CONNECT_REFRESH_URL
           ? { STRIPE_CONNECT_REFRESH_URL: process.env.STRIPE_CONNECT_REFRESH_URL }
           : {}),
-        // Google Calendar OAuth (Booking → Integrations)
         ...(process.env.GOOGLE_CLIENT_ID
           ? { GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID }
           : {}),
@@ -197,22 +237,22 @@ export class LocalSeoApiStack extends cdk.Stack {
         ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
           ? { GOOGLE_REDIRECT_URI: googleRedirectUri }
           : {}),
-        // Places search (both stages when key present)
         ...(process.env.GOOGLE_PLACES_API_KEY
           ? { GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY }
           : {}),
-        // Gemini: paid key on prod only via GEMINI_API_KEY_PROD
         ...(geminiKey ? { GEMINI_API_KEY: geminiKey } : {}),
-        // Booking emails via AWS SES — from info@zappsites.com on both stages
         EMAIL_TRANSPORT: 'ses',
         BOOKING_EMAIL_FROM: process.env.BOOKING_EMAIL_FROM || 'info@zappsites.com',
         SES_REGION: process.env.SES_REGION || 'us-east-1',
+        ...(process.env.SMS_SENDER_ID ? { SMS_SENDER_ID: process.env.SMS_SENDER_ID } : {}),
       },
       logGroup,
     });
 
     dbSecret.grantRead(fn);
     jwtSecret.grantRead(fn);
+    mediaBucket.grantPut(fn);
+    mediaBucket.grantRead(fn);
 
     // Allow Lambda to send booking emails through SES
     fn.addToRolePolicy(
@@ -222,21 +262,18 @@ export class LocalSeoApiStack extends cdk.Stack {
       })
     );
 
+    // Outbound SMS via Amazon SNS (Publish to phone number)
+    fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['sns:Publish'],
+        resources: ['*'],
+      })
+    );
+
     const integration = new HttpLambdaIntegration('ApiIntegration', fn);
 
     // Explicit origins on both stages (no wildcard) — Express CORS mirrors this list.
-    const allowOrigins = Array.from(
-      new Set(
-        [
-          cfg.clientOrigin,
-          'http://localhost:5173',
-          'http://127.0.0.1:5173',
-          'https://zappsites-local-seo.vercel.app',
-          'https://app.zappsites.com',
-          'https://www.zappsites.com',
-        ].filter(Boolean)
-      )
-    );
+    const allowOrigins = spaOrigins;
 
     const httpApi = new apigwv2.HttpApi(this, 'HttpApi', {
       apiName: `localseo-api-${stage}`,
@@ -266,6 +303,11 @@ export class LocalSeoApiStack extends cdk.Stack {
         throttlingRateLimit: stage === 'prod' ? 50 : 25,
       };
     }
+
+    new cdk.CfnOutput(this, 'LocalSeoMediaBucket', {
+      value: mediaBucket.bucketName,
+      exportName: `LocalSeoApi-${stage}-MediaBucket`,
+    });
 
     new cdk.CfnOutput(this, 'LocalSeoApiUrl', {
       value: httpApi.apiEndpoint,

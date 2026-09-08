@@ -7,13 +7,13 @@ Maps ZappSites **plan IDs** to portal **feature keys**. The SPA hides nav items 
 Catalog kept in sync:
 
 - `backend/lib/planCatalog.ts`
-- `client/src/lib/planCatalog.ts`
+- `client/src/shared/planCatalog.ts`
 
 ## Feature keys
 
 | Key | Unlocks |
 |-----|---------|
-| `bookings` | Booking board, schedule, host + Google Calendar integration APIs |
+| `bookings` | Booking board, CRM, quotes, inbox, team, dispatch, field, money, marketing, host + calendar APIs |
 | `local_presence` | Profile, citations, posts, media, reviews, Q&A, Places/business APIs |
 | `local_growth` | Local Search Grid (`/rank-tracker`), gap analysis |
 | `reporting` | Dashboard stats/activity APIs; with `local_growth` → AI Insights |
@@ -27,6 +27,8 @@ Catalog kept in sync:
 | `local-presence` | `local_presence` |
 | `local-growth` | `local_presence`, `local_growth`, `reporting` |
 | `complete-growth-system` | all four |
+
+**Pricing deferred:** Starter/Growth/Pro (and any new price matrix) is **not** finalized — do not add catalog aliases or Stripe Price ID changes until product locks pricing. Live checkout remains ZappSites + Stripe.
 
 ## How entitlements load
 
@@ -63,7 +65,7 @@ Stripe webhooks on LocalPulse (`POST /api/webhooks/stripe`):
 | `/profile`, `/citations`, `/posts`, `/media`, `/reviews`, `/qa` | `local_presence` |
 | `/rank-tracker` | `local_growth` |
 | `/report` | `local_growth` + `reporting` |
-| `/booking`, `/booking/settings` | `bookings` |
+| `/booking`, `/booking/settings`, `/clients`, `/quotes`, `/inbox`, `/team`, `/dispatch`, `/field`, `/money`, `/marketing` | `bookings` |
 
 Public `/book/*` and `/api/public/*` are not gated by plan.
 

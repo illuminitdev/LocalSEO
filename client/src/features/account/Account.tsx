@@ -9,9 +9,14 @@ import {
     CreditCard,
     UserRound,
     Check,
-    Pencil
+    Pencil,
+    Camera,
+    Mail,
+    Phone,
+    Key,
+    Settings
 } from 'lucide-react';
-import { apiGet, apiPatch } from '../../shared/utils';
+import { apiGet, apiPatch, apiPost } from '../../shared/utils';
 import { clearToken, setMustChangePassword } from '../auth/auth';
 import GroundingModal from '../dashboard/GroundingModal';
 import PlacesMap from '../../shared/PlacesMap';
@@ -77,9 +82,13 @@ export default function Account() {
 
     const [displayName, setDisplayName] = useState('');
     const [email, setEmail] = useState('');
+    const [avatarUrl, setAvatarUrl] = useState('');
+    const [avatarBusy, setAvatarBusy] = useState(false);
     const [profileMsg, setProfileMsg] = useState('');
     const [profileErr, setProfileErr] = useState('');
     const [profileBusy, setProfileBusy] = useState(false);
+    const [editingProfile, setEditingProfile] = useState(false);
+    const [showPasswordForm, setShowPasswordForm] = useState(forcePassword);
 
     const [org, setOrg] = useState<OrgForm>({
         name: '',
@@ -160,6 +169,7 @@ export default function Account() {
             .then((me) => {
                 setDisplayName(me.user?.name || '');
                 setEmail(me.user?.email || '');
+                setAvatarUrl(me.user?.avatarUrl || me.user?.avatar_url || '');
                 if (me.user?.mustChangePassword) {
                     setMustChange(true);
                     setMustChangePassword(true);
@@ -208,13 +218,41 @@ export default function Account() {
         setProfileMsg('');
         setProfileErr('');
         try {
-            const data = await apiPatch('/api/auth/profile', { name: displayName });
+            const data = await apiPatch('/api/auth/profile', { name: displayName, avatarUrl: avatarUrl || undefined });
             setDisplayName(data.user?.name || displayName);
+            setAvatarUrl(data.user?.avatarUrl || avatarUrl);
             setProfileMsg('Profile saved.');
+            setEditingProfile(false);
         } catch (err: any) {
             setProfileErr(err.message);
         } finally {
             setProfileBusy(false);
+        }
+    };
+
+    const uploadAvatar = async (file: File) => {
+        setAvatarBusy(true);
+        setProfileErr('');
+        try {
+            const presign = await apiPost('/api/auth/avatar/presign', {
+                contentType: file.type || 'image/jpeg'
+            });
+            const put = await fetch(presign.uploadUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': file.type || 'image/jpeg' },
+                body: file
+            });
+            if (!put.ok) throw new Error('Upload to storage failed');
+            setAvatarUrl(presign.publicUrl);
+            await apiPatch('/api/auth/profile', {
+                name: displayName || 'User',
+                avatarUrl: presign.publicUrl
+            });
+            setProfileMsg('Profile picture updated.');
+        } catch (err: any) {
+            setProfileErr(err.message || 'Upload failed (set MEDIA_BUCKET for S3)');
+        } finally {
+            setAvatarBusy(false);
         }
     };
 
@@ -284,34 +322,20 @@ export default function Account() {
     };
 
     return (
-        <div className="max-w-3xl mx-auto pb-12 animate-in fade-in duration-500">
-            <div className="relative overflow-hidden rounded-3xl mb-8 border border-[#FED7AA]/50 shadow-[0_20px_50px_-24px_rgba(217,119,6,0.45)]">
-                <div className="absolute inset-0 bg-gradient-to-br from-[#0F172A] via-[#1E293B] to-[#0F172A]" />
-                <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-[#F59E0B]/25 blur-3xl" />
-                <div className="absolute -left-10 bottom-0 h-40 w-40 rounded-full bg-[#FBBF24]/15 blur-2xl" />
-                <div className="relative px-6 py-8 sm:px-8">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FBBF24]">Zappsites · Local SEO</p>
-                    <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-white mt-2">Account settings</h1>
-                    <p className="mt-2 text-sm text-white/70 max-w-xl">
-                        Profile, plan, workspace details, listing location, and password.
-                    </p>
-                    {(displayName || email) && (
-                        <div className="mt-6 inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/10 backdrop-blur-md px-4 py-3 shadow-lg">
-                            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white flex items-center justify-center text-sm font-black shadow-md">
-                                {(displayName || email).charAt(0).toUpperCase()}
-                            </div>
-                            <div className="min-w-0">
-                                <p className="text-sm font-bold text-white truncate">{displayName || 'Your account'}</p>
-                                <p className="text-xs text-white/65 truncate">{email}</p>
-                            </div>
-                        </div>
-                    )}
+        <div className="max-w-4xl mx-auto pb-12 animate-in fade-in duration-500">
+            <div className="mb-8 flex items-start gap-4">
+                <div className="h-12 w-12 rounded-2xl bg-[#0F172A] text-white flex items-center justify-center shrink-0 shadow-md">
+                    <Settings className="w-5 h-5" strokeWidth={2} />
+                </div>
+                <div>
+                    <h1 className="text-3xl font-black tracking-tight text-[#0F172A]">Settings</h1>
+                    <p className="mt-1 text-sm text-[#64748B]">Manage your account profile and security.</p>
                 </div>
             </div>
 
             {mustChangePassword && (
                 <p className="mb-6 text-sm text-amber-950 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl px-4 py-3 shadow-sm">
-                    Please change your temporary password when you can — use the Password section below.
+                    Please change your temporary password when you can — use Account Security below.
                 </p>
             )}
 
@@ -320,6 +344,135 @@ export default function Account() {
             )}
 
             <div className="space-y-7">
+                {/* Profile card — photo on top/left, personal info beside */}
+                <section className="rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_10px_40px_-18px_rgba(15,23,42,0.2)] overflow-hidden">
+                    <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr]">
+                        <div className="p-6 border-b lg:border-b-0 lg:border-r border-[#E2E8F0] bg-[#F8FAFC]/80 flex flex-col">
+                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#94A3B8] flex items-center gap-1.5 mb-5">
+                                <UserRound className="w-3.5 h-3.5" /> Profile
+                            </p>
+                            <div className="flex items-start gap-4 mb-5">
+                                {avatarUrl ? (
+                                    <img
+                                        src={avatarUrl}
+                                        alt=""
+                                        className="h-20 w-20 rounded-full object-cover border-2 border-white shadow-md shrink-0"
+                                    />
+                                ) : (
+                                    <div className="h-20 w-20 rounded-full bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white flex items-center justify-center text-2xl font-black shadow-md shrink-0">
+                                        {(displayName || email || 'U').charAt(0).toUpperCase()}
+                                    </div>
+                                )}
+                                <div className="min-w-0 pt-1">
+                                    <p className="text-sm font-bold text-[#0F172A]">Profile Picture</p>
+                                    <label className="mt-2 inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-bold text-[#0F172A] cursor-pointer hover:bg-[#F8FAFC]">
+                                        <Camera className="w-3.5 h-3.5" />
+                                        {avatarBusy ? 'Uploading…' : 'Upload Picture'}
+                                        <input
+                                            type="file"
+                                            accept="image/jpeg,image/png,image/webp,image/gif"
+                                            className="hidden"
+                                            disabled={avatarBusy}
+                                            onChange={async (e) => {
+                                                const file = e.target.files?.[0];
+                                                if (!file) return;
+                                                if (file.size > 5 * 1024 * 1024) {
+                                                    setProfileErr('Maximum size is 5MB.');
+                                                    e.target.value = '';
+                                                    return;
+                                                }
+                                                await uploadAvatar(file);
+                                                e.target.value = '';
+                                            }}
+                                        />
+                                    </label>
+                                    <p className="mt-2 text-[11px] text-[#94A3B8] leading-snug">
+                                        JPG or PNG only. Maximum size 5MB.
+                                    </p>
+                                </div>
+                            </div>
+                            <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-800 mb-4">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                Host account
+                            </span>
+                            {profileErr && <p className="text-xs text-red-600 mb-2">{profileErr}</p>}
+                            {profileMsg && <p className="text-xs text-emerald-700 mb-2">{profileMsg}</p>}
+                            <button
+                                type="button"
+                                onClick={() => setEditingProfile((v) => !v)}
+                                className="mt-auto w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm font-bold text-[#0F172A] hover:bg-white"
+                            >
+                                <Pencil className="w-4 h-4" />
+                                {editingProfile ? 'Cancel edit' : 'Edit Profile'}
+                            </button>
+                        </div>
+
+                        <div className="p-6 sm:p-8">
+                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#94A3B8] mb-5">
+                                Personal information
+                            </p>
+                            {!editingProfile ? (
+                                <div className="space-y-3">
+                                    <div className="rounded-xl border border-[#E2E8F0] px-4 py-3 flex items-center gap-3">
+                                        <UserRound className="w-4 h-4 text-[#94A3B8] shrink-0" />
+                                        <div className="min-w-0">
+                                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Name</p>
+                                            <p className="text-sm font-bold text-[#0F172A] truncate">{displayName || '—'}</p>
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl border border-[#E2E8F0] px-4 py-3 flex items-center gap-3">
+                                        <Mail className="w-4 h-4 text-[#94A3B8] shrink-0" />
+                                        <div className="min-w-0">
+                                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Email</p>
+                                            <p className="text-sm font-bold text-[#0F172A] truncate">{email || '—'}</p>
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl border border-[#E2E8F0] px-4 py-3 flex items-center gap-3">
+                                        <Phone className="w-4 h-4 text-[#94A3B8] shrink-0" />
+                                        <div className="min-w-0">
+                                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Phone</p>
+                                            <p className="text-sm font-bold text-[#0F172A] truncate">{org.phone || '—'}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <form onSubmit={saveProfile} className="space-y-4 max-w-md">
+                                    <label className="block text-sm font-semibold text-[#334155]">
+                                        Full name
+                                        <input
+                                            type="text"
+                                            required
+                                            value={displayName}
+                                            onChange={(e) => setDisplayName(e.target.value)}
+                                            className={fieldClass}
+                                            placeholder="Your name"
+                                        />
+                                    </label>
+                                    <label className="block text-sm font-semibold text-[#334155]">
+                                        Email
+                                        <input
+                                            type="email"
+                                            value={email}
+                                            disabled
+                                            className={`${fieldClass} bg-[#F1F5F9] text-[#64748B] cursor-not-allowed`}
+                                        />
+                                        <span className="mt-1.5 block text-xs text-[#94A3B8]">
+                                            Email is used to sign in and cannot be changed here.
+                                        </span>
+                                    </label>
+                                    <button
+                                        type="submit"
+                                        disabled={profileBusy}
+                                        className="px-5 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold hover:bg-[#1E293B] disabled:opacity-55"
+                                    >
+                                        {profileBusy ? 'Saving…' : 'Save profile'}
+                                    </button>
+                                </form>
+                            )}
+                        </div>
+                    </div>
+                </section>
+
                 <SectionCard
                     icon={CreditCard}
                     title={showStackedList ? 'Your plans' : 'Your plan'}
@@ -435,101 +588,86 @@ export default function Account() {
 
                 <SectionCard
                     icon={Shield}
-                    title="Password"
-                    subtitle={
-                        mustChangePassword
-                            ? 'Enter your temporary password, then choose a new one.'
-                            : 'Update the password you use to sign in.'
-                    }
+                    title="Account Security"
+                    subtitle="Keep your sign-in credentials up to date."
                     id="password"
                 >
-                    <form onSubmit={savePassword} className="space-y-4 max-w-md">
-                        {passErr && <p className="text-sm text-red-700">{passErr}</p>}
-                        {passMsg && <p className="text-sm text-emerald-700">{passMsg}</p>}
-                        <label className="block text-sm font-semibold text-[#334155]">
-                            Current password
-                            <input
-                                type="password"
-                                required
-                                autoComplete="current-password"
-                                value={currentPassword}
-                                onChange={(e) => setCurrentPassword(e.target.value)}
-                                className={fieldClass}
-                            />
-                        </label>
-                        <label className="block text-sm font-semibold text-[#334155]">
-                            New password
-                            <input
-                                type="password"
-                                required
-                                minLength={8}
-                                autoComplete="new-password"
-                                value={newPassword}
-                                onChange={(e) => setNewPassword(e.target.value)}
-                                className={fieldClass}
-                            />
-                        </label>
-                        <label className="block text-sm font-semibold text-[#334155]">
-                            Confirm new password
-                            <input
-                                type="password"
-                                required
-                                minLength={8}
-                                autoComplete="new-password"
-                                value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
-                                className={fieldClass}
-                            />
-                        </label>
-                        <button
-                            type="submit"
-                            disabled={passBusy}
-                            className="px-5 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold hover:bg-[#1E293B] disabled:opacity-55"
-                        >
-                            {passBusy ? 'Saving…' : 'Update password'}
-                        </button>
-                    </form>
-                </SectionCard>
-
-                <SectionCard
-                    icon={UserRound}
-                    title="Profile"
-                    subtitle="How you appear in this workspace."
-                >
-                    <form onSubmit={saveProfile} className="space-y-4 max-w-md">
-                        {profileErr && <p className="text-sm text-red-700">{profileErr}</p>}
-                        {profileMsg && <p className="text-sm text-emerald-700">{profileMsg}</p>}
-                        <label className="block text-sm font-semibold text-[#334155]">
-                            Full name
-                            <input
-                                type="text"
-                                required
-                                value={displayName}
-                                onChange={(e) => setDisplayName(e.target.value)}
-                                className={fieldClass}
-                                placeholder="Your name"
-                            />
-                        </label>
-                        <label className="block text-sm font-semibold text-[#334155]">
-                            Email
-                            <input
-                                type="email"
-                                value={email}
-                                disabled
-                                className={`${fieldClass} bg-[#F1F5F9] text-[#64748B] cursor-not-allowed`}
-                            />
-                            <span className="mt-1.5 block text-xs text-[#94A3B8]">
-                                Email is used to sign in and cannot be changed here.
-                            </span>
-                        </label>
-                        <button
-                            type="submit"
-                            disabled={profileBusy}
-                            className="px-5 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold hover:bg-[#1E293B] disabled:opacity-55"
-                        >
-                            {profileBusy ? 'Saving…' : 'Save profile'}
-                        </button>
-                    </form>
+                    <div className="rounded-xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 flex items-start gap-3 mb-4">
+                        <Shield className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                        <p className="text-sm text-amber-950">
+                            We recommend changing your password every 90 days to keep your account secure.
+                        </p>
+                    </div>
+                    {!showPasswordForm ? (
+                        <div className="rounded-xl border border-dashed border-[#E2E8F0] px-4 py-8 text-center">
+                            <button
+                                type="button"
+                                onClick={() => setShowPasswordForm(true)}
+                                className="inline-flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-5 py-2.5 text-sm font-bold text-[#0F172A] hover:bg-[#F8FAFC]"
+                            >
+                                <Key className="w-4 h-4" />
+                                Update Password
+                            </button>
+                        </div>
+                    ) : (
+                        <form onSubmit={savePassword} className="space-y-4 max-w-md">
+                            {passErr && <p className="text-sm text-red-700">{passErr}</p>}
+                            {passMsg && <p className="text-sm text-emerald-700">{passMsg}</p>}
+                            <label className="block text-sm font-semibold text-[#334155]">
+                                Current password
+                                <input
+                                    type="password"
+                                    required
+                                    autoComplete="current-password"
+                                    value={currentPassword}
+                                    onChange={(e) => setCurrentPassword(e.target.value)}
+                                    className={fieldClass}
+                                />
+                            </label>
+                            <label className="block text-sm font-semibold text-[#334155]">
+                                New password
+                                <input
+                                    type="password"
+                                    required
+                                    minLength={8}
+                                    autoComplete="new-password"
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    className={fieldClass}
+                                />
+                            </label>
+                            <label className="block text-sm font-semibold text-[#334155]">
+                                Confirm new password
+                                <input
+                                    type="password"
+                                    required
+                                    minLength={8}
+                                    autoComplete="new-password"
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                    className={fieldClass}
+                                />
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                                <button
+                                    type="submit"
+                                    disabled={passBusy}
+                                    className="px-5 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold hover:bg-[#1E293B] disabled:opacity-55"
+                                >
+                                    {passBusy ? 'Saving…' : 'Update password'}
+                                </button>
+                                {!forcePassword && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPasswordForm(false)}
+                                        className="px-5 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
+                                    >
+                                        Cancel
+                                    </button>
+                                )}
+                            </div>
+                        </form>
+                    )}
                 </SectionCard>
 
                 <SectionCard

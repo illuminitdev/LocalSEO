@@ -39,11 +39,18 @@ function hashInvitePassword(password: string) {
     return createHash('sha256').update(password).digest('hex');
 }
 
-function authUserPayload(user: { id: any; email: any; name: any; must_change_password?: boolean }) {
+function authUserPayload(user: {
+    id: any;
+    email: any;
+    name: any;
+    must_change_password?: boolean;
+    avatar_url?: string;
+}) {
     return {
         id: user.id,
         email: user.email,
         name: user.name,
+        avatarUrl: user.avatar_url || '',
         mustChangePassword: Boolean(user.must_change_password)
     };
 }
@@ -397,15 +404,45 @@ router.patch('/profile', requireAuth, async (req: Request, res: Response) => {
     try {
         const name = String(req.body?.name || '').trim();
         if (!name) return res.status(400).json({ error: 'Name is required.' });
+        const avatarUrl =
+            req.body?.avatarUrl != null ? String(req.body.avatarUrl).trim() : undefined;
 
         const { rows } = await query(
-            `UPDATE users SET name = $1 WHERE id = $2 RETURNING id, email, name`,
-            [name, (req as any).user.id]
+            `UPDATE users SET
+                name = $1,
+                avatar_url = CASE WHEN $3::text IS NOT NULL THEN $3 ELSE avatar_url END
+             WHERE id = $2
+             RETURNING id, email, name, avatar_url, must_change_password`,
+            [name, (req as any).user.id, avatarUrl ?? null]
         );
-        res.json({ user: rows[0] });
+        res.json({ user: authUserPayload(rows[0]) });
     } catch (err: any) {
         console.error('Update profile error:', err);
         res.status(500).json({ error: err.message || 'Could not update profile' });
+    }
+});
+
+router.post('/avatar/presign', requireAuth, async (req: Request, res: Response) => {
+    try {
+        const { createUploadPresign } = await import('../lib/media');
+        const data = await createUploadPresign({
+            kind: 'avatar',
+            contentType: String(req.body?.contentType || 'image/jpeg'),
+            userId: (req as any).user.id
+        });
+        res.json(data);
+    } catch (err: any) {
+        res.status(err.status || 500).json({ error: err.message || 'Presign failed' });
+    }
+});
+
+router.post('/team/accept', requireAuth, async (req: Request, res: Response) => {
+    try {
+        const { acceptOrgInvite } = await import('../lib/team');
+        const result = await acceptOrgInvite(String(req.body?.token || ''), (req as any).user.id);
+        res.json({ success: true, ...result });
+    } catch (err: any) {
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 

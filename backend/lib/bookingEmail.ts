@@ -213,6 +213,7 @@ async function sendPasswordResetEmail({ to, name, resetUrl }: any) {
 }
 
 export {
+    sendMail,
     sendBookingConfirmationEmail,
     sendHostBookingNotification,
     sendInvoiceEmail,

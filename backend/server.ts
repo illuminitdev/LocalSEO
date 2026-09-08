@@ -1198,6 +1198,20 @@ app.use('/api/host', createHostRouter({ stripeClient }));
 app.use('/api/public', createPublicRouter({ stripeClient }));
 app.use('/api/integrations', integrationsRouter);
 
+app.post('/api/ops/process-booking-reminders', async (req, res) => {
+    const secret = process.env.OPS_SECRET || process.env.ZAPP_OPS_SECRET || 'zappsites-ops-dev';
+    if (req.headers['x-ops-secret'] !== secret) {
+        return res.status(401).json({ error: 'unauthorized' });
+    }
+    try {
+        const { processDueScheduledMessages } = await import('./lib/bookingReminders');
+        const result = await processDueScheduledMessages(100);
+        res.json({ ok: true, ...result });
+    } catch (err: any) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Legacy booking API shim — redirects clients to new endpoints
 app.get('/api/booking', (_req, res) => {
     res.status(410).json({ error: 'Booking API moved. Use /api/auth/me and /api/host/dashboard. Register or login first.' });
