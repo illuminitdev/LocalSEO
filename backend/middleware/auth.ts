@@ -10,12 +10,12 @@ async function loadUserMembership(userId: string, opts: { orgId?: string | null;
 
     if (orgSlug) {
         const { rows } = await query(
-            `SELECT u.id, u.email, u.name, u.must_change_password,
+            `SELECT u.id, u.email, u.name, u.must_change_password, u.avatar_url,
                     m.org_id, m.role, o.slug AS org_slug, o.name AS org_name
              FROM users u
              JOIN memberships m ON m.user_id = u.id
              JOIN organizations o ON o.id = m.org_id
-             WHERE u.id = $1 AND o.slug = $2
+             WHERE u.id = $1 AND o.slug = $2 AND COALESCE(m.active, TRUE) = TRUE
              LIMIT 1`,
             [userId, orgSlug]
         );
@@ -24,12 +24,12 @@ async function loadUserMembership(userId: string, opts: { orgId?: string | null;
 
     if (orgId) {
         const { rows } = await query(
-            `SELECT u.id, u.email, u.name, u.must_change_password,
+            `SELECT u.id, u.email, u.name, u.must_change_password, u.avatar_url,
                     m.org_id, m.role, o.slug AS org_slug, o.name AS org_name
              FROM users u
              JOIN memberships m ON m.user_id = u.id
              JOIN organizations o ON o.id = m.org_id
-             WHERE u.id = $1 AND m.org_id = $2::uuid
+             WHERE u.id = $1 AND m.org_id = $2::uuid AND COALESCE(m.active, TRUE) = TRUE
              LIMIT 1`,
             [userId, orgId]
         );
@@ -37,12 +37,12 @@ async function loadUserMembership(userId: string, opts: { orgId?: string | null;
     }
 
     const { rows } = await query(
-        `SELECT u.id, u.email, u.name, u.must_change_password,
+        `SELECT u.id, u.email, u.name, u.must_change_password, u.avatar_url,
                 m.org_id, m.role, o.slug AS org_slug, o.name AS org_name
          FROM users u
          JOIN memberships m ON m.user_id = u.id
          JOIN organizations o ON o.id = m.org_id
-         WHERE u.id = $1
+         WHERE u.id = $1 AND COALESCE(m.active, TRUE) = TRUE
          ORDER BY m.org_id
          LIMIT 1`,
         [userId]

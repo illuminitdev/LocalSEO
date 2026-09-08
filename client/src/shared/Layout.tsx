@@ -13,6 +13,12 @@ import {
     CalendarClock,
     Settings,
     UserRound,
+    Users,
+    MessageSquare,
+    Megaphone,
+    Wallet,
+    CalendarDays,
+    Wrench,
     LogOut,
     Menu,
     X
@@ -66,6 +72,14 @@ const NAV: NavSection[] = [
         group: 'Booking Plots',
         items: [
             { name: 'Booking board', to: '/booking', icon: CalendarClock, end: true, match: 'board' as const, featurePath: '/booking' },
+            { name: 'Clients', to: '/clients', icon: Users, featurePath: '/clients' },
+            { name: 'Quotes', to: '/quotes', icon: FileText, featurePath: '/quotes' },
+            { name: 'Inbox', to: '/inbox', icon: MessageSquare, featurePath: '/inbox' },
+            { name: 'Team', to: '/team', icon: Users, featurePath: '/team' },
+            { name: 'Dispatch', to: '/dispatch', icon: CalendarDays, featurePath: '/dispatch' },
+            { name: 'Field', to: '/field', icon: Wrench, featurePath: '/field' },
+            { name: 'Jobs & money', to: '/money', icon: Wallet, featurePath: '/money' },
+            { name: 'Marketing', to: '/marketing', icon: Megaphone, featurePath: '/marketing' },
             { name: 'Schedule settings', to: '/booking?panel=settings&tab=events', icon: Settings, match: 'settings' as const, featurePath: '/booking' },
         ]
     },
@@ -83,6 +97,7 @@ export default function Layout() {
     const { features, loading, entitlementsDisabled } = useEntitlements();
     const [userName, setUserName] = useState('');
     const [userEmail, setUserEmail] = useState('');
+    const [avatarUrl, setAvatarUrl] = useState('');
     const [navOpen, setNavOpen] = useState(false);
 
     useEffect(() => {
@@ -90,6 +105,7 @@ export default function Layout() {
             .then((data) => {
                 setUserName(data.user?.name || data.name || '');
                 setUserEmail(data.user?.email || data.email || '');
+                setAvatarUrl(data.user?.avatarUrl || data.user?.avatar_url || '');
             })
             .catch(() => {
                 /* ignore — sidebar still works */
@@ -116,6 +132,12 @@ export default function Layout() {
 
     const isNavActive = (item: NavItem) => {
         if (!item.to.startsWith('/booking')) {
+            if (item.to === '/clients') {
+                return location.pathname === '/clients' || location.pathname.startsWith('/clients/');
+            }
+            if (item.to === '/quotes') {
+                return location.pathname === '/quotes' || location.pathname.startsWith('/quotes/');
+            }
             return location.pathname === item.to || (item.end ? false : location.pathname.startsWith(item.to));
         }
         if (location.pathname !== '/booking') return false;
@@ -194,9 +216,13 @@ export default function Layout() {
 
             <div className="px-4 pb-4 pt-3 border-t border-[#E2E8F0] shrink-0 space-y-3 safe-pb">
                 <div className="flex items-center gap-3 px-1 min-w-0">
-                    <div className="w-9 h-9 rounded-full bg-[#FFF7ED] text-[#D97706] flex items-center justify-center text-sm font-bold shrink-0">
-                        {initials}
-                    </div>
+                    {avatarUrl ? (
+                        <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
+                    ) : (
+                        <div className="w-9 h-9 rounded-full bg-[#FFF7ED] text-[#D97706] flex items-center justify-center text-sm font-bold shrink-0">
+                            {initials}
+                        </div>
+                    )}
                     <div className="min-w-0 leading-tight">
                         <p className="text-sm font-semibold text-[#0F172A] truncate">{userName || 'Account'}</p>
                         <p className="text-xs text-[#94A3B8] mt-0.5 truncate">{userEmail || 'Signed in'}</p>

@@ -1,6 +1,7 @@
 import { query } from './db';
 import { createCalendarEvent } from './googleCalendar';
 import { sendBookingConfirmationEmail, sendHostBookingNotification } from './bookingEmail';
+import { scheduleVisitReminder, issuePortalAccess } from './bookingReminders';
 
 function frontendOrigin() {
     return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -25,7 +26,8 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
     const { rows } = await query(
         `SELECT b.*, e.name AS event_name,
                 o.name AS org_name, o.slug AS org_slug, o.email AS org_email,
-                o.phone AS org_phone, o.host_name AS org_host_name, o.currency AS org_currency
+                o.phone AS org_phone, o.host_name AS org_host_name, o.currency AS org_currency,
+                o.reminder_visit_hours, o.reminders_enabled
          FROM bookings b
          JOIN event_types e ON e.id = b.event_type_id
          JOIN organizations o ON o.id = b.org_id
@@ -42,6 +44,7 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
     if (!alreadyConfirmed) {
         await query(
             `UPDATE bookings SET status = 'confirmed', deposit_paid = TRUE,
+             job_status = COALESCE(NULLIF(job_status, ''), 'scheduled'),
              stripe_payment_intent_id = COALESCE($1, stripe_payment_intent_id), updated_at = NOW()
              WHERE id = $2`,
             [paymentIntentId || null, booking.id]
@@ -58,9 +61,19 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
         }
     }
 
+    let portalLink = '';
+    if (booking.client_id) {
+        try {
+            const portal = await issuePortalAccess(booking.org_id, booking.client_id, { emailClient: false });
+            portalLink = portal.portalUrl;
+        } catch (err: any) {
+            console.error('Portal token error:', err.message);
+        }
+    }
+
     if (!meta.confirmation_email_sent) {
         try {
-            const manageUrl = `${frontendOrigin()}/book/manage/${booking.manage_token}`;
+            const manageUrl = portalLink || `${frontendOrigin()}/book/manage/${booking.manage_token}`;
             const icsUrl = `${frontendOrigin()}/api/public/bookings/${booking.id}/calendar.ics`;
             const whenLabel = new Date(booking.start_at).toLocaleString('en-GB', {
                 dateStyle: 'medium',
@@ -109,6 +122,30 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
         } catch (emailErr: any) {
             console.error('Booking confirmation email error:', emailErr.message);
         }
+    }
+
+    try {
+        await scheduleVisitReminder(
+            { ...booking, event_name: meta.event_name },
+            {
+                id: booking.org_id,
+                name: meta.org_name,
+                reminders_enabled: meta.reminders_enabled !== false,
+                reminder_visit_hours: meta.reminder_visit_hours
+            }
+        );
+    } catch (err: any) {
+        console.error('Visit reminder schedule error:', err.message);
+    }
+
+    if (!alreadyConfirmed) {
+        const { fireZapierEvent } = await import('./zapier');
+        fireZapierEvent(booking.org_id, 'booking.created', {
+            bookingId: booking.id,
+            customerName: booking.customer_name,
+            startAt: booking.start_at,
+            jobStatus: booking.job_status
+        }).catch(() => {});
     }
 
     return booking;

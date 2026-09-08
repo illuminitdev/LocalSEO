@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     ArrowLeft,
+    Bell,
     Calendar,
     Check,
     CreditCard,
@@ -18,7 +19,7 @@ import {
 import { apiGet, apiPatch, apiPost, apiPut, cn, formatCents } from '../../shared/utils';
 import AvailabilityEditor, { type AvailabilitySettings } from './AvailabilityEditor';
 
-type Tab = 'events' | 'availability' | 'integrations' | 'profile';
+type Tab = 'events' | 'availability' | 'integrations' | 'profile' | 'reminders';
 
 type EventTemplateKey = 'standard' | 'emergency' | 'serious';
 
@@ -81,7 +82,13 @@ type Props = {
 export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, initialDashboard, onRefresh }: Props) {
     const [searchParams, setSearchParams] = useSearchParams();
     const tabParam = searchParams.get('tab');
-    const tab: Tab = tabParam === 'availability' || tabParam === 'integrations' || tabParam === 'profile' ? tabParam : 'events';
+    const tab: Tab =
+        tabParam === 'availability' ||
+        tabParam === 'integrations' ||
+        tabParam === 'profile' ||
+        tabParam === 'reminders'
+            ? tabParam
+            : 'events';
     const [loading, setLoading] = useState(true);
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState('');
@@ -104,6 +111,16 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         accountId?: string | null;
     } | null>(null);
     const [stripeBusy, setStripeBusy] = useState(false);
+    const [qboStatus, setQboStatus] = useState<{
+        configured?: boolean;
+        connected?: boolean;
+        realmId?: string | null;
+        connectedAt?: string | null;
+    } | null>(null);
+    const [qboBusy, setQboBusy] = useState(false);
+    const [zapierUrl, setZapierUrl] = useState('');
+    const [zapierSecret, setZapierSecret] = useState('');
+    const [zapierBusy, setZapierBusy] = useState(false);
     const [selectedTemplate, setSelectedTemplate] = useState<EventTemplateKey>('standard');
     const [newDepositPounds, setNewDepositPounds] = useState('60');
     const [addingEvent, setAddingEvent] = useState(false);
@@ -124,6 +141,8 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
             maxDaysAhead: dash.organization?.max_days_ahead || 60,
             bufferMinutes: dash.organization?.buffer_minutes || 15
         });
+        setZapierUrl(dash.organization?.zapier_webhook_url || '');
+        setZapierSecret(dash.organization?.zapier_secret || '');
     };
 
     useEffect(() => {
@@ -147,6 +166,10 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         apiGet('/api/host/stripe/status')
             .then((s) => setStripeStatus(s))
             .catch(() => setStripeStatus({ configured: false, connected: false, ready: false }));
+
+        apiGet('/api/integrations/qbo/status')
+            .then((q) => setQboStatus(q))
+            .catch(() => setQboStatus({ configured: false, connected: false }));
     }, [initialDashboard]);
 
     useEffect(() => {
@@ -267,7 +290,12 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 tradeType: org.trade_type,
                 phone: org.phone,
                 email: org.email,
-                serviceArea: org.service_area
+                serviceArea: org.service_area,
+                remindersEnabled: org.reminders_enabled !== false,
+                smsEnabled: Boolean(org.sms_enabled),
+                reminderVisitHours: org.reminder_visit_hours ?? 24,
+                reminderPostJobHours: org.reminder_post_job_hours ?? 24,
+                reminderInvoiceDays: org.reminder_invoice_days ?? 3
             });
             setSaved(true);
             setSavingProfile(false);
@@ -294,6 +322,50 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
     const connectGoogle = async () => {
         const { url } = await apiGet('/api/integrations/google/start');
         window.location.href = url;
+    };
+
+    const connectQbo = async () => {
+        setQboBusy(true);
+        setError('');
+        try {
+            const { url } = await apiGet('/api/integrations/qbo/start');
+            window.location.href = url;
+        } catch (e: any) {
+            setError(e.message || 'Could not start QuickBooks connect');
+            setQboBusy(false);
+        }
+    };
+
+    const disconnectQbo = async () => {
+        setQboBusy(true);
+        try {
+            await apiPost('/api/integrations/qbo/disconnect', {});
+            setQboStatus((s) => ({ ...(s || {}), connected: false, realmId: null }));
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setQboBusy(false);
+        }
+    };
+
+    const saveZapier = async () => {
+        setZapierBusy(true);
+        setError('');
+        try {
+            const updated = await apiPatch('/api/host/organization', {
+                zapierWebhookUrl: zapierUrl.trim(),
+                zapierSecret: zapierSecret.trim()
+            });
+            setOrg(updated);
+            setZapierUrl(updated.zapier_webhook_url || '');
+            setZapierSecret(updated.zapier_secret || '');
+            setSaved(true);
+            setTimeout(() => setSaved(false), 2000);
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setZapierBusy(false);
+        }
     };
 
     const connectStripe = async () => {
@@ -360,6 +432,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                         ['events', 'Event types', Settings],
                         ['availability', 'Availability', Calendar],
                         ['integrations', 'Integrations', CreditCard],
+                        ['reminders', 'Reminders', Bell],
                         ['profile', 'Profile', Wallet]
                     ] as const).map(([key, label, Icon]) => (
                         <button
@@ -623,6 +696,159 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                 <button type="button" onClick={connectGoogle} className="px-3 py-2 rounded-xl bg-[#0F172A] text-white text-xs font-bold">Connect</button>
                             )}
                         </div>
+                        <div className="border border-[#E2E8F0] rounded-xl p-4 space-y-3">
+                            <div>
+                                <p className="font-bold">Zapier webhook</p>
+                                <p className="text-xs text-[#64748B]">
+                                    Catch hooks for booking.created, booking.completed, quote.approved, invoice.paid. Optional HMAC
+                                    header <code className="text-[10px]">X-LocalPulse-Signature</code>.
+                                </p>
+                            </div>
+                            <label className="block text-xs font-bold text-[#64748B]">
+                                Webhook URL
+                                <input
+                                    value={zapierUrl}
+                                    onChange={(e) => setZapierUrl(e.target.value)}
+                                    placeholder="https://hooks.zapier.com/..."
+                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm font-medium text-[#0F172A]"
+                                />
+                            </label>
+                            <label className="block text-xs font-bold text-[#64748B]">
+                                Signing secret (optional)
+                                <input
+                                    value={zapierSecret}
+                                    onChange={(e) => setZapierSecret(e.target.value)}
+                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm font-medium text-[#0F172A]"
+                                />
+                            </label>
+                            <button
+                                type="button"
+                                disabled={zapierBusy}
+                                onClick={saveZapier}
+                                className="px-3 py-2 rounded-xl bg-[#0F172A] text-white text-xs font-bold disabled:opacity-50"
+                            >
+                                {zapierBusy ? 'Saving…' : 'Save Zapier'}
+                            </button>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 border border-[#E2E8F0] rounded-xl p-4">
+                            <div>
+                                <p className="font-bold">QuickBooks Online</p>
+                                <p className="text-xs text-[#64748B]">
+                                    OAuth connect and push a sales receipt summary when an invoice is paid. CSV export still available
+                                    under Jobs &amp; money.
+                                </p>
+                                {qboStatus?.realmId && (
+                                    <p className="text-[10px] text-[#94A3B8] font-mono mt-1">Realm {qboStatus.realmId}</p>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                                {!qboStatus?.configured ? (
+                                    <span className="text-xs font-bold text-[#94A3B8]">Set QBO env keys</span>
+                                ) : qboStatus?.connected ? (
+                                    <>
+                                        <span className="text-xs font-bold text-emerald-700">Connected</span>
+                                        <button
+                                            type="button"
+                                            onClick={disconnectQbo}
+                                            disabled={qboBusy}
+                                            className="px-3 py-2 rounded-xl border border-[#E2E8F0] text-xs font-bold disabled:opacity-50"
+                                        >
+                                            Disconnect
+                                        </button>
+                                    </>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={connectQbo}
+                                        disabled={qboBusy}
+                                        className="px-3 py-2 rounded-xl bg-[#0F172A] text-white text-xs font-bold disabled:opacity-50"
+                                    >
+                                        {qboBusy ? 'Opening…' : 'Connect'}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {tab === 'reminders' && org && (
+                    <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
+                        <div>
+                            <h2 className="font-bold text-[#0F172A]">Reminders</h2>
+                            <p className="text-sm text-[#64748B] mt-1">
+                                Automated email and optional outbound SMS (Amazon SNS) for visits, requests, post-job,
+                                invoices, and quotes. Customer replies are not received via SNS.
+                            </p>
+                        </div>
+                        <label className="flex items-center gap-2 text-sm font-bold text-[#0F172A]">
+                            <input
+                                type="checkbox"
+                                checked={org.reminders_enabled !== false}
+                                onChange={(e) => setOrg((o: any) => ({ ...o, reminders_enabled: e.target.checked }))}
+                            />
+                            Enable email reminders
+                        </label>
+                        <label className="flex items-center gap-2 text-sm font-bold text-[#0F172A]">
+                            <input
+                                type="checkbox"
+                                checked={Boolean(org.sms_enabled)}
+                                onChange={(e) => setOrg((o: any) => ({ ...o, sms_enabled: e.target.checked }))}
+                            />
+                            Also send outbound SMS via AWS SNS when the client has a phone
+                        </label>
+                        <label className="block text-xs font-bold uppercase text-[#64748B]">
+                            Visit reminder (hours before start)
+                            <input
+                                type="number"
+                                min={1}
+                                max={168}
+                                value={org.reminder_visit_hours ?? 24}
+                                onChange={(e) =>
+                                    setOrg((o: any) => ({ ...o, reminder_visit_hours: Number(e.target.value) || 24 }))
+                                }
+                                className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-medium text-[#0F172A]"
+                            />
+                        </label>
+                        <label className="block text-xs font-bold uppercase text-[#64748B]">
+                            Post-job follow-up (hours after complete)
+                            <input
+                                type="number"
+                                min={1}
+                                max={168}
+                                value={org.reminder_post_job_hours ?? 24}
+                                onChange={(e) =>
+                                    setOrg((o: any) => ({
+                                        ...o,
+                                        reminder_post_job_hours: Number(e.target.value) || 24
+                                    }))
+                                }
+                                className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-medium text-[#0F172A]"
+                            />
+                        </label>
+                        <label className="block text-xs font-bold uppercase text-[#64748B]">
+                            Unpaid invoice reminder (days after send)
+                            <input
+                                type="number"
+                                min={1}
+                                max={30}
+                                value={org.reminder_invoice_days ?? 3}
+                                onChange={(e) =>
+                                    setOrg((o: any) => ({
+                                        ...o,
+                                        reminder_invoice_days: Number(e.target.value) || 3
+                                    }))
+                                }
+                                className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-medium text-[#0F172A]"
+                            />
+                        </label>
+                        <button
+                            type="button"
+                            disabled={savingProfile}
+                            onClick={saveProfile}
+                            className="px-5 py-2.5 rounded-xl bg-[#0F172A] text-white font-bold text-sm disabled:opacity-60"
+                        >
+                            {savingProfile ? 'Saving…' : 'Save reminder settings'}
+                        </button>
                     </div>
                 )}
 

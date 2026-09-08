@@ -77,6 +77,9 @@ export function CustomerBookingFlow({
     const [phone, setPhone] = useState('');
     const [address, setAddress] = useState('');
     const [description, setDescription] = useState('');
+    const [photoUrl, setPhotoUrl] = useState('');
+    const [intakeMode, setIntakeMode] = useState<'instant' | 'request'>('instant');
+    const [preferredAt, setPreferredAt] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState('');
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -163,8 +166,12 @@ export function CustomerBookingFlow({
     const detailsValid = useMemo(() => Object.keys(validateDetails()).length === 0, [customerName, email, phone, address]);
 
     const goToDetails = () => {
-        if (!selectedSlot) {
+        if (intakeMode === 'instant' && !selectedSlot) {
             setError('Select a date and time to continue.');
+            return;
+        }
+        if (intakeMode === 'request' && !preferredAt) {
+            setError('Choose a preferred date and time for your request.');
             return;
         }
         setError('');
@@ -180,7 +187,43 @@ export function CustomerBookingFlow({
             return;
         }
         setError('');
+        if (intakeMode === 'request') {
+            submitRequest();
+            return;
+        }
         setStep('payment');
+    };
+
+    const submitRequest = async () => {
+        if (!eventType || !preferredAt) return;
+        setSubmitting(true);
+        setError('');
+        try {
+            const start = new Date(preferredAt);
+            const end = new Date(start.getTime() + (eventType.durationMinutes || 60) * 60000);
+            const result = await apiPost(`/api/public/${hostSlug}/${activeEventSlug}/book`, {
+                customerName: customerName.trim(),
+                email: email.trim(),
+                phone: phone.trim(),
+                address: address.trim(),
+                description: description.trim(),
+                intakeType: 'request',
+                preferredSlots: [{ startAt: start.toISOString(), endAt: end.toISOString() }],
+                photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
+                startAt: start.toISOString(),
+                endAt: end.toISOString()
+            });
+            if (result.success || result.mode === 'request') {
+                setDone(true);
+                onSuccess?.();
+                return;
+            }
+            throw new Error(result.error || 'Request could not be submitted');
+        } catch (e: any) {
+            setError(e.message || 'Request failed — try again.');
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     const submit = async () => {
@@ -195,6 +238,8 @@ export function CustomerBookingFlow({
                 phone: phone.trim(),
                 address: address.trim(),
                 description: description.trim(),
+                photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
+                intakeType: 'instant',
                 startAt: selectedSlot.startAt,
                 endAt: selectedSlot.endAt
             });
@@ -243,10 +288,13 @@ export function CustomerBookingFlow({
                 <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mb-4">
                     <ShieldCheck className="w-8 h-8 text-emerald-600" />
                 </div>
-                <h2 className="text-xl font-black text-[#0F172A]">Booking confirmed</h2>
+                <h2 className="text-xl font-black text-[#0F172A]">
+                    {intakeMode === 'request' ? 'Request submitted' : 'Booking confirmed'}
+                </h2>
                 <p className="text-sm text-[#64748B] mt-2 max-w-sm">
-                    Deposit of {eventType ? formatCents(eventType.depositCents) : ''} recorded.
-                    {email ? ` Confirmation sent to ${email}.` : ''}
+                    {intakeMode === 'request'
+                        ? `The business will review your preferred time and get back to you.${email ? ` We noted ${email}.` : ''}`
+                        : `Deposit of ${eventType ? formatCents(eventType.depositCents) : ''} recorded.${email ? ` Confirmation sent to ${email}.` : ''}`}
                 </p>
             </div>
         );
@@ -354,118 +402,190 @@ export function CustomerBookingFlow({
                     {/* Step 1: Schedule */}
                     {step === 'schedule' && (
                         <div>
-                            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-[#E2E8F0]">
-                                <div className="p-5">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h2 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
-                                            <Calendar className="w-4 h-4 text-[#F59E0B]" /> Pick a date
-                                        </h2>
-                                        <div className="flex gap-1">
-                                            <button type="button" onClick={() => setMonth((m) => (m.month === 0 ? { year: m.year - 1, month: 11 } : { year: m.year, month: m.month - 1 }))} className="p-1.5 rounded-lg border border-[#E2E8F0]">
-                                                <ChevronLeft className="w-4 h-4" />
-                                            </button>
-                                            <button type="button" onClick={() => setMonth((m) => (m.month === 11 ? { year: m.year + 1, month: 0 } : { year: m.year, month: m.month + 1 }))} className="p-1.5 rounded-lg border border-[#E2E8F0]">
-                                                <ChevronRight className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <p className="text-sm font-bold text-[#64748B] mb-3">
-                                        {new Date(month.year, month.month).toLocaleString('en-GB', { month: 'long', year: 'numeric' })}
-                                    </p>
-                                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-[#64748B] mb-1">
-                                        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => <div key={d}>{d}</div>)}
-                                    </div>
-                                    <div className="grid grid-cols-7 gap-1">
-                                        {days.map((d, i) => {
-                                            if (!d.inMonth) return <div key={i} />;
-                                            const selectable = isDateSelectable(d.date, maxDaysAhead);
-                                            const isPast = d.date < todayStr();
-                                            return (
-                                                <button
-                                                    key={d.date}
-                                                    type="button"
-                                                    disabled={!selectable}
-                                                    onClick={() => { setSelectedDate(d.date); setError(''); }}
-                                                    className={cn(
-                                                        'aspect-square rounded-lg text-sm font-bold transition',
-                                                        selectable ? 'hover:bg-[#0F172A] hover:text-white border border-[#E2E8F0] bg-[#F8FAFC]' : 'text-[#CBD5E1] cursor-not-allowed',
-                                                        selectedDate === d.date && 'bg-[#0F172A] text-white',
-                                                        isPast && !selectable && 'opacity-40'
-                                                    )}
-                                                >
-                                                    {d.date.slice(8)}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-
-                                <div className="p-5">
-                                    <h2 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm mb-4">
-                                        <Clock className="w-4 h-4 text-[#F59E0B]" />
-                                        {selectedDate
-                                            ? new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })
-                                            : 'Select a date first'}
-                                    </h2>
-                                    {!selectedDate && (
-                                        <p className="text-sm text-[#64748B] py-8 text-center">Choose any date on the calendar.</p>
-                                    )}
-                                    {selectedDate && loadingSlots && (
-                                        <p className="text-sm text-[#64748B] py-8 text-center">Loading times…</p>
-                                    )}
-                                    {selectedDate && !loadingSlots && !hasAvailabilityRules && (
-                                        <p className="text-sm text-[#64748B] py-8 text-center">
-                                            No booking times set yet — the business hasn&apos;t configured their availability.
-                                        </p>
-                                    )}
-                                    {selectedDate && !loadingSlots && hasAvailabilityRules && daySlots.length === 0 && (
-                                        <p className="text-sm text-[#64748B] py-8 text-center">No times available on this day — try another date.</p>
-                                    )}
-                                    <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-                                        {daySlots.map((s) => (
-                                            <button
-                                                key={s.startAt}
-                                                type="button"
-                                                onClick={() => { setSelectedSlot(s); setError(''); }}
-                                                className={cn(
-                                                    'py-2.5 rounded-xl border text-sm font-bold transition',
-                                                    selectedSlot?.startAt === s.startAt
-                                                        ? 'bg-[#0F172A] text-white border-[#0F172A]'
-                                                        : 'border-[#E2E8F0] hover:border-[#0F172A]/40'
-                                                )}
-                                            >
-                                                {new Date(s.startAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="border-t border-[#E2E8F0] p-5 bg-[#FAFBFC]">
-                                {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+                            <div className="px-5 pt-4 flex flex-wrap gap-2">
                                 <button
                                     type="button"
-                                    disabled={!selectedSlot}
-                                    onClick={goToDetails}
-                                    className="w-full py-3.5 rounded-xl bg-[#0F172A] text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
+                                    onClick={() => {
+                                        setIntakeMode('instant');
+                                        setError('');
+                                    }}
+                                    className={cn(
+                                        'px-3 py-1.5 rounded-lg text-xs font-bold border',
+                                        intakeMode === 'instant'
+                                            ? 'bg-[#0F172A] text-white border-[#0F172A]'
+                                            : 'bg-white text-[#64748B] border-[#E2E8F0]'
+                                    )}
                                 >
-                                    Next — enter your details
-                                    <ChevronRight className="w-4 h-4" />
+                                    Book a time
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIntakeMode('request');
+                                        setSelectedSlot(null);
+                                        setError('');
+                                    }}
+                                    className={cn(
+                                        'px-3 py-1.5 rounded-lg text-xs font-bold border',
+                                        intakeMode === 'request'
+                                            ? 'bg-[#0F172A] text-white border-[#0F172A]'
+                                            : 'bg-white text-[#64748B] border-[#E2E8F0]'
+                                    )}
+                                >
+                                    Request a visit
                                 </button>
                             </div>
+                            {intakeMode === 'request' ? (
+                                <div className="p-5 space-y-4">
+                                    <p className="text-sm text-[#64748B]">
+                                        Tell us when you prefer — the business will confirm a time. No deposit is taken on requests.
+                                    </p>
+                                    <label className="block text-xs font-bold text-[#64748B]">
+                                        Preferred date & time
+                                        <input
+                                            type="datetime-local"
+                                            value={preferredAt}
+                                            onChange={(e) => setPreferredAt(e.target.value)}
+                                            className="mt-1 w-full max-w-md rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
+                                        />
+                                    </label>
+                                    <button
+                                        type="button"
+                                        onClick={goToDetails}
+                                        className="px-5 py-3 rounded-xl bg-[#F59E0B] text-[#0F172A] font-bold text-sm"
+                                    >
+                                        Continue to your details
+                                    </button>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-[#E2E8F0]">
+                                        <div className="p-5">
+                                            <div className="flex items-center justify-between mb-4">
+                                                <h2 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
+                                                    <Calendar className="w-4 h-4 text-[#F59E0B]" /> Pick a date
+                                                </h2>
+                                                <div className="flex gap-1">
+                                                    <button type="button" onClick={() => setMonth((m) => (m.month === 0 ? { year: m.year - 1, month: 11 } : { year: m.year, month: m.month - 1 }))} className="p-1.5 rounded-lg border border-[#E2E8F0]">
+                                                        <ChevronLeft className="w-4 h-4" />
+                                                    </button>
+                                                    <button type="button" onClick={() => setMonth((m) => (m.month === 11 ? { year: m.year + 1, month: 0 } : { year: m.year, month: m.month + 1 }))} className="p-1.5 rounded-lg border border-[#E2E8F0]">
+                                                        <ChevronRight className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <p className="text-sm font-bold text-[#64748B] mb-3">
+                                                {new Date(month.year, month.month).toLocaleString('en-GB', { month: 'long', year: 'numeric' })}
+                                            </p>
+                                            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-[#64748B] mb-1">
+                                                {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => <div key={d}>{d}</div>)}
+                                            </div>
+                                            <div className="grid grid-cols-7 gap-1">
+                                                {days.map((d, i) => {
+                                                    if (!d.inMonth) return <div key={i} />;
+                                                    const selectable = isDateSelectable(d.date, maxDaysAhead);
+                                                    const isPast = d.date < todayStr();
+                                                    return (
+                                                        <button
+                                                            key={d.date}
+                                                            type="button"
+                                                            disabled={!selectable}
+                                                            onClick={() => { setSelectedDate(d.date); setError(''); }}
+                                                            className={cn(
+                                                                'aspect-square rounded-lg text-sm font-bold transition',
+                                                                selectable ? 'hover:bg-[#0F172A] hover:text-white border border-[#E2E8F0] bg-[#F8FAFC]' : 'text-[#CBD5E1] cursor-not-allowed',
+                                                                selectedDate === d.date && 'bg-[#0F172A] text-white',
+                                                                isPast && !selectable && 'opacity-40'
+                                                            )}
+                                                        >
+                                                            {d.date.slice(8)}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+
+                                        <div className="p-5">
+                                            <h2 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm mb-4">
+                                                <Clock className="w-4 h-4 text-[#F59E0B]" />
+                                                {selectedDate
+                                                    ? new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })
+                                                    : 'Select a date first'}
+                                            </h2>
+                                            {!selectedDate && (
+                                                <p className="text-sm text-[#64748B] py-8 text-center">Choose any date on the calendar.</p>
+                                            )}
+                                            {selectedDate && loadingSlots && (
+                                                <p className="text-sm text-[#64748B] py-8 text-center">Loading times…</p>
+                                            )}
+                                            {selectedDate && !loadingSlots && !hasAvailabilityRules && (
+                                                <p className="text-sm text-[#64748B] py-8 text-center">
+                                                    No booking times set yet — the business hasn&apos;t configured their availability.
+                                                </p>
+                                            )}
+                                            {selectedDate && !loadingSlots && hasAvailabilityRules && daySlots.length === 0 && (
+                                                <p className="text-sm text-[#64748B] py-8 text-center">No times available on this day — try another date.</p>
+                                            )}
+                                            <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                                                {daySlots.map((s) => (
+                                                    <button
+                                                        key={s.startAt}
+                                                        type="button"
+                                                        onClick={() => { setSelectedSlot(s); setError(''); }}
+                                                        className={cn(
+                                                            'py-2.5 rounded-xl border text-sm font-bold transition',
+                                                            selectedSlot?.startAt === s.startAt
+                                                                ? 'bg-[#0F172A] text-white border-[#0F172A]'
+                                                                : 'border-[#E2E8F0] hover:border-[#0F172A]/40'
+                                                        )}
+                                                    >
+                                                        {new Date(s.startAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="border-t border-[#E2E8F0] p-5 bg-[#FAFBFC]">
+                                        {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+                                        <button
+                                            type="button"
+                                            disabled={!selectedSlot}
+                                            onClick={goToDetails}
+                                            className="w-full py-3.5 rounded-xl bg-[#0F172A] text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
+                                        >
+                                            Next — enter your details
+                                            <ChevronRight className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     )}
 
                     {/* Step 2: Details */}
-                    {step === 'details' && selectedSlot && (
+                    {step === 'details' && (selectedSlot || intakeMode === 'request') && (
                         <div className="p-5 space-y-4">
                             <div className="rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 text-sm">
-                                <p className="font-bold text-[#0F172A]">
-                                    {new Date(selectedSlot.startAt).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
-                                    {' at '}
-                                    {new Date(selectedSlot.startAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                                </p>
-                                <p className="text-xs text-[#64748B] mt-0.5">{eventType.name} · {eventType.durationMinutes} min</p>
+                                {intakeMode === 'request' && preferredAt ? (
+                                    <>
+                                        <p className="font-bold text-[#0F172A]">
+                                            Preferred: {new Date(preferredAt).toLocaleString('en-GB')}
+                                        </p>
+                                        <p className="text-xs text-[#64748B] mt-0.5">
+                                            Request · {eventType.name} · business will confirm
+                                        </p>
+                                    </>
+                                ) : selectedSlot ? (
+                                    <>
+                                        <p className="font-bold text-[#0F172A]">
+                                            {new Date(selectedSlot.startAt).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                            {' at '}
+                                            {new Date(selectedSlot.startAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                                        </p>
+                                        <p className="text-xs text-[#64748B] mt-0.5">{eventType.name} · {eventType.durationMinutes} min</p>
+                                    </>
+                                ) : null}
                             </div>
 
                             <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
@@ -526,6 +646,16 @@ export function CustomerBookingFlow({
                                         className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm resize-none"
                                     />
                                 </label>
+                                <label className="block sm:col-span-2">
+                                    <span className="text-xs font-bold text-[#64748B]">Photo URL <span className="text-[#94A3B8] font-normal">(optional)</span></span>
+                                    <input
+                                        type="url"
+                                        value={photoUrl}
+                                        onChange={(e) => setPhotoUrl(e.target.value)}
+                                        placeholder="https://…"
+                                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm"
+                                    />
+                                </label>
                             </div>
 
                             {error && <p className="text-sm text-red-600">{error}</p>}
@@ -536,11 +666,15 @@ export function CustomerBookingFlow({
                                 </button>
                                 <button
                                     type="button"
-                                    disabled={!detailsValid}
+                                    disabled={!detailsValid || submitting}
                                     onClick={goToPayment}
                                     className="flex-1 py-3 rounded-xl bg-[#0F172A] text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
                                 >
-                                    Next — payment
+                                    {submitting
+                                        ? 'Submitting…'
+                                        : intakeMode === 'request'
+                                          ? 'Submit request'
+                                          : 'Next — payment'}
                                     <ChevronRight className="w-4 h-4" />
                                 </button>
                             </div>

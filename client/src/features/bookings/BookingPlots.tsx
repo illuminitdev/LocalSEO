@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Calendar, CheckCircle2, Copy, ExternalLink, LogIn, Plus, QrCode, Settings, User, Wrench } from 'lucide-react';
+import { Calendar, CheckCircle2, Copy, ExternalLink, LogIn, Plus, Play, QrCode, Settings, User, Wrench } from 'lucide-react';
 import { apiGet, apiPost, formatCents, cn } from '../../shared/utils';
 import { setBookingOrgSlug } from './bookingUtils';
 import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
@@ -18,20 +18,29 @@ type BookingService = {
     ready?: boolean;
 };
 
-function bookingStatusBadge(b: { status: string; deposit_paid?: boolean }) {
+function bookingStatusBadge(b: { status: string; deposit_paid?: boolean; job_status?: string; intake_type?: string }) {
+    if (b.job_status === 'requested' || b.intake_type === 'request') {
+        return { label: 'Request', className: 'text-violet-700 bg-violet-50 border-violet-200' };
+    }
+    if (b.job_status === 'in_progress') {
+        return { label: 'In progress', className: 'text-orange-700 bg-orange-50 border-orange-200' };
+    }
+    if (b.job_status === 'invoiced') {
+        return { label: 'Invoiced', className: 'text-indigo-700 bg-indigo-50 border-indigo-200' };
+    }
+    if (b.job_status === 'completed' || b.status === 'done') {
+        return { label: 'Completed', className: 'text-sky-700 bg-sky-50 border-sky-200' };
+    }
     if (b.status === 'confirmed' && b.deposit_paid) {
-        return { label: 'Booked', className: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
+        return { label: 'Scheduled', className: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
     }
     if (b.status === 'awaiting_payment') {
         return { label: 'Awaiting payment', className: 'text-amber-700 bg-amber-50 border-amber-200' };
     }
-    if (b.status === 'cancelled') {
+    if (b.status === 'cancelled' || b.job_status === 'cancelled') {
         return { label: 'Cancelled', className: 'text-red-700 bg-red-50 border-red-200' };
     }
-    if (b.status === 'done') {
-        return { label: 'Completed', className: 'text-sky-700 bg-sky-50 border-sky-200' };
-    }
-    return { label: b.status, className: 'text-[#64748B] bg-[#F8FAFC] border-[#E2E8F0]' };
+    return { label: b.job_status || b.status, className: 'text-[#64748B] bg-[#F8FAFC] border-[#E2E8F0]' };
 }
 
 export default function BookingPlots() {
@@ -45,9 +54,22 @@ export default function BookingPlots() {
     const [addingService, setAddingService] = useState(false);
     const [linked, setLinked] = useState(false);
     const [linkedBusiness, setLinkedBusiness] = useState<any>(null);
-    const [filter, setFilter] = useState<'upcoming' | 'past' | 'cancelled'>('upcoming');
+    const [filter, setFilter] = useState<'upcoming' | 'requests' | 'active' | 'past' | 'cancelled'>('upcoming');
     const [copied, setCopied] = useState(false);
     const [busy, setBusy] = useState('');
+    const [showManual, setShowManual] = useState(false);
+    const [manualBusy, setManualBusy] = useState(false);
+    const [manualForm, setManualForm] = useState({
+        eventTypeId: '',
+        customerName: '',
+        email: '',
+        phone: '',
+        address: '',
+        description: '',
+        startAt: '',
+        endAt: '',
+        intakeType: 'instant' as 'instant' | 'request'
+    });
 
     const loadServices = async () => {
         try {
@@ -109,14 +131,34 @@ export default function BookingPlots() {
         const now = Date.now();
         return bookings.filter((b: any) => {
             const t = new Date(b.start_at).getTime();
-            if (filter === 'cancelled') return b.status === 'cancelled';
-            if (filter === 'past') return (t < now || b.status === 'done') && b.status !== 'cancelled';
-            return t >= now && b.status === 'confirmed' && b.deposit_paid;
+            const cancelled = b.status === 'cancelled' || b.job_status === 'cancelled';
+            if (filter === 'cancelled') return cancelled;
+            if (filter === 'requests') return !cancelled && (b.job_status === 'requested' || b.intake_type === 'request');
+            if (filter === 'active') return !cancelled && b.job_status === 'in_progress';
+            if (filter === 'past') {
+                return (
+                    !cancelled &&
+                    (b.status === 'done' ||
+                        b.job_status === 'completed' ||
+                        b.job_status === 'invoiced' ||
+                        (t < now && b.job_status !== 'requested' && b.job_status !== 'in_progress'))
+                );
+            }
+            // upcoming: scheduled / confirmed future (not request-only unless already scheduled)
+            return (
+                !cancelled &&
+                t >= now &&
+                b.status !== 'done' &&
+                b.job_status !== 'completed' &&
+                b.job_status !== 'invoiced' &&
+                b.job_status !== 'in_progress' &&
+                (b.status === 'confirmed' || b.job_status === 'scheduled' || b.status === 'awaiting_payment')
+            );
         });
     }, [bookings, filter]);
 
     const hostUrl = org?.slug ? `${window.location.origin}/book/${org.slug}` : '';
-    const qrUrl = hostUrl ? `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(hostUrl)}` : '';
+    const qrUrl = hostUrl ? `https://api.qrserver.com/v1/create-qr-code/?size=96x96&data=${encodeURIComponent(hostUrl)}` : '';
 
     const copyLink = async () => {
         await navigator.clipboard.writeText(hostUrl);
@@ -187,7 +229,9 @@ export default function BookingPlots() {
                     if (!prev?.bookings) return prev;
                     return {
                         ...prev,
-                        bookings: prev.bookings.map((b: any) => (b.id === id ? { ...b, ...result.booking, status: 'done' } : b))
+                        bookings: prev.bookings.map((b: any) =>
+                            b.id === id ? { ...b, ...result.booking, status: 'done', job_status: 'completed' } : b
+                        )
                     };
                 });
             }
@@ -205,6 +249,79 @@ export default function BookingPlots() {
             }
         } finally {
             setBusy('');
+        }
+    };
+
+    const startJob = async (id: string) => {
+        setBusy(id);
+        setError('');
+        try {
+            const result = await apiPost(`/api/host/bookings/${id}/start`, {});
+            if (result.booking) {
+                setData((prev: any) => {
+                    if (!prev?.bookings) return prev;
+                    return {
+                        ...prev,
+                        bookings: prev.bookings.map((b: any) => (b.id === id ? { ...b, ...result.booking } : b))
+                    };
+                });
+            }
+            await load().catch(() => {});
+        } catch (e: any) {
+            setError(e.message || 'Could not start job');
+        } finally {
+            setBusy('');
+        }
+    };
+
+    const createManualBooking = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!manualForm.eventTypeId || !manualForm.customerName.trim() || !manualForm.email.trim()) {
+            setError('Service, name, and email are required');
+            return;
+        }
+        setManualBusy(true);
+        setError('');
+        try {
+            let startAt = manualForm.startAt;
+            let endAt = manualForm.endAt;
+            if (startAt && !endAt) {
+                const et = (data?.eventTypes || []).find((x: any) => x.id === manualForm.eventTypeId);
+                const mins = et?.duration_minutes || 60;
+                endAt = new Date(new Date(startAt).getTime() + mins * 60000).toISOString().slice(0, 16);
+            }
+            await apiPost('/api/host/bookings', {
+                eventTypeId: manualForm.eventTypeId,
+                customerName: manualForm.customerName.trim(),
+                email: manualForm.email.trim(),
+                phone: manualForm.phone.trim(),
+                address: manualForm.address.trim(),
+                description: manualForm.description.trim(),
+                startAt: startAt ? new Date(startAt).toISOString() : undefined,
+                endAt: endAt ? new Date(endAt).toISOString() : undefined,
+                intakeType: manualForm.intakeType,
+                preferredSlots:
+                    manualForm.intakeType === 'request' && startAt && endAt
+                        ? [{ startAt: new Date(startAt).toISOString(), endAt: new Date(endAt).toISOString() }]
+                        : []
+            });
+            setShowManual(false);
+            setManualForm({
+                eventTypeId: '',
+                customerName: '',
+                email: '',
+                phone: '',
+                address: '',
+                description: '',
+                startAt: '',
+                endAt: '',
+                intakeType: 'instant'
+            });
+            await load();
+        } catch (err: any) {
+            setError(err.message || 'Could not create booking');
+        } finally {
+            setManualBusy(false);
         }
     };
 
@@ -369,13 +486,108 @@ export default function BookingPlots() {
                         </div>
                     ) : (
                         <>
-                    <div className="flex gap-1 p-2 border-b border-[#E2E8F0] bg-[#F8FAFC]">
-                        {(['upcoming', 'past', 'cancelled'] as const).map((f) => (
+                    <div className="flex flex-wrap gap-1 p-2 border-b border-[#E2E8F0] bg-[#F8FAFC] items-center">
+                        {(['upcoming', 'requests', 'active', 'past', 'cancelled'] as const).map((f) => (
                             <button key={f} type="button" onClick={() => setFilter(f)} className={cn('px-3 py-2 rounded-lg text-xs font-bold capitalize', filter === f ? 'bg-white shadow-sm text-[#0F172A]' : 'text-[#64748B]')}>
-                                {f}
+                                {f === 'active' ? 'In progress' : f}
                             </button>
                         ))}
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowManual(true);
+                                setManualForm((f) => ({
+                                    ...f,
+                                    eventTypeId: f.eventTypeId || eventTypes[0]?.id || ''
+                                }));
+                            }}
+                            className="ml-auto inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-[#0F172A] text-white"
+                        >
+                            <Plus className="w-3.5 h-3.5" /> Add job
+                        </button>
                     </div>
+                    {showManual && (
+                        <form onSubmit={createManualBooking} className="p-4 border-b border-[#E2E8F0] bg-[#FAFBFC] space-y-3">
+                            <div className="flex justify-between items-center">
+                                <h3 className="font-bold text-sm text-[#0F172A]">Manual booking / request</h3>
+                                <button type="button" onClick={() => setShowManual(false)} className="text-xs font-bold text-[#64748B]">
+                                    Close
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <select
+                                    required
+                                    value={manualForm.eventTypeId}
+                                    onChange={(e) => setManualForm((f) => ({ ...f, eventTypeId: e.target.value }))}
+                                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
+                                >
+                                    <option value="">Select service</option>
+                                    {eventTypes.map((et: any) => (
+                                        <option key={et.id} value={et.id}>
+                                            {et.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                <select
+                                    value={manualForm.intakeType}
+                                    onChange={(e) =>
+                                        setManualForm((f) => ({ ...f, intakeType: e.target.value as 'instant' | 'request' }))
+                                    }
+                                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
+                                >
+                                    <option value="instant">Scheduled booking</option>
+                                    <option value="request">Request (to schedule)</option>
+                                </select>
+                                <input
+                                    required
+                                    placeholder="Customer name"
+                                    value={manualForm.customerName}
+                                    onChange={(e) => setManualForm((f) => ({ ...f, customerName: e.target.value }))}
+                                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
+                                />
+                                <input
+                                    required
+                                    type="email"
+                                    placeholder="Email"
+                                    value={manualForm.email}
+                                    onChange={(e) => setManualForm((f) => ({ ...f, email: e.target.value }))}
+                                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
+                                />
+                                <input
+                                    placeholder="Phone"
+                                    value={manualForm.phone}
+                                    onChange={(e) => setManualForm((f) => ({ ...f, phone: e.target.value }))}
+                                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
+                                />
+                                <input
+                                    placeholder="Address"
+                                    value={manualForm.address}
+                                    onChange={(e) => setManualForm((f) => ({ ...f, address: e.target.value }))}
+                                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
+                                />
+                                <input
+                                    type="datetime-local"
+                                    required={manualForm.intakeType === 'instant'}
+                                    value={manualForm.startAt}
+                                    onChange={(e) => setManualForm((f) => ({ ...f, startAt: e.target.value }))}
+                                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm sm:col-span-2"
+                                />
+                                <input
+                                    placeholder="Job notes"
+                                    value={manualForm.description}
+                                    onChange={(e) => setManualForm((f) => ({ ...f, description: e.target.value }))}
+                                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm sm:col-span-2"
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={manualBusy}
+                                className="rounded-xl bg-[#F59E0B] text-[#0F172A] px-4 py-2 text-sm font-bold disabled:opacity-50"
+                            >
+                                {manualBusy ? 'Saving…' : 'Create'}
+                            </button>
+                        </form>
+                    )}
                     <div className="p-4 min-h-[400px]">
                         {!filtered.length && (
                             <div className="border border-dashed border-[#E2E8F0] rounded-2xl p-10 text-center flex flex-col items-center justify-center min-h-[340px] bg-[#FAFBFC]">
@@ -398,6 +610,14 @@ export default function BookingPlots() {
                                             <div className="min-w-0">
                                                 <p className="font-bold text-[#0F172A] truncate">{b.customer_name}</p>
                                                 <p className="text-xs text-[#64748B]">{b.event_name}</p>
+                                                {b.client_id && (
+                                                    <Link
+                                                        to={`/clients/${b.client_id}`}
+                                                        className="text-[11px] font-bold text-[#F59E0B]"
+                                                    >
+                                                        View client
+                                                    </Link>
+                                                )}
                                             </div>
                                             <span className={cn('text-[10px] font-bold uppercase px-2 py-1 rounded-full border shrink-0', badge.className)}>
                                                 {badge.label}
@@ -424,7 +644,26 @@ export default function BookingPlots() {
                                             )}
                                         </div>
                                         <div className="flex flex-wrap gap-2 pt-2 mt-auto border-t border-[#F1F5F9]">
-                                            {b.status === 'confirmed' && (
+                                            {(b.status === 'confirmed' || b.job_status === 'scheduled' || b.job_status === 'requested') &&
+                                                b.job_status !== 'in_progress' &&
+                                                b.status !== 'done' &&
+                                                b.job_status !== 'completed' && (
+                                                    <button
+                                                        type="button"
+                                                        disabled={busy === b.id}
+                                                        onClick={() => startJob(b.id)}
+                                                        className="text-xs font-bold px-3 py-1.5 rounded-lg bg-orange-600 text-white flex items-center gap-1"
+                                                    >
+                                                        <Play className="w-3 h-3" /> {busy === b.id ? '…' : 'Start job'}
+                                                    </button>
+                                                )}
+                                            {(b.status === 'confirmed' ||
+                                                b.job_status === 'in_progress' ||
+                                                b.job_status === 'scheduled' ||
+                                                b.job_status === 'requested') &&
+                                                b.status !== 'done' &&
+                                                b.job_status !== 'completed' &&
+                                                b.job_status !== 'invoiced' && (
                                                 <button type="button" disabled={busy === b.id} onClick={() => markJobDone(b.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-[#0F172A] text-white flex items-center gap-1">
                                                     <CheckCircle2 className="w-3 h-3" /> {busy === b.id ? 'Saving…' : 'Mark as done'}
                                                 </button>
@@ -432,7 +671,9 @@ export default function BookingPlots() {
                                             {b.invoice_url && (
                                                 <a href={b.invoice_url} target="_blank" rel="noreferrer" className="text-xs font-bold px-3 py-1.5 rounded-lg border border-[#E2E8F0]">View invoice</a>
                                             )}
-                                            {b.status === 'confirmed' && (
+                                            {(b.status === 'confirmed' || b.job_status === 'requested' || b.job_status === 'scheduled' || b.job_status === 'in_progress') &&
+                                                b.status !== 'cancelled' &&
+                                                b.job_status !== 'cancelled' && (
                                                 <button type="button" disabled={busy === b.id} onClick={() => cancelBooking(b.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-red-600 ml-auto disabled:opacity-50">
                                                     {busy === b.id ? 'Cancelling…' : 'Cancel & refund'}
                                                 </button>
@@ -466,23 +707,74 @@ export default function BookingPlots() {
                                 </button>
                             </div>
                         )}
-                        <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4">
-                            <div className="flex items-center gap-2 mb-2"><QrCode className="w-4 h-4 text-[#F59E0B]" /><h3 className="text-xs font-bold uppercase text-[#64748B]">Share</h3></div>
-                            {qrUrl && <img src={qrUrl} alt="QR" className="w-full max-w-[180px] mx-auto rounded-lg border border-[#E2E8F0]" />}
-                            <input readOnly value={hostUrl} className="mt-3 w-full text-xs rounded-lg border border-[#E2E8F0] px-2 py-2 truncate" />
-                            <p className="text-[10px] text-[#64748B] mt-2">Customers pick a service, date, time & details — deposit via Stripe.</p>
+                        <div className="bg-white rounded-2xl border border-[#E2E8F0] p-3.5">
+                            <div className="flex items-center gap-1.5 mb-3">
+                                <QrCode className="w-3.5 h-3.5 text-[#F59E0B]" />
+                                <h3 className="text-[11px] font-bold uppercase tracking-wide text-[#64748B]">Share booking page</h3>
+                            </div>
+                            <div className="flex gap-3 items-start">
+                                {qrUrl ? (
+                                    <img
+                                        src={qrUrl}
+                                        alt="QR code for booking page"
+                                        width={80}
+                                        height={80}
+                                        className="w-20 h-20 shrink-0 rounded-md border border-[#E2E8F0] bg-white object-contain"
+                                    />
+                                ) : (
+                                    <div className="w-20 h-20 shrink-0 rounded-md border border-dashed border-[#E2E8F0] bg-[#F8FAFC]" />
+                                )}
+                                <div className="min-w-0 flex-1 space-y-2">
+                                    <p className="text-[11px] text-[#64748B] leading-snug">
+                                        Scan or copy the link so customers can book online.
+                                    </p>
+                                    <div className="flex gap-1.5">
+                                        <input
+                                            readOnly
+                                            value={hostUrl}
+                                            className="min-w-0 flex-1 text-[11px] rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-1.5 truncate"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={copyLink}
+                                            className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-[#0F172A] text-white px-2.5 py-1.5 text-[11px] font-bold"
+                                        >
+                                            <Copy className="w-3 h-3" />
+                                            {copied ? 'Copied' : 'Copy'}
+                                        </button>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={openCustomerView}
+                                        className="text-[11px] font-bold text-[#F59E0B] hover:underline"
+                                    >
+                                        Open customer view →
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4">
-                            <h3 className="text-xs font-bold uppercase text-[#64748B] mb-2">Event types</h3>
-                            <ul className="space-y-2">
+                        <div className="bg-white rounded-2xl border border-[#E2E8F0] p-3.5">
+                            <h3 className="text-[11px] font-bold uppercase tracking-wide text-[#64748B] mb-2.5">Event types</h3>
+                            <ul className="space-y-1.5">
                                 {eventTypes.map((et: any) => (
-                                    <li key={et.id} className="text-sm flex justify-between gap-2">
-                                        <span className="font-medium">{et.name}</span>
-                                        <span className="text-[#64748B] shrink-0">{formatCents(et.deposit_cents)} · {et.duration_minutes}m</span>
+                                    <li
+                                        key={et.id}
+                                        className="text-sm flex justify-between gap-2 rounded-lg bg-[#F8FAFC] border border-[#F1F5F9] px-2.5 py-2"
+                                    >
+                                        <span className="font-medium text-[#0F172A] truncate">{et.name}</span>
+                                        <span className="text-[#64748B] shrink-0 text-xs">
+                                            {formatCents(et.deposit_cents)} · {et.duration_minutes}m
+                                        </span>
                                     </li>
                                 ))}
                             </ul>
-                            <button type="button" onClick={() => openSettings('events')} className="mt-3 block w-full text-center text-xs font-bold text-[#0F172A] underline">Manage event types</button>
+                            <button
+                                type="button"
+                                onClick={() => openSettings('events')}
+                                className="mt-2.5 block w-full text-center text-[11px] font-bold text-[#0F172A] underline"
+                            >
+                                Manage event types
+                            </button>
                         </div>
                         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex gap-2">
                             <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />

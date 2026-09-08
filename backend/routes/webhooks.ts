@@ -1,8 +1,11 @@
 import { Request, Response } from 'express';
 import { query } from '../lib/db';
 import { confirmBookingPayment } from '../lib/confirmBooking';
+import { confirmQuoteDeposit } from '../lib/quotes';
 import { syncOrgStripeAccount } from '../lib/stripeConnect';
 import { syncStripeSubscriptionRecord } from '../middleware/entitlements';
+import { fireZapierEvent } from '../lib/zapier';
+import { pushPaidInvoiceToQbo } from '../lib/qbo';
 
 function subscriptionIdFromInvoice(invoice: any): string | null {
     const sub = invoice?.subscription;
@@ -46,13 +49,38 @@ function createStripeWebhookHandler(stripeClient: any) {
                         paymentIntentId: session.payment_intent
                     });
                 }
+                if (session.payment_status === 'paid' && session.metadata?.quoteId) {
+                    await confirmQuoteDeposit({
+                        quoteId: session.metadata.quoteId,
+                        stripeSessionId: session.id,
+                        paymentIntentId: session.payment_intent
+                    });
+                }
             }
 
             if (event.type === 'invoice.paid') {
                 const invoice = event.data.object;
                 const bookingId = invoice.metadata?.bookingId;
                 if (bookingId) {
-                    await query(`UPDATE invoices SET status = 'paid', updated_at = NOW() WHERE booking_id = $1`, [bookingId]);
+                    const { rows: invRows } = await query(
+                        `UPDATE invoices SET status = 'paid', updated_at = NOW() WHERE booking_id = $1 RETURNING *`,
+                        [bookingId]
+                    );
+                    const { rows: bRows } = await query(`SELECT * FROM bookings WHERE id = $1`, [bookingId]);
+                    const booking = bRows[0];
+                    if (booking?.org_id) {
+                        const inv = invRows[0] || {
+                            id: invoice.id,
+                            amount_cents: invoice.amount_paid,
+                            booking_id: bookingId
+                        };
+                        fireZapierEvent(booking.org_id, 'invoice.paid', {
+                            bookingId,
+                            invoiceId: inv.id,
+                            amountCents: inv.amount_cents || invoice.amount_paid
+                        }).catch(() => {});
+                        pushPaidInvoiceToQbo(booking.org_id, inv, booking).catch(() => {});
+                    }
                 }
 
                 const stripeSubId = subscriptionIdFromInvoice(invoice);

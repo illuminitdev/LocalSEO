@@ -52,6 +52,14 @@ export const ROUTE_FEATURES: Record<string, RouteFeature> = {
     '/qa': 'local_presence',
     '/booking': 'bookings',
     '/booking/settings': 'bookings',
+    '/clients': 'bookings',
+    '/quotes': 'bookings',
+    '/inbox': 'bookings',
+    '/team': 'bookings',
+    '/dispatch': 'bookings',
+    '/money': 'bookings',
+    '/marketing': 'bookings',
+    '/field': 'bookings',
     '/account': null
 };
 
