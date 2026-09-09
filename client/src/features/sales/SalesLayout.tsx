@@ -1,44 +1,43 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, LogOut, Layers, Settings, Menu, X, ClipboardList } from 'lucide-react';
-import { clearAdminToken } from './adminApi';
-import { cn } from '../../shared/utils';
+import { Briefcase, LogOut, Menu, UserRound, X } from 'lucide-react';
+import { apiGet, cn } from '../../shared/utils';
+import { clearToken } from '../auth/auth';
 
 const NAV = [
-    { name: 'Overview', to: '/admin', icon: LayoutDashboard, end: true },
-    { name: 'Users', to: '/admin/users', icon: Users },
-    { name: 'Growth leads', to: '/admin/growth-audit-leads', icon: ClipboardList },
-    { name: 'Plan guide', to: '/admin/services', icon: Layers },
-    { name: 'Settings', to: '/admin/settings', icon: Settings }
+    { name: 'My Work', to: '/sales', icon: Briefcase, end: true },
+    { name: 'Account', to: '/sales/account', icon: UserRound, end: true }
 ];
 
 function pageTitle(pathname: string) {
-    if (pathname.match(/\/admin\/users\/(user|invite)\//)) {
-        return { title: 'User details', subtitle: 'Plan, renew date, autopay status, and tools for this user.' };
+    if (pathname.startsWith('/sales/account')) {
+        return { title: 'Account', subtitle: 'Your profile and password.' };
     }
-    if (pathname.startsWith('/admin/users')) {
-        return { title: 'User Management', subtitle: 'Create and manage system users.' };
+    if (pathname.startsWith('/sales/leads/')) {
+        return { title: 'Lead', subtitle: 'Call, log outcome, and update status.' };
     }
-    if (pathname.startsWith('/admin/growth-audit-leads')) {
-        return {
-            title: 'Growth audit leads',
-            subtitle: 'Prospects who submitted the Free Growth Audit on ZappSites.'
-        };
-    }
-    if (pathname.startsWith('/admin/services')) {
-        return { title: 'Plan guide', subtitle: 'Which portal tools each paid plan includes.' };
-    }
-    if (pathname.startsWith('/admin/settings')) {
-        return { title: 'Settings', subtitle: 'Your admin login email and password.' };
-    }
-    return { title: 'Overview', subtitle: 'Quick health check for the Local SEO portal.' };
+    return { title: 'My Work', subtitle: 'Leads assigned to you. Call, log, follow up.' };
 }
 
-export default function AdminLayout() {
+export default function SalesLayout() {
     const navigate = useNavigate();
     const location = useLocation();
     const heading = pageTitle(location.pathname);
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
     const [navOpen, setNavOpen] = useState(false);
+
+    useEffect(() => {
+        apiGet('/api/sales/me')
+            .then((data) => {
+                setName(data.user?.name || '');
+                setEmail(data.user?.email || '');
+            })
+            .catch(() => {
+                clearToken();
+                navigate('/', { replace: true });
+            });
+    }, [navigate]);
 
     useEffect(() => {
         setNavOpen(false);
@@ -59,9 +58,11 @@ export default function AdminLayout() {
     }, [navOpen]);
 
     const logout = () => {
-        clearAdminToken();
+        clearToken();
         navigate('/', { replace: true });
     };
+
+    const initials = (name || email || 'S').charAt(0).toUpperCase();
 
     const sidebar = (
         <>
@@ -76,7 +77,7 @@ export default function AdminLayout() {
                             <p className="text-[11px] text-[#94A3B8] mt-0.5 truncate">Local SEO simplified.</p>
                         </div>
                     </div>
-                    <p className="mt-5 text-[13px] font-medium text-[#94A3B8]">Admin Portal</p>
+                    <p className="mt-5 text-[13px] font-medium text-[#94A3B8]">Sales Portal</p>
                 </div>
                 <button
                     type="button"
@@ -97,8 +98,9 @@ export default function AdminLayout() {
                         onClick={() => setNavOpen(false)}
                         className={({ isActive }) => {
                             const active =
-                                item.to === '/admin/users'
-                                    ? location.pathname.startsWith('/admin/users')
+                                item.to === '/sales'
+                                    ? location.pathname === '/sales' ||
+                                      location.pathname.startsWith('/sales/leads/')
                                     : isActive;
                             return cn(
                                 'flex items-center gap-3 px-3 py-2.5 min-h-[44px] rounded-xl text-sm transition-colors',
@@ -117,11 +119,11 @@ export default function AdminLayout() {
             <div className="px-4 pb-4 pt-3 shrink-0 space-y-3 safe-pb">
                 <div className="flex items-center gap-3 px-1">
                     <div className="w-9 h-9 rounded-full bg-[#0F172A] text-white flex items-center justify-center text-xs font-bold shrink-0">
-                        AD
+                        {initials}
                     </div>
                     <div className="min-w-0 leading-tight">
-                        <p className="text-sm font-semibold text-[#0F172A] truncate">Admin</p>
-                        <p className="text-xs text-[#94A3B8] mt-0.5 truncate">Admin</p>
+                        <p className="text-sm font-semibold text-[#0F172A] truncate">{name || 'Sales'}</p>
+                        <p className="text-xs text-[#94A3B8] mt-0.5 truncate">{email || 'Sales agent'}</p>
                     </div>
                 </div>
                 <button

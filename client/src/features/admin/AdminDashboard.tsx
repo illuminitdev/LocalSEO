@@ -66,14 +66,14 @@ export default function AdminDashboard() {
                         </p>
                         <h2 className="text-2xl font-bold mt-2 tracking-tight">Portal at a glance</h2>
                         <p className="text-sm text-white/60 mt-2 max-w-md">
-                            See how many customers are paying, then open Customers to manage one plan at a time.
+                            See how many users are paying, then open Users to manage one plan at a time.
                         </p>
                     </div>
                     <Link
                         to="/admin/users"
                         className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#F59E0B] text-[#0F172A] px-5 py-3 text-sm font-bold hover:bg-[#FBBF24] shrink-0"
                     >
-                        Open customers <ArrowRight className="w-4 h-4" />
+                        Open users <ArrowRight className="w-4 h-4" />
                     </Link>
                 </div>
             </div>

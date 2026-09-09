@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, Mail, Plus, RefreshCw, Search, Trash2, UserRound, X } from 'lucide-react';
+import {
+    ChevronRight,
+    Headphones,
+    Plus,
+    Search,
+    Trash2,
+    Users,
+    UserRound,
+    X
+} from 'lucide-react';
 import { adminDelete, adminGet, adminPost } from './adminApi';
 import { PLANS } from '../../shared/planCatalog';
 import { cn } from '../../shared/utils';
@@ -11,6 +20,7 @@ type AdminUser = {
     email: string;
     name: string;
     createdAt: string;
+    platformRole?: 'customer' | 'sales_agent';
     organization: { id: string; name: string; tradeType: string } | null;
     subscription: {
         planName: string;
@@ -23,7 +33,7 @@ type AdminUser = {
     invite: { id: string } | null;
 };
 
-type FilterKey = 'all' | 'active' | 'expiring' | 'autopay_off' | 'unclaimed';
+type RoleFilter = 'all' | 'customer' | 'sales_agent' | 'invite';
 
 function fmtDate(value?: string | null) {
     if (!value) return '—';
@@ -44,12 +54,24 @@ function detailPath(user: AdminUser) {
     return '/admin/users';
 }
 
+function roleOf(user: AdminUser): 'customer' | 'sales_agent' | 'invite' {
+    if (user.kind === 'invite') return 'invite';
+    return user.platformRole === 'sales_agent' ? 'sales_agent' : 'customer';
+}
+
+function roleLabel(user: AdminUser) {
+    const r = roleOf(user);
+    if (r === 'sales_agent') return 'Sales Agent';
+    if (r === 'invite') return 'Pending invite';
+    return 'User';
+}
+
 export default function AdminUsers() {
     const [users, setUsers] = useState<AdminUser[]>([]);
     const [error, setError] = useState('');
     const [msg, setMsg] = useState('');
     const [query, setQuery] = useState('');
-    const [filter, setFilter] = useState<FilterKey>('all');
+    const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
     const [addOpen, setAddOpen] = useState(false);
     const [addBusy, setAddBusy] = useState(false);
     const [deletingKey, setDeletingKey] = useState<string | null>(null);
@@ -74,28 +96,27 @@ export default function AdminUsers() {
         load();
     }, []);
 
+    const totalUsers = users.length;
+    const portalUsers = users.filter((u) => roleOf(u) === 'customer').length;
+    const salesAgents = users.filter((u) => roleOf(u) === 'sales_agent').length;
+
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         return users.filter((u) => {
-            if (filter === 'unclaimed' && u.kind !== 'invite') return false;
-            if (filter === 'active' && u.subscription?.status !== 'active') return false;
-            if (filter === 'autopay_off' && u.subscription?.autopayEnabled !== false) return false;
-            if (filter === 'expiring') {
-                const days = u.subscription?.daysLeft;
-                if (days == null || days > 7 || days < 0) return false;
-            }
+            const role = roleOf(u);
+            if (roleFilter === 'customer' && role !== 'customer') return false;
+            if (roleFilter === 'sales_agent' && role !== 'sales_agent') return false;
+            if (roleFilter === 'invite' && role !== 'invite') return false;
             if (!q) return true;
             return (
                 u.email.toLowerCase().includes(q) ||
                 (u.name || '').toLowerCase().includes(q) ||
                 (u.organization?.name || '').toLowerCase().includes(q) ||
-                (u.subscription?.planName || '').toLowerCase().includes(q)
+                (u.subscription?.planName || '').toLowerCase().includes(q) ||
+                roleLabel(u).toLowerCase().includes(q)
             );
         });
-    }, [users, query, filter]);
-
-    const registered = users.filter((u) => u.kind === 'user').length;
-    const pending = users.filter((u) => u.kind === 'invite').length;
+    }, [users, query, roleFilter]);
 
     const resetForm = () => {
         setForm({ name: '', email: '', password: '', role: '', businessName: '', planId: '' });
@@ -154,39 +175,23 @@ export default function AdminUsers() {
     };
 
     return (
-        <div className="space-y-4 max-w-5xl">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap gap-2 text-sm">
-                    <span className="inline-flex items-center gap-2 rounded-xl bg-white border border-[#E2E8F0] px-3 py-2 shadow-sm">
-                        <UserRound className="w-4 h-4 text-[#F59E0B]" />
-                        <strong>{registered}</strong> logged in
-                    </span>
-                    <span className="inline-flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 px-3 py-2">
-                        <Mail className="w-4 h-4" />
-                        <strong>{pending}</strong> waiting to claim
-                    </span>
+        <div className="space-y-5 max-w-6xl">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <h2 className="text-2xl font-bold tracking-tight text-[#0F172A]">User Management</h2>
+                    <p className="text-sm text-[#64748B] mt-1">Create and manage system users</p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setError('');
-                            setAddOpen(true);
-                        }}
-                        className="inline-flex items-center gap-2 rounded-xl bg-[#0F172A] text-white px-3 py-2 text-sm font-semibold hover:bg-[#1E293B]"
-                    >
-                        <Plus className="w-4 h-4" />
-                        Add User
-                    </button>
-                    <button
-                        type="button"
-                        onClick={load}
-                        className="inline-flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-sm font-semibold hover:bg-[#F8FAFC]"
-                    >
-                        <RefreshCw className="w-4 h-4" />
-                        Refresh
-                    </button>
-                </div>
+                <button
+                    type="button"
+                    onClick={() => {
+                        setError('');
+                        setAddOpen(true);
+                    }}
+                    className="inline-flex items-center gap-2 rounded-xl bg-[#0F172A] text-white px-4 py-2.5 text-sm font-semibold hover:bg-[#1E293B] shadow-sm"
+                >
+                    <Plus className="w-4 h-4" />
+                    Create User
+                </button>
             </div>
 
             {error && (
@@ -198,61 +203,108 @@ export default function AdminUsers() {
                 </p>
             )}
 
-            <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
-                <div className="p-4 border-b border-[#E2E8F0] space-y-3 bg-[#FCFDFE]">
-                    <div className="relative">
-                        <Search className="w-4 h-4 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            placeholder="Search name, email, plan…"
-                            className="w-full rounded-xl border border-[#E2E8F0] bg-white pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
-                        />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 flex items-start justify-between gap-3">
+                    <div>
+                        <p className="text-xs font-semibold text-[#64748B]">Total Users</p>
+                        <p className="text-3xl font-bold text-[#0F172A] mt-1 tabular-nums">{totalUsers}</p>
+                        <p className="text-xs text-[#94A3B8] mt-1">All registered users</p>
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
-                        {(
-                            [
-                                ['all', 'All'],
-                                ['active', 'Paying'],
-                                ['expiring', 'Ends soon'],
-                                ['autopay_off', 'No autopay'],
-                                ['unclaimed', 'Not logged in']
-                            ] as const
-                        ).map(([id, label]) => (
-                            <button
-                                key={id}
-                                type="button"
-                                onClick={() => setFilter(id)}
-                                className={cn(
-                                    'px-2.5 py-1 rounded-lg text-[11px] font-bold',
-                                    filter === id
-                                        ? 'bg-[#0F172A] text-white'
-                                        : 'bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]'
-                                )}
+                    <div className="w-10 h-10 rounded-xl bg-[#E2E8F0] text-[#475569] flex items-center justify-center shrink-0">
+                        <Users className="w-5 h-5" />
+                    </div>
+                </div>
+                <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4 flex items-start justify-between gap-3">
+                    <div>
+                        <p className="text-xs font-semibold text-sky-800/80">Users</p>
+                        <p className="text-3xl font-bold text-sky-700 mt-1 tabular-nums">{portalUsers}</p>
+                        <p className="text-xs text-sky-700/70 mt-1">Portal customers</p>
+                    </div>
+                    <div className="w-10 h-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center shrink-0">
+                        <UserRound className="w-5 h-5" />
+                    </div>
+                </div>
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 flex items-start justify-between gap-3">
+                    <div>
+                        <p className="text-xs font-semibold text-emerald-800/80">Sales Agents</p>
+                        <p className="text-3xl font-bold text-emerald-700 mt-1 tabular-nums">{salesAgents}</p>
+                        <p className="text-xs text-emerald-700/70 mt-1">Telecallers</p>
+                    </div>
+                    <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                        <Headphones className="w-5 h-5" />
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-5 pt-5 pb-4 border-b border-[#E2E8F0] space-y-4">
+                    <div>
+                        <h3 className="text-base font-bold text-[#0F172A]">All Users</h3>
+                        <p className="text-xs text-[#64748B] mt-0.5">
+                            {filtered.length} of {totalUsers} users
+                        </p>
+                    </div>
+                    <div className="flex flex-col lg:flex-row gap-3 lg:items-end">
+                        <div className="relative flex-1">
+                            <Search className="w-4 h-4 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                                placeholder="Search users by name, email, or phone..."
+                                className="w-full rounded-xl border border-[#E2E8F0] bg-white pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                            />
+                        </div>
+                        <label className="block text-xs font-semibold text-[#64748B] lg:w-56 shrink-0">
+                            Filter by Role
+                            <select
+                                value={roleFilter}
+                                onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
+                                className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
                             >
-                                {label}
-                            </button>
-                        ))}
+                                <option value="all">All Roles</option>
+                                <option value="customer">Users</option>
+                                <option value="sales_agent">Sales Agents</option>
+                                <option value="invite">Pending invites</option>
+                            </select>
+                        </label>
                     </div>
                 </div>
 
                 <div className="divide-y divide-[#F1F5F9]">
                     {filtered.length === 0 ? (
-                        <p className="p-8 text-center text-sm text-[#64748B]">No customers match.</p>
+                        <div className="px-6 py-14 text-center">
+                            <div className="mx-auto w-12 h-12 rounded-2xl bg-[#F1F5F9] text-[#94A3B8] flex items-center justify-center">
+                                <Users className="w-6 h-6" />
+                            </div>
+                            <p className="mt-4 text-sm font-semibold text-[#334155]">No users found</p>
+                            <p className="mt-1 text-sm text-[#64748B] max-w-sm mx-auto">
+                                Try adjusting your search or filters, or add a new user.
+                            </p>
+                        </div>
                     ) : (
                         filtered.map((user) => {
                             const rowKey = user.userId || user.invite?.id || user.email;
                             const busy = deletingKey === rowKey;
+                            const role = roleOf(user);
                             return (
                                 <div
                                     key={rowKey}
-                                    className="flex items-center gap-3 px-4 py-4 hover:bg-[#FFFBEB] transition-colors group"
+                                    className="flex items-center gap-3 px-4 sm:px-5 py-4 hover:bg-[#F8FAFC] transition-colors group"
                                 >
                                     <Link
                                         to={detailPath(user)}
                                         className="flex items-center gap-4 min-w-0 flex-1"
                                     >
-                                        <div className="w-10 h-10 rounded-xl bg-[#0F172A] text-[#F59E0B] flex items-center justify-center font-bold shrink-0">
+                                        <div
+                                            className={cn(
+                                                'w-10 h-10 rounded-xl flex items-center justify-center font-bold shrink-0',
+                                                role === 'sales_agent'
+                                                    ? 'bg-emerald-100 text-emerald-700'
+                                                    : role === 'invite'
+                                                      ? 'bg-amber-50 text-amber-800'
+                                                      : 'bg-[#0F172A] text-[#F59E0B]'
+                                            )}
+                                        >
                                             {(user.name || user.email || '?').charAt(0).toUpperCase()}
                                         </div>
                                         <div className="min-w-0 flex-1">
@@ -260,35 +312,42 @@ export default function AdminUsers() {
                                                 <p className="font-bold text-[#0F172A] truncate">
                                                     {user.name || user.email}
                                                 </p>
-                                                {user.kind === 'invite' ? (
-                                                    <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200">
-                                                        Not logged in
-                                                    </span>
-                                                ) : user.subscription?.status === 'active' ? (
-                                                    <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
-                                                        Live
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                                                        No plan
-                                                    </span>
-                                                )}
-                                                {user.subscription?.autopayEnabled === false && (
-                                                    <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
-                                                        Autopay off
-                                                    </span>
-                                                )}
+                                                <span
+                                                    className={cn(
+                                                        'text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border',
+                                                        role === 'sales_agent'
+                                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                            : role === 'invite'
+                                                              ? 'bg-amber-50 text-amber-900 border-amber-200'
+                                                              : 'bg-sky-50 text-sky-800 border-sky-200'
+                                                    )}
+                                                >
+                                                    {roleLabel(user)}
+                                                </span>
+                                                {user.kind === 'user' &&
+                                                    role === 'customer' &&
+                                                    (user.subscription?.status === 'active' ? (
+                                                        <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                                            Live
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                                            No plan
+                                                        </span>
+                                                    ))}
                                             </div>
                                             <p className="text-xs text-[#64748B] truncate mt-0.5">{user.email}</p>
-                                            <p className="text-xs text-[#334155] mt-1.5">
-                                                {user.subscription?.planName || 'No plan'}
-                                                {user.subscription?.priceLabel
-                                                    ? ` · ${user.subscription.priceLabel}`
-                                                    : ''}
-                                                {user.subscription?.periodEnd
-                                                    ? ` · ends ${fmtDate(user.subscription.periodEnd)}`
-                                                    : ''}
-                                            </p>
+                                            {role !== 'sales_agent' && (
+                                                <p className="text-xs text-[#334155] mt-1.5">
+                                                    {user.subscription?.planName || 'No plan'}
+                                                    {user.subscription?.priceLabel
+                                                        ? ` · ${user.subscription.priceLabel}`
+                                                        : ''}
+                                                    {user.subscription?.periodEnd
+                                                        ? ` · ends ${fmtDate(user.subscription.periodEnd)}`
+                                                        : ''}
+                                                </p>
+                                            )}
                                         </div>
                                         <ChevronRight className="w-5 h-5 text-[#CBD5E1] group-hover:text-[#F59E0B] shrink-0 hidden sm:block" />
                                     </Link>
@@ -312,7 +371,7 @@ export default function AdminUsers() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
                     <div className="w-full max-w-md rounded-2xl bg-white border border-[#E2E8F0] shadow-xl">
                         <div className="flex items-center justify-between px-5 py-4 border-b border-[#E2E8F0]">
-                            <h2 className="text-base font-black text-[#0F172A]">Add User</h2>
+                            <h2 className="text-base font-black text-[#0F172A]">Create User</h2>
                             <button
                                 type="button"
                                 onClick={() => !addBusy && setAddOpen(false)}
@@ -362,42 +421,45 @@ export default function AdminUsers() {
                                         setForm((f) => ({
                                             ...f,
                                             role,
-                                            planId: role === 'sales_agent' ? '' : f.planId
+                                            planId: role === 'sales_agent' ? '' : f.planId,
+                                            businessName: role === 'sales_agent' ? '' : f.businessName
                                         }));
                                     }}
                                     className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
                                 >
                                     <option value="">Select role</option>
-                                    <option value="customer">Customer</option>
+                                    <option value="customer">User</option>
                                     <option value="sales_agent">Sales Agent</option>
                                 </select>
                             </label>
-                            <label className="block text-xs font-semibold text-[#475569]">
-                                Business name (optional)
-                                <input
-                                    value={form.businessName}
-                                    onChange={(e) =>
-                                        setForm((f) => ({ ...f, businessName: e.target.value }))
-                                    }
-                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
-                                />
-                            </label>
                             {form.role === 'customer' && (
-                                <label className="block text-xs font-semibold text-[#475569]">
-                                    Plan (optional)
-                                    <select
-                                        value={form.planId}
-                                        onChange={(e) => setForm((f) => ({ ...f, planId: e.target.value }))}
-                                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
-                                    >
-                                        <option value="">No plan</option>
-                                        {PLANS.map((p) => (
-                                            <option key={p.id} value={p.id}>
-                                                {p.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
+                                <>
+                                    <label className="block text-xs font-semibold text-[#475569]">
+                                        Business name (optional)
+                                        <input
+                                            value={form.businessName}
+                                            onChange={(e) =>
+                                                setForm((f) => ({ ...f, businessName: e.target.value }))
+                                            }
+                                            className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                        />
+                                    </label>
+                                    <label className="block text-xs font-semibold text-[#475569]">
+                                        Plan (optional)
+                                        <select
+                                            value={form.planId}
+                                            onChange={(e) => setForm((f) => ({ ...f, planId: e.target.value }))}
+                                            className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                        >
+                                            <option value="">No plan</option>
+                                            {PLANS.map((p) => (
+                                                <option key={p.id} value={p.id}>
+                                                    {p.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                </>
                             )}
                             <div className="flex justify-end gap-2 pt-2">
                                 <button

@@ -1,6 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Layout from './shared/Layout';
-import { RequireAuth, RequireAdmin } from './shared/AuthGuards';
+import { RequireAuth, RequireAdmin, RequireSales } from './shared/AuthGuards';
 import FeatureGate from './shared/FeatureGate';
 import Dashboard from './features/dashboard/Dashboard';
 import ProfileAudit from './features/local-presence/ProfileAudit';
@@ -36,6 +36,10 @@ import AdminServices from './features/admin/AdminServices';
 import AdminSettings from './features/admin/AdminSettings';
 import AdminGrowthAuditLeads from './features/admin/AdminGrowthAuditLeads';
 import AdminLayout from './features/admin/AdminLayout';
+import SalesLayout from './features/sales/SalesLayout';
+import SalesQueue from './features/sales/SalesQueue';
+import SalesLeadDetail from './features/sales/SalesLeadDetail';
+import SalesAccount from './features/sales/SalesAccount';
 
 /** Old /booking/settings URL → /booking?panel=settings */
 function BookingSettingsRedirect() {
@@ -83,6 +87,17 @@ export default function App() {
         <Route path="/book/:hostSlug/:eventSlug" element={<PublicBookEvent />} />
         <Route path="/book/:hostSlug" element={<PublicBookHost />} />
         <Route path="/book" element={<Navigate to="/booking" replace />} />
+        <Route
+          element={
+            <RequireSales>
+              <SalesLayout />
+            </RequireSales>
+          }
+        >
+          <Route path="/sales" element={<SalesQueue />} />
+          <Route path="/sales/leads/:id" element={<SalesLeadDetail />} />
+          <Route path="/sales/account" element={<SalesAccount />} />
+        </Route>
         <Route
           element={
             <RequireAuth>

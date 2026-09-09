@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { API_BASE, apiPost } from '../../shared/utils';
-import { clearToken, setMustChangePassword, setToken } from './auth';
+import { clearToken, setMustChangePassword, setPlatformRole, setToken } from './auth';
 import { clearAdminToken, setAdminToken } from '../admin/adminApi';
 import { useEntitlements } from '../../shared/EntitlementsContext';
 import AuthShell, { AuthFieldWrap, authFieldClass } from './AuthShell';
@@ -54,14 +54,25 @@ export default function Login() {
                 setToken(data.token);
                 const mustChange = Boolean(data.user?.mustChangePassword);
                 setMustChangePassword(mustChange);
-                await refresh();
+                setPlatformRole(data.user?.platformRole || 'customer');
+                const isSales = data.user?.platformRole === 'sales_agent';
+                if (!isSales) {
+                    await refresh();
+                }
                 const next = params.get('next');
+                if (isSales) {
+                    const salesNext =
+                        next && next.startsWith('/sales') ? next : '/sales';
+                    navigate(salesNext, { replace: true });
+                    return;
+                }
                 const safeNext =
                     next &&
                     next.startsWith('/') &&
                     next !== '/' &&
                     next !== '/login' &&
-                    !next.startsWith('/admin')
+                    !next.startsWith('/admin') &&
+                    !next.startsWith('/sales')
                         ? next
                         : '/dashboard';
                 navigate(safeNext, { replace: true });
