@@ -218,9 +218,9 @@ export default function Dispatch() {
                     placeholder={
                         mapsJsConfigured()
                             ? routeJobs.length
-                                ? 'Geocoding job addresses…'
-                                : 'Jobs with addresses appear here as map pins.'
-                            : 'Add VITE_GOOGLE_MAPS_JS_KEY in client/.env to show live map pins.'
+                                ? 'Finding locations on the map…'
+                                : 'Jobs with addresses show up here as map pins.'
+                            : 'Map pins are unavailable in this environment.'
                     }
                 />
                 <ol className="space-y-2">
