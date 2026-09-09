@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Calendar, CheckCircle2, Copy, ExternalLink, LogIn, Plus, Play, QrCode, Settings, User, Wrench } from 'lucide-react';
-import { apiGet, apiPost, formatCents, cn } from '../../shared/utils';
+import { apiGet, apiPost, formatCents, cn, restrictPhoneInput } from '../../shared/utils';
 import { setBookingOrgSlug } from './bookingUtils';
 import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
 import BookingSettingsPanel from './BookingSettings';
@@ -556,7 +556,9 @@ export default function BookingPlots() {
                                 <input
                                     placeholder="Phone"
                                     value={manualForm.phone}
-                                    onChange={(e) => setManualForm((f) => ({ ...f, phone: e.target.value }))}
+                                    onChange={(e) =>
+                                        setManualForm((f) => ({ ...f, phone: restrictPhoneInput(e.target.value) }))
+                                    }
                                     className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
                                 />
                                 <input
