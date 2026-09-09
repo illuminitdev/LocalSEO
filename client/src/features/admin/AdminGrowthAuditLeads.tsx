@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ClipboardList, ExternalLink, RefreshCw, Search } from 'lucide-react';
-import { adminGet } from './adminApi';
+import { ClipboardList, ExternalLink, RefreshCw, Search, CheckSquare } from 'lucide-react';
+import { adminGet, fetchSalesAgents, type SalesAgent } from './adminApi';
+import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { cn } from '../../shared/utils';
 
 type ContactFilter = 'any' | 'email' | 'phone' | 'both';
@@ -45,6 +46,8 @@ function townLine(lead: GrowthAuditLead) {
 
 export default function AdminGrowthAuditLeads() {
     const [leads, setLeads] = useState<GrowthAuditLead[]>([]);
+    const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
+    const [activeLead, setActiveLead] = useState<GrowthAuditLeadRef | null>(null);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(true);
     const [query, setQuery] = useState('');
@@ -58,8 +61,15 @@ export default function AdminGrowthAuditLeads() {
         if (query.trim()) params.set('q', query.trim());
         if (hasContact !== 'any') params.set('hasContact', hasContact);
         const qs = params.toString();
-        adminGet(`/api/admin/growth-audit-leads${qs ? `?${qs}` : ''}`)
-            .then((data) => setLeads(data.leads || []))
+        
+        Promise.all([
+            adminGet(`/api/admin/growth-audit-leads${qs ? `?${qs}` : ''}`),
+            fetchSalesAgents().catch(() => [])
+        ])
+            .then(([data, agents]) => {
+                setLeads(data.leads || []);
+                setSalesAgents(agents);
+            })
             .catch((err: Error) => {
                 setLeads([]);
                 setError(err.message);
@@ -84,7 +94,7 @@ export default function AdminGrowthAuditLeads() {
     ];
 
     return (
-        <div className="space-y-4 max-w-6xl">
+        <div className="space-y-4 max-w-7xl">
             {error && (
                 <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">{error}</p>
             )}
@@ -136,7 +146,7 @@ export default function AdminGrowthAuditLeads() {
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
-                        <table className="w-full text-left min-w-[900px]">
+                        <table className="w-full text-left min-w-[950px]">
                             <thead>
                                 <tr className="border-b border-[#E2E8F0] text-[10px] uppercase tracking-wide text-[#64748B]">
                                     <th className="px-4 py-3 font-bold">Date</th>
@@ -145,19 +155,25 @@ export default function AdminGrowthAuditLeads() {
                                     <th className="px-4 py-3 font-bold">Town / address</th>
                                     <th className="px-4 py-3 font-bold">Email</th>
                                     <th className="px-4 py-3 font-bold">Phone</th>
-                                    <th className="px-4 py-3 font-bold">Website</th>
                                     <th className="px-4 py-3 font-bold">Score</th>
                                     <th className="px-4 py-3 font-bold">Report</th>
+                                    <th className="px-4 py-3 font-bold text-right">CRM & Tasks</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#F1F5F9]">
                                 {leads.map((lead) => (
-                                    <tr key={lead.id} className="hover:bg-[#FFFBEB]">
+                                    <tr key={lead.id} className="hover:bg-[#FFFBEB] transition-colors">
                                         <td className="px-4 py-3 text-xs text-[#64748B] whitespace-nowrap">
                                             {fmtDateTime(lead.createdAt)}
                                         </td>
                                         <td className="px-4 py-3 text-sm font-semibold text-[#0F172A]">
-                                            {lead.businessName || '—'}
+                                            <button
+                                                type="button"
+                                                onClick={() => setActiveLead(lead)}
+                                                className="text-left hover:text-[#F59E0B] hover:underline"
+                                            >
+                                                {lead.businessName || '—'}
+                                            </button>
                                         </td>
                                         <td className="px-4 py-3 text-sm text-[#334155]">
                                             {lead.serviceLabel || lead.service || '—'}
@@ -170,24 +186,6 @@ export default function AdminGrowthAuditLeads() {
                                         </td>
                                         <td className="px-4 py-3 text-sm text-[#334155] whitespace-nowrap">
                                             {lead.phone || '—'}
-                                        </td>
-                                        <td className="px-4 py-3 text-sm">
-                                            {lead.website ? (
-                                                <a
-                                                    href={
-                                                        lead.website.startsWith('http')
-                                                            ? lead.website
-                                                            : `https://${lead.website}`
-                                                    }
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="text-[#0F172A] font-medium hover:underline truncate max-w-[140px] inline-block align-bottom"
-                                                >
-                                                    {lead.website.replace(/^https?:\/\//, '')}
-                                                </a>
-                                            ) : (
-                                                <span className="text-[#94A3B8]">—</span>
-                                            )}
                                         </td>
                                         <td className="px-4 py-3 text-sm font-bold text-[#0F172A] whitespace-nowrap">
                                             {lead.scoreTotal != null ? `${lead.scoreTotal}/100` : '—'}
@@ -206,6 +204,16 @@ export default function AdminGrowthAuditLeads() {
                                                 <span className="text-xs text-[#94A3B8]">—</span>
                                             )}
                                         </td>
+                                        <td className="px-4 py-3 text-right">
+                                            <button
+                                                type="button"
+                                                onClick={() => setActiveLead(lead)}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-xs font-bold rounded-xl shadow-xs transition-colors"
+                                            >
+                                                <CheckSquare className="w-3.5 h-3.5 text-[#D97706]" />
+                                                Manage Tasks
+                                            </button>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -219,6 +227,17 @@ export default function AdminGrowthAuditLeads() {
                     Showing {leads.length} lead{leads.length === 1 ? '' : 's'} (newest first).
                 </p>
             )}
+
+            {/* Slide-over CRM Drawer */}
+            {activeLead && (
+                <LeadCrmDrawer
+                    lead={activeLead}
+                    salesAgents={salesAgents}
+                    onClose={() => setActiveLead(null)}
+                    onTaskUpdated={load}
+                />
+            )}
         </div>
     );
 }
+

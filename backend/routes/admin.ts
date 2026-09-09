@@ -900,4 +900,388 @@ router.get('/services', requireAdmin, (_req: Request, res: Response) => {
     });
 });
 
+/* =========================================================================
+   TELECALLER CRM & TASK ASSIGNMENT ENDPOINTS
+   ========================================================================= */
+
+let crmTablesChecked = false;
+async function ensureCrmTables() {
+    if (crmTablesChecked) return;
+    try {
+        await query(`
+            CREATE TABLE IF NOT EXISTS lead_tasks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                lead_id TEXT NOT NULL,
+                assigned_to_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                task_type TEXT NOT NULL DEFAULT 'follow_up_call' CHECK (task_type IN ('prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom')),
+                title TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '',
+                priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+                status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed', 'cancelled')),
+                due_date TIMESTAMPTZ,
+                completed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_lead_tasks_lead_id ON lead_tasks(lead_id);
+            CREATE INDEX IF NOT EXISTS idx_lead_tasks_assigned_to ON lead_tasks(assigned_to_user_id);
+            CREATE INDEX IF NOT EXISTS idx_lead_tasks_status ON lead_tasks(status);
+            CREATE INDEX IF NOT EXISTS idx_lead_tasks_due_date ON lead_tasks(due_date);
+
+            CREATE TABLE IF NOT EXISTS lead_activities (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                lead_id TEXT NOT NULL,
+                user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                author_name TEXT NOT NULL DEFAULT 'Admin',
+                activity_type TEXT NOT NULL DEFAULT 'call_log' CHECK (activity_type IN ('call_log', 'status_change', 'task_event', 'note')),
+                disposition TEXT CHECK (disposition IN ('connected', 'voicemail', 'callback_requested', 'not_interested', 'converted', 'other')),
+                note TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_lead_activities_lead_id ON lead_activities(lead_id);
+            CREATE INDEX IF NOT EXISTS idx_lead_activities_created_at ON lead_activities(created_at DESC);
+        `);
+        crmTablesChecked = true;
+    } catch (err) {
+        console.warn('ensureCrmTables warning:', err);
+    }
+}
+
+/** Get list of sales agents / telecallers available for assignment */
+router.get('/crm/sales-agents', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const { rows } = await query(`
+            SELECT id, name, email, platform_role, created_at
+            FROM users
+            WHERE platform_role = 'sales_agent'
+            ORDER BY name ASC, email ASC
+        `);
+        res.json({ agents: rows });
+    } catch (err: any) {
+        console.error('Fetch sales agents error:', err);
+        res.status(500).json({ error: err.message || 'Failed to fetch sales agents' });
+    }
+});
+
+/** Get all CRM tasks with optional filters */
+router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = String(req.query.leadId || '').trim();
+        const assignedTo = String(req.query.assignedTo || '').trim();
+        const status = String(req.query.status || '').trim();
+        const priority = String(req.query.priority || '').trim();
+        const taskType = String(req.query.taskType || '').trim();
+
+        const params: any[] = [];
+        const where: string[] = ['1=1'];
+
+        if (leadId) {
+            params.push(leadId);
+            where.push(`t.lead_id = $${params.length}`);
+        }
+        if (assignedTo) {
+            params.push(assignedTo);
+            where.push(`t.assigned_to_user_id = $${params.length}`);
+        }
+        if (status) {
+            params.push(status);
+            where.push(`t.status = $${params.length}`);
+        }
+        if (priority) {
+            params.push(priority);
+            where.push(`t.priority = $${params.length}`);
+        }
+        if (taskType) {
+            params.push(taskType);
+            where.push(`t.task_type = $${params.length}`);
+        }
+
+        const { rows } = await query(`
+            SELECT 
+                t.id,
+                t.lead_id AS "leadId",
+                t.task_type AS "taskType",
+                t.title,
+                t.notes,
+                t.priority,
+                t.status,
+                t.due_date AS "dueDate",
+                t.completed_at AS "completedAt",
+                t.created_at AS "createdAt",
+                t.updated_at AS "updatedAt",
+                t.assigned_to_user_id AS "assignedToUserId",
+                u.name AS "assignedToName",
+                u.email AS "assignedToEmail"
+            FROM lead_tasks t
+            LEFT JOIN users u ON u.id = t.assigned_to_user_id
+            WHERE ${where.join(' AND ')}
+            ORDER BY 
+                CASE 
+                    WHEN t.status = 'pending' THEN 1 
+                    WHEN t.status = 'in_progress' THEN 2 
+                    WHEN t.status = 'completed' THEN 3 
+                    ELSE 4 
+                END,
+                t.due_date ASC NULLS LAST,
+                t.created_at DESC
+            LIMIT 500
+        `, params);
+
+        res.json({ tasks: rows });
+    } catch (err: any) {
+        console.error('Fetch CRM tasks error:', err);
+        res.status(500).json({ error: err.message || 'Failed to fetch tasks' });
+    }
+});
+
+/** Create a new task for a lead */
+router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const {
+            lead_id,
+            task_type = 'follow_up_call',
+            title,
+            notes = '',
+            priority = 'medium',
+            assigned_to_user_id = null,
+            due_date = null
+        } = req.body || {};
+
+        if (!lead_id) {
+            return res.status(400).json({ error: 'lead_id is required.' });
+        }
+        if (!title || !String(title).trim()) {
+            return res.status(400).json({ error: 'Task title is required.' });
+        }
+
+        const validTaskTypes = ['prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom'];
+        const sanitizedTaskType = validTaskTypes.includes(task_type) ? task_type : 'custom';
+
+        const validPriorities = ['low', 'medium', 'high', 'urgent'];
+        const sanitizedPriority = validPriorities.includes(priority) ? priority : 'medium';
+
+        const { rows } = await query(`
+            INSERT INTO lead_tasks (
+                lead_id, task_type, title, notes, priority, status, assigned_to_user_id, due_date
+            ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)
+            RETURNING 
+                id,
+                lead_id AS "leadId",
+                task_type AS "taskType",
+                title,
+                notes,
+                priority,
+                status,
+                due_date AS "dueDate",
+                completed_at AS "completedAt",
+                created_at AS "createdAt",
+                updated_at AS "updatedAt",
+                assigned_to_user_id AS "assignedToUserId"
+        `, [
+            lead_id,
+            sanitizedTaskType,
+            String(title).trim(),
+            String(notes || '').trim(),
+            sanitizedPriority,
+            assigned_to_user_id || null,
+            due_date || null
+        ]);
+
+        const task = rows[0];
+
+        // Add auto activity log
+        try {
+            await query(`
+                INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
+                VALUES ($1, 'Admin', 'task_event', $2)
+            `, [lead_id, `Created task: "${task.title}"`]);
+        } catch {}
+
+        res.status(201).json({ task });
+    } catch (err: any) {
+        console.error('Create CRM task error:', err);
+        res.status(500).json({ error: err.message || 'Failed to create task' });
+    }
+});
+
+/** Update task details / status */
+router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const taskId = req.params.id;
+        const { status, priority, notes, assigned_to_user_id, due_date, title, task_type } = req.body || {};
+
+        const updates: string[] = ['updated_at = NOW()'];
+        const params: any[] = [taskId];
+
+        if (status !== undefined) {
+            params.push(status);
+            updates.push(`status = $${params.length}`);
+            if (status === 'completed') {
+                updates.push(`completed_at = NOW()`);
+            } else {
+                updates.push(`completed_at = NULL`);
+            }
+        }
+        if (priority !== undefined) {
+            params.push(priority);
+            updates.push(`priority = $${params.length}`);
+        }
+        if (notes !== undefined) {
+            params.push(String(notes || '').trim());
+            updates.push(`notes = $${params.length}`);
+        }
+        if (title !== undefined && String(title).trim()) {
+            params.push(String(title).trim());
+            updates.push(`title = $${params.length}`);
+        }
+        if (task_type !== undefined) {
+            params.push(task_type);
+            updates.push(`task_type = $${params.length}`);
+        }
+        if (assigned_to_user_id !== undefined) {
+            params.push(assigned_to_user_id || null);
+            updates.push(`assigned_to_user_id = $${params.length}`);
+        }
+        if (due_date !== undefined) {
+            params.push(due_date || null);
+            updates.push(`due_date = $${params.length}`);
+        }
+
+        const { rows } = await query(`
+            UPDATE lead_tasks
+            SET ${updates.join(', ')}
+            WHERE id = $1
+            RETURNING 
+                id,
+                lead_id AS "leadId",
+                task_type AS "taskType",
+                title,
+                notes,
+                priority,
+                status,
+                due_date AS "dueDate",
+                completed_at AS "completedAt",
+                created_at AS "createdAt",
+                updated_at AS "updatedAt",
+                assigned_to_user_id AS "assignedToUserId"
+        `, params);
+
+        if (!rows.length) {
+            return res.status(404).json({ error: 'Task not found' });
+        }
+
+        const task = rows[0];
+
+        // If status changed, record activity log
+        if (status) {
+            try {
+                await query(`
+                    INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
+                    VALUES ($1, 'Admin', 'task_event', $2)
+                `, [task.leadId, `Task "${task.title}" marked as ${status}`]);
+            } catch {}
+        }
+
+        res.json({ task });
+    } catch (err: any) {
+        console.error('Update CRM task error:', err);
+        res.status(500).json({ error: err.message || 'Failed to update task' });
+    }
+});
+
+/** Delete a task */
+router.delete('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const taskId = req.params.id;
+        await query(`DELETE FROM lead_tasks WHERE id = $1`, [taskId]);
+        res.json({ success: true });
+    } catch (err: any) {
+        console.error('Delete CRM task error:', err);
+        res.status(500).json({ error: err.message || 'Failed to delete task' });
+    }
+});
+
+/** Get lead activities / call notes */
+router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = req.params.leadId;
+        const { rows } = await query(`
+            SELECT 
+                a.id,
+                a.lead_id AS "leadId",
+                a.activity_type AS "activityType",
+                a.disposition,
+                a.note,
+                a.author_name AS "authorName",
+                a.created_at AS "createdAt",
+                u.name AS "userName",
+                u.email AS "userEmail"
+            FROM lead_activities a
+            LEFT JOIN users u ON u.id = a.user_id
+            WHERE a.lead_id = $1
+            ORDER BY a.created_at DESC
+            LIMIT 200
+        `, [leadId]);
+
+        res.json({ activities: rows });
+    } catch (err: any) {
+        console.error('Fetch lead activities error:', err);
+        res.status(500).json({ error: err.message || 'Failed to fetch activities' });
+    }
+});
+
+/** Log an activity / call note for a lead */
+router.post('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = req.params.leadId;
+        const {
+            activity_type = 'call_log',
+            disposition = 'connected',
+            note = '',
+            author_name = 'Admin',
+            user_id = null
+        } = req.body || {};
+
+        if (!note && !disposition) {
+            return res.status(400).json({ error: 'Note or disposition is required.' });
+        }
+
+        const { rows } = await query(`
+            INSERT INTO lead_activities (
+                lead_id, user_id, author_name, activity_type, disposition, note
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING 
+                id,
+                lead_id AS "leadId",
+                activity_type AS "activityType",
+                disposition,
+                note,
+                author_name AS "authorName",
+                created_at AS "createdAt"
+        `, [
+            leadId,
+            user_id || null,
+            String(author_name || 'Admin').trim(),
+            activity_type,
+            disposition || null,
+            String(note || '').trim()
+        ]);
+
+        res.status(201).json({ activity: rows[0] });
+    } catch (err: any) {
+        console.error('Create lead activity error:', err);
+        res.status(500).json({ error: err.message || 'Failed to create activity' });
+    }
+});
+
 export default router;
+

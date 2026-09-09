@@ -35,6 +35,7 @@ import AdminUserDetail from './features/admin/AdminUserDetail';
 import AdminServices from './features/admin/AdminServices';
 import AdminSettings from './features/admin/AdminSettings';
 import AdminGrowthAuditLeads from './features/admin/AdminGrowthAuditLeads';
+import AdminCrmTasks from './features/admin/AdminCrmTasks';
 import AdminLayout from './features/admin/AdminLayout';
 
 /** Old /booking/settings URL → /booking?panel=settings */
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/admin/users/:kind/:id" element={<AdminUserDetail />} />
           <Route path="/admin/growth-audit-leads" element={<AdminGrowthAuditLeads />} />
+          <Route path="/admin/tasks" element={<AdminCrmTasks />} />
           <Route path="/admin/services" element={<AdminServices />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
         </Route>
