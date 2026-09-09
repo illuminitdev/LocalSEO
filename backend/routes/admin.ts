@@ -632,16 +632,22 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
             .toLowerCase();
         const name = String(req.body?.name || '').trim();
         const password = String(req.body?.password || '');
+        const role = String(req.body?.role || '')
+            .trim()
+            .toLowerCase();
         const businessName = String(req.body?.businessName || name || 'My business').trim();
         const planId = req.body?.planId ? String(req.body.planId).trim() : '';
 
-        if (!email || !name || !password) {
-            return res.status(400).json({ error: 'Name, email, and password are required.' });
+        if (!email || !name || !password || !role) {
+            return res.status(400).json({ error: 'Name, email, password, and role are required.' });
+        }
+        if (role !== 'customer' && role !== 'sales_agent') {
+            return res.status(400).json({ error: 'Role must be customer or sales_agent.' });
         }
         if (password.length < 8) {
             return res.status(400).json({ error: 'Password must be at least 8 characters.' });
         }
-        if (planId && !isValidPlanId(planId)) {
+        if (role === 'customer' && planId && !isValidPlanId(planId)) {
             return res.status(400).json({ error: 'Invalid plan.' });
         }
 
@@ -652,12 +658,26 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
 
         const passwordHash = await hashPassword(password);
         const userRes = await query(
-            `INSERT INTO users (email, password_hash, name, must_change_password)
-             VALUES ($1, $2, $3, TRUE)
-             RETURNING id, email, name, must_change_password, created_at`,
-            [email, passwordHash, name]
+            `INSERT INTO users (email, password_hash, name, must_change_password, platform_role)
+             VALUES ($1, $2, $3, TRUE, $4)
+             RETURNING id, email, name, must_change_password, platform_role, created_at`,
+            [email, passwordHash, name, role]
         );
         const user = userRes.rows[0];
+
+        if (role === 'sales_agent') {
+            return res.status(201).json({
+                success: true,
+                user: {
+                    kind: 'user',
+                    userId: user.id,
+                    email: user.email,
+                    name: user.name,
+                    platformRole: user.platform_role,
+                    organization: null
+                }
+            });
+        }
 
         const orgSlug = await uniqueOrgSlug(businessName, query);
         const orgRes = await query(
@@ -685,6 +705,7 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
                 userId: user.id,
                 email: user.email,
                 name: user.name,
+                platformRole: user.platform_role,
                 organization: { id: org.id, name: org.name, slug: org.slug }
             }
         });

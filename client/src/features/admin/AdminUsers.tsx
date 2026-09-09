@@ -57,6 +57,7 @@ export default function AdminUsers() {
         name: '',
         email: '',
         password: '',
+        role: '' as '' | 'customer' | 'sales_agent',
         businessName: '',
         planId: ''
     });
@@ -97,7 +98,7 @@ export default function AdminUsers() {
     const pending = users.filter((u) => u.kind === 'invite').length;
 
     const resetForm = () => {
-        setForm({ name: '', email: '', password: '', businessName: '', planId: '' });
+        setForm({ name: '', email: '', password: '', role: '', businessName: '', planId: '' });
     };
 
     const handleAddUser = async (e: FormEvent) => {
@@ -110,8 +111,9 @@ export default function AdminUsers() {
                 name: form.name.trim(),
                 email: form.email.trim(),
                 password: form.password,
+                role: form.role,
                 businessName: form.businessName.trim() || undefined,
-                planId: form.planId || undefined
+                planId: form.role === 'customer' && form.planId ? form.planId : undefined
             });
             setMsg('User created.');
             setAddOpen(false);
@@ -340,7 +342,7 @@ export default function AdminUsers() {
                                 />
                             </label>
                             <label className="block text-xs font-semibold text-[#475569]">
-                                Temporary password
+                                Password
                                 <input
                                     required
                                     type="text"
@@ -349,6 +351,26 @@ export default function AdminUsers() {
                                     onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
                                     className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
                                 />
+                            </label>
+                            <label className="block text-xs font-semibold text-[#475569]">
+                                Role
+                                <select
+                                    required
+                                    value={form.role}
+                                    onChange={(e) => {
+                                        const role = e.target.value as '' | 'customer' | 'sales_agent';
+                                        setForm((f) => ({
+                                            ...f,
+                                            role,
+                                            planId: role === 'sales_agent' ? '' : f.planId
+                                        }));
+                                    }}
+                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                >
+                                    <option value="">Select role</option>
+                                    <option value="customer">Customer</option>
+                                    <option value="sales_agent">Sales Agent</option>
+                                </select>
                             </label>
                             <label className="block text-xs font-semibold text-[#475569]">
                                 Business name (optional)
@@ -360,21 +382,23 @@ export default function AdminUsers() {
                                     className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
                                 />
                             </label>
-                            <label className="block text-xs font-semibold text-[#475569]">
-                                Plan (optional)
-                                <select
-                                    value={form.planId}
-                                    onChange={(e) => setForm((f) => ({ ...f, planId: e.target.value }))}
-                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
-                                >
-                                    <option value="">No plan</option>
-                                    {PLANS.map((p) => (
-                                        <option key={p.id} value={p.id}>
-                                            {p.name}
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
+                            {form.role === 'customer' && (
+                                <label className="block text-xs font-semibold text-[#475569]">
+                                    Plan (optional)
+                                    <select
+                                        value={form.planId}
+                                        onChange={(e) => setForm((f) => ({ ...f, planId: e.target.value }))}
+                                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                    >
+                                        <option value="">No plan</option>
+                                        {PLANS.map((p) => (
+                                            <option key={p.id} value={p.id}>
+                                                {p.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                            )}
                             <div className="flex justify-end gap-2 pt-2">
                                 <button
                                     type="button"
