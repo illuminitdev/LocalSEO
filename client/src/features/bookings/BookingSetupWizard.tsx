@@ -4,25 +4,30 @@ import {
     Building2,
     ChevronRight,
     Flame,
-    KeyRound,
     Mail,
     MapPin,
     User,
     Wallet,
-    Wrench,
-    Zap
+    Wrench
 } from 'lucide-react';
-import { cn } from '../../shared/utils';
+import { cn, restrictEmailOrPhoneInput } from '../../shared/utils';
 
-const OTHER_SERVICE_TYPE = 'General Tradesperson';
+const PLUMBER_TRADE_TYPE = 'Emergency Plumber';
 
-const SERVICES = [
-    { type: 'Heating Engineer', label: 'Heating & Gas', subtitle: 'Boilers, radiators, no-heat', icon: Flame },
-    { type: 'Emergency Plumber', label: 'Plumbing', subtitle: 'Leaks, pipes, emergencies', icon: Wrench },
-    { type: 'Electrician', label: 'Electrician', subtitle: 'Fuse boards, power loss', icon: Zap },
-    { type: 'Locksmith', label: 'Locksmith', subtitle: 'Lockouts, security', icon: KeyRound },
-    { type: 'General Tradesperson', label: 'Other service', subtitle: 'Handyman, maintenance, etc.', icon: Wrench }
-] as const;
+const PLUMBER_SERVICE = {
+    type: PLUMBER_TRADE_TYPE,
+    label: 'Plumbing',
+    subtitle: 'Leaks, pipes, emergencies'
+} as const;
+
+/** Plumber booking defaults — aligned with backend trade catalog / BOOKING_DEMOS.plumber */
+export const PLUMBER_BOOKING_DEFAULTS = {
+    tradeType: PLUMBER_TRADE_TYPE,
+    standardDeposit: 45,
+    emergencyDeposit: 60,
+    acceptingEmergencies: true,
+    emergencyNote: 'Burst pipes and active leaks get emergency windows.'
+} as const;
 
 export type SetupForm = {
     tradeType: string;
@@ -53,93 +58,67 @@ type Props = {
     onComplete: (form: SetupForm) => Promise<void>;
 };
 
-function emptyForm(): SetupForm {
+function plumberForm(overrides: Partial<SetupForm> = {}): SetupForm {
     return {
-        tradeType: '',
+        tradeType: PLUMBER_TRADE_TYPE,
         name: '',
         businessName: '',
         contact: '',
         serviceArea: '',
-        standardDeposit: 45,
-        emergencyDeposit: 60,
+        standardDeposit: PLUMBER_BOOKING_DEFAULTS.standardDeposit,
+        emergencyDeposit: PLUMBER_BOOKING_DEFAULTS.emergencyDeposit,
         currency: '£',
-        acceptingEmergencies: true,
-        emergencyNote: ''
+        acceptingEmergencies: PLUMBER_BOOKING_DEFAULTS.acceptingEmergencies,
+        emergencyNote: PLUMBER_BOOKING_DEFAULTS.emergencyNote,
+        ...overrides
     };
 }
 
 function formFromLinked(linkedBusiness: NonNullable<LinkedBusiness>): SetupForm {
-    return {
-        ...emptyForm(),
+    return plumberForm({
         businessName: linkedBusiness.name || '',
-        tradeType: linkedBusiness.category || '',
         contact: linkedBusiness.phone || '',
         serviceArea: linkedBusiness.address || ''
-    };
+    });
 }
 
 export default function BookingSetupWizard({ linked, linkedBusiness, busy, error, onComplete }: Props) {
     const hasSavedBusiness = Boolean(linked && linkedBusiness?.name?.trim());
 
     // Booking is separate from SEO tools: only use saved business profile when it exists.
-    // Without it, start by asking booking details (not demos / not other services).
     const [path, setPath] = useState<'choose' | 'manual' | 'from-profile'>(
         hasSavedBusiness ? 'choose' : 'manual'
     );
+    // Order: Your service (locked plumber) → Your details → Bookings & deposit
     const [step, setStep] = useState(1);
-    const [customServiceName, setCustomServiceName] = useState('');
-    const [form, setForm] = useState<SetupForm>(() => emptyForm());
+    const [form, setForm] = useState<SetupForm>(() => plumberForm());
 
     const useSavedBusiness = () => {
         if (!linkedBusiness?.name) return;
-        const next = formFromLinked(linkedBusiness);
-        setForm(next);
-        setCustomServiceName(
-            next.tradeType && !SERVICES.some((s) => s.type === next.tradeType) ? next.tradeType : ''
-        );
+        setForm(formFromLinked(linkedBusiness));
         setPath('from-profile');
-        setStep(next.tradeType ? 2 : 1);
+        setStep(1);
     };
 
     const enterManually = () => {
-        setForm(emptyForm());
-        setCustomServiceName('');
+        setForm(plumberForm());
         setPath('manual');
         setStep(1);
     };
 
-    const isOtherSelected =
-        form.tradeType === OTHER_SERVICE_TYPE ||
-        (Boolean(form.tradeType) && !SERVICES.some((s) => s.type === form.tradeType));
-
-    const selectService = (type: string) => {
-        if (type === OTHER_SERVICE_TYPE) {
-            setForm((f) => ({ ...f, tradeType: OTHER_SERVICE_TYPE }));
-            return;
-        }
-        setCustomServiceName('');
-        setForm((f) => ({ ...f, tradeType: type }));
-    };
-
-    const canContinueFromService =
-        Boolean(form.tradeType) && (!isOtherSelected || customServiceName.trim().length > 0);
-
     const finish = async (e: FormEvent) => {
         e.preventDefault();
-        await onComplete(form);
+        await onComplete({ ...form, tradeType: PLUMBER_TRADE_TYPE });
     };
 
     const stepLabels = [
-        ['1', path === 'manual' ? 'Your details' : 'Your service'],
-        ['2', path === 'manual' ? 'Your service' : 'Confirm details'],
+        ['1', 'Your service'],
+        ['2', path === 'from-profile' ? 'Confirm details' : 'Your details'],
         ['3', 'Bookings & deposit']
     ];
 
-    // Manual path: details → service → deposit
-    // From-profile path: service (if needed) → confirm details → deposit
-    const showDetailsFirst = path === 'manual';
-    const onDetailsStep = showDetailsFirst ? step === 1 : step === 2;
-    const onServiceStep = showDetailsFirst ? step === 2 : step === 1;
+    const onServiceStep = step === 1;
+    const onDetailsStep = step === 2;
     const onDepositStep = step === 3;
 
     return (
@@ -170,7 +149,7 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                                 .join(' · ')}
                         </p>
                         <p className="text-xs text-[#64748B] mt-3">
-                            Adds this business to your booking board, then you confirm service & deposits.
+                            Adds this business to your booking board, then you confirm details & deposits.
                         </p>
                     </button>
 
@@ -217,7 +196,7 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                         </div>
                     )}
 
-                    {path === 'manual' && !hasSavedBusiness && (
+                    {path === 'manual' && !hasSavedBusiness && step === 2 && (
                         <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-sm text-[#64748B]">
                             No business profile saved yet — enter booking details below. You can also{' '}
                             <Link to="/profile" className="font-semibold text-[#0F172A] underline">
@@ -231,24 +210,61 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                         <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>
                     )}
 
+                    {onServiceStep && (
+                        <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 lg:p-6 shadow-sm">
+                            <h2 className="font-bold text-lg text-[#0F172A]">Your service</h2>
+                            <p className="text-sm text-[#64748B] mt-1 mb-4">
+                                This booking board is set up for plumbing — no need to choose a trade.
+                            </p>
+                            <div className="rounded-xl border-2 border-[#F59E0B] bg-[#F59E0B]/15 ring-2 ring-[#F59E0B]/40 p-4 max-w-md">
+                                <Wrench className="w-6 h-6 mb-2 text-[#0F172A]" />
+                                <div className="font-bold text-sm text-[#0F172A]">{PLUMBER_SERVICE.label}</div>
+                                <div className="text-xs text-[#64748B] mt-0.5">{PLUMBER_SERVICE.subtitle}</div>
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-[#D97706] mt-3">
+                                    Locked for this setup
+                                </p>
+                            </div>
+                            <div className="flex gap-2 mt-5">
+                                {hasSavedBusiness && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setPath('choose');
+                                            setStep(1);
+                                        }}
+                                        className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
+                                    >
+                                        Back
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => setStep(2)}
+                                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#0F172A] text-white text-sm font-bold"
+                                >
+                                    Continue <ChevronRight className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {onDetailsStep && (
                         <form
                             onSubmit={(e) => {
                                 e.preventDefault();
                                 if (!form.name.trim() || !form.businessName.trim()) return;
-                                if (showDetailsFirst) setStep(2);
-                                else setStep(3);
+                                setStep(3);
                             }}
                             className="bg-white rounded-2xl border border-[#E2E8F0] p-5 lg:p-6 shadow-sm space-y-4"
                         >
                             <div>
                                 <h2 className="font-bold text-lg text-[#0F172A]">
-                                    {showDetailsFirst ? 'Your details' : 'Confirm booking details'}
+                                    {path === 'from-profile' ? 'Confirm booking details' : 'Your details'}
                                 </h2>
                                 <p className="text-sm text-[#64748B] mt-1">
-                                    {showDetailsFirst
-                                        ? 'Tell us who customers book with — required to launch your board.'
-                                        : 'This is what customers see on your booking page.'}
+                                    {path === 'from-profile'
+                                        ? 'This is what customers see on your booking page.'
+                                        : 'Tell us who customers book with — required to launch your board.'}
                                 </p>
                             </div>
                             <label className="block text-xs font-bold uppercase text-[#64748B]">
@@ -272,7 +288,7 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                                         required
                                         value={form.businessName}
                                         onChange={(e) => setForm((f) => ({ ...f, businessName: e.target.value }))}
-                                        placeholder="e.g. Miller Heating Ltd"
+                                        placeholder="e.g. Miller Plumbing Ltd"
                                         className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] pl-10 pr-3 py-2.5 text-sm focus:outline-none focus:border-[#0F172A] focus:bg-white"
                                     />
                                 </div>
@@ -285,7 +301,12 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                                         type="text"
                                         inputMode="email"
                                         value={form.contact}
-                                        onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))}
+                                        onChange={(e) =>
+                                            setForm((f) => ({
+                                                ...f,
+                                                contact: restrictEmailOrPhoneInput(e.target.value)
+                                            }))
+                                        }
                                         placeholder="e.g. 07700900123 or hello@yourbusiness.com"
                                         className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] pl-10 pr-3 py-2.5 text-sm focus:outline-none focus:border-[#0F172A] focus:bg-white"
                                     />
@@ -304,27 +325,13 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                                 </div>
                             </label>
                             <div className="flex gap-2 pt-2">
-                                {!showDetailsFirst && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setStep(1)}
-                                        className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
-                                    >
-                                        Back
-                                    </button>
-                                )}
-                                {showDetailsFirst && hasSavedBusiness && (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setPath('choose');
-                                            setStep(1);
-                                        }}
-                                        className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
-                                    >
-                                        Back
-                                    </button>
-                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => setStep(1)}
+                                    className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
+                                >
+                                    Back
+                                </button>
                                 <button
                                     type="submit"
                                     className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold"
@@ -333,93 +340,6 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                                 </button>
                             </div>
                         </form>
-                    )}
-
-                    {onServiceStep && (
-                        <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 lg:p-6 shadow-sm">
-                            <h2 className="font-bold text-lg text-[#0F172A]">What service do you offer?</h2>
-                            <p className="text-sm text-[#64748B] mt-1 mb-4">
-                                Choose the trade for this booking board (separate from other SEO modules).
-                            </p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                {SERVICES.map((s) => {
-                                    const Icon = s.icon;
-                                    const on =
-                                        s.type === OTHER_SERVICE_TYPE
-                                            ? isOtherSelected
-                                            : form.tradeType === s.type;
-                                    return (
-                                        <button
-                                            key={s.type}
-                                            type="button"
-                                            onClick={() => selectService(s.type)}
-                                            className={cn(
-                                                'text-left rounded-xl border p-4 transition',
-                                                on
-                                                    ? 'border-[#F59E0B] bg-[#F59E0B]/15 ring-2 ring-[#F59E0B]/40'
-                                                    : 'border-[#E2E8F0] hover:border-[#0F172A]/30'
-                                            )}
-                                        >
-                                            <Icon className={cn('w-6 h-6 mb-2', on ? 'text-[#0F172A]' : 'text-[#64748B]')} />
-                                            <div className="font-bold text-sm text-[#0F172A]">{s.label}</div>
-                                            <div className="text-xs text-[#64748B] mt-0.5">{s.subtitle}</div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                            {isOtherSelected && (
-                                <label className="block mt-4 text-xs font-bold uppercase text-[#64748B]">
-                                    Your service name
-                                    <input
-                                        autoFocus
-                                        value={customServiceName}
-                                        onChange={(e) => setCustomServiceName(e.target.value)}
-                                        placeholder="e.g. Handyman, CCTV installer, painter…"
-                                        className="mt-1 w-full rounded-xl border border-[#F59E0B] bg-[#F59E0B]/5 px-3 py-2.5 text-sm font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/40"
-                                    />
-                                </label>
-                            )}
-                            <div className="flex gap-2 mt-5">
-                                {showDetailsFirst ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => setStep(1)}
-                                        className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
-                                    >
-                                        Back
-                                    </button>
-                                ) : (
-                                    hasSavedBusiness && (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setPath('choose');
-                                                setStep(1);
-                                            }}
-                                            className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
-                                        >
-                                            Back
-                                        </button>
-                                    )
-                                )}
-                                <button
-                                    type="button"
-                                    disabled={!canContinueFromService}
-                                    onClick={() => {
-                                        if (!form.tradeType) return;
-                                        if (isOtherSelected) {
-                                            const name = customServiceName.trim();
-                                            if (!name) return;
-                                            setForm((f) => ({ ...f, tradeType: name }));
-                                        }
-                                        setStep(showDetailsFirst ? 3 : 2);
-                                    }}
-                                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#0F172A] text-white text-sm font-bold disabled:opacity-40"
-                                >
-                                    Continue <ChevronRight className="w-4 h-4" />
-                                </button>
-                            </div>
-                        </div>
                     )}
 
                     {onDepositStep && (

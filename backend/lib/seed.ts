@@ -1,23 +1,41 @@
 import { query } from './db';
 import { uniqueOrgSlug, uniqueEventSlug } from './slug';
+import { getTradeBookingCatalog } from './bookingTradeCatalog';
 
 async function seedDefaultAvailability(_orgId: any) {
     // Engineers configure their own hours in booking settings — no default slots.
 }
 
-async function seedDefaultEventTypes(orgId: any, { standardDepositCents = 4500, emergencyDepositCents = 6000, acceptingEmergencies = true }: any = {}) {
-    const standardSlug = await uniqueEventSlug(orgId, 'standard-visit', query);
-    await query(
-        `INSERT INTO event_types (org_id, slug, name, description, duration_minutes, deposit_cents, total_cents, sort_order)
-         VALUES ($1, $2, 'Standard Visit', 'Regular scheduled appointment', 60, $3, $4, 0)`,
-        [orgId, standardSlug, standardDepositCents, standardDepositCents]
+async function seedDefaultEventTypes(
+    orgId: any,
+    {
+        standardDepositCents = 4500,
+        emergencyDepositCents = 6000,
+        acceptingEmergencies = true,
+        tradeType = ''
+    }: any = {}
+) {
+    const catalog = getTradeBookingCatalog(tradeType);
+    const types = catalog.eventTypes.filter(
+        (t) => t.kind !== 'emergency' || acceptingEmergencies !== false
     );
-    if (acceptingEmergencies) {
-        const emergencySlug = await uniqueEventSlug(orgId, 'emergency-callout', query);
+
+    for (const t of types) {
+        const slug = await uniqueEventSlug(orgId, t.slugBase, query);
+        const depositCents = t.kind === 'emergency' ? emergencyDepositCents : standardDepositCents;
         await query(
             `INSERT INTO event_types (org_id, slug, name, description, duration_minutes, deposit_cents, total_cents, sort_order)
-             VALUES ($1, $2, 'Emergency Callout', 'Urgent same-day service', 90, $3, $4, 1)`,
-            [orgId, emergencySlug, emergencyDepositCents, emergencyDepositCents]
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [
+                orgId,
+                slug,
+                t.name,
+                t.description,
+                t.durationMinutes,
+                depositCents,
+                depositCents,
+                t.sortOrder
+            ]
         );
     }
 }
@@ -28,19 +46,34 @@ async function createBookingOrg({
     tradeType,
     phone,
     serviceArea,
-    standardDeposit = 45,
-    emergencyDeposit = 60,
+    standardDeposit,
+    emergencyDeposit,
     currency = 'GBP',
-    acceptingEmergencies = true,
-    emergencyNote = '',
+    acceptingEmergencies,
+    emergencyNote,
     email = '',
     orgId = null,
     userId = null,
     createNew = false
 }: any) {
-    const standardDepositCents = Math.round(Number(standardDeposit) * 100) || 4500;
-    const emergencyDepositCents = Math.round(Number(emergencyDeposit) * 100) || 6000;
+    const catalog = getTradeBookingCatalog(tradeType);
+    const resolvedStandard =
+        standardDeposit != null && standardDeposit !== '' ? Number(standardDeposit) : catalog.standardDeposit;
+    const resolvedEmergency =
+        emergencyDeposit != null && emergencyDeposit !== '' ? Number(emergencyDeposit) : catalog.emergencyDeposit;
+    const resolvedAccepting =
+        acceptingEmergencies !== undefined && acceptingEmergencies !== null
+            ? acceptingEmergencies !== false
+            : catalog.acceptingEmergencies;
+    const resolvedNote =
+        emergencyNote != null && String(emergencyNote).trim()
+            ? String(emergencyNote).trim()
+            : catalog.emergencyNote;
+
+    const standardDepositCents = Math.round(resolvedStandard * 100) || 4500;
+    const emergencyDepositCents = Math.round(resolvedEmergency * 100) || 6000;
     const currencyCode = currency === '£' || currency === 'GBP' ? 'GBP' : currency === '€' || currency === 'EUR' ? 'EUR' : 'USD';
+    const resolvedTradeType = String(tradeType || catalog.tradeType || '').trim();
 
     // Update existing org only when completing first-time setup on that org (not createNew).
     if (orgId && !createNew) {
@@ -54,13 +87,13 @@ async function createBookingOrg({
             [
                 String(businessName).trim(),
                 String(hostName).trim(),
-                String(tradeType).trim(),
+                resolvedTradeType,
                 String(phone || '').trim(),
                 String(serviceArea || '').trim(),
                 String(email || '').trim(),
                 currencyCode,
-                acceptingEmergencies !== false,
-                String(emergencyNote || '').trim(),
+                resolvedAccepting,
+                resolvedNote,
                 await uniqueOrgSlug(businessName, query),
                 orgId
             ]
@@ -72,7 +105,8 @@ async function createBookingOrg({
             await seedDefaultEventTypes(org.id, {
                 standardDepositCents,
                 emergencyDepositCents,
-                acceptingEmergencies: acceptingEmergencies !== false
+                acceptingEmergencies: resolvedAccepting,
+                tradeType: resolvedTradeType
             });
         }
         return org;
@@ -87,20 +121,21 @@ async function createBookingOrg({
             orgSlug,
             String(businessName).trim(),
             String(hostName).trim(),
-            String(tradeType).trim(),
+            resolvedTradeType,
             String(phone || '').trim(),
             String(serviceArea || '').trim(),
             String(email || '').trim(),
             currencyCode,
-            acceptingEmergencies !== false,
-            String(emergencyNote || '').trim()
+            resolvedAccepting,
+            resolvedNote
         ]
     );
     const org = orgRes.rows[0];
     await seedDefaultEventTypes(org.id, {
         standardDepositCents,
         emergencyDepositCents,
-        acceptingEmergencies: acceptingEmergencies !== false
+        acceptingEmergencies: resolvedAccepting,
+        tradeType: resolvedTradeType
     });
 
     if (userId) {

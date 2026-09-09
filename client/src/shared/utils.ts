@@ -17,6 +17,12 @@ export function restrictPhoneInput(value: string, maxDigits = 11): string {
     return value.replace(/\D/g, '').slice(0, maxDigits);
 }
 
+/** Email or phone: emails pass through; phone-shaped input is capped at 11 UK digits. */
+export function restrictEmailOrPhoneInput(value: string, maxDigits = 11): string {
+    if (/[a-zA-Z@]/.test(value)) return value;
+    return restrictPhoneInput(value, maxDigits);
+}
+
 async function readError(res: Response, path: string): Promise<Error> {
     const status = res.status;
     try {
