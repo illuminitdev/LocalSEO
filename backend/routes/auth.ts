@@ -45,13 +45,15 @@ function authUserPayload(user: {
     name: any;
     must_change_password?: boolean;
     avatar_url?: string;
+    platform_role?: string;
 }) {
     return {
         id: user.id,
         email: user.email,
         name: user.name,
         avatarUrl: user.avatar_url || '',
-        mustChangePassword: Boolean(user.must_change_password)
+        mustChangePassword: Boolean(user.must_change_password),
+        platformRole: user.platform_role || 'customer'
     };
 }
 
@@ -177,7 +179,7 @@ router.post('/login', async (req: Request, res: Response) => {
         const normalizedEmail = String(email).trim().toLowerCase();
 
         const { rows } = await query(
-            `SELECT id, email, name, password_hash, must_change_password
+            `SELECT id, email, name, password_hash, must_change_password, platform_role
              FROM users WHERE email = $1`,
             [normalizedEmail]
         );

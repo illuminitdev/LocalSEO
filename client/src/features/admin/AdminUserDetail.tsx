@@ -95,7 +95,7 @@ export default function AdminUserDetail() {
         return (
             <div className="max-w-3xl space-y-4">
                 <Link to="/admin/users" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0F172A]">
-                    <ArrowLeft className="w-4 h-4" /> Back to customers
+                    <ArrowLeft className="w-4 h-4" /> Back to users
                 </Link>
                 <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{error}</p>
             </div>
@@ -103,7 +103,7 @@ export default function AdminUserDetail() {
     }
 
     if (!user) {
-        return <p className="text-sm text-[#64748B]">Loading customer…</p>;
+        return <p className="text-sm text-[#64748B]">Loading user…</p>;
     }
 
     const autopayOn = user.subscription ? user.subscription.autopayEnabled !== false : null;
@@ -116,7 +116,7 @@ export default function AdminUserDetail() {
                 to="/admin/users"
                 className="inline-flex items-center gap-2 text-sm font-semibold text-[#64748B] hover:text-[#0F172A]"
             >
-                <ArrowLeft className="w-4 h-4" /> Back to customers
+                <ArrowLeft className="w-4 h-4" /> Back to users
             </Link>
 
             {error && (
@@ -130,8 +130,8 @@ export default function AdminUserDetail() {
 
             <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
                 <div className="px-6 py-5 bg-gradient-to-r from-[#0F172A] to-[#1E293B] text-white">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-[#F59E0B]">Customer</p>
-                    <h2 className="text-2xl font-bold mt-1">{user.name || 'Customer'}</h2>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-[#F59E0B]">User</p>
+                    <h2 className="text-2xl font-bold mt-1">{user.name || 'User'}</h2>
                     <p className="text-sm text-white/70 mt-1">{user.email}</p>
                     {user.organization && (
                         <p className="text-xs text-white/50 mt-2">
@@ -264,7 +264,7 @@ export default function AdminUserDetail() {
                             className="rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 space-y-3"
                             onSubmit={(e: FormEvent) => e.preventDefault()}
                         >
-                            <h3 className="font-bold text-[#0F172A]">Manage this customer</h3>
+                            <h3 className="font-bold text-[#0F172A]">Manage this user</h3>
                             <label className="block">
                                 <span className="text-[11px] font-bold uppercase text-[#64748B]">Change plan</span>
                                 <select
@@ -292,7 +292,7 @@ export default function AdminUserDetail() {
                         </form>
                     ) : (
                         <p className="text-sm text-[#64748B] rounded-xl border border-dashed border-[#E2E8F0] px-4 py-3">
-                            Customer must log in once before you can change plan here.
+                            User must log in once before you can change plan here.
                         </p>
                     )}
                 </div>

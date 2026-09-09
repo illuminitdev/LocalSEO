@@ -38,8 +38,8 @@ export default function AdminServices() {
     return (
         <div className="space-y-6 max-w-6xl">
             <div className="rounded-2xl border border-[#FED7AA] bg-[#FFFBEB] px-4 py-3 text-sm text-amber-950">
-                Customers only see tools that are <strong>On</strong> for their plan. Change a person’s plan under{' '}
-                <strong>Customers</strong>.
+                Users only see tools that are <strong>On</strong> for their plan. Change a person’s plan under{' '}
+                <strong>Users</strong>.
             </div>
 
             <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">

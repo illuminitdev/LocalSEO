@@ -10,7 +10,7 @@ async function loadUserMembership(userId: string, opts: { orgId?: string | null;
 
     if (orgSlug) {
         const { rows } = await query(
-            `SELECT u.id, u.email, u.name, u.must_change_password, u.avatar_url,
+            `SELECT u.id, u.email, u.name, u.must_change_password, u.avatar_url, u.platform_role,
                     m.org_id, m.role, o.slug AS org_slug, o.name AS org_name
              FROM users u
              JOIN memberships m ON m.user_id = u.id
@@ -24,7 +24,7 @@ async function loadUserMembership(userId: string, opts: { orgId?: string | null;
 
     if (orgId) {
         const { rows } = await query(
-            `SELECT u.id, u.email, u.name, u.must_change_password, u.avatar_url,
+            `SELECT u.id, u.email, u.name, u.must_change_password, u.avatar_url, u.platform_role,
                     m.org_id, m.role, o.slug AS org_slug, o.name AS org_name
              FROM users u
              JOIN memberships m ON m.user_id = u.id
@@ -37,7 +37,7 @@ async function loadUserMembership(userId: string, opts: { orgId?: string | null;
     }
 
     const { rows } = await query(
-        `SELECT u.id, u.email, u.name, u.must_change_password, u.avatar_url,
+        `SELECT u.id, u.email, u.name, u.must_change_password, u.avatar_url, u.platform_role,
                 m.org_id, m.role, o.slug AS org_slug, o.name AS org_name
          FROM users u
          JOIN memberships m ON m.user_id = u.id
@@ -63,6 +63,22 @@ async function attachUserFromToken(req: any, token: string) {
     req.user = row;
     req.orgId = row.org_id;
     req.orgSlug = row.org_slug;
+    return true;
+}
+
+async function attachSalesAgentFromToken(req: any, token: string) {
+    const decoded: any = verifyToken(token);
+    const { rows } = await query(
+        `SELECT id, email, name, must_change_password, avatar_url, platform_role
+         FROM users
+         WHERE id = $1 AND platform_role = 'sales_agent'
+         LIMIT 1`,
+        [decoded.userId]
+    );
+    if (!rows.length) return false;
+    req.user = rows[0];
+    req.orgId = null;
+    req.orgSlug = null;
     return true;
 }
 
@@ -119,6 +135,21 @@ async function requireAuth(req: any, res: any, next: any) {
     }
 }
 
+/** Sales / telecaller portal — JWT user with platform_role = sales_agent (no org required). */
+async function requireSalesAgent(req: any, res: any, next: any) {
+    try {
+        const header = req.headers.authorization || '';
+        const token = header.startsWith('Bearer ') ? header.slice(7) : req.cookies?.token;
+        if (!token) return res.status(401).json({ error: 'Login required' });
+        if (!(await attachSalesAgentFromToken(req, token))) {
+            return res.status(403).json({ error: 'Sales agent access required' });
+        }
+        next();
+    } catch {
+        return res.status(401).json({ error: 'Invalid or expired session' });
+    }
+}
+
 async function resolveHostUserId(req: any) {
     if (req.user?.id) return req.user.id;
     if (!req.orgId) return null;
@@ -129,4 +160,4 @@ async function resolveHostUserId(req: any) {
     return rows[0]?.user_id || null;
 }
 
-export { requireAuth, requireHost, authRequired, resolveHostUserId };
+export { requireAuth, requireHost, requireSalesAgent, authRequired, resolveHostUserId };

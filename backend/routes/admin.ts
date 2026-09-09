@@ -92,6 +92,7 @@ function mapRegisteredUser(row: any) {
         name: row.user_name,
         createdAt: row.user_created_at,
         mustChangePassword: Boolean(row.must_change_password),
+        platformRole: row.platform_role === 'sales_agent' ? 'sales_agent' : 'customer',
         organization: row.org_id
             ? {
                   id: row.org_id,
@@ -159,6 +160,7 @@ function mapInviteUser(row: any) {
         name: row.full_name || '',
         createdAt: row.invite_created_at,
         mustChangePassword: true,
+        platformRole: 'customer' as const,
         organization: null,
         subscription: row.plan_id
             ? {
@@ -355,7 +357,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
         const { rows } = await query(
             `SELECT DISTINCT ON (u.id)
                     u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
-                    u.must_change_password,
+                    u.must_change_password, COALESCE(u.platform_role, 'customer') AS platform_role,
                     o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.setup_complete,
                     s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,

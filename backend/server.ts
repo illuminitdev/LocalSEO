@@ -14,6 +14,7 @@ import createHostRouter from './routes/host';
 import createPublicRouter from './routes/public';
 import authRouter from './routes/auth';
 import adminRouter from './routes/admin';
+import salesRouter from './routes/sales';
 import integrationsRouter from './routes/integrations';
 import { migrate } from './lib/db';
 import { loadOrgAppState, saveOrgAppState } from './lib/orgAppState';
@@ -1194,6 +1195,7 @@ app.post('/api/dashboard/update-stats', requireAuth, hydrateOrgFromDb, requireFe
 
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/sales', salesRouter);
 app.use('/api/host', createHostRouter({ stripeClient }));
 app.use('/api/public', createPublicRouter({ stripeClient }));
 app.use('/api/integrations', integrationsRouter);
