@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, LogOut, Layers, Settings, Menu, X, ClipboardList } from 'lucide-react';
+import { LayoutDashboard, Users, LogOut, Layers, Settings, Menu, X, ClipboardList, CheckSquare } from 'lucide-react';
 import { clearAdminToken } from './adminApi';
 import { cn } from '../../shared/utils';
 
@@ -8,6 +8,7 @@ const NAV = [
     { name: 'Overview', to: '/admin', icon: LayoutDashboard, end: true },
     { name: 'Users', to: '/admin/users', icon: Users },
     { name: 'Growth leads', to: '/admin/growth-audit-leads', icon: ClipboardList },
+    { name: 'Lead Tasks & CRM', to: '/admin/tasks', icon: CheckSquare },
     { name: 'Plan guide', to: '/admin/services', icon: Layers },
     { name: 'Settings', to: '/admin/settings', icon: Settings }
 ];
@@ -23,6 +24,12 @@ function pageTitle(pathname: string) {
         return {
             title: 'Growth audit leads',
             subtitle: 'Prospects who submitted the Free Growth Audit on ZappSites.'
+        };
+    }
+    if (pathname.startsWith('/admin/tasks')) {
+        return {
+            title: 'Lead Tasks & CRM',
+            subtitle: 'Assign tasks to telecallers, track audits, customer onboarding, and follow-ups.'
         };
     }
     if (pathname.startsWith('/admin/services')) {
