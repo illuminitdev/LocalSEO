@@ -1,6 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 
-const MAPS_JS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_JS_KEY as string | undefined)?.trim() || '';
+/** Demo Maps JS key — used only when VITE_STAGE is not prod and no env key is set (local/staging testing). */
+const DEV_DEMO_MAPS_JS_KEY = 'AIzaSyDKn-KGL7tIv0kJpDZOjAjeP_1rQ484CSY';
+
+function resolveMapsJsKey() {
+    const fromEnv =
+        (import.meta.env.VITE_GOOGLE_MAPS_JS_KEY as string | undefined)?.trim() ||
+        (import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined)?.trim() ||
+        '';
+    if (fromEnv) return fromEnv;
+    // Local Vite (`npm run dev`) or non-prod stage only — never for VITE_STAGE=prod
+    if (import.meta.env.DEV) return DEV_DEMO_MAPS_JS_KEY;
+    const stage = String(import.meta.env.VITE_STAGE || '').toLowerCase();
+    if (stage === 'dev' || stage === 'staging') return DEV_DEMO_MAPS_JS_KEY;
+    return '';
+}
+
+const MAPS_JS_KEY = resolveMapsJsKey();
 
 let mapsScriptPromise: Promise<void> | null = null;
 
@@ -65,7 +81,7 @@ export default function PlacesMap({
     markers,
     zoom,
     showPlaceholder = false,
-    placeholder = 'Map unavailable — set VITE_GOOGLE_MAPS_JS_KEY and ensure coordinates exist.'
+    placeholder = 'Map unavailable right now.'
 }: PlacesMapProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [failed, setFailed] = useState(false);

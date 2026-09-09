@@ -494,7 +494,7 @@ export default function RankTracker() {
                             placeholder={
                                 mapsJsConfigured()
                                     ? 'Could not load Google Maps.'
-                                    : 'Add VITE_GOOGLE_MAPS_JS_KEY in client/.env to show the live map with rank pins.'
+                                    : 'Map pins are unavailable in this environment.'
                             }
                         />
                     ) : (
