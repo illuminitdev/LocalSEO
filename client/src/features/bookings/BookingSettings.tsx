@@ -17,7 +17,7 @@ import {
     X
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiPut, cn, formatCents } from '../../shared/utils';
-import AvailabilityEditor, { type AvailabilitySettings } from './AvailabilityEditor';
+import AvailabilityEditor, { type AvailabilitySavePayload, type AvailabilitySettings } from './AvailabilityEditor';
 
 type Tab = 'events' | 'availability' | 'integrations' | 'profile' | 'reminders';
 
@@ -75,6 +75,7 @@ type Props = {
         organization?: any;
         eventTypes?: any[];
         availabilityDateRules?: any[];
+        availabilityWeeklyRules?: any[];
     } | null;
     onRefresh?: () => void;
 };
@@ -94,6 +95,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
     const [error, setError] = useState('');
     const [eventTypes, setEventTypes] = useState<any[]>([]);
     const [dateRules, setDateRules] = useState<any[]>([]);
+    const [weeklyRules, setWeeklyRules] = useState<any[]>([]);
     const [settings, setSettings] = useState<AvailabilitySettings>({
         timezone: 'Europe/London',
         minNoticeHours: 2,
@@ -135,6 +137,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         setOrg(dash.organization);
         setEventTypes(dash.eventTypes || []);
         setDateRules(dash.availabilityDateRules || []);
+        setWeeklyRules(dash.availabilityWeeklyRules || []);
         setSettings({
             timezone: dash.organization?.timezone || 'Europe/London',
             minNoticeHours: dash.organization?.min_notice_hours || 2,
@@ -196,7 +199,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         eventTypes.map((et) => templateKeyForName(et.name)).filter(Boolean) as EventTemplateKey[]
     );
 
-    const saveAvailability = async (payload: { settings: AvailabilitySettings; dateRules: { date: string; startTime: string; endTime: string; enabled: boolean }[] }) => {
+    const saveAvailability = async (payload: AvailabilitySavePayload) => {
         setSavingAvailability(true);
         setError('');
         try {
@@ -207,9 +210,11 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                     maxDaysAhead: payload.settings.maxDaysAhead,
                     bufferMinutes: payload.settings.bufferMinutes
                 },
+                weeklyRules: payload.weeklyRules,
                 dateRules: payload.dateRules
             });
             setDateRules(payload.dateRules);
+            setWeeklyRules(payload.weeklyRules);
             setSettings(payload.settings);
             setSaved(true);
             onRefresh?.();
@@ -624,8 +629,9 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 {tab === 'availability' && (
                     <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5">
                         <AvailabilityEditor
-                            key={dateRules.length}
+                            key={`${weeklyRules.length}-${dateRules.length}`}
                             initialDateRules={dateRules}
+                            initialWeeklyRules={weeklyRules}
                             settings={settings}
                             onSettingsChange={setSettings}
                             onSave={saveAvailability}

@@ -145,7 +145,17 @@ async function loadDashboard(orgId: any) {
         'SELECT * FROM availability_date_rules WHERE org_id = $1 ORDER BY avail_date, start_time',
         [orgId]
     );
-    return { organization: org, eventTypes, bookings, availabilityDateRules: dateRules };
+    const { rows: weeklyRules } = await query(
+        'SELECT * FROM availability_rules WHERE org_id = $1 ORDER BY day_of_week, start_time',
+        [orgId]
+    );
+    return {
+        organization: org,
+        eventTypes,
+        bookings,
+        availabilityDateRules: dateRules,
+        availabilityWeeklyRules: weeklyRules
+    };
 }
 
 
@@ -562,18 +572,36 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             'SELECT * FROM availability_date_rules WHERE org_id = $1 ORDER BY avail_date, start_time',
             [(req as any).orgId]
         );
-        res.json({ settings: org[0], dateRules });
+        const { rows: weeklyRules } = await query(
+            'SELECT * FROM availability_rules WHERE org_id = $1 ORDER BY day_of_week, start_time',
+            [(req as any).orgId]
+        );
+        res.json({ settings: org[0], dateRules, weeklyRules });
     });
 
     router.put('/availability', async (req: Request, res: Response) => {
         try {
-            const { settings, dateRules } = req.body || {};
+            const { settings, dateRules, weeklyRules } = req.body || {};
             if (settings) {
                 await query(
                     `UPDATE organizations SET timezone = COALESCE($1, timezone), min_notice_hours = COALESCE($2, min_notice_hours),
                      max_days_ahead = COALESCE($3, max_days_ahead), buffer_minutes = COALESCE($4, buffer_minutes) WHERE id = $5`,
                     [settings.timezone, settings.minNoticeHours, settings.maxDaysAhead, settings.bufferMinutes, (req as any).orgId]
                 );
+            }
+            if (Array.isArray(weeklyRules)) {
+                await query('DELETE FROM availability_rules WHERE org_id = $1', [(req as any).orgId]);
+                for (const r of weeklyRules) {
+                    const dayOfWeek = Number(r.dayOfWeek ?? r.day_of_week);
+                    const startTime = String(r.startTime || r.start_time || '').slice(0, 5);
+                    const endTime = String(r.endTime || r.end_time || '').slice(0, 5);
+                    if (Number.isNaN(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6 || !startTime || !endTime) continue;
+                    await query(
+                        `INSERT INTO availability_rules (org_id, day_of_week, start_time, end_time, enabled)
+                         VALUES ($1, $2, $3, $4, $5)`,
+                        [(req as any).orgId, dayOfWeek, startTime, endTime, r.enabled !== false]
+                    );
+                }
             }
             if (Array.isArray(dateRules)) {
                 await query('DELETE FROM availability_date_rules WHERE org_id = $1', [(req as any).orgId]);

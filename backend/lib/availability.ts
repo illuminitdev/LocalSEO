@@ -13,10 +13,9 @@ function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) {
     return aStart < bEnd && bStart < aEnd;
 }
 
-function toDateInTimezone(dateStr: string, timeStr: string, timezone: any) {
+function toDateInTimezone(dateStr: string, timeStr: string, _timezone: any) {
     const iso = `${dateStr}T${timeStr}:00`;
-    const d = new Date(iso);
-    return d;
+    return new Date(iso);
 }
 
 function localDateStr(d: Date) {
@@ -26,11 +25,55 @@ function localDateStr(d: Date) {
     return `${y}-${m}-${day}`;
 }
 
+function ruleDateStr(r: any): string | null {
+    if (r.avail_date) {
+        return r.avail_date instanceof Date ? localDateStr(r.avail_date) : String(r.avail_date).slice(0, 10);
+    }
+    if (r.date) return String(r.date).slice(0, 10);
+    return null;
+}
+
+function normalizeTime(t: any): string {
+    return String(t || '').slice(0, 5);
+}
+
+function dayOfWeekForDate(dateStr: string): number {
+    // Noon avoids DST / UTC edge cases on date-only strings
+    return new Date(`${dateStr}T12:00:00`).getDay();
+}
+
+/**
+ * Date overrides win when any row exists for that date (including disabled = closed).
+ * Otherwise fall back to weekly day_of_week rules.
+ */
+function resolveRulesForDate(dateStr: string, dateRules: any[], weeklyRules: any[]) {
+    const overrides = (dateRules || []).filter((r: any) => ruleDateStr(r) === dateStr);
+    if (overrides.length > 0) {
+        return overrides.filter((r: any) => {
+            if (r.enabled === false) return false;
+            const start = normalizeTime(r.start_time ?? r.startTime);
+            const end = normalizeTime(r.end_time ?? r.endTime);
+            return start && end && parseTimeToMinutes(end) > parseTimeToMinutes(start);
+        });
+    }
+    const dow = dayOfWeekForDate(dateStr);
+    return (weeklyRules || []).filter((r: any) => {
+        if (r.enabled === false) return false;
+        const ruleDow = Number(r.day_of_week ?? r.dayOfWeek);
+        if (ruleDow !== dow) return false;
+        const start = normalizeTime(r.start_time ?? r.startTime);
+        const end = normalizeTime(r.end_time ?? r.endTime);
+        return start && end && parseTimeToMinutes(end) > parseTimeToMinutes(start);
+    });
+}
+
 function generateSlots({
     fromDate,
     toDate,
     timezone,
     rules,
+    weeklyRules,
+    dateRules,
     durationMinutes,
     bufferMinutes,
     minNoticeHours,
@@ -43,26 +86,21 @@ function generateSlots({
     const minStart = new Date(now.getTime() + minNoticeHours * 60 * 60 * 1000);
     const maxEnd = new Date(now.getTime() + maxDaysAhead * 24 * 60 * 60 * 1000);
 
+    // Back-compat: older callers passed only `rules` (date rules)
+    const resolvedDateRules = dateRules || rules || [];
+    const resolvedWeekly = weeklyRules || [];
+
     const start = new Date(`${fromDate}T00:00:00`);
     const end = new Date(`${toDate}T23:59:59`);
 
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         if (d > maxEnd) break;
         const dateStr = localDateStr(d);
-        const dayRules = rules.filter((r: any) => {
-            if (r.enabled === false) return false;
-            let ruleDate: string | null = null;
-            if (r.avail_date) {
-                ruleDate = r.avail_date instanceof Date ? localDateStr(r.avail_date) : String(r.avail_date).slice(0, 10);
-            } else if (r.date) {
-                ruleDate = String(r.date).slice(0, 10);
-            }
-            return ruleDate === dateStr;
-        });
+        const dayRules = resolveRulesForDate(dateStr, resolvedDateRules, resolvedWeekly);
 
         for (const rule of dayRules) {
-            const windowStart = parseTimeToMinutes(rule.start_time);
-            const windowEnd = parseTimeToMinutes(rule.end_time);
+            const windowStart = parseTimeToMinutes(rule.start_time ?? rule.startTime);
+            const windowEnd = parseTimeToMinutes(rule.end_time ?? rule.endTime);
             let cursor = windowStart;
 
             while (cursor + durationMinutes <= windowEnd) {
@@ -112,4 +150,11 @@ function datesWithAvailability(slots: any[]) {
     return [...set];
 }
 
-export { generateSlots, datesWithAvailability, parseTimeToMinutes, minutesToTime };
+export {
+    generateSlots,
+    datesWithAvailability,
+    parseTimeToMinutes,
+    minutesToTime,
+    resolveRulesForDate,
+    dayOfWeekForDate
+};
