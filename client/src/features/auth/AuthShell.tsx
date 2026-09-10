@@ -13,11 +13,14 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
     return (
         <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center px-4 py-10">
             <div className="w-full max-w-[400px]">
-                <div className="flex items-center justify-center mb-8">
+                <div className="flex items-center justify-center mb-6">
                     <img
                         src="/localseo.png"
                         alt="Local SEO"
-                        className="h-10 w-auto max-w-[220px] object-contain"
+                        width={156}
+                        height={48}
+                        className="block"
+                        style={{ width: 156, height: 'auto', maxWidth: 156 }}
                     />
                 </div>
 
