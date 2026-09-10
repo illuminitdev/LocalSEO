@@ -12,9 +12,10 @@ function resolveCorsOrigins(): string[] | true {
         'http://localhost:5173',
         'http://127.0.0.1:5173',
         'http://localhost:4173',
-        'https://zappsites-local-seo.vercel.app',
+        'https://test.zappsites.com',
         'https://app.zappsites.com',
-        'https://www.zappsites.com'
+        'https://www.zappsites.com',
+        'https://staging.zappsites.com'
     ]
         .join(',')
         .split(',')

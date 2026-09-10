@@ -6,7 +6,7 @@ ZappSites Local SEO portal — TypeScript Express API + React SPA. Shares the **
 
 | Layer | Tech |
 |-------|------|
-| Frontend | React + Vite (`client/`) — Vercel OK |
+| Frontend | React + Vite (`client/`) — [test.zappsites.com](https://test.zappsites.com/) (dev) / [app.zappsites.com](https://app.zappsites.com/) (prod) |
 | Backend | TypeScript Express (`backend/`) → Node 22 Lambda |
 | Infra | AWS CDK (`backend/infra/`) → `LocalSeoApi-{dev\|prod}` |
 | DB | Shared ZappSites RDS via Secrets Manager + RDS Proxy |
@@ -45,9 +45,10 @@ Or from repo root:
 npm run deploy:api:dev
 ```
 
-**Marketing:** [www.zappsites.com](https://www.zappsites.com/) · staging: `https://staging.zappsites.com`  
+**Marketing prod:** [www.zappsites.com](https://www.zappsites.com/)  
+**Marketing staging (ZappSites, `dev`):** [staging.zappsites.com](https://staging.zappsites.com/)  
 **Portal prod:** [app.zappsites.com](https://app.zappsites.com/)  
-**Dev portal:** live URL TBD  
+**Portal test (this repo, `dev`):** [test.zappsites.com](https://test.zappsites.com/)  
 
 **Dev API:** `https://ud9zl0ww6d.execute-api.us-east-1.amazonaws.com`  
 **Prod API:** `https://zw8pq7vyi2.execute-api.us-east-1.amazonaws.com`

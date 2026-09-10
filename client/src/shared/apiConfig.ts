@@ -17,7 +17,7 @@ export function resolveApiBase(): string {
     const base = String(import.meta.env.VITE_API_BASE || '').trim();
     if (!base) {
         console.error(
-            '[apiConfig] VITE_API_BASE is missing. Set it in client/.env or Vercel env (Preview/Production).'
+            '[apiConfig] VITE_API_BASE is missing. Set it in client/.env (dev: test.zappsites.com stack / prod: app.zappsites.com).'
         );
         return '';
     }
