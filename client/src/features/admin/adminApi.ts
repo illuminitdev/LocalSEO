@@ -71,6 +71,7 @@ export type SalesAgent = {
     id: string;
     name: string;
     email: string;
+    avatar_url?: string | null;
     platform_role: string;
     created_at?: string;
 };
@@ -94,6 +95,7 @@ export type LeadTask = {
     assignedToUserId: string | null;
     assignedToName?: string | null;
     assignedToEmail?: string | null;
+    assignedToAvatarUrl?: string | null;
 };
 
 export type LeadActivity = {

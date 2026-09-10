@@ -956,7 +956,7 @@ router.get('/crm/sales-agents', requireAdmin, async (_req: Request, res: Respons
     try {
         await ensureCrmTables();
         const { rows } = await query(`
-            SELECT id, name, email, platform_role, created_at
+            SELECT id, name, email, avatar_url, platform_role, created_at
             FROM users
             WHERE platform_role = 'sales_agent'
             ORDER BY name ASC, email ASC
@@ -1017,7 +1017,8 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
                 t.updated_at AS "updatedAt",
                 t.assigned_to_user_id AS "assignedToUserId",
                 u.name AS "assignedToName",
-                u.email AS "assignedToEmail"
+                u.email AS "assignedToEmail",
+                u.avatar_url AS "assignedToAvatarUrl"
             FROM lead_tasks t
             LEFT JOIN users u ON u.id = t.assigned_to_user_id
             WHERE ${where.join(' AND ')}

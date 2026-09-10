@@ -23,6 +23,7 @@ router.get('/me', async (req: Request, res: Response) => {
             id: user.id,
             email: user.email,
             name: user.name,
+            avatarUrl: user.avatar_url || '',
             platformRole: user.platform_role || 'sales_agent',
             mustChangePassword: Boolean(user.must_change_password)
         }
