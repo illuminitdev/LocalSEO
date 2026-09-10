@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Check, Circle, Globe2, Loader2, MapPinned, Search, Sparkles } from 'lucide-react';
 import { pollFullAuditJob, startFullCrawl, fetchFullAudit } from './adminApi';
