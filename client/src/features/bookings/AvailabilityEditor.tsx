@@ -81,11 +81,16 @@ function weekDatesFor(dateStr: string): string[] {
     return out;
 }
 
+/** Today + future days in a Sun–Sat week (past days are never locked). */
+function remainingWeekDates(week: string[]): string[] {
+    const today = todayStr();
+    return week.filter((d) => d >= today);
+}
+
 function formatWeekRange(dates: string[]): string {
-    if (dates.length < 7) return '';
-    const a = formatDateLabel(dates[0]);
-    const b = formatDateLabel(dates[6]);
-    return `${a} – ${b}`;
+    if (!dates.length) return '';
+    if (dates.length === 1) return formatDateLabel(dates[0]);
+    return `${formatDateLabel(dates[0])} – ${formatDateLabel(dates[dates.length - 1])}`;
 }
 
 function rulesToOpenMap(rules: DateRuleInput[]): Record<string, DateSlot[]> {
@@ -140,6 +145,10 @@ function cloneSlots(slots: DateSlot[], idPrefix: string): DateSlot[] {
 }
 
 function slotsForWeek(dateSlots: Record<string, DateSlot[]>, weekDates: string[]): DateSlot[] {
+    const remaining = remainingWeekDates(weekDates);
+    for (const d of remaining) {
+        if (dateSlots[d]?.length) return cloneSlots(dateSlots[d], 'edit');
+    }
     for (const d of weekDates) {
         if (dateSlots[d]?.length) return cloneSlots(dateSlots[d], 'edit');
     }
@@ -205,16 +214,23 @@ export default function AvailabilityEditor({
 
     const days = useMemo(() => monthDays(month.year, month.month), [month]);
     const selectedWeek = selectedDate ? weekDatesFor(selectedDate) : [];
+    const selectedRemaining = useMemo(() => remainingWeekDates(selectedWeek), [selectedWeek]);
     const selectedIsClosed = selectedDate ? closedDates.has(selectedDate) : false;
     const openDates = useMemo(
         () => new Set(Object.keys(dateSlots).filter((d) => (dateSlots[d] || []).length > 0)),
         [dateSlots]
     );
 
+    /** Apply hours only to today + future days; strip open hours from past days in that week. */
     const applySlotsToWeek = (week: string[], slots: DateSlot[], closed: Set<string>) => {
+        const today = todayStr();
         setDateSlots((prev) => {
             const next = { ...prev };
             for (const d of week) {
+                if (d < today) {
+                    delete next[d];
+                    continue;
+                }
                 if (closed.has(d)) {
                     delete next[d];
                     continue;
@@ -317,7 +333,7 @@ export default function AvailabilityEditor({
         });
         setClosedDates((prev) => {
             const n = new Set(prev);
-            for (const d of selectedWeek) n.delete(d);
+            for (const d of selectedRemaining) n.delete(d);
             return n;
         });
         setWeekSlots([]);
@@ -326,7 +342,7 @@ export default function AvailabilityEditor({
     };
 
     const handleSave = async () => {
-        if (selectedWeek.length && weekSlots.length) {
+        if (selectedRemaining.length && weekSlots.length) {
             const validationError = validateSlotsList(weekSlots);
             if (validationError) {
                 setError(validationError);
@@ -334,9 +350,14 @@ export default function AvailabilityEditor({
             }
         }
 
+        const today = todayStr();
         const finalSlots: Record<string, DateSlot[]> = { ...dateSlots };
         if (selectedWeek.length) {
             for (const d of selectedWeek) {
+                if (d < today) {
+                    delete finalSlots[d];
+                    continue;
+                }
                 if (closedDates.has(d)) {
                     delete finalSlots[d];
                 } else if (weekSlots.length === 0) {
@@ -372,7 +393,7 @@ export default function AvailabilityEditor({
             <div>
                 <h2 className="font-bold text-[#0F172A]">Your availability</h2>
                 <p className="text-sm text-[#64748B] mt-1">
-                    Pick any day, set hours, Save — locks that week only (Sun–Sat), not every month or year.
+                    Pick any day, set hours, Save — locks remaining days that week (today onward), not past days.
                 </p>
             </div>
 
@@ -461,7 +482,7 @@ export default function AvailabilityEditor({
                         })}
                     </p>
                     <p className="text-[11px] text-[#94A3B8] mb-3">
-                        Amber = that week has open hours. Red = closed that date only.
+                        Amber = open hours (today + future). Past days in a week are never locked.
                     </p>
                     <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-[#64748B] mb-1">
                         {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
@@ -473,7 +494,7 @@ export default function AvailabilityEditor({
                             if (!d.inMonth) return <div key={i} />;
                             const isPast = d.date < todayStr();
                             const isClosed = closedDates.has(d.date);
-                            const hasHours = openDates.has(d.date);
+                            const hasHours = !isPast && openDates.has(d.date);
                             const inSelectedWeek = selectedWeek.includes(d.date);
                             return (
                                 <button
@@ -517,7 +538,7 @@ export default function AvailabilityEditor({
                         <div className="h-full flex flex-col items-center justify-center text-center py-12">
                             <Calendar className="w-10 h-10 text-[#CBD5E1] mb-3" />
                             <p className="text-sm text-[#64748B]">
-                                Pick a day to set hours for that week only (e.g. 13–19), then Save.
+                                Pick a day to set hours for the rest of that week (today onward), then Save.
                             </p>
                         </div>
                     ) : (
@@ -528,7 +549,9 @@ export default function AvailabilityEditor({
                                     <p className="text-xs text-[#64748B] mt-0.5">
                                         {selectedIsClosed
                                             ? 'Closed this date only — customers cannot book.'
-                                            : `Hours apply to this week only: ${formatWeekRange(selectedWeek)}.`}
+                                            : selectedRemaining.length
+                                              ? `Hours apply to remaining days this week: ${formatWeekRange(selectedRemaining)}.`
+                                              : 'All days in this week are in the past — pick a future week.'}
                                     </p>
                                 </div>
                                 {!selectedIsClosed && (
