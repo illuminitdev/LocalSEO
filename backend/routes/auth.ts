@@ -382,12 +382,18 @@ router.patch('/dev/subscription', requireAuth, async (req: Request, res: Respons
 
 router.get('/me', requireAuth, async (req: Request, res: Response) => {
     const user = (req as any).user;
-    const { rows: orgRows } = await query('SELECT * FROM organizations WHERE id = $1', [(req as any).orgId]);
-    const org = orgRows[0];
-    const { rows: eventTypes } = await query(
-        'SELECT * FROM event_types WHERE org_id = $1 ORDER BY sort_order, created_at',
-        [(req as any).orgId]
-    );
+    const orgId = (req as any).orgId;
+    let org = null;
+    let eventTypes: any[] = [];
+    if (orgId) {
+        const { rows: orgRows } = await query('SELECT * FROM organizations WHERE id = $1', [orgId]);
+        org = orgRows[0] || null;
+        const { rows: et } = await query(
+            'SELECT * FROM event_types WHERE org_id = $1 ORDER BY sort_order, created_at',
+            [orgId]
+        );
+        eventTypes = et;
+    }
     const { rows: cal } = await query(
         'SELECT id, calendar_id, connected_at FROM calendar_connections WHERE user_id = $1',
         [user.id]

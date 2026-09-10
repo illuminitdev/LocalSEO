@@ -1,22 +1,28 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Briefcase, LogOut, Menu, UserRound, X } from 'lucide-react';
+import { LayoutDashboard, LogOut, Menu, UserRound, X } from 'lucide-react';
 import { apiGet, cn } from '../../shared/utils';
 import { clearToken } from '../auth/auth';
 
-const NAV = [
-    { name: 'My Work', to: '/sales', icon: Briefcase, end: true },
-    { name: 'Account', to: '/sales/account', icon: UserRound, end: true }
+const NAV_GROUPS = [
+    {
+        section: 'OVERVIEW',
+        items: [{ name: 'Dashboard', to: '/sales', icon: LayoutDashboard, end: true }]
+    },
+    {
+        section: 'ACCOUNT',
+        items: [{ name: 'Account', to: '/sales/account', icon: UserRound, end: true }]
+    }
 ];
 
 function pageTitle(pathname: string) {
     if (pathname.startsWith('/sales/account')) {
-        return { title: 'Account', subtitle: 'Your profile and password.' };
+        return { title: 'Settings', subtitle: 'Manage your account profile and security.' };
     }
     if (pathname.startsWith('/sales/leads/')) {
         return { title: 'Lead', subtitle: 'Call, log outcome, and update status.' };
     }
-    return { title: 'My Work', subtitle: 'Leads assigned to you. Call, log, follow up.' };
+    return { title: 'Dashboard', subtitle: 'Leads assigned to you. Call, log, follow up.' };
 }
 
 export default function SalesLayout() {
@@ -25,6 +31,7 @@ export default function SalesLayout() {
     const heading = pageTitle(location.pathname);
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
+    const [avatarUrl, setAvatarUrl] = useState('');
     const [navOpen, setNavOpen] = useState(false);
 
     useEffect(() => {
@@ -32,6 +39,7 @@ export default function SalesLayout() {
             .then((data) => {
                 setName(data.user?.name || '');
                 setEmail(data.user?.email || '');
+                setAvatarUrl(data.user?.avatarUrl || data.user?.avatar_url || '');
             })
             .catch(() => {
                 clearToken();
@@ -62,11 +70,18 @@ export default function SalesLayout() {
         navigate('/', { replace: true });
     };
 
-    const initials = (name || email || 'S').charAt(0).toUpperCase();
+    const initials =
+        (name || email || 'S')
+            .split(' ')
+            .map((p) => p[0])
+            .join('')
+            .slice(0, 2)
+            .toUpperCase() || 'S';
 
     const sidebar = (
         <>
             <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2">
+<<<<<<< HEAD
                 <div className="min-w-0 flex-1">
                     <img
                         src="/localseo.png"
@@ -74,6 +89,22 @@ export default function SalesLayout() {
                         className="h-9 w-auto max-w-[180px] object-contain object-left"
                     />
                     <p className="mt-5 text-[13px] font-medium text-[#94A3B8]">Sales Portal</p>
+=======
+                <div className="min-w-0">
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white flex items-center justify-center font-black text-sm shadow-sm shrink-0">
+                            Z
+                        </div>
+                        <div className="min-w-0">
+                            <span className="text-base font-extrabold tracking-tight text-[#0F172A] block truncate">
+                                ZappSites
+                            </span>
+                            <span className="text-[11px] font-semibold text-[#64748B] block truncate">
+                                Telecaller & Sales
+                            </span>
+                        </div>
+                    </div>
+>>>>>>> a1692b6149cd7160a478c88b463a4b3573077c7d
                 </div>
                 <button
                     type="button"
@@ -85,37 +116,45 @@ export default function SalesLayout() {
                 </button>
             </div>
 
-            <nav className="px-3 flex-1 overflow-y-auto space-y-0.5 overscroll-contain">
-                {NAV.map((item) => (
-                    <NavLink
-                        key={item.to}
-                        to={item.to}
-                        end={item.end}
-                        onClick={() => setNavOpen(false)}
-                        className={({ isActive }) => {
-                            const active =
-                                item.to === '/sales'
-                                    ? location.pathname === '/sales' ||
-                                      location.pathname.startsWith('/sales/leads/')
-                                    : isActive;
-                            return cn(
-                                'flex items-center gap-3 px-3 py-2.5 min-h-[44px] rounded-xl text-sm transition-colors',
-                                active
-                                    ? 'bg-[#F59E0B] text-[#0F172A] font-semibold'
-                                    : 'text-[#64748B] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
-                            );
-                        }}
-                    >
-                        <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
-                        <span>{item.name}</span>
-                    </NavLink>
+            <nav className="flex-1 px-3 space-y-4 overflow-y-auto">
+                {NAV_GROUPS.map((grp) => (
+                    <div key={grp.section} className="space-y-1">
+                        <p className="px-3 text-[10px] font-extrabold uppercase tracking-wider text-[#94A3B8]">
+                            {grp.section}
+                        </p>
+                        {grp.items.map((item) => (
+                            <NavLink
+                                key={item.to}
+                                to={item.to}
+                                end={item.end}
+                                className={() => {
+                                    const active = item.end
+                                        ? location.pathname === item.to
+                                        : location.pathname.startsWith(item.to);
+                                    return cn(
+                                        'flex items-center gap-3 px-3 py-2.5 min-h-[44px] rounded-xl text-sm transition-colors',
+                                        active
+                                            ? 'bg-[#F59E0B] text-[#0F172A] font-semibold'
+                                            : 'text-[#64748B] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
+                                    );
+                                }}
+                            >
+                                <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
+                                <span>{item.name}</span>
+                            </NavLink>
+                        ))}
+                    </div>
                 ))}
             </nav>
 
             <div className="px-4 pb-4 pt-3 shrink-0 space-y-3 safe-pb">
                 <div className="flex items-center gap-3 px-1">
-                    <div className="w-9 h-9 rounded-full bg-[#0F172A] text-white flex items-center justify-center text-xs font-bold shrink-0">
-                        {initials}
+                    <div className="w-9 h-9 rounded-full bg-[#0F172A] text-white overflow-hidden flex items-center justify-center text-xs font-bold shrink-0 border border-[#E2E8F0]">
+                        {avatarUrl ? (
+                            <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                        ) : (
+                            initials
+                        )}
                     </div>
                     <div className="min-w-0 leading-tight">
                         <p className="text-sm font-semibold text-[#0F172A] truncate">{name || 'Sales'}</p>

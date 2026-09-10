@@ -52,6 +52,7 @@ async function loadUserMembership(userId: string, opts: { orgId?: string | null;
 
 async function attachUserFromToken(req: any, token: string) {
     const decoded: any = verifyToken(token);
+    if (!decoded || !decoded.userId) return false;
     const headerSlug = String(req.headers['x-booking-org'] || '').trim() || null;
     const jwtOrgId = decoded.orgId ? String(decoded.orgId) : null;
 
@@ -59,10 +60,30 @@ async function attachUserFromToken(req: any, token: string) {
         orgSlug: headerSlug,
         orgId: jwtOrgId
     });
-    if (!row) return false;
-    req.user = row;
-    req.orgId = row.org_id;
-    req.orgSlug = row.org_slug;
+    if (row) {
+        req.user = row;
+        req.orgId = row.org_id;
+        req.orgSlug = row.org_slug;
+        return true;
+    }
+
+    // Fallback for sales_agent or users without an organization
+    const { rows: uRows } = await query(
+        `SELECT id, email, name, must_change_password, avatar_url, platform_role
+         FROM users
+         WHERE id = $1
+         LIMIT 1`,
+        [decoded.userId]
+    );
+    if (!uRows.length) return false;
+    req.user = {
+        ...uRows[0],
+        org_id: null,
+        org_slug: null,
+        role: uRows[0].platform_role || 'sales_agent'
+    };
+    req.orgId = null;
+    req.orgSlug = null;
     return true;
 }
 
