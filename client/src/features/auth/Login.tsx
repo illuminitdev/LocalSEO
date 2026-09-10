@@ -177,7 +177,7 @@ export default function Login() {
                     target="_blank"
                     rel="noreferrer"
                 >
-                    Get started on zappsites.com
+                    Get started
                 </a>
             </p>
         </AuthShell>
