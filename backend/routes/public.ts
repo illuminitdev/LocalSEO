@@ -80,10 +80,10 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
     }
 
     async function computeAvailability(org: any, eventType: any, fromDate: any, toDate: any, userId: any) {
-        const { rows: rules } = await query(
-            'SELECT * FROM availability_date_rules WHERE org_id = $1 AND enabled = TRUE',
-            [org.id]
-        );
+        const [{ rows: dateRules }, { rows: weeklyRules }] = await Promise.all([
+            query('SELECT * FROM availability_date_rules WHERE org_id = $1', [org.id]),
+            query('SELECT * FROM availability_rules WHERE org_id = $1 AND enabled = TRUE', [org.id])
+        ]);
         const { rows: bookings } = await query(
             `SELECT start_at, end_at FROM bookings
              WHERE org_id = $1 AND status IN ('confirmed', 'done') AND start_at >= $2 AND start_at <= $3`,
@@ -97,7 +97,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             fromDate,
             toDate,
             timezone: org.timezone,
-            rules,
+            dateRules,
+            weeklyRules,
             durationMinutes: eventType.duration_minutes,
             bufferMinutes: org.buffer_minutes,
             minNoticeHours: org.min_notice_hours,
@@ -499,8 +500,10 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const fromDate = (req.query.from as string) || new Date().toISOString().slice(0, 10);
             const toDate = (req.query.to as string) || new Date(Date.now() + org.max_days_ahead * 86400000).toISOString().slice(0, 10);
             const userId = await getHostUserId(org.id);
-            const { rows: rules } = await query(
-                'SELECT id FROM availability_date_rules WHERE org_id = $1 AND enabled = TRUE LIMIT 1',
+            const { rows: anyRules } = await query(
+                `(SELECT id FROM availability_rules WHERE org_id = $1 AND enabled = TRUE LIMIT 1)
+                 UNION ALL
+                 (SELECT id FROM availability_date_rules WHERE org_id = $1 AND enabled = TRUE LIMIT 1)`,
                 [org.id]
             );
             const slots = await computeAvailability(org, eventType, fromDate, toDate, userId);
@@ -508,7 +511,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             res.json({
                 slots,
                 availableDates: datesWithAvailability(slots),
-                hasAvailabilityRules: rules.length > 0,
+                hasAvailabilityRules: anyRules.length > 0,
                 maxDaysAhead: org.max_days_ahead
             });
         } catch (err: any) {
