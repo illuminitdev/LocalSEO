@@ -51,12 +51,64 @@ export type AvailabilitySavePayload = {
 
 type Props = {
     initialDateRules: DateRuleInput[];
+    /** Legacy recurring rules — ignored in UI; cleared on save so hours no longer repeat forever. */
     initialWeeklyRules?: WeeklyRuleInput[];
     settings: AvailabilitySettings;
     onSettingsChange: (settings: AvailabilitySettings) => void;
     onSave: (payload: AvailabilitySavePayload) => Promise<void>;
     saving?: boolean;
 };
+
+function toDateKey(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+/** Sunday–Saturday week containing `dateStr` (matches calendar grid). */
+function weekDatesFor(dateStr: string): string[] {
+    const d = new Date(`${dateStr}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return [];
+    const sunday = new Date(d);
+    sunday.setDate(d.getDate() - d.getDay());
+    const out: string[] = [];
+    for (let i = 0; i < 7; i++) {
+        const x = new Date(sunday);
+        x.setDate(sunday.getDate() + i);
+        out.push(toDateKey(x));
+    }
+    return out;
+}
+
+function formatWeekRange(dates: string[]): string {
+    if (dates.length < 7) return '';
+    const a = formatDateLabel(dates[0]);
+    const b = formatDateLabel(dates[6]);
+    return `${a} – ${b}`;
+}
+
+function rulesToOpenMap(rules: DateRuleInput[]): Record<string, DateSlot[]> {
+    const map: Record<string, DateSlot[]> = {};
+    for (const r of rules) {
+        if (r.enabled === false) continue;
+        const date = String(r.date || r.avail_date || '').slice(0, 10);
+        const startTime = String(r.startTime || r.start_time || '').slice(0, 5);
+        const endTime = String(r.endTime || r.end_time || '').slice(0, 5);
+        if (!date || !startTime || !endTime) continue;
+        if (parseTimeToMinutes(endTime) <= parseTimeToMinutes(startTime)) continue;
+        if (!map[date]) map[date] = [];
+        map[date].push({
+            id: `${date}-${startTime}-${endTime}-${map[date].length}`,
+            startTime,
+            endTime
+        });
+    }
+    for (const date of Object.keys(map)) {
+        map[date].sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
+    }
+    return map;
+}
 
 function closedDatesFromRules(rules: DateRuleInput[]): Set<string> {
     const byDate: Record<string, { any: boolean; open: boolean }> = {};
@@ -79,34 +131,6 @@ function closedDatesFromRules(rules: DateRuleInput[]): Set<string> {
     return new Set(Object.keys(byDate).filter((d) => byDate[d].any && !byDate[d].open));
 }
 
-function weeklyRulesToTemplate(rules: WeeklyRuleInput[]): DateSlot[] {
-    const byDow: Record<number, DateSlot[]> = {};
-    for (let i = 0; i < 7; i++) byDow[i] = [];
-    for (const r of rules) {
-        if (r.enabled === false) continue;
-        const dow = Number(r.dayOfWeek ?? r.day_of_week);
-        if (Number.isNaN(dow) || dow < 0 || dow > 6) continue;
-        const startTime = String(r.startTime || r.start_time || '').slice(0, 5);
-        const endTime = String(r.endTime || r.end_time || '').slice(0, 5);
-        if (!startTime || !endTime) continue;
-        if (parseTimeToMinutes(endTime) <= parseTimeToMinutes(startTime)) continue;
-        byDow[dow].push({
-            id: `w-${dow}-${startTime}-${endTime}-${byDow[dow].length}`,
-            startTime,
-            endTime
-        });
-    }
-    for (let i = 0; i < 7; i++) {
-        byDow[i].sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
-    }
-    // Prefer the fullest weekday as the shared template (all days should match after save).
-    let best: DateSlot[] = [];
-    for (let i = 0; i < 7; i++) {
-        if ((byDow[i] || []).length > best.length) best = byDow[i];
-    }
-    return cloneSlots(best, 'tpl');
-}
-
 function cloneSlots(slots: DateSlot[], idPrefix: string): DateSlot[] {
     return slots.map((s, i) => ({
         id: `${idPrefix}-${s.startTime}-${s.endTime}-${i}`,
@@ -115,29 +139,30 @@ function cloneSlots(slots: DateSlot[], idPrefix: string): DateSlot[] {
     }));
 }
 
-function mapToWeeklyRules(template: DateSlot[]) {
-    const rules: { dayOfWeek: number; startTime: string; endTime: string; enabled: boolean }[] = [];
-    for (let dow = 0; dow < 7; dow++) {
-        for (const slot of template) {
+function slotsForWeek(dateSlots: Record<string, DateSlot[]>, weekDates: string[]): DateSlot[] {
+    for (const d of weekDates) {
+        if (dateSlots[d]?.length) return cloneSlots(dateSlots[d], 'edit');
+    }
+    return [];
+}
+
+function mapToDateRules(dateSlots: Record<string, DateSlot[]>, closedDates: Set<string>) {
+    const rules: { date: string; startTime: string; endTime: string; enabled: boolean }[] = [];
+    for (const [date, slots] of Object.entries(dateSlots)) {
+        if (closedDates.has(date)) continue;
+        for (const slot of slots) {
             rules.push({
-                dayOfWeek: dow,
+                date,
                 startTime: slot.startTime,
                 endTime: slot.endTime,
                 enabled: true
             });
         }
     }
+    for (const date of closedDates) {
+        rules.push({ date, startTime: '00:00', endTime: '00:00', enabled: false });
+    }
     return rules;
-}
-
-/** Closed dates only — open per-date overrides are cleared on save (weekly template wins). */
-function mapToClosedDateRules(closedDates: Set<string>) {
-    return [...closedDates].map((date) => ({
-        date,
-        startTime: '00:00',
-        endTime: '00:00',
-        enabled: false
-    }));
 }
 
 function validateSlotsList(slots: DateSlot[]): string | null {
@@ -159,7 +184,7 @@ function validateSlotsList(slots: DateSlot[]): string | null {
 
 export default function AvailabilityEditor({
     initialDateRules,
-    initialWeeklyRules = [],
+    initialWeeklyRules: _initialWeeklyRules = [],
     settings,
     onSettingsChange,
     onSave,
@@ -170,50 +195,98 @@ export default function AvailabilityEditor({
         return { year: n.getFullYear(), month: n.getMonth() };
     });
     const [selectedDate, setSelectedDate] = useState('');
-    /** Hours applied to every weekday on save. */
-    const [templateSlots, setTemplateSlots] = useState<DateSlot[]>(() =>
-        weeklyRulesToTemplate(initialWeeklyRules)
+    const [dateSlots, setDateSlots] = useState<Record<string, DateSlot[]>>(() =>
+        rulesToOpenMap(initialDateRules)
     );
     const [closedDates, setClosedDates] = useState<Set<string>>(() => closedDatesFromRules(initialDateRules));
+    const [weekSlots, setWeekSlots] = useState<DateSlot[]>([]);
     const [error, setError] = useState('');
     const [editingId, setEditingId] = useState<string | null>(null);
 
     const days = useMemo(() => monthDays(month.year, month.month), [month]);
-    const hasWeeklyHours = templateSlots.length > 0;
+    const selectedWeek = selectedDate ? weekDatesFor(selectedDate) : [];
     const selectedIsClosed = selectedDate ? closedDates.has(selectedDate) : false;
+    const openDates = useMemo(
+        () => new Set(Object.keys(dateSlots).filter((d) => (dateSlots[d] || []).length > 0)),
+        [dateSlots]
+    );
+
+    const applySlotsToWeek = (week: string[], slots: DateSlot[], closed: Set<string>) => {
+        setDateSlots((prev) => {
+            const next = { ...prev };
+            for (const d of week) {
+                if (closed.has(d)) {
+                    delete next[d];
+                    continue;
+                }
+                if (slots.length === 0) {
+                    delete next[d];
+                } else {
+                    next[d] = cloneSlots(slots, d);
+                }
+            }
+            return next;
+        });
+    };
+
+    const selectDate = (date: string) => {
+        const week = weekDatesFor(date);
+        setSelectedDate(date);
+        setWeekSlots(slotsForWeek(dateSlots, week));
+        setEditingId(null);
+        setError('');
+    };
 
     const updateSlot = (id: string, patch: Partial<DateSlot>) => {
-        setTemplateSlots((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+        setWeekSlots((prev) => {
+            const next = prev.map((s) => (s.id === id ? { ...s, ...patch } : s));
+            if (selectedWeek.length) applySlotsToWeek(selectedWeek, next, closedDates);
+            return next;
+        });
     };
 
     const deleteSlot = (id: string) => {
-        setTemplateSlots((prev) => prev.filter((s) => s.id !== id));
+        setWeekSlots((prev) => {
+            const next = prev.filter((s) => s.id !== id);
+            if (selectedWeek.length) applySlotsToWeek(selectedWeek, next, closedDates);
+            return next;
+        });
         if (editingId === id) setEditingId(null);
     };
 
     const addSlot = () => {
-        if (selectedDate) {
-            setClosedDates((prev) => {
-                if (!prev.has(selectedDate)) return prev;
-                const n = new Set(prev);
-                n.delete(selectedDate);
-                return n;
-            });
-        }
-        const next = suggestNextSlot(templateSlots);
+        if (!selectedDate || !selectedWeek.length) return;
+        setClosedDates((prev) => {
+            if (!prev.has(selectedDate)) return prev;
+            const n = new Set(prev);
+            n.delete(selectedDate);
+            return n;
+        });
+        const nextSuggest = suggestNextSlot(weekSlots);
         const slot: DateSlot = {
-            id: `tpl-${Date.now()}`,
-            startTime: next.startTime,
-            endTime: next.endTime
+            id: `slot-${Date.now()}`,
+            startTime: nextSuggest.startTime,
+            endTime: nextSuggest.endTime
         };
-        setTemplateSlots((prev) =>
-            [...prev, slot].sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime))
-        );
+        setWeekSlots((prev) => {
+            const next = [...prev, slot].sort(
+                (a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime)
+            );
+            const closed = new Set(closedDates);
+            closed.delete(selectedDate);
+            applySlotsToWeek(selectedWeek, next, closed);
+            return next;
+        });
         setEditingId(slot.id);
         setError('');
     };
 
     const markDateClosed = (date: string) => {
+        setDateSlots((prev) => {
+            const copy = { ...prev };
+            delete copy[date];
+            return copy;
+        });
         setClosedDates((prev) => new Set(prev).add(date));
         setEditingId(null);
         setError('');
@@ -225,20 +298,72 @@ export default function AvailabilityEditor({
             n.delete(date);
             return n;
         });
+        // Restore this day from the rest of the week's hours if any
+        const week = weekDatesFor(date);
+        const restored = slotsForWeek(dateSlots, week.filter((d) => d !== date));
+        if (restored.length) {
+            setDateSlots((prev) => ({ ...prev, [date]: cloneSlots(restored, date) }));
+            if (selectedDate === date) setWeekSlots(cloneSlots(restored, 'edit'));
+        }
         setEditingId(null);
     };
 
-    const handleSave = async () => {
-        const validationError = validateSlotsList(templateSlots);
-        if (validationError) {
-            setError(validationError);
-            return;
-        }
+    const clearThisWeek = () => {
+        if (!selectedWeek.length) return;
+        setDateSlots((prev) => {
+            const next = { ...prev };
+            for (const d of selectedWeek) delete next[d];
+            return next;
+        });
+        setClosedDates((prev) => {
+            const n = new Set(prev);
+            for (const d of selectedWeek) n.delete(d);
+            return n;
+        });
+        setWeekSlots([]);
+        setEditingId(null);
         setError('');
+    };
+
+    const handleSave = async () => {
+        if (selectedWeek.length && weekSlots.length) {
+            const validationError = validateSlotsList(weekSlots);
+            if (validationError) {
+                setError(validationError);
+                return;
+            }
+        }
+
+        const finalSlots: Record<string, DateSlot[]> = { ...dateSlots };
+        if (selectedWeek.length) {
+            for (const d of selectedWeek) {
+                if (closedDates.has(d)) {
+                    delete finalSlots[d];
+                } else if (weekSlots.length === 0) {
+                    delete finalSlots[d];
+                } else {
+                    finalSlots[d] = cloneSlots(weekSlots, d);
+                }
+            }
+        }
+
+        for (const [date, slots] of Object.entries(finalSlots)) {
+            if (closedDates.has(date)) continue;
+            const err = validateSlotsList(slots);
+            if (err) {
+                setError(`${formatDateLabel(date)}: ${err}`);
+                return;
+            }
+        }
+
+        setError('');
+        setDateSlots(finalSlots);
+
         await onSave({
             settings,
-            weeklyRules: mapToWeeklyRules(templateSlots),
-            dateRules: mapToClosedDateRules(closedDates)
+            // Clear forever-recurring weekly template — availability is week-specific date rules only
+            weeklyRules: [],
+            dateRules: mapToDateRules(finalSlots, closedDates)
         });
     };
 
@@ -247,7 +372,7 @@ export default function AvailabilityEditor({
             <div>
                 <h2 className="font-bold text-[#0F172A]">Your availability</h2>
                 <p className="text-sm text-[#64748B] mt-1">
-                    Pick any date, set hours, Save — applies to every day of the week.
+                    Pick any day, set hours, Save — locks that week only (Sun–Sat), not every month or year.
                 </p>
             </div>
 
@@ -298,7 +423,7 @@ export default function AvailabilityEditor({
                 <div className="p-5 bg-[#FAFBFC]">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
-                            <Calendar className="w-4 h-4 text-[#F59E0B]" /> Weekly hours
+                            <Calendar className="w-4 h-4 text-[#F59E0B]" /> Hours by week
                         </h3>
                         <div className="flex gap-1">
                             <button
@@ -336,7 +461,7 @@ export default function AvailabilityEditor({
                         })}
                     </p>
                     <p className="text-[11px] text-[#94A3B8] mb-3">
-                        Amber = open hours every week. Red = closed that date only.
+                        Amber = that week has open hours. Red = closed that date only.
                     </p>
                     <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-[#64748B] mb-1">
                         {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
@@ -348,30 +473,28 @@ export default function AvailabilityEditor({
                             if (!d.inMonth) return <div key={i} />;
                             const isPast = d.date < todayStr();
                             const isClosed = closedDates.has(d.date);
+                            const hasHours = openDates.has(d.date);
+                            const inSelectedWeek = selectedWeek.includes(d.date);
                             return (
                                 <button
                                     key={d.date}
                                     type="button"
                                     disabled={isPast}
-                                    onClick={() => {
-                                        setSelectedDate(d.date);
-                                        setEditingId(null);
-                                        setError('');
-                                    }}
+                                    onClick={() => selectDate(d.date)}
                                     className={cn(
                                         'aspect-square rounded-lg text-sm font-bold transition relative flex flex-col items-center justify-center',
                                         isPast
                                             ? 'text-[#CBD5E1] cursor-not-allowed'
                                             : 'hover:bg-[#0F172A] hover:text-white border border-[#E2E8F0] bg-white',
                                         selectedDate === d.date && 'bg-[#0F172A] text-white border-[#0F172A]',
-                                        !isClosed &&
-                                            hasWeeklyHours &&
+                                        inSelectedWeek &&
                                             selectedDate !== d.date &&
-                                            'bg-[#FFFBEB]'
+                                            'ring-1 ring-[#F59E0B]/40',
+                                        !isClosed && hasHours && selectedDate !== d.date && 'bg-[#FFFBEB]'
                                     )}
                                 >
                                     {d.date.slice(8)}
-                                    {(hasWeeklyHours || isClosed) && (
+                                    {(hasHours || isClosed) && (
                                         <span
                                             className={cn(
                                                 'absolute bottom-1 w-1 h-1 rounded-full',
@@ -394,7 +517,7 @@ export default function AvailabilityEditor({
                         <div className="h-full flex flex-col items-center justify-center text-center py-12">
                             <Calendar className="w-10 h-10 text-[#CBD5E1] mb-3" />
                             <p className="text-sm text-[#64748B]">
-                                Pick any date, set hours, then Save — same hours every day of the week.
+                                Pick a day to set hours for that week only (e.g. 13–19), then Save.
                             </p>
                         </div>
                     ) : (
@@ -405,7 +528,7 @@ export default function AvailabilityEditor({
                                     <p className="text-xs text-[#64748B] mt-0.5">
                                         {selectedIsClosed
                                             ? 'Closed this date only — customers cannot book.'
-                                            : 'Hours you set here apply to every day of the week when you save.'}
+                                            : `Hours apply to this week only: ${formatWeekRange(selectedWeek)}.`}
                                     </p>
                                 </div>
                                 {!selectedIsClosed && (
@@ -433,22 +556,31 @@ export default function AvailabilityEditor({
                                         onClick={() => clearClosed(selectedDate)}
                                         className="px-3 py-1.5 rounded-lg border border-[#E2E8F0] text-[#64748B] text-xs font-bold"
                                     >
-                                        Clear closed (use weekly hours)
+                                        Clear closed
                                     </button>
                                 )}
+                                <button
+                                    type="button"
+                                    onClick={clearThisWeek}
+                                    className="px-3 py-1.5 rounded-lg border border-[#E2E8F0] text-[#64748B] text-xs font-bold"
+                                >
+                                    Clear this week
+                                </button>
                             </div>
 
                             {selectedIsClosed ? (
                                 <div className="border border-dashed border-red-200 rounded-xl p-8 text-center bg-red-50/50">
                                     <p className="text-sm text-red-700 font-medium">This date is marked closed.</p>
                                 </div>
-                            ) : templateSlots.length === 0 ? (
+                            ) : weekSlots.length === 0 ? (
                                 <div className="border border-dashed border-[#E2E8F0] rounded-xl p-6 text-center">
-                                    <p className="text-sm text-[#94A3B8]">No hours yet — add hours, then Save.</p>
+                                    <p className="text-sm text-[#94A3B8]">
+                                        No hours for this week — add hours, then Save.
+                                    </p>
                                 </div>
                             ) : (
                                 <div className="space-y-2">
-                                    {templateSlots.map((slot) => {
+                                    {weekSlots.map((slot) => {
                                         const isEditing = editingId === slot.id;
                                         return (
                                             <div
