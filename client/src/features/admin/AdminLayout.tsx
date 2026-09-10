@@ -1,8 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Users, LogOut, Layers, Settings, Menu, X, ClipboardList, CheckSquare, ClipboardCheck } from 'lucide-react';
 import { clearAdminToken } from './adminApi';
 import { cn } from '../../shared/utils';
+
+const SIDEBAR_MIN = 200;
+const SIDEBAR_MAX = 380;
+const SIDEBAR_DEFAULT = 260;
 
 const NAV = [
     { name: 'Overview', to: '/admin', icon: LayoutDashboard, end: true },
@@ -65,6 +69,15 @@ export default function AdminLayout() {
     const location = useLocation();
     const heading = pageTitle(location.pathname);
     const [navOpen, setNavOpen] = useState(false);
+    const [sidebarWidth, setSidebarWidth] = useState(() => {
+        try {
+            const n = Number(localStorage.getItem('lp.sidebarWidth.admin'));
+            if (Number.isFinite(n)) return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(n)));
+        } catch { /* ignore */ }
+        return SIDEBAR_DEFAULT;
+    });
+    const [resizing, setResizing] = useState(false);
+    const resizeRef = useRef<{ startX: number; startW: number } | null>(null);
 
     useEffect(() => {
         setNavOpen(false);
@@ -84,6 +97,37 @@ export default function AdminLayout() {
         };
     }, [navOpen]);
 
+    useEffect(() => {
+        try {
+            localStorage.setItem('lp.sidebarWidth.admin', String(sidebarWidth));
+        } catch { /* ignore */ }
+    }, [sidebarWidth]);
+
+    useEffect(() => {
+        if (!resizing) return;
+        const onMove = (e: PointerEvent) => {
+            const d = resizeRef.current;
+            if (!d) return;
+            setSidebarWidth(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(d.startW + (e.clientX - d.startX)))));
+        };
+        const onUp = () => {
+            resizeRef.current = null;
+            setResizing(false);
+        };
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
+        return () => {
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onUp);
+        };
+    }, [resizing]);
+
     const logout = () => {
         clearAdminToken();
         navigate('/', { replace: true });
@@ -91,15 +135,12 @@ export default function AdminLayout() {
 
     const sidebar = (
         <>
-            <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                    <img
-                        src="/localseo.png"
-                        alt="Local SEO"
-                        className="h-9 w-auto max-w-[180px] object-contain object-left"
-                    />
-                    <p className="mt-5 text-[13px] font-medium text-[#94A3B8]">Admin Portal</p>
-                </div>
+            <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2 border-b-2 border-[#E2E8F0]">
+                <img
+                    src="/localseo.png"
+                    alt="Local SEO"
+                    className="h-9 w-auto max-w-[180px] object-contain object-left min-w-0 flex-1"
+                />
                 <button
                     type="button"
                     className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9]"
@@ -110,7 +151,7 @@ export default function AdminLayout() {
                 </button>
             </div>
 
-            <nav className="px-3 flex-1 overflow-y-auto space-y-0.5 overscroll-contain">
+            <nav className="px-3 pt-3 flex-1 overflow-y-auto space-y-0.5 overscroll-contain">
                 {NAV.map((item) => (
                     <NavLink
                         key={item.to}
@@ -138,7 +179,7 @@ export default function AdminLayout() {
                 ))}
             </nav>
 
-            <div className="px-4 pb-4 pt-3 shrink-0 space-y-3 safe-pb">
+            <div className="px-4 pb-4 pt-3 border-t-2 border-[#E2E8F0] shrink-0 space-y-3 safe-pb">
                 <div className="flex items-center gap-3 px-1">
                     <div className="w-9 h-9 rounded-full bg-[#0F172A] text-white flex items-center justify-center text-xs font-bold shrink-0">
                         AD
@@ -162,8 +203,25 @@ export default function AdminLayout() {
 
     return (
         <div className="flex h-[100dvh] bg-[#EEF2F6] text-[#0F172A] overflow-hidden">
-            <aside className="hidden lg:flex w-[260px] h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden">
+            <aside
+                className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden"
+                style={{ width: sidebarWidth }}
+            >
                 {sidebar}
+                <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize sidebar"
+                    onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.preventDefault();
+                        resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
+                        setResizing(true);
+                    }}
+                    className="absolute inset-y-0 right-0 z-20 w-1.5 translate-x-1/2 cursor-col-resize touch-none"
+                >
+                    <span className={`pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 ${resizing ? 'bg-[#F59E0B]' : 'bg-transparent hover:bg-[#CBD5E1]'}`} />
+                </div>
             </aside>
 
             {navOpen && (
