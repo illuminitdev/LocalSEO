@@ -95,6 +95,56 @@ Login with `tester@example.com` / `Zs-TestPass1!` → only local presence module
 - **Dev / testing**: `admin@localseo.net`
 Emails are stage-locked in code (not taken from `.env`).
 
+### Full Audit (admin only)
+
+Sidebar **Full Audit** — deep / fullcrawl history from the **shared ZappSites RDS** `audits` / `audit_jobs` tables (`kind=deep`). Do not create a second audit database.
+
+**Report quality APIs (admin Full Audit worker — not client Visibility / Growth Audit):**
+
+| Job | API |
+|-----|-----|
+| Local pack for deep report | **DataForSEO** Maps live (`DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD`; Secrets `Zappsites/prod/DATAFORSEO_*`) |
+| GBP / Places on worker | `GOOGLE_PLACES_API_KEY` (demo key OK for now) |
+| AI deep report | Paid Gemini via `Zappsites/prod/GEMINI_API_KEY` on the audit worker |
+
+Redeploy worker after changing those secrets: `npm run deploy:worker:prod` (Docker required).
+
+Phase 1 BFF proxies to the existing ZappSites ops API (server-side `AUDIT_OPS_SECRET`; never in the browser):
+
+| Env | Purpose |
+|-----|---------|
+| `ZAPP_SITES_API_BASE` | ZappSites API (prod: `https://dvj0p5k5d0.execute-api.us-east-1.amazonaws.com`) |
+| `AUDIT_OPS_SECRET` | From Secrets Manager `Zappsites/{stage}/AUDIT_OPS_SECRET` |
+| `ZAPP_SITES_ORIGIN` | Share links (`https://www.zappsites.com`) |
+
+Admin actions: **New full audit** (poll job ~4s), **Copy shareable link** (`/audit-report/{id}`), **Download PDF** (print-quality A4 via ZappSites PDF pipeline).
+
+Public Growth Audit + marketing `/audit-report/:id` stay on ZappSites. Do not ask ZappSites to remove `/fullcrawl` until Local SEO Phase 1 **and** worker deploy from this repo are verified.
+
+### Full Audit worker deploy (Phase 2)
+
+Worker package: [`backend/audit-worker/`](backend/audit-worker/) — Docker Lambda that consumes `zappsites-{stage}-audit-jobs` and writes the shared RDS `audits` / `audit_jobs` tables (never create/drop/truncate those).
+
+**Docker Desktop must be running** for worker deploy (`docker ps`). Not required for API-only deploys. First image build can take 20–45 minutes on Windows.
+
+```powershell
+# Prereqs
+aws sts get-caller-identity
+docker ps
+
+# API BFF only (no Docker)
+cd c:\Users\svpku\LocalPulse
+npm run deploy:api:prod
+# optional: npm run deploy:api:dev
+
+# Audit worker — updates existing ZappsitesAuditWorker-prod (reuses queue)
+cd c:\Users\svpku\LocalPulse\backend
+npm run deploy:worker:prod
+# optional: npm run deploy:worker:dev
+```
+
+Stacks / names (prod): CloudFormation `ZappsitesAuditWorker-prod`, Lambda `zappsites-prod-audit-worker`, SQS `zappsites-prod-audit-jobs` (imported, not recreated). With `reuseAuditQueue=true` (default), the SQS→Lambda event source stays the existing **Enabled** mapping (not recreated in CFN — avoids duplicate consumers / stale UUID updates). After a successful worker deploy + one fullcrawl from Admin Full Audit, notify ZappSites to remove `/fullcrawl` and stop deploying the audit worker from the zappsites repo.
+
 ## Neon
 
 Removed. Do not add Neon URLs for AWS paths. Use ZappSites RDS Proxy + Secrets Manager.

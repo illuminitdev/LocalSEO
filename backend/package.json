@@ -12,8 +12,11 @@
     "migrate:app-state": "tsx scripts/migrate-app-state.ts",
     "seed:subscription": "tsx scripts/seed-subscription.ts",
     "prepare:lambda": "node scripts/prepare-lambda.js",
+    "prepare:audit-worker": "npm run build --prefix audit-worker",
     "deploy:dev": "npm run prepare:lambda && npm run deploy:dev --prefix infra",
     "deploy:prod": "npm run prepare:lambda && npm run deploy:prod --prefix infra",
+    "deploy:worker:dev": "npm run prepare:lambda && npm run prepare:audit-worker && npm run deploy:worker:dev --prefix infra",
+    "deploy:worker:prod": "npm run prepare:lambda && npm run prepare:audit-worker && npm run deploy:worker:prod --prefix infra",
     "cdk:synth": "npm run prepare:lambda && npm run synth --prefix infra -- -c stage=dev",
     "cdk:diff": "npm run prepare:lambda && npm run diff --prefix infra -- -c stage=dev"
   },

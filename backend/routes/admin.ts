@@ -13,8 +13,10 @@ import {
     isValidPlanId
 } from '../lib/planCatalog';
 import Stripe from 'stripe';
+import adminFullAuditsRouter from './adminFullAudits';
 
 const router = Router();
+router.use(adminFullAuditsRouter);
 
 function getStripeClient() {
     if (!process.env.STRIPE_SECRET_KEY) return null;

@@ -36,6 +36,9 @@ import AdminServices from './features/admin/AdminServices';
 import AdminSettings from './features/admin/AdminSettings';
 import AdminGrowthAuditLeads from './features/admin/AdminGrowthAuditLeads';
 import AdminCrmTasks from './features/admin/AdminCrmTasks';
+import AdminFullAudits from './features/admin/AdminFullAudits';
+import AdminFullAuditNew from './features/admin/AdminFullAuditNew';
+import AdminFullAuditDetail from './features/admin/AdminFullAuditDetail';
 import AdminLayout from './features/admin/AdminLayout';
 import SalesLayout from './features/sales/SalesLayout';
 import SalesQueue from './features/sales/SalesQueue';
@@ -67,6 +70,9 @@ export default function App() {
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/admin/users/:kind/:id" element={<AdminUserDetail />} />
           <Route path="/admin/growth-audit-leads" element={<AdminGrowthAuditLeads />} />
+          <Route path="/admin/full-audits" element={<AdminFullAudits />} />
+          <Route path="/admin/full-audits/new" element={<AdminFullAuditNew />} />
+          <Route path="/admin/full-audits/:id" element={<AdminFullAuditDetail />} />
           <Route path="/admin/tasks" element={<AdminCrmTasks />} />
           <Route path="/admin/services" element={<AdminServices />} />
           <Route path="/admin/settings" element={<AdminSettings />} />

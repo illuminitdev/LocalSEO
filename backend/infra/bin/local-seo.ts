@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { LocalSeoApiStack } from '../lib/local-seo-api-stack';
+import { AuditWorkerStack } from '../lib/audit-worker-stack';
 
 /** Load backend/.env so deploy can inject Gemini/Places/Stripe/Google OAuth keys without committing them.
  *  Paid Gemini: GEMINI_API_KEY_PROD (-c stage=prod only).
@@ -49,5 +50,24 @@ new LocalSeoApiStack(app, `LocalSeoApi-${stage}`, {
   stage: stage as 'dev' | 'prod',
   description: `Local SEO (LocalPulse) API — ${stage}`,
 });
+
+/** Full Audit Docker worker — only when explicitly requested (requires Docker Desktop). */
+const deployAuditWorker =
+  app.node.tryGetContext('deployAuditWorker') === 'true' ||
+  app.node.tryGetContext('deployAuditWorker') === true;
+
+if (deployAuditWorker) {
+  const reuseExistingQueue = app.node.tryGetContext('reuseAuditQueue') !== 'false';
+  new AuditWorkerStack(app, `ZappsitesAuditWorker-${stage}`, {
+    env,
+    stage: stage as 'dev' | 'prod',
+    reuseExistingQueue,
+    description: `ZappSites Full Audit worker (owned by Local SEO) — ${stage}`,
+  });
+} else {
+  console.log(
+    'deployAuditWorker not set — skipping ZappsitesAuditWorker stack (API-only; no Docker required)'
+  );
+}
 
 app.synth();

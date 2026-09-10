@@ -29,7 +29,6 @@ Engine: `backend/lib/visibilityAudit/`
 | Google Places | `GOOGLE_PLACES_API_KEY` | GBP lookup + Top 10 text search |
 | Maps JavaScript | `VITE_GOOGLE_MAPS_JS_KEY` | Report map UI |
 | Gemini | `GEMINI_API_KEY` | AI report (fallback template if missing) |
-
 ## Deferred
 
 - Entitlements / plan who-can-access
