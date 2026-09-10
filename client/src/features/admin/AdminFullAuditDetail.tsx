@@ -52,7 +52,7 @@ export default function AdminFullAuditDetail() {
         setMessage('');
         try {
             await downloadFullAuditPdf(String(audit?.id || id), businessName, audit?.pdfUrl);
-            setMessage('PDF downloaded.');
+            setMessage('PDF opened in a new tab.');
         } catch (err: any) {
             setError(err.message || 'PDF download failed');
         } finally {

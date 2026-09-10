@@ -61,7 +61,7 @@ export default function AdminFullAudits() {
         setMessage('');
         try {
             await downloadFullAuditPdf(a.id, a.businessName, a.pdfUrl);
-            setMessage('PDF downloaded.');
+            setMessage('PDF opened in a new tab.');
         } catch (err: any) {
             setError(err.message || 'PDF download failed');
         } finally {
@@ -89,30 +89,24 @@ export default function AdminFullAudits() {
 
     return (
         <div className="space-y-4 max-w-7xl">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-[#64748B] max-w-xl">
-                    Deep site crawls scored for Local SEO + AEO + GEO. History is the shared ZappSites{' '}
-                    <code className="text-xs">audits</code> table (kind=deep) — not Growth Audit leads.
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={load}
-                        disabled={loading}
-                        className="inline-flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-xl border border-[#E2E8F0] bg-white text-sm font-semibold text-[#0F172A] hover:bg-[#F8FAFC]"
-                    >
-                        <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
-                        Refresh
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => navigate('/admin/full-audits/new')}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-[#F59E0B] text-sm font-bold text-[#0F172A] hover:bg-[#FBBF24]"
-                    >
-                        <Plus className="w-4 h-4" />
-                        New full audit
-                    </button>
-                </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                    type="button"
+                    onClick={load}
+                    disabled={loading}
+                    className="inline-flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-xl border border-[#E2E8F0] bg-white text-sm font-semibold text-[#0F172A] hover:bg-[#F8FAFC]"
+                >
+                    <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+                    Refresh
+                </button>
+                <button
+                    type="button"
+                    onClick={() => navigate('/admin/full-audits/new')}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-[#F59E0B] text-sm font-bold text-[#0F172A] hover:bg-[#FBBF24]"
+                >
+                    <Plus className="w-4 h-4" />
+                    New full audit
+                </button>
             </div>
 
             {error ? (

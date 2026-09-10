@@ -227,42 +227,24 @@ export function fullAuditPdfUrl(id: string, pdfUrl?: string | null) {
     return `${ZAPP_SITES_PDF_API}/api/audits/${encodeURIComponent(id)}/pdf`;
 }
 
-/** Download print-quality PDF from ZappSites public endpoint (same as report page). */
+/**
+ * Open print-quality PDF from ZappSites public endpoint (same as report page).
+ * Cross-origin fetch from the portal is CORS-blocked, and window.open after await
+ * is often popup-blocked — open the PDF URL in a new tab on the click path.
+ */
 export async function downloadFullAuditPdf(
     id: string,
-    filenameHint?: string,
+    _filenameHint?: string,
     pdfUrl?: string | null
 ) {
     const url = fullAuditPdfUrl(id, pdfUrl);
-    const safe =
-        String(filenameHint || 'audit')
-            .replace(/[^a-z0-9]+/gi, '-')
-            .replace(/^-|-$/g, '')
-            .slice(0, 40)
-            .toLowerCase() || 'audit';
-
-    try {
-        const res = await fetch(url);
-        const contentType = (res.headers.get('content-type') || '').toLowerCase();
-        if (res.ok && contentType.includes('application/pdf')) {
-            const blob = await res.blob();
-            if (blob && blob.size >= 800) {
-                const objectUrl = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = objectUrl;
-                a.download = `zappsites-audit-${safe}.pdf`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(objectUrl);
-                return;
-            }
-        }
-        throw new Error('PDF unavailable');
-    } catch {
-        // CORS or network — same URL the report page uses
-        window.open(url, '_blank', 'noopener,noreferrer');
-    }
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
 }
 
 
