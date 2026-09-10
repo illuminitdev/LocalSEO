@@ -31,3 +31,24 @@ export const APP_STAGE = (String(import.meta.env.VITE_STAGE || 'dev').toLowerCas
 export const USE_LOCAL_API = import.meta.env.VITE_USE_LOCAL_API === 'true';
 
 export const API_BASE = resolveApiBase();
+
+/**
+ * ZappSites marketing site for “Get started” / plan links.
+ * - test.zappsites.com → staging.zappsites.com (always)
+ * - app.zappsites.com → www.zappsites.com (prod; unchanged)
+ */
+export function resolveMarketingUrl(): string {
+    if (typeof window !== 'undefined' && window.location.hostname === 'test.zappsites.com') {
+        return 'https://staging.zappsites.com/';
+    }
+
+    const fromEnv = String(import.meta.env.VITE_MARKETING_URL || '').trim().replace(/\/$/, '');
+    if (fromEnv) return `${fromEnv}/`;
+
+    if (APP_STAGE === 'dev') {
+        return 'https://staging.zappsites.com/';
+    }
+
+    return 'https://www.zappsites.com/';
+}
+

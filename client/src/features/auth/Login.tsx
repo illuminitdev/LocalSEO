@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { API_BASE, apiPost } from '../../shared/utils';
+import { resolveMarketingUrl } from '../../shared/apiConfig';
 import { clearToken, setMustChangePassword, setPlatformRole, setToken } from './auth';
 import { clearAdminToken, setAdminToken } from '../admin/adminApi';
 import { useEntitlements } from '../../shared/EntitlementsContext';
@@ -171,7 +172,7 @@ export default function Login() {
             <p className="text-sm text-[#64748B] mt-6 text-center leading-relaxed">
                 Need a plan?{' '}
                 <a
-                    href="https://www.zappsites.com/"
+                    href={resolveMarketingUrl()}
                     className="font-semibold text-[#0F172A] hover:underline"
                     target="_blank"
                     rel="noreferrer"
