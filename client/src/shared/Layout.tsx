@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, type ComponentType } from 'react';
+﻿import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
     Building2,
@@ -28,6 +28,10 @@ import { clearToken } from '../features/auth/auth';
 import { hasRouteAccess, routeRequiresFeatures } from './planCatalog';
 import { useEntitlements } from './EntitlementsContext';
 import MustChangePasswordBanner from '../features/account/MustChangePasswordBanner';
+
+const SIDEBAR_MIN = 200;
+const SIDEBAR_MAX = 380;
+const SIDEBAR_DEFAULT = 260;
 
 type NavItem = {
     name: string;
@@ -99,6 +103,15 @@ export default function Layout() {
     const [userEmail, setUserEmail] = useState('');
     const [avatarUrl, setAvatarUrl] = useState('');
     const [navOpen, setNavOpen] = useState(false);
+    const [sidebarWidth, setSidebarWidth] = useState(() => {
+        try {
+            const n = Number(localStorage.getItem('lp.sidebarWidth.user'));
+            if (Number.isFinite(n)) return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(n)));
+        } catch { /* ignore */ }
+        return SIDEBAR_DEFAULT;
+    });
+    const [resizing, setResizing] = useState(false);
+    const resizeRef = useRef<{ startX: number; startW: number } | null>(null);
 
     useEffect(() => {
         apiGet('/api/auth/me')
@@ -129,6 +142,37 @@ export default function Layout() {
             document.body.style.overflow = prev;
         };
     }, [navOpen]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('lp.sidebarWidth.user', String(sidebarWidth));
+        } catch { /* ignore */ }
+    }, [sidebarWidth]);
+
+    useEffect(() => {
+        if (!resizing) return;
+        const onMove = (e: PointerEvent) => {
+            const d = resizeRef.current;
+            if (!d) return;
+            setSidebarWidth(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(d.startW + (e.clientX - d.startX)))));
+        };
+        const onUp = () => {
+            resizeRef.current = null;
+            setResizing(false);
+        };
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
+        return () => {
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onUp);
+        };
+    }, [resizing]);
 
     const isNavActive = (item: NavItem) => {
         if (!item.to.startsWith('/booking')) {
@@ -163,7 +207,7 @@ export default function Layout() {
 
     const sidebar = (
         <>
-            <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2">
+            <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2 border-b-2 border-[#E2E8F0]">
                 <img
                     src="/localseo.png"
                     alt="Local SEO"
@@ -179,7 +223,7 @@ export default function Layout() {
                 </button>
             </div>
 
-            <nav className="px-3 flex-1 overflow-y-auto space-y-4 pb-3 overscroll-contain">
+            <nav className="px-3 pt-3 flex-1 overflow-y-auto space-y-4 pb-3 overscroll-contain">
                 {visibleNav.map((section) => (
                     <div key={section.group}>
                         <p className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">
@@ -210,7 +254,7 @@ export default function Layout() {
                 ))}
             </nav>
 
-            <div className="px-4 pb-4 pt-3 border-t border-[#E2E8F0] shrink-0 space-y-3 safe-pb">
+            <div className="px-4 pb-4 pt-3 border-t-2 border-[#E2E8F0] shrink-0 space-y-3 safe-pb">
                 <div className="flex items-center gap-3 px-1 min-w-0">
                     {avatarUrl ? (
                         <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
@@ -239,8 +283,25 @@ export default function Layout() {
     return (
         <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden">
             {/* Desktop sidebar */}
-            <aside className="hidden lg:flex w-[260px] h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden">
+            <aside
+                className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden"
+                style={{ width: sidebarWidth }}
+            >
                 {sidebar}
+                <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize sidebar"
+                    onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.preventDefault();
+                        resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
+                        setResizing(true);
+                    }}
+                    className="absolute inset-y-0 right-0 z-20 w-1.5 translate-x-1/2 cursor-col-resize touch-none"
+                >
+                    <span className={`pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 ${resizing ? 'bg-[#F59E0B]' : 'bg-transparent hover:bg-[#CBD5E1]'}`} />
+                </div>
             </aside>
 
             {/* Mobile drawer */}
