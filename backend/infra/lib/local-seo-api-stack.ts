@@ -35,8 +35,8 @@ const STAGE_CONFIG: Record<
     lambdaSgId: 'sg-0167438f34915d1e2',
     proxyEndpoint: 'rdsproxy.proxy-cehyac2sc676.us-east-1.rds.amazonaws.com',
     dbSecretName: 'ZappsitesDatabase-dev/credentials',
-    // Staging SPA on Vercel (dev branch) — override with CLIENT_ORIGIN if needed
-    clientOrigin: process.env.CLIENT_ORIGIN || 'https://zappsites-local-seo.vercel.app',
+    // Local SEO staging SPA (dev branch → test.zappsites.com)
+    clientOrigin: process.env.CLIENT_ORIGIN || 'https://test.zappsites.com',
     zappSitesOrigin: process.env.ZAPP_SITES_ORIGIN || 'https://staging.zappsites.com',
   },
   prod: {
@@ -163,9 +163,10 @@ export class LocalSeoApiStack extends cdk.Stack {
           cfg.clientOrigin,
           'http://localhost:5173',
           'http://127.0.0.1:5173',
-          'https://zappsites-local-seo.vercel.app',
+          'https://test.zappsites.com',
           'https://app.zappsites.com',
           'https://www.zappsites.com',
+          'https://staging.zappsites.com',
         ].filter(Boolean)
       )
     );
