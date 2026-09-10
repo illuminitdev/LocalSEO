@@ -1,0 +1,21 @@
+# Docker build context: backend/audit-worker
+# Run `npm run build` here first so dist/lambda/auditWorker.js exists.
+
+FROM public.ecr.aws/lambda/nodejs:22
+
+# Chromium dependencies for Puppeteer/Lighthouse on Lambda
+RUN dnf install -y \
+    alsa-lib atk at-spi2-atk cups-libs gtk3 libXcomposite libXcursor \
+    libXdamage libXext libXi libXrandr libXScrnSaver libXtst pango \
+    libdrm libgbm nss mesa-libgbm \
+    && dnf clean all
+
+WORKDIR ${LAMBDA_TASK_ROOT}
+
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev || npm install --omit=dev
+
+COPY dist/lambda/auditWorker.js ./auditWorker.js
+COPY dist/ ./dist/
+
+CMD ["auditWorker.main"]

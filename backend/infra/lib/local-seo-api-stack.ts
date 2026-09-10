@@ -85,6 +85,22 @@ export class LocalSeoApiStack extends cdk.Stack {
       },
     });
 
+    // Shared with ZappSites Full Crawl ops routes (Phase 1 BFF).
+    // Deep history + worker currently live on ZappSites prod API — use that stage's secret
+    // unless ZAPP_SITES_API_BASE points at another stage.
+    const zappSitesApiBase =
+      (stage === 'prod'
+        ? process.env.ZAPP_SITES_API_BASE_PROD
+        : process.env.ZAPP_SITES_API_BASE_DEV) ||
+      process.env.ZAPP_SITES_API_BASE ||
+      'https://dvj0p5k5d0.execute-api.us-east-1.amazonaws.com';
+    const auditOpsSecretStage = zappSitesApiBase.includes('dvj0p5k5d0') ? 'prod' : stage;
+    const auditOpsSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      'AuditOpsSecret',
+      `Zappsites/${auditOpsSecretStage}/AUDIT_OPS_SECRET`
+    );
+
     const backendRoot = path.join(__dirname, '..', '..');
     const assetPath = path.join(backendRoot, '.lambda-dist');
     if (!fs.existsSync(path.join(assetPath, 'dist', 'lambda.js'))) {
@@ -211,6 +227,8 @@ export class LocalSeoApiStack extends cdk.Stack {
         CLIENT_ORIGIN: cfg.clientOrigin,
         FRONTEND_URL: cfg.clientOrigin,
         ZAPP_SITES_ORIGIN: cfg.zappSitesOrigin,
+        ZAPP_SITES_API_BASE: zappSitesApiBase,
+        AUDIT_OPS_SECRET: auditOpsSecret.secretValue.unsafeUnwrap(),
         API_BASE_URL: apiBaseUrl,
         ENTITLEMENTS_DISABLED: 'false',
         MEDIA_BUCKET: mediaBucket.bucketName,
@@ -251,6 +269,7 @@ export class LocalSeoApiStack extends cdk.Stack {
 
     dbSecret.grantRead(fn);
     jwtSecret.grantRead(fn);
+    auditOpsSecret.grantRead(fn);
     mediaBucket.grantPut(fn);
     mediaBucket.grantRead(fn);
 

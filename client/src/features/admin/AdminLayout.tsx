@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, LogOut, Layers, Settings, Menu, X, ClipboardList, CheckSquare } from 'lucide-react';
+import { LayoutDashboard, Users, LogOut, Layers, Settings, Menu, X, ClipboardList, CheckSquare, ClipboardCheck } from 'lucide-react';
 import { clearAdminToken } from './adminApi';
 import { cn } from '../../shared/utils';
 
 const NAV = [
     { name: 'Overview', to: '/admin', icon: LayoutDashboard, end: true },
     { name: 'Users', to: '/admin/users', icon: Users },
+    { name: 'Full Audit', to: '/admin/full-audits', icon: ClipboardCheck },
     { name: 'Growth leads', to: '/admin/growth-audit-leads', icon: ClipboardList },
     { name: 'Lead Tasks & CRM', to: '/admin/tasks', icon: CheckSquare },
     { name: 'Plan guide', to: '/admin/services', icon: Layers },
@@ -19,6 +20,24 @@ function pageTitle(pathname: string) {
     }
     if (pathname.startsWith('/admin/users')) {
         return { title: 'User Management', subtitle: 'Create and manage system users.' };
+    }
+    if (pathname.startsWith('/admin/full-audits/new')) {
+        return {
+            title: 'New full audit',
+            subtitle: 'Run a deep crawl — Maps/GBP lookup, website score, shareable report + PDF.'
+        };
+    }
+    if (pathname.match(/\/admin\/full-audits\/[^/]+/)) {
+        return {
+            title: 'Full audit details',
+            subtitle: 'Shareable report link and print-quality PDF download.'
+        };
+    }
+    if (pathname.startsWith('/admin/full-audits')) {
+        return {
+            title: 'Full Audit',
+            subtitle: 'Deep / fullcrawl history from the shared ZappSites audits table.'
+        };
     }
     if (pathname.startsWith('/admin/growth-audit-leads')) {
         return {
@@ -106,7 +125,9 @@ export default function AdminLayout() {
                             const active =
                                 item.to === '/admin/users'
                                     ? location.pathname.startsWith('/admin/users')
-                                    : isActive;
+                                    : item.to === '/admin/full-audits'
+                                      ? location.pathname.startsWith('/admin/full-audits')
+                                      : isActive;
                             return cn(
                                 'flex items-center gap-3 px-3 py-2.5 min-h-[44px] rounded-xl text-sm transition-colors',
                                 active

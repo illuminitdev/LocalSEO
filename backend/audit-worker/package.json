@@ -1,0 +1,29 @@
+{
+  "name": "localseo-audit-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ZappSites Full Audit Docker Lambda worker — owned by Local SEO (LocalPulse)",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.888.0",
+    "@google/generative-ai": "^0.24.1",
+    "@sparticuz/chromium": "^133.0.0",
+    "cheerio": "^1.2.0",
+    "chrome-launcher": "^1.2.1",
+    "lighthouse": "^13.4.1",
+    "pg": "^8.16.3",
+    "puppeteer": "^25.8.0",
+    "puppeteer-core": "^25.8.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.152",
+    "@types/node": "^24.3.0",
+    "@types/pg": "^8.15.5",
+    "esbuild": "^0.25.9",
+    "typescript": "^5.9.2"
+  }
+}

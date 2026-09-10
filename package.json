@@ -9,8 +9,10 @@
     "dev:backend": "npm run dev --prefix backend",
     "build": "npm run build --prefix client",
     "build:all": "npm run build --prefix backend && npm run build --prefix client",
-    "install:all": "npm install --prefix client && npm install --prefix backend && npm install --prefix backend/infra",
+    "install:all": "npm install --prefix client && npm install --prefix backend && npm install --prefix backend/infra && npm install --prefix backend/audit-worker",
     "deploy:api:dev": "npm run deploy:dev --prefix backend",
-    "deploy:api:prod": "npm run deploy:prod --prefix backend"
+    "deploy:api:prod": "npm run deploy:prod --prefix backend",
+    "deploy:worker:dev": "npm run deploy:worker:dev --prefix backend",
+    "deploy:worker:prod": "npm run deploy:worker:prod --prefix backend"
   }
 }

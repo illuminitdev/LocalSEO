@@ -176,3 +176,93 @@ export async function createLeadActivity(leadId: string, data: {
     return res.activity;
 }
 
+/* Full Audit (deep / fullcrawl via ZappSites BFF) */
+
+export type FullAuditListItem = {
+    id: string;
+    businessName?: string;
+    website?: string;
+    city?: string;
+    tradeId?: string;
+    email?: string;
+    phone?: string;
+    published?: boolean;
+    status?: string;
+    totalScore?: number | null;
+    auditKind?: string | null;
+    shareUrl?: string;
+    pdfUrl?: string;
+    reportUrl?: string;
+    updatedAt?: string;
+    createdAt?: string;
+};
+
+export async function fetchFullAudits(): Promise<FullAuditListItem[]> {
+    const res = await adminGet('/api/admin/full-audits');
+    return res.data || [];
+}
+
+export async function startFullCrawl(body: Record<string, unknown>) {
+    return adminPost('/api/admin/full-audits/fullcrawl', body);
+}
+
+export async function pollFullAuditJob(jobId: string) {
+    return adminGet(`/api/admin/full-audits/jobs/${encodeURIComponent(jobId)}`);
+}
+
+export async function fetchFullAudit(id: string) {
+    return adminGet(`/api/admin/full-audits/${encodeURIComponent(id)}`);
+}
+
+export async function deleteFullAudit(id: string) {
+    return adminDelete(`/api/admin/full-audits/${encodeURIComponent(id)}`);
+}
+
+/** Same public PDF as www.zappsites.com audit-report Download button (not Local SEO BFF). */
+const ZAPP_SITES_PDF_API =
+    'https://dvj0p5k5d0.execute-api.us-east-1.amazonaws.com';
+
+export function fullAuditPdfUrl(id: string, pdfUrl?: string | null) {
+    if (pdfUrl && /^https?:\/\//i.test(pdfUrl)) return pdfUrl;
+    return `${ZAPP_SITES_PDF_API}/api/audits/${encodeURIComponent(id)}/pdf`;
+}
+
+/** Download print-quality PDF from ZappSites public endpoint (same as report page). */
+export async function downloadFullAuditPdf(
+    id: string,
+    filenameHint?: string,
+    pdfUrl?: string | null
+) {
+    const url = fullAuditPdfUrl(id, pdfUrl);
+    const safe =
+        String(filenameHint || 'audit')
+            .replace(/[^a-z0-9]+/gi, '-')
+            .replace(/^-|-$/g, '')
+            .slice(0, 40)
+            .toLowerCase() || 'audit';
+
+    try {
+        const res = await fetch(url);
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        if (res.ok && contentType.includes('application/pdf')) {
+            const blob = await res.blob();
+            if (blob && blob.size >= 800) {
+                const objectUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = objectUrl;
+                a.download = `zappsites-audit-${safe}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(objectUrl);
+                return;
+            }
+        }
+        throw new Error('PDF unavailable');
+    } catch {
+        // CORS or network — same URL the report page uses
+        window.open(url, '_blank', 'noopener,noreferrer');
+    }
+}
+
+
