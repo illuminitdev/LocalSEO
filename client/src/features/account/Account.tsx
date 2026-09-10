@@ -218,9 +218,20 @@ export default function Account() {
         setProfileMsg('');
         setProfileErr('');
         try {
-            const data = await apiPatch('/api/auth/profile', { name: displayName, avatarUrl: avatarUrl || undefined });
+            const data = await apiPatch('/api/auth/profile', {
+                name: displayName,
+                avatarUrl: avatarUrl || undefined
+            });
             setDisplayName(data.user?.name || displayName);
             setAvatarUrl(data.user?.avatarUrl || avatarUrl);
+
+            // Phone is stored on the organization (shown under Personal information)
+            const updated = await apiPatch('/api/host/organization', { phone: org.phone || '' });
+            setOrg((o) => ({
+                ...o,
+                phone: updated.phone || ''
+            }));
+
             setProfileMsg('Profile saved.');
             setEditingProfile(false);
         } catch (err: any) {
@@ -459,6 +470,17 @@ export default function Account() {
                                         <span className="mt-1.5 block text-xs text-[#94A3B8]">
                                             Email is used to sign in and cannot be changed here.
                                         </span>
+                                    </label>
+                                    <label className="block text-sm font-semibold text-[#334155]">
+                                        Phone
+                                        <input
+                                            type="tel"
+                                            value={org.phone}
+                                            onChange={(e) => setOrg((o) => ({ ...o, phone: e.target.value }))}
+                                            className={fieldClass}
+                                            placeholder="Mobile or business number"
+                                            autoComplete="tel"
+                                        />
                                     </label>
                                     <button
                                         type="submit"

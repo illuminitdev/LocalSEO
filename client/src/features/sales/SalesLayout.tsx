@@ -67,16 +67,12 @@ export default function SalesLayout() {
     const sidebar = (
         <>
             <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                    <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-lg bg-[#F59E0B] text-white flex items-center justify-center font-bold text-sm shrink-0">
-                            z
-                        </div>
-                        <div className="min-w-0 leading-tight">
-                            <p className="font-bold text-[15px] text-[#0F172A] tracking-tight truncate">ZappSites</p>
-                            <p className="text-[11px] text-[#94A3B8] mt-0.5 truncate">Local SEO simplified.</p>
-                        </div>
-                    </div>
+                <div className="min-w-0 flex-1">
+                    <img
+                        src="/localseo.png"
+                        alt="Local SEO"
+                        className="h-9 w-auto max-w-[180px] object-contain object-left"
+                    />
                     <p className="mt-5 text-[13px] font-medium text-[#94A3B8]">Sales Portal</p>
                 </div>
                 <button

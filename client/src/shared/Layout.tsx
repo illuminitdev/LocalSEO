@@ -164,15 +164,11 @@ export default function Layout() {
     const sidebar = (
         <>
             <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-9 h-9 rounded-lg bg-[#F59E0B] text-white flex items-center justify-center font-bold text-sm shrink-0">
-                        z
-                    </div>
-                    <div className="min-w-0 leading-tight">
-                        <p className="font-bold text-[15px] text-[#0F172A] tracking-tight truncate">ZappSites</p>
-                        <p className="text-[11px] text-[#94A3B8] mt-0.5 truncate">Local SEO simplified.</p>
-                    </div>
-                </div>
+                <img
+                    src="/localseo.png"
+                    alt="Local SEO"
+                    className="h-9 w-auto max-w-[180px] object-contain object-left min-w-0 flex-1"
+                />
                 <button
                     type="button"
                     className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9]"
@@ -274,8 +270,11 @@ export default function Layout() {
                         <Menu className="w-5 h-5" />
                     </button>
                     <div className="min-w-0 flex-1">
-                        <p className="font-bold text-sm text-[#0F172A] truncate">ZappSites</p>
-                        <p className="text-[11px] text-[#94A3B8] truncate">Local SEO</p>
+                        <img
+                            src="/localseo.png"
+                            alt="Local SEO"
+                            className="h-7 w-auto max-w-[140px] object-contain object-left"
+                        />
                     </div>
                 </header>
                 <main className="flex-1 overflow-auto overscroll-contain p-4 sm:p-5 lg:p-6">

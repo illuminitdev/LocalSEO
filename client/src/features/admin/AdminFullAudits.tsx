@@ -60,8 +60,8 @@ export default function AdminFullAudits() {
         setError('');
         setMessage('');
         try {
-            await downloadFullAuditPdf(a.id, a.businessName, a.pdfUrl);
-            setMessage('PDF opened in a new tab.');
+            await downloadFullAuditPdf(a.id, a.businessName);
+            setMessage('PDF downloaded.');
         } catch (err: any) {
             setError(err.message || 'PDF download failed');
         } finally {

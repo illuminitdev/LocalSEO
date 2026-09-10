@@ -51,8 +51,8 @@ export default function AdminFullAuditDetail() {
         setError('');
         setMessage('');
         try {
-            await downloadFullAuditPdf(String(audit?.id || id), businessName, audit?.pdfUrl);
-            setMessage('PDF opened in a new tab.');
+            await downloadFullAuditPdf(String(audit?.id || id), businessName);
+            setMessage('PDF downloaded.');
         } catch (err: any) {
             setError(err.message || 'PDF download failed');
         } finally {
