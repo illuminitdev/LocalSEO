@@ -160,13 +160,13 @@ export default function Layout() {
             resizeRef.current = null;
             setResizing(false);
         };
-        document.body.style.cursor = 'col-resize';
+        document.body.classList.add('cursor-sidebar-resize');
         document.body.style.userSelect = 'none';
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
         window.addEventListener('pointercancel', onUp);
         return () => {
-            document.body.style.cursor = '';
+            document.body.classList.remove('cursor-sidebar-resize');
             document.body.style.userSelect = '';
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
@@ -298,7 +298,7 @@ export default function Layout() {
                         resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
                         setResizing(true);
                     }}
-                    className="absolute inset-y-0 right-0 z-20 w-1.5 translate-x-1/2 cursor-col-resize touch-none"
+                    className="absolute inset-y-0 right-0 z-20 w-1.5 translate-x-1/2 cursor-sidebar-resize touch-none"
                 >
                     <span className={`pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 ${resizing ? 'bg-[#F59E0B]' : 'bg-transparent hover:bg-[#CBD5E1]'}`} />
                 </div>
