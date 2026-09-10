@@ -147,7 +147,7 @@ export default function SalesLeadDetail() {
         return (
             <div className="space-y-3">
                 <Link to="/sales" className="inline-flex items-center gap-1 text-xs font-bold text-[#64748B]">
-                    <ArrowLeft className="w-3.5 h-3.5" /> Back to My Work
+                    <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
                 </Link>
                 <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-xl px-4 py-2">{error}</p>
             </div>
@@ -157,7 +157,7 @@ export default function SalesLeadDetail() {
     return (
         <div className="space-y-4">
             <Link to="/sales" className="inline-flex items-center gap-1 text-xs font-bold text-[#64748B] hover:text-[#0F172A]">
-                <ArrowLeft className="w-3.5 h-3.5" /> Back to My Work
+                <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
             </Link>
 
             <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5">
