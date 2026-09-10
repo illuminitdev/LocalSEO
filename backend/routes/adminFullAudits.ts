@@ -105,10 +105,14 @@ router.get('/full-audits/:id/pdf', requireAdmin, async (req: Request, res: Respo
         if (!id) return res.status(400).json({ success: false, error: 'Missing audit id' });
         const result = await proxyZappSitesPdf(id);
         if (result.buffer && result.status === 200) {
-            res.setHeader('Content-Type', result.contentType || 'application/pdf');
-            if (result.contentDisposition) {
-                res.setHeader('Content-Disposition', result.contentDisposition);
-            }
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader(
+                'Content-Disposition',
+                result.contentDisposition?.includes('attachment')
+                    ? result.contentDisposition
+                    : `attachment; filename="zappsites-audit-${id}.pdf"`
+            );
+            res.setHeader('Cache-Control', 'no-store');
             return res.status(200).send(result.buffer);
         }
         return sendProxyJson(res, result);

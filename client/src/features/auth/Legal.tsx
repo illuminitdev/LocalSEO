@@ -12,14 +12,12 @@ export function LegalPage({ title, children }: Props) {
         <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A]">
             <header className="border-b border-[#E2E8F0] bg-white">
                 <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
-                    <Link to="/" className="flex items-center gap-2.5">
-                        <div className="h-8 w-8 rounded-lg bg-[#EA580C] text-white flex items-center justify-center font-bold text-sm shrink-0">
-                            z
-                        </div>
-                        <div className="leading-none">
-                            <p className="text-[15px] font-semibold tracking-tight">Zappsites</p>
-                            <p className="text-[10px] uppercase tracking-widest text-[#EA580C] mt-1.5">Local SEO</p>
-                        </div>
+                    <Link to="/" className="flex items-center min-w-0">
+                        <img
+                            src="/localseo.png"
+                            alt="Local SEO"
+                            className="h-8 w-auto max-w-[180px] object-contain object-left"
+                        />
                     </Link>
                     <Link to="/" className="text-sm font-medium text-[#64748B] hover:text-[#0F172A]">
                         Sign in

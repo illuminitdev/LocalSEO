@@ -220,33 +220,36 @@ export async function deleteFullAudit(id: string) {
     return adminDelete(`/api/admin/full-audits/${encodeURIComponent(id)}`);
 }
 
-/** Same public PDF as www.zappsites.com audit-report Download button (not Local SEO BFF). */
-const ZAPP_SITES_PDF_API =
-    'https://dvj0p5k5d0.execute-api.us-east-1.amazonaws.com';
-
-export function fullAuditPdfUrl(id: string, pdfUrl?: string | null) {
-    if (pdfUrl && /^https?:\/\//i.test(pdfUrl)) return pdfUrl;
-    return `${ZAPP_SITES_PDF_API}/api/audits/${encodeURIComponent(id)}/pdf`;
-}
-
 /**
- * Open print-quality PDF from ZappSites public endpoint (same as report page).
- * Cross-origin fetch from the portal is CORS-blocked, and window.open after await
- * is often popup-blocked — open the PDF URL in a new tab on the click path.
+ * Download PDF via Local SEO admin BFF (same-origin to API_BASE with admin auth).
+ * Stays on the admin page — does not open/expose the ZappSites AWS PDF URL.
  */
-export async function downloadFullAuditPdf(
-    id: string,
-    _filenameHint?: string,
-    pdfUrl?: string | null
-) {
-    const url = fullAuditPdfUrl(id, pdfUrl);
+export async function downloadFullAuditPdf(id: string, filenameHint?: string) {
+    const path = `/api/admin/full-audits/${encodeURIComponent(id)}/pdf`;
+    const res = await fetch(`${API_BASE}${path}`, { headers: { ...adminAuthHeaders() } });
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (!res.ok || !contentType.includes('application/pdf')) {
+        throw await readAdminError(res, path);
+    }
+    const blob = await res.blob();
+    if (!blob.size || blob.size < 800) {
+        throw new Error('PDF download was empty. Please retry.');
+    }
+    const safe =
+        String(filenameHint || 'audit')
+            .replace(/[^a-z0-9]+/gi, '-')
+            .replace(/^-|-$/g, '')
+            .slice(0, 40)
+            .toLowerCase() || 'audit';
+    const objectUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
+    a.href = objectUrl;
+    a.download = `zappsites-audit-${safe}.pdf`;
+    a.rel = 'noopener';
     document.body.appendChild(a);
     a.click();
     a.remove();
+    URL.revokeObjectURL(objectUrl);
 }
 
 

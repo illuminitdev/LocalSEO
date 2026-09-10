@@ -13,14 +13,12 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
     return (
         <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center px-4 py-10">
             <div className="w-full max-w-[400px]">
-                <div className="flex items-center justify-center gap-2.5 mb-8">
-                    <div className="h-8 w-8 rounded-lg bg-[#EA580C] text-white flex items-center justify-center font-bold text-sm leading-none shrink-0">
-                        z
-                    </div>
-                    <div className="leading-none text-left">
-                        <p className="text-[15px] font-semibold text-[#0F172A] tracking-tight">Zappsites</p>
-                        <p className="text-[10px] uppercase tracking-widest text-[#EA580C] mt-1.5">Local SEO</p>
-                    </div>
+                <div className="flex items-center justify-center mb-8">
+                    <img
+                        src="/localseo.png"
+                        alt="Local SEO"
+                        className="h-10 w-auto max-w-[220px] object-contain"
+                    />
                 </div>
 
                 <div className="bg-white rounded-2xl border border-[#E2E8F0] px-6 py-7 sm:px-8 sm:py-8">
