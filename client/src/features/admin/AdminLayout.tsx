@@ -143,6 +143,7 @@ export default function AdminLayout() {
                     src="/localseo.png"
                     alt="Local SEO"
                     className="h-9 w-auto max-w-[180px] object-contain object-left min-w-0 flex-1"
+                    style={{ maxHeight: '36px', maxWidth: '160px', objectFit: 'contain' }}
                 />
                 <button
                     type="button"
