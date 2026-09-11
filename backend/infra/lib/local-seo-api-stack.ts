@@ -229,6 +229,11 @@ export class LocalSeoApiStack extends cdk.Stack {
         FRONTEND_URL: cfg.clientOrigin,
         ZAPP_SITES_ORIGIN: cfg.zappSitesOrigin,
         ZAPP_SITES_API_BASE: zappSitesApiBase,
+        PAYMENT_API_URL:
+          process.env.PAYMENT_API_URL ||
+          (stage === 'prod'
+            ? 'https://gq94idnsj0.execute-api.us-east-1.amazonaws.com'
+            : 'https://gq94idnsj0.execute-api.us-east-1.amazonaws.com'),
         AUDIT_OPS_SECRET: auditOpsSecret.secretValue.unsafeUnwrap(),
         API_BASE_URL: apiBaseUrl,
         ENTITLEMENTS_DISABLED: 'false',

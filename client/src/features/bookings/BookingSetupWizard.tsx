@@ -90,8 +90,8 @@ export default function BookingSetupWizard({
     const [path, setPath] = useState<'choose' | 'manual' | 'from-profile'>(
         hasSavedBusiness ? 'choose' : 'manual'
     );
-    // Always 2 steps once industry is known: 1 = details, 2 = deposit.
-    const [step, setStep] = useState(1);
+    // 0 = locked industry + Next, 1 = details, 2 = deposit
+    const [step, setStep] = useState(0);
     const [form, setForm] = useState<SetupForm>(() => baseForm(checkoutIndustryId || null));
 
     const selectedPreset = getBookingPreset(checkoutIndustryId || form.bookingIndustryId);
@@ -105,6 +105,7 @@ export default function BookingSetupWizard({
             bookingIndustryId: preset.id,
             tradeType: preset.name
         }));
+        setStep((s) => (s === 0 ? 0 : s));
     }, [checkoutIndustryId]);
 
     const useSavedBusiness = () => {
@@ -117,7 +118,7 @@ export default function BookingSetupWizard({
     const enterManually = () => {
         setForm(baseForm(checkoutIndustryId || null));
         setPath('manual');
-        setStep(1);
+        setStep(hasCheckoutIndustry ? 0 : 1);
     };
 
     const finish = async (e: FormEvent) => {
@@ -131,12 +132,14 @@ export default function BookingSetupWizard({
         });
     };
 
+    const onIndustryStep = hasCheckoutIndustry && step === 0;
     const onDetailsStep = step === 1;
     const onDepositStep = step === 2;
 
     const stepLabels = [
-        ['1', path === 'from-profile' ? 'Confirm details' : 'Your details'],
-        ['2', 'Bookings & deposit']
+        ['1', 'Your service'],
+        ['2', path === 'from-profile' ? 'Confirm details' : 'Your details'],
+        ['3', 'Bookings & deposit']
     ];
 
     return (
@@ -214,9 +217,9 @@ export default function BookingSetupWizard({
                                     <div
                                         key={n}
                                         className={
-                                            step === i + 1
+                                            step === i
                                                 ? 'flex-1 rounded-xl px-3 py-2 text-center border text-xs font-bold bg-[#0F172A] text-white border-[#0F172A]'
-                                                : step > i + 1
+                                                : step > i
                                                   ? 'flex-1 rounded-xl px-3 py-2 text-center border text-xs font-bold bg-[#F59E0B]/20 text-[#0F172A] border-[#F59E0B]/50'
                                                   : 'flex-1 rounded-xl px-3 py-2 text-center border text-xs font-bold bg-white text-[#64748B] border-[#E2E8F0]'
                                         }
@@ -241,7 +244,31 @@ export default function BookingSetupWizard({
                                 </p>
                             </div>
 
-                            {path === 'from-profile' && (
+                            {onIndustryStep && (
+                                <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 lg:p-6 shadow-sm space-y-4">
+                                    <div>
+                                        <h2 className="font-bold text-lg text-[#0F172A]">Confirm your service</h2>
+                                        <p className="text-sm text-[#64748B] mt-1">
+                                            This was set at ZappSites checkout. Next you&apos;ll enter your business
+                                            details.
+                                        </p>
+                                    </div>
+                                    {error && (
+                                        <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                                            {error}
+                                        </p>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => setStep(1)}
+                                        className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#0F172A] text-white text-sm font-bold"
+                                    >
+                                        Next <ChevronRight className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            )}
+
+                            {path === 'from-profile' && onDetailsStep && (
                                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 flex items-start gap-2">
                                     <Building2 className="w-4 h-4 mt-0.5 shrink-0" />
                                     <span>
@@ -261,7 +288,7 @@ export default function BookingSetupWizard({
                                 </div>
                             )}
 
-                            {error && (
+                            {error && !onIndustryStep && (
                                 <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
                                     {error}
                                 </p>
@@ -346,18 +373,20 @@ export default function BookingSetupWizard({
                                         </div>
                                     </label>
                                     <div className="flex gap-2 pt-2">
-                                        {hasSavedBusiness && (
-                                            <button
-                                                type="button"
-                                                onClick={() => {
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (hasSavedBusiness && path === 'from-profile') {
                                                     setPath('choose');
-                                                    setStep(1);
-                                                }}
-                                                className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
-                                            >
-                                                Back
-                                            </button>
-                                        )}
+                                                    setStep(0);
+                                                } else {
+                                                    setStep(0);
+                                                }
+                                            }}
+                                            className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
+                                        >
+                                            Back
+                                        </button>
                                         <button
                                             type="submit"
                                             className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#0F172A] text-white text-sm font-bold"

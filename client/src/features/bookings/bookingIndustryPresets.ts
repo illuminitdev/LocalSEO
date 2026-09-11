@@ -16,7 +16,8 @@ export const BOOKING_INDUSTRY_IDS = [
     'personal-trainers',
     'restaurants',
     'professional-services',
-    'small-business'
+    'small-business',
+    'dentists'
 ] as const;
 
 export type BookingIndustryId = (typeof BOOKING_INDUSTRY_IDS)[number];
@@ -630,6 +631,54 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
             contact: 'e.g. 07700 901012 or hello@shahlocal.co.uk',
             serviceArea: 'e.g. Leicester & county'
         }
+    },
+    {
+        id: 'dentists',
+        name: 'Dentists & Dental Practices',
+        shortName: 'Dentists',
+        icon: 'Smile',
+        eyebrow: 'DENTAL PRACTICE BOOKING FLOW DEMO',
+        demoTitle: 'How Dental Practices Fill Chair Time 24/7',
+        confirmationTitle: 'Dental Appointment Confirmed!',
+        tagline: 'Book new patient exams, emergency toothache visits, and whitening consults.',
+        defaultService: 'New Patient Exam & Clean (£65)',
+        services: [
+            'New Patient Exam & Clean (£65)',
+            'Emergency Toothache Call-Out (£95)',
+            'Teeth Whitening Consultation (Free)',
+            'Filling / Restoration Quote',
+            'Invisalign / Orthodontic Assessment (£50 Deposit)'
+        ],
+        timeSlots: ['09:00 AM', '11:00 AM', '02:00 PM', '04:30 PM'],
+        customFields: [
+            {
+                id: 'patientType',
+                label: 'Patient Status *',
+                type: 'select',
+                options: ['New Patient', 'Existing Patient', 'Emergency / Urgent']
+            },
+            {
+                id: 'treatmentFocus',
+                label: 'Treatment Interest *',
+                type: 'select',
+                options: [
+                    'Check-up & Hygiene',
+                    'Fillings / Restorations',
+                    'Whitening / Cosmetic',
+                    'Orthodontics / Invisalign',
+                    'Pain Relief / Emergency'
+                ]
+            }
+        ],
+        uploadPrompt: 'Upload a photo of teeth, smile concern or problem area',
+        notesPlaceholder: 'E.g. Sensitivity on upper left, prefer morning appointments.',
+        summaryBullet: 'Chair time reserved with patient intake and reminder SMS queued.',
+        setupPlaceholders: {
+            name: 'e.g. Dr Sara Khan',
+            businessName: 'e.g. Khan Dental Practice',
+            contact: 'e.g. 0113 000 0000 or reception@khandental.co.uk',
+            serviceArea: 'e.g. Leeds city centre'
+        }
     }
 ];
 
@@ -704,6 +753,14 @@ export function getBookingPreset(industryId: string | null | undefined): Booking
         return bookingIndustryPresets[10];
     }
     if (idLower.includes('small') || idLower.includes('biz')) return bookingIndustryPresets[11];
+    if (
+        idLower.includes('dentist') ||
+        idLower.includes('dental') ||
+        idLower.includes('teeth') ||
+        idLower.includes('orthodont')
+    ) {
+        return bookingIndustryPresets[12];
+    }
 
     const found = bookingIndustryPresets.find((p) => p.id === idLower);
     return found || bookingIndustryPresets[0];
