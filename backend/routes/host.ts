@@ -174,13 +174,17 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             if (!(req as any).orgId) {
                 return res.json({ ready: false, canResume: false });
             }
-            await hydrateOrgBookingIndustry((req as any).orgId).catch((err: any) => {
+            let hydratedId: string | null = null;
+            try {
+                hydratedId = await hydrateOrgBookingIndustry((req as any).orgId);
+            } catch (err: any) {
                 console.warn('Industry hydrate skipped:', err?.message || err);
-            });
+            }
             const data = await loadDashboard((req as any).orgId);
             const org = data?.organization;
             const industryId =
                 normalizeBookingIndustryId(org?.booking_industry_id) ||
+                normalizeBookingIndustryId(hydratedId) ||
                 (org?.trade_type ? getBookingPreset(String(org.trade_type)).id : null);
             const industryPreset = industryId ? getBookingPreset(industryId) : null;
             const hasBookingData = Boolean(
