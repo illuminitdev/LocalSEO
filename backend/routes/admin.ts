@@ -437,7 +437,7 @@ router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Respon
         const userId = req.params.userId;
         const { rows } = await query(
             `SELECT u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
-                    u.must_change_password,
+                    u.must_change_password, COALESCE(u.platform_role, 'customer') AS platform_role,
                     o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.setup_complete,
                     s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
