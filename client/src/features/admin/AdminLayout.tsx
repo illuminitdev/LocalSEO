@@ -13,7 +13,7 @@ const NAV = [
     { name: 'Users', to: '/admin/users', icon: Users },
     { name: 'Full Audit', to: '/admin/full-audits', icon: ClipboardCheck },
     { name: 'Growth leads', to: '/admin/growth-audit-leads', icon: ClipboardList },
-    { name: 'Lead Tasks & CRM', to: '/admin/tasks', icon: CheckSquare },
+    { name: 'CRM', to: '/admin/tasks', icon: CheckSquare },
     { name: 'Plan guide', to: '/admin/services', icon: Layers },
     { name: 'Settings', to: '/admin/settings', icon: Settings }
 ];
@@ -54,7 +54,7 @@ function pageTitle(pathname: string) {
     }
     if (pathname.startsWith('/admin/tasks')) {
         return {
-            title: 'Lead Tasks & CRM',
+            title: 'CRM',
             subtitle: 'Assign tasks to telecallers, track audits, customer onboarding, and follow-ups.'
         };
     }

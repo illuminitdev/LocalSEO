@@ -1,305 +1,452 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Phone } from 'lucide-react';
-import { apiGet, apiPatch, apiPost } from '../../shared/utils';
-
-const STATUSES = [
-    { value: 'new', label: 'New' },
-    { value: 'contacted', label: 'Contacted' },
-    { value: 'callback', label: 'Callback' },
-    { value: 'interested', label: 'Interested' },
-    { value: 'not_interested', label: 'Not interested' },
-    { value: 'converted', label: 'Converted' }
-];
-
-const OUTCOMES = [
-    { value: 'no_answer', label: 'No answer' },
-    { value: 'reached', label: 'Reached' },
-    { value: 'callback', label: 'Callback' },
-    { value: 'interested', label: 'Interested' },
-    { value: 'not_interested', label: 'Not interested' }
-];
-
-type CallLog = {
-    id: string;
-    outcome: string;
-    notes: string;
-    createdAt: string;
-};
-
-type Lead = {
-    id: string;
-    name: string;
-    phone: string;
-    email: string;
-    notes: string;
-    status: string;
-    source: string;
-    nextFollowUpAt?: string | null;
-};
-
-function fmtWhen(value?: string | null) {
-    if (!value) return '—';
-    try {
-        return new Date(value).toLocaleString(undefined, {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    } catch {
-        return '—';
-    }
-}
-
-function toDatetimeLocal(value?: string | null) {
-    if (!value) return '';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return '';
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+import { useEffect, useState, useCallback } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import {
+    ArrowLeft,
+    Phone,
+    Mail,
+    Globe,
+    Clock,
+    CheckCircle2,
+    Check,
+    Calendar,
+    MessageSquare,
+    AlertCircle,
+    CheckSquare,
+    MapPin,
+    ArrowUpRight,
+    Shield,
+    User,
+    Bell,
+    X
+} from 'lucide-react';
+import TaskCompletionModal, { type CrmTaskStatus } from '../../shared/TaskCompletionModal';
+import {
+    type SalesUnifiedLead,
+    type SalesLeadTask,
+    type SalesLeadActivity,
+    type SalesTaskStatus,
+    fetchSalesLeadCrm,
+    updateSalesTask
+} from './salesApi';
+import { cn } from '../../shared/utils';
 
 export default function SalesLeadDetail() {
     const { id } = useParams<{ id: string }>();
-    const [lead, setLead] = useState<Lead | null>(null);
-    const [calls, setCalls] = useState<CallLog[]>([]);
+    const [lead, setLead] = useState<SalesUnifiedLead | null>(null);
+    const [tasks, setTasks] = useState<SalesLeadTask[]>([]);
+    const [activities, setActivities] = useState<SalesLeadActivity[]>([]);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [msg, setMsg] = useState('');
-    const [busy, setBusy] = useState(false);
-    const [status, setStatus] = useState('new');
-    const [notes, setNotes] = useState('');
-    const [outcome, setOutcome] = useState('reached');
-    const [callNotes, setCallNotes] = useState('');
-    const [followUp, setFollowUp] = useState('');
 
-    const load = async () => {
+    const loadLead = useCallback(async () => {
         if (!id) return;
+        setLoading(true);
         setError('');
         try {
-            const data = await apiGet(`/api/sales/leads/${id}`);
+            const data = await fetchSalesLeadCrm(id);
             setLead(data.lead);
-            setCalls(data.calls || []);
-            setStatus(data.lead?.status || 'new');
-            setNotes(data.lead?.notes || '');
-            setFollowUp(toDatetimeLocal(data.lead?.nextFollowUpAt));
+            setTasks(data.tasks || []);
+            setActivities(data.activities || []);
         } catch (err: any) {
-            setError(err.message || 'Could not load lead');
+            setError(err.message || 'Failed to load lead CRM data');
+        } finally {
+            setLoading(false);
         }
-    };
-
-    useEffect(() => {
-        load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
-    const saveLead = async (e: FormEvent) => {
-        e.preventDefault();
-        if (!id) return;
-        setBusy(true);
+    useEffect(() => {
+        loadLead();
+    }, [loadLead]);
+
+    // Confirmation Modal State
+    const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask } | null>(null);
+    const [modalLoading, setModalLoading] = useState(false);
+
+    const handleOpenToggleModal = (task: SalesLeadTask) => {
+        setConfirmModalTask({ task });
+    };
+
+    const handleConfirmToggleStatus = async (chosenStatus?: CrmTaskStatus) => {
+        if (!confirmModalTask) return;
+        const { task } = confirmModalTask;
+        setModalLoading(true);
         setError('');
-        setMsg('');
         try {
-            const data = await apiPatch(`/api/sales/leads/${id}`, {
-                status,
-                notes,
-                nextFollowUpAt: followUp ? new Date(followUp).toISOString() : null
-            });
-            setLead(data.lead);
-            setMsg('Lead updated.');
+            const nextStatus: SalesTaskStatus = (chosenStatus as SalesTaskStatus) || (task.status === 'completed' ? 'pending' : 'completed');
+            await updateSalesTask(task.id, { status: nextStatus });
+            const statusLabels: Record<string, string> = {
+                completed: 'Task marked as completed! 🎉',
+                in_progress: 'Task set to In Progress 🟡',
+                pending: 'Task moved to Pending 📋',
+                cancelled: 'Task marked as Cancelled ❌'
+            };
+            setMsg(statusLabels[nextStatus] || 'Task status updated.');
+            await loadLead();
+            setConfirmModalTask(null);
         } catch (err: any) {
-            setError(err.message || 'Could not update lead');
+            setError(err.message || 'Failed to update task');
         } finally {
-            setBusy(false);
+            setModalLoading(false);
         }
     };
 
-    const submitCall = async (e: FormEvent) => {
-        e.preventDefault();
-        if (!id) return;
-        setBusy(true);
-        setError('');
-        setMsg('');
-        try {
-            const data = await apiPost(`/api/sales/leads/${id}/calls`, {
-                outcome,
-                notes: callNotes,
-                nextFollowUpAt: followUp ? new Date(followUp).toISOString() : undefined
-            });
-            setLead(data.lead);
-            setStatus(data.lead?.status || status);
-            setCallNotes('');
-            setMsg('Call logged.');
-            await load();
-        } catch (err: any) {
-            setError(err.message || 'Could not log call');
-        } finally {
-            setBusy(false);
-        }
-    };
-
-    if (!lead && !error) {
-        return <p className="text-sm text-[#64748B]">Loading lead…</p>;
-    }
-
-    if (!lead) {
+    if (loading && !lead) {
         return (
-            <div className="space-y-3">
-                <Link to="/sales" className="inline-flex items-center gap-1 text-xs font-bold text-[#64748B]">
-                    <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-                </Link>
-                <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-xl px-4 py-2">{error}</p>
+            <div className="p-12 text-center text-[#64748B]">
+                <Clock className="w-6 h-6 animate-spin mx-auto mb-2 text-[#F59E0B]" />
+                <p className="text-sm font-semibold">Loading Lead CRM Details…</p>
             </div>
         );
     }
 
-    return (
-        <div className="space-y-4">
-            <Link to="/sales" className="inline-flex items-center gap-1 text-xs font-bold text-[#64748B] hover:text-[#0F172A]">
-                <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-            </Link>
-
-            <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                        <h1 className="text-xl font-black">{lead.name || 'Unnamed lead'}</h1>
-                        <p className="text-sm text-[#64748B] mt-1">
-                            {lead.source ? `Source: ${lead.source}` : 'No source'}
-                        </p>
-                    </div>
-                    {lead.phone ? (
-                        <a
-                            href={`tel:${lead.phone}`}
-                            className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F172A] text-white px-3 py-2 text-xs font-bold hover:bg-[#1E293B]"
-                        >
-                            <Phone className="w-3.5 h-3.5" />
-                            {lead.phone}
-                        </a>
-                    ) : null}
+    if (!lead) {
+        return (
+            <div className="space-y-4 max-w-4xl mx-auto">
+                <Link to="/sales" className="inline-flex items-center gap-1 text-xs font-bold text-[#64748B] hover:text-[#0F172A]">
+                    <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
+                </Link>
+                <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-sm text-red-700">
+                    {error || 'Lead not found or no permission.'}
                 </div>
-                <dl className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                    <div>
-                        <dt className="text-[11px] font-bold uppercase tracking-wide text-[#94A3B8]">Email</dt>
-                        <dd className="mt-0.5 text-[#334155]">{lead.email || '—'}</dd>
-                    </div>
-                    <div>
-                        <dt className="text-[11px] font-bold uppercase tracking-wide text-[#94A3B8]">Phone</dt>
-                        <dd className="mt-0.5 text-[#334155]">{lead.phone || '—'}</dd>
-                    </div>
-                </dl>
             </div>
+        );
+    }
 
-            {error && (
-                <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-xl px-4 py-2">{error}</p>
-            )}
-            {msg && (
-                <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2">
-                    {msg}
-                </p>
-            )}
+    const bizName = lead.businessName || 'Lead';
 
-            <form onSubmit={submitCall} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 space-y-3">
-                <h2 className="text-sm font-black">Log call</h2>
-                <label className="block text-xs font-semibold text-[#475569]">
-                    Outcome
-                    <select
-                        required
-                        value={outcome}
-                        onChange={(e) => setOutcome(e.target.value)}
-                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0F172A]/15 focus:border-[#0F172A]"
-                    >
-                        {OUTCOMES.map((o) => (
-                            <option key={o.value} value={o.value}>
-                                {o.label}
-                            </option>
-                        ))}
-                    </select>
-                </label>
-                <label className="block text-xs font-semibold text-[#475569]">
-                    Call notes
-                    <textarea
-                        value={callNotes}
-                        onChange={(e) => setCallNotes(e.target.value)}
-                        rows={3}
-                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0F172A]/15 focus:border-[#0F172A]"
-                    />
-                </label>
-                <label className="block text-xs font-semibold text-[#475569]">
-                    Next follow-up (optional)
-                    <input
-                        type="datetime-local"
-                        value={followUp}
-                        onChange={(e) => setFollowUp(e.target.value)}
-                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0F172A]/15 focus:border-[#0F172A]"
-                    />
-                </label>
-                <button
-                    type="submit"
-                    disabled={busy}
-                    className="rounded-xl bg-[#0F172A] text-white px-3 py-2 text-sm font-semibold hover:bg-[#1E293B] disabled:opacity-50"
+    return (
+        <div className="space-y-6 max-w-5xl mx-auto pb-16 animate-in fade-in duration-300">
+            {/* Top Back Nav */}
+            <div className="flex items-center justify-between">
+                <Link
+                    to="/sales"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E2E8F0] hover:bg-[#F8FAFC] text-xs font-bold text-[#475569] rounded-xl transition-colors shadow-2xs"
                 >
-                    {busy ? 'Saving…' : 'Save call'}
-                </button>
-            </form>
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    Back to Dashboard
+                </Link>
 
-            <form onSubmit={saveLead} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 space-y-3">
-                <h2 className="text-sm font-black">Lead status</h2>
-                <label className="block text-xs font-semibold text-[#475569]">
-                    Status
-                    <select
-                        value={status}
-                        onChange={(e) => setStatus(e.target.value)}
-                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0F172A]/15 focus:border-[#0F172A]"
+                {lead.reportUrl && (
+                    <a
+                        href={lead.reportUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 text-xs font-bold rounded-xl transition-colors shadow-2xs"
                     >
-                        {STATUSES.map((s) => (
-                            <option key={s.value} value={s.value}>
-                                {s.label}
-                            </option>
-                        ))}
-                    </select>
-                </label>
-                <label className="block text-xs font-semibold text-[#475569]">
-                    Notes
-                    <textarea
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        rows={3}
-                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0F172A]/15 focus:border-[#0F172A]"
-                    />
-                </label>
-                <button
-                    type="submit"
-                    disabled={busy}
-                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm font-semibold hover:bg-[#F8FAFC] disabled:opacity-50"
-                >
-                    Update lead
-                </button>
-            </form>
-
-            <div className="bg-white border border-[#E2E8F0] rounded-2xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-[#E2E8F0]">
-                    <h2 className="text-sm font-black">Call history</h2>
-                </div>
-                {!calls.length ? (
-                    <p className="p-5 text-sm text-[#64748B]">No calls logged yet.</p>
-                ) : (
-                    <ul className="divide-y divide-[#F1F5F9]">
-                        {calls.map((c) => (
-                            <li key={c.id} className="px-5 py-3">
-                                <p className="text-xs font-bold uppercase tracking-wide text-[#64748B]">
-                                    {OUTCOMES.find((o) => o.value === c.outcome)?.label || c.outcome}
-                                    <span className="font-medium normal-case tracking-normal text-[#94A3B8]">
-                                        {' '}
-                                        · {fmtWhen(c.createdAt)}
-                                    </span>
-                                </p>
-                                {c.notes ? <p className="text-sm text-[#334155] mt-1">{c.notes}</p> : null}
-                            </li>
-                        ))}
-                    </ul>
+                        <span>View Live SEO Audit</span>
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                    </a>
                 )}
             </div>
+
+            {/* Notification Messages */}
+            {error && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                    <span>{error}</span>
+                </div>
+            )}
+            {msg && (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                    <span>{msg}</span>
+                </div>
+            )}
+
+            {/* Lead Context Header Card */}
+            <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-xs">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2.5 mb-1.5">
+                            <h1 className="text-2xl font-black text-[#0F172A] tracking-tight">{bizName}</h1>
+                            {lead.scoreTotal != null && (
+                                <span className="bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-black px-2.5 py-0.5 rounded-lg shadow-2xs">
+                                    Score: {lead.scoreTotal}/100
+                                </span>
+                            )}
+                            {lead.source && (
+                                <span className="bg-[#F1F5F9] border border-[#E2E8F0] text-[#64748B] text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md">
+                                    {lead.source}
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-xs text-[#64748B]">CRM Lead Profile & Activity History</p>
+                    </div>
+
+                    {/* Quick Action Dialing & Log Call Box */}
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                        {lead.phone && (
+                            <a
+                                href={`tel:${lead.phone}`}
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-white font-extrabold text-xs rounded-xl transition-colors shadow-sm"
+                            >
+                                <Phone className="w-3.5 h-3.5" />
+                                Call {lead.phone}
+                            </a>
+                        )}
+                        <Link
+                            to={`/sales/calls?leadId=${encodeURIComponent(id || '')}`}
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-[#0F172A] hover:bg-[#1E293B] text-white font-extrabold text-xs rounded-xl transition-colors shadow-sm"
+                        >
+                            <Phone className="w-3.5 h-3.5 text-[#F59E0B]" />
+                            Log Call & Activity
+                        </Link>
+                    </div>
+                </div>
+
+                {/* Contact Attributes Bar */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-5 pt-5 border-t border-[#F1F5F9]">
+                    <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl flex items-center gap-2.5">
+                        <Phone className="w-4 h-4 text-[#F59E0B] shrink-0" />
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase text-[#94A3B8]">Phone</p>
+                            <p className="text-xs font-bold text-[#0F172A] truncate">
+                                {lead.phone || 'No phone provided'}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl flex items-center gap-2.5">
+                        <Mail className="w-4 h-4 text-[#F59E0B] shrink-0" />
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase text-[#94A3B8]">Email</p>
+                            <p className="text-xs font-bold text-[#0F172A] truncate">
+                                {lead.email || 'No email provided'}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl flex items-center gap-2.5">
+                        <Globe className="w-4 h-4 text-[#F59E0B] shrink-0" />
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase text-[#94A3B8]">Website</p>
+                            <p className="text-xs font-bold text-[#0F172A] truncate">
+                                {lead.website ? (
+                                    <a
+                                        href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-indigo-600 hover:underline"
+                                    >
+                                        {lead.website.replace(/^https?:\/\/(www\.)?/, '')}
+                                    </a>
+                                ) : (
+                                    'None'
+                                )}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl flex items-center gap-2.5">
+                        <MapPin className="w-4 h-4 text-[#F59E0B] shrink-0" />
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase text-[#94A3B8]">Location</p>
+                            <p className="text-xs font-bold text-[#0F172A] truncate">
+                                {lead.city || lead.address || 'Not specified'}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Two-Column CRM Workspace: Left = Tasks for this Lead, Right = Unified CRM Activity Timeline */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Left Column: Tasks */}
+                <div className="lg:col-span-6 space-y-6">
+                    {/* Tasks Section */}
+                    <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                                <CheckSquare className="w-4 h-4 text-[#F59E0B]" />
+                                <h2 className="text-base font-black text-[#0F172A]">Tasks for this Lead</h2>
+                                <span className="bg-[#F1F5F9] text-[#475569] text-xs font-bold px-2 py-0.5 rounded-full">
+                                    {tasks.length}
+                                </span>
+                            </div>
+                            <Link
+                                to={`/sales/reminders?leadId=${encodeURIComponent(id || '')}`}
+                                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0F172A] hover:text-[#D97706] bg-[#F8FAFC] border border-[#E2E8F0] px-3 py-1.5 rounded-xl transition-colors hover:bg-white shadow-2xs"
+                            >
+                                <Bell className="w-3.5 h-3.5 text-[#F59E0B]" />
+                                <span>+ Add Reminder</span>
+                            </Link>
+                        </div>
+
+                        {/* Task List */}
+                        {!tasks.length ? (
+                            <p className="text-xs text-[#94A3B8] text-center py-4">No tasks assigned for this lead yet.</p>
+                        ) : (
+                            <ul className="space-y-2">
+                                {tasks.map((t) => {
+                                    const isDone = t.status === 'completed';
+                                    return (
+                                        <li
+                                            key={t.id}
+                                            className={cn(
+                                                'p-3 rounded-xl border flex items-center justify-between gap-3 transition-colors',
+                                                isDone ? 'bg-emerald-50/50 border-emerald-300 shadow-xs' : 'bg-white border-[#E2E8F0]'
+                                            )}
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    <p className={cn('text-xs font-bold', isDone ? 'text-emerald-950 font-bold' : 'text-[#0F172A]')}>
+                                                        {t.title}
+                                                    </p>
+                                                    {t.createdByRole === 'admin' ? (
+                                                        <span className="inline-flex items-center gap-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider">
+                                                            <Shield className="w-2.5 h-2.5 text-purple-600" />
+                                                            Admin Assigned
+                                                        </span>
+                                                    ) : (
+                                                        <span className="inline-flex items-center gap-0.5 rounded border border-slate-200 bg-slate-100 text-slate-700 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider">
+                                                            <User className="w-2.5 h-2.5 text-slate-500" />
+                                                            Self Created
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                {t.dueDate && (
+                                                    <p className={cn("text-[10px] mt-1 flex items-center gap-1", isDone ? "text-emerald-700" : "text-[#94A3B8]")}>
+                                                        <Calendar className="w-3 h-3" />
+                                                        Due: {new Date(t.dueDate).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                    </p>
+                                                )}
+                                            </div>
+
+                                            {/* Status Badge + Update Status Button */}
+                                            <div className="shrink-0 flex items-center gap-2">
+                                                <span className={cn(
+                                                    "inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md border",
+                                                    t.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300" :
+                                                    t.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300" :
+                                                    t.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200" :
+                                                    "bg-slate-50 text-slate-700 border-slate-200"
+                                                )}>
+                                                    {t.status === 'completed' && <Check className="w-3 h-3 text-emerald-600" />}
+                                                    {t.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600" />}
+                                                    {t.status === 'cancelled' && <X className="w-3 h-3 text-rose-600" />}
+                                                    <span className="capitalize">{t.status.replace('_', ' ')}</span>
+                                                </span>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleOpenToggleModal(t)}
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-amber-500 hover:bg-amber-600 text-white transition-all shadow-2xs"
+                                                    title="Update Status"
+                                                >
+                                                    <span>Update Status</span>
+                                                </button>
+                                            </div>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        )}
+                    </div>
+                </div>
+
+                {/* Right Column: Unified CRM Activity Timeline */}
+                <div className="lg:col-span-6 space-y-6">
+                    <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs">
+                        <div className="flex items-center justify-between gap-2 mb-4 pb-3 border-b border-[#F1F5F9]">
+                            <div className="flex items-center gap-2">
+                                <MessageSquare className="w-4 h-4 text-[#F59E0B]" />
+                                <h2 className="text-base font-black text-[#0F172A]">Activity Timeline</h2>
+                            </div>
+                            <Link
+                                to={`/sales/calls?leadId=${encodeURIComponent(id || '')}`}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0F172A] hover:bg-[#1E293B] text-white font-bold text-xs rounded-xl shadow-xs transition-colors"
+                            >
+                                <Phone className="w-3 h-3 text-[#F59E0B]" />
+                                <span>Log Call</span>
+                            </Link>
+                        </div>
+
+                        {!activities.length ? (
+                            <div className="text-center py-8 text-[#94A3B8]">
+                                <Clock className="w-6 h-6 mx-auto mb-1 text-[#CBD5E1]" />
+                                <p className="text-xs font-semibold">No activity logs recorded yet.</p>
+                            </div>
+                        ) : (
+                            <div className="relative pl-4 space-y-4 before:absolute before:left-1.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-[#E2E8F0]">
+                                {activities.map((act) => {
+                                    const isCall = act.activityType === 'call_log';
+                                    const isTask = act.activityType === 'task_event';
+                                    const isDeleted = isTask && act.note?.toLowerCase().includes('deleted');
+
+                                    return (
+                                        <div key={act.id} className="relative pl-4">
+                                            {/* Dot */}
+                                            <span
+                                                className={cn(
+                                                    'absolute -left-4 top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white',
+                                                    isCall ? 'bg-[#F59E0B]' : isDeleted ? 'bg-rose-500' : isTask ? 'bg-indigo-500' : 'bg-slate-400'
+                                                )}
+                                            />
+                                            <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-3 text-xs space-y-1">
+                                                <div className="flex items-center justify-between gap-1 flex-wrap">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        {isTask && (
+                                                            <span className={cn(
+                                                                "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-bold text-[10px] uppercase border",
+                                                                isDeleted
+                                                                    ? "bg-rose-100 text-rose-800 border-rose-200"
+                                                                    : "bg-purple-100 text-purple-800 border-purple-200"
+                                                            )}>
+                                                                <Shield className={cn("w-2.5 h-2.5", isDeleted ? "text-rose-600" : "text-purple-600")} />
+                                                                {isDeleted ? 'Task Deleted' : 'Admin Task'}
+                                                            </span>
+                                                        )}
+                                                        {act.disposition && (
+                                                            <span className={cn(
+                                                                "inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase",
+                                                                act.disposition === 'converted' ? "bg-emerald-100 text-emerald-800 border border-emerald-200" :
+                                                                act.disposition === 'callback_requested' ? "bg-amber-100 text-amber-800 border border-amber-200" :
+                                                                act.disposition === 'not_interested' ? "bg-rose-100 text-rose-800 border border-rose-200" :
+                                                                "bg-amber-100 text-amber-900 border border-amber-200"
+                                                            )}>
+                                                                {act.disposition.replace('_', ' ')}
+                                                            </span>
+                                                        )}
+                                                        <span className="font-extrabold text-[#0F172A]">
+                                                            {act.authorName || act.userName || (isTask ? 'Admin' : 'Sales')}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-[10px] text-[#94A3B8]">
+                                                        {new Date(act.createdAt).toLocaleString(undefined, {
+                                                            month: 'short',
+                                                            day: 'numeric',
+                                                            hour: '2-digit',
+                                                            minute: '2-digit'
+                                                        })}
+                                                    </span>
+                                                </div>
+
+                                                <p className="text-[#475569] leading-relaxed whitespace-pre-wrap pt-0.5">
+                                                    {act.note}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Task Completion Modal */}
+            <TaskCompletionModal
+                isOpen={!!confirmModalTask}
+                onClose={() => setConfirmModalTask(null)}
+                onConfirm={handleConfirmToggleStatus}
+                taskTitle={confirmModalTask?.task.title || ''}
+                leadName={lead?.businessName}
+                priority={confirmModalTask?.task.priority}
+                currentStatus={confirmModalTask?.task.status}
+                isCompleting={confirmModalTask ? confirmModalTask.task.status !== 'completed' : true}
+                loading={modalLoading}
+            />
         </div>
     );
 }
