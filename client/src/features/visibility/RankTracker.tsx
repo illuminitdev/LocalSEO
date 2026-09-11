@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity, updateDashboardStats } from '../../shared/utils';
 import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
-import PlacesMap, { geoGridMarkers, geocodeAddress, mapsJsConfigured } from '../../shared/PlacesMap';
+import PlacesMap, { geoGridMarkers, geocodeAddress, mapsJsConfigured, type MapMarker } from '../../shared/PlacesMap';
 import {
     PRIMARY_SERVICES,
     loadVisibilityAuditReport,
@@ -114,6 +114,7 @@ export default function RankTracker() {
     const [trackedKeywords, setTrackedKeywords] = useState<TrackedKeyword[]>([]);
     const [lastAudit, setLastAudit] = useState<LastAuditSummary | null>(null);
     const [hasAuditReport, setHasAuditReport] = useState(false);
+    const [showRankGrid, setShowRankGrid] = useState(false);
     const [error, setError] = useState('');
 
     const [showAuditForm, setShowAuditForm] = useState(false);
@@ -257,8 +258,54 @@ export default function RankTracker() {
 
     const mapMarkers = useMemo(() => {
         if (typeof lat !== 'number' || typeof lng !== 'number' || !gridData.length) return [];
-        return geoGridMarkers(lat, lng, gridData, 2);
-    }, [lat, lng, gridData]);
+
+        const markers: MapMarker[] = [];
+        if (showRankGrid) {
+            markers.push(...geoGridMarkers(lat, lng, gridData, 1));
+        }
+
+        markers.push({
+            lat,
+            lng,
+            label: 'You',
+            title: businessName ? `${businessName} (You)` : 'Your business',
+            highlight: true,
+            color: '#0F172A'
+        });
+
+        let rivalIdx = 0;
+        for (const comp of competitors) {
+            const name = String(comp?.name || '');
+            if (!name || /\(You\)/i.test(name)) continue;
+            const cLat = Number(comp.lat);
+            const cLng = Number(comp.lng);
+            if (!Number.isFinite(cLat) || !Number.isFinite(cLng)) continue;
+            rivalIdx += 1;
+            if (rivalIdx > 5) break;
+            markers.push({
+                lat: cLat,
+                lng: cLng,
+                label: `C${rivalIdx}`,
+                title: `${name}${comp.rating ? ` · ${comp.rating}★` : ''}`,
+                color: '#475569'
+            });
+        }
+
+        return markers;
+    }, [lat, lng, gridData, competitors, businessName, showRankGrid]);
+
+    const mapCompetitors = useMemo(() => {
+        return competitors
+            .filter((c) => c?.name && !/\(You\)/i.test(String(c.name)))
+            .slice(0, 5)
+            .map((c, i) => ({
+                label: `C${i + 1}`,
+                name: c.name as string,
+                rating: c.rating,
+                reviews: c.reviews,
+                hasPin: Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng))
+            }));
+    }, [competitors]);
 
     const displayKeyword = activeKeyword || keyword || (businessCategory ? `${businessCategory} near me` : '');
 
@@ -457,9 +504,9 @@ export default function RankTracker() {
                 <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
-                <div className="bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-sm">
-                    <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8 items-stretch">
+                <div className="bg-white p-5 md:p-6 rounded-2xl border border-[#E2E8F0] shadow-sm flex flex-col min-h-[220px]">
+                    <div className="flex items-start justify-between gap-3 mb-2">
                         <div>
                             <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Audit score & track</p>
                             <h2 className="text-lg font-semibold text-[#0F172A] flex items-center gap-2 mt-1">
@@ -467,44 +514,44 @@ export default function RankTracker() {
                             </h2>
                         </div>
                         {lastAudit ? (
-                            <div className="text-right">
-                                <div className="text-3xl font-black text-[#0F172A]">
+                            <div className="text-right shrink-0">
+                                <div className="text-3xl font-black text-[#0F172A] leading-none">
                                     {lastAudit.total}
                                     <span className="text-base font-bold text-gray-400">/100</span>
                                 </div>
                                 {lastAudit.bandLabel && (
-                                    <p className="text-xs font-bold text-[#D97706]">{lastAudit.bandLabel}</p>
+                                    <p className="text-xs font-bold text-[#D97706] mt-1">{lastAudit.bandLabel}</p>
                                 )}
                             </div>
                         ) : null}
                     </div>
                     {lastAudit ? (
                         <>
-                            <p className="text-sm text-gray-600 mb-4">
+                            <p className="text-sm text-gray-600 mb-3">
                                 Last run {auditDateLabel}
                                 {lastAudit.query ? ` · ${lastAudit.query}` : ''}
                             </p>
-                            <div className="flex flex-wrap gap-2">
+                            <div className="mt-auto flex flex-wrap gap-2">
                                 <button
                                     type="button"
                                     disabled={!hasAuditReport}
                                     onClick={() => navigate('/visibility-audit/report')}
-                                    className="inline-flex items-center gap-2 px-4 py-2 bg-[#0F172A] hover:bg-[#111827] text-white text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50"
+                                    className="inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-[#0F172A] hover:bg-[#111827] text-white text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50"
                                 >
                                     <FileText className="w-4 h-4" /> View report
                                 </button>
                                 <button
                                     type="button"
                                     disabled={!hasAuditReport}
-                                    onClick={() => navigate('/visibility-audit/report?print=1')}
-                                    className="inline-flex items-center gap-2 px-4 py-2 bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#E2E8F0] text-[#0F172A] text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50"
+                                    onClick={() => navigate('/visibility-audit/report?download=1')}
+                                    className="inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#E2E8F0] text-[#0F172A] text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50"
                                 >
-                                    <Download className="w-4 h-4" /> Download / Print
+                                    <Download className="w-4 h-4" /> Download PDF
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => setShowAuditForm(true)}
-                                    className="inline-flex items-center gap-2 px-4 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-white text-sm font-bold rounded-lg cursor-pointer"
+                                    className="inline-flex items-center justify-center gap-2 px-3.5 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-white text-sm font-bold rounded-lg cursor-pointer"
                                 >
                                     Re-run audit
                                 </button>
@@ -518,14 +565,14 @@ export default function RankTracker() {
                         </>
                     ) : (
                         <>
-                            <p className="text-sm text-gray-500 mb-4">
+                            <p className="text-sm text-gray-500 mb-3 flex-1">
                                 No audit yet. Run a free Local Visibility Audit to see your score here and open the report
                                 anytime.
                             </p>
                             <button
                                 type="button"
                                 onClick={() => setShowAuditForm(true)}
-                                className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0F172A] hover:bg-[#111827] text-white text-sm font-bold rounded-xl cursor-pointer"
+                                className="mt-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F172A] hover:bg-[#111827] text-white text-sm font-bold rounded-xl cursor-pointer self-start"
                             >
                                 <Radar className="w-4 h-4 text-amber-300" /> Run Local Visibility Audit
                             </button>
@@ -533,38 +580,38 @@ export default function RankTracker() {
                     )}
                 </div>
 
-                <div className="bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-sm">
-                    <div className="flex items-center gap-2 mb-3">
+                <div className="bg-white p-5 md:p-6 rounded-2xl border border-[#E2E8F0] shadow-sm flex flex-col min-h-[220px]">
+                    <div className="flex items-center gap-2 mb-2">
                         <ListOrdered className="w-5 h-5 text-[#0F172A]" />
                         <h2 className="text-lg font-semibold text-[#0F172A]">Ranking keywords</h2>
                     </div>
-                    <p className="text-sm text-gray-500 mb-4">
+                    <p className="text-sm text-gray-500 mb-3">
                         Keywords you have run through Gap Analysis, with average pack rank and Local 3-Pack coverage.
                     </p>
                     {trackedKeywords.length ? (
-                        <div className="overflow-x-auto rounded-xl border border-[#E2E8F0]">
+                        <div className="mt-auto overflow-x-auto rounded-xl border border-[#E2E8F0]">
                             <table className="w-full text-left text-sm">
                                 <thead className="bg-[#F8FAFC] text-gray-500 border-b border-[#E2E8F0]">
                                     <tr>
-                                        <th className="px-3 py-2 font-bold">Keyword</th>
-                                        <th className="px-3 py-2 font-bold">Avg rank</th>
-                                        <th className="px-3 py-2 font-bold">Top 3%</th>
-                                        <th className="px-3 py-2 font-bold"></th>
+                                        <th className="px-3 py-2.5 font-bold">Keyword</th>
+                                        <th className="px-3 py-2.5 font-bold">Avg rank</th>
+                                        <th className="px-3 py-2.5 font-bold">Top 3%</th>
+                                        <th className="px-3 py-2.5 font-bold"></th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#E2E8F0]">
                                     {trackedKeywords.map((row) => (
                                         <tr key={row.keyword}>
-                                            <td className="px-3 py-2 font-semibold text-[#0F172A]">{row.keyword}</td>
-                                            <td className="px-3 py-2 font-bold text-[#D97706]">{row.avgRank || '—'}</td>
-                                            <td className="px-3 py-2 text-gray-600 font-semibold">
+                                            <td className="px-3 py-2.5 font-semibold text-[#0F172A]">{row.keyword}</td>
+                                            <td className="px-3 py-2.5 font-bold text-[#D97706]">{row.avgRank || '—'}</td>
+                                            <td className="px-3 py-2.5 text-gray-600 font-semibold">
                                                 {row.top3Percentage ?? '—'}%
                                             </td>
-                                            <td className="px-3 py-2 text-right">
+                                            <td className="px-3 py-2.5 text-right">
                                                 <button
                                                     type="button"
                                                     onClick={() => loadKeyword(row)}
-                                                    className="text-xs font-bold text-[#0F172A] hover:text-[#F59E0B] cursor-pointer"
+                                                    className="inline-flex items-center px-2.5 py-1 text-xs font-bold text-[#0F172A] bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#E2E8F0] rounded-full cursor-pointer"
                                                 >
                                                     Load
                                                 </button>
@@ -575,7 +622,7 @@ export default function RankTracker() {
                             </table>
                         </div>
                     ) : (
-                        <div className="rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 text-sm text-gray-500 text-center">
+                        <div className="mt-auto rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 text-sm text-gray-500 text-center">
                             No tracked keywords yet. Generate Gap Analysis to start the list.
                         </div>
                     )}
@@ -739,22 +786,41 @@ export default function RankTracker() {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8 items-start">
                 <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-sm">
-                    <div className="flex justify-between items-center mb-6 gap-2 flex-wrap">
+                    <div className="flex justify-between items-start mb-4 gap-3 flex-wrap">
                         <h2 className="text-lg font-semibold flex items-center gap-2">
                             <Map className="w-5 h-5 text-[#0F172A]" /> Keyword: {displayKeyword || 'not set'}
                         </h2>
-                        <div className="flex gap-2 text-xs font-semibold">
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs font-semibold text-gray-600 items-center">
                             <span className="flex items-center gap-1">
-                                <div className="w-3 h-3 bg-[#F59E0B] rounded-full"></div> 1-3
+                                <div className="w-3 h-3 bg-[#0F172A] rounded-full"></div> You
                             </span>
                             <span className="flex items-center gap-1">
-                                <div className="w-3 h-3 bg-[#D97706] rounded-full"></div> 4-5
+                                <div className="w-3 h-3 bg-[#475569] rounded-full"></div> Competitors
                             </span>
-                            <span className="flex items-center gap-1">
-                                <div className="w-3 h-3 bg-red-500 rounded-full"></div> 11+
-                            </span>
+                            {showRankGrid && (
+                                <>
+                                    <span className="flex items-center gap-1">
+                                        <div className="w-3 h-3 bg-[#F59E0B] rounded-full"></div> Rank 1-3
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                        <div className="w-3 h-3 bg-[#D97706] rounded-full"></div> Rank 4-5
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                        <div className="w-3 h-3 bg-red-500 rounded-full"></div> Rank 11+
+                                    </span>
+                                </>
+                            )}
+                            <label className="inline-flex items-center gap-1.5 cursor-pointer ml-1">
+                                <input
+                                    type="checkbox"
+                                    checked={showRankGrid}
+                                    onChange={(e) => setShowRankGrid(e.target.checked)}
+                                    className="rounded border-[#CBD5E1] text-[#F59E0B] focus:ring-[#F59E0B]"
+                                />
+                                Show rank grid
+                            </label>
                         </div>
                     </div>
 
@@ -762,8 +828,8 @@ export default function RankTracker() {
                         <PlacesMap
                             markers={mapMarkers}
                             height={360}
-                            title="Local Pack geo ranks"
-                            zoom={12}
+                            title="Local competitors and ranks"
+                            zoom={13}
                             showPlaceholder
                             placeholder={
                                 mapsJsConfigured()
@@ -775,28 +841,30 @@ export default function RankTracker() {
                         <div className="w-full h-[360px] rounded-xl border border-[#E2E8F0] bg-[#F1F5F9] flex flex-col items-center justify-center text-sm text-gray-500 px-6 text-center gap-2">
                             <Map className="w-8 h-8 text-gray-400" />
                             {!gridData.length
-                                ? 'Run gap analysis to place rank pins on the map.'
+                                ? 'Run gap analysis to place your business and competitors on the map.'
                                 : typeof lat !== 'number' || typeof lng !== 'number'
                                   ? 'Analysis is ready, but location is missing — save a full address on Business Profile so pins can be placed.'
                                   : 'Preparing map…'}
                         </div>
                     )}
                     <p className="text-center text-sm text-gray-500 mt-4 font-semibold">
-                        <Crosshair className="w-4 h-4 inline mr-1 text-[#F59E0B]" /> Radius: 2 miles · pin = estimated
-                        Local Pack rank
+                        <Crosshair className="w-4 h-4 inline mr-1 text-[#F59E0B]" />
+                        {showRankGrid
+                            ? 'Amber numbers = estimated Local Pack rank at search cells (not businesses). Slate C1–C5 = real same-service rivals.'
+                            : 'Map shows your business and same-service rivals at real locations. Turn on “Show rank grid” for the 3×3 Local Pack estimate.'}
                     </p>
                 </div>
 
-                <div className="bg-[#F8FAFC] p-6 rounded-2xl border border-[#E2E8F0] shadow-sm flex flex-col">
+                <div className="bg-[#F8FAFC] p-6 rounded-2xl border border-[#E2E8F0] shadow-sm self-start w-full">
                     <h2 className="text-lg font-semibold flex items-center gap-2 mb-2">
                         <Activity className="w-5 h-5 text-[#D97706]" /> AI Gap Analysis
                     </h2>
-                    <p className="text-sm text-gray-500 mb-6 font-semibold animate-in">
+                    <p className="text-sm text-gray-500 mb-4 font-semibold">
                         Fills the map pins and competitor table for your keyword (same-service rivals only).
                     </p>
 
                     {!gapAnalysis ? (
-                        <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-[#E2E8F0] rounded-xl bg-white p-8">
+                        <div className="flex flex-col items-center justify-center border-2 border-dashed border-[#E2E8F0] rounded-xl bg-white p-8">
                             <button
                                 onClick={handleGenerateGap}
                                 disabled={isGeneratingGap}
@@ -807,11 +875,43 @@ export default function RankTracker() {
                             </button>
                         </div>
                     ) : (
-                        <div className="flex-1 bg-white p-6 rounded-xl border border-[#F59E0B]/30 shadow-sm animate-in zoom-in duration-300">
+                        <div className="bg-white p-5 rounded-xl border border-[#F59E0B]/30 shadow-sm animate-in zoom-in duration-300">
                             <h3 className="text-[#0F172A] font-bold mb-3 flex items-center gap-2">
                                 <Sparkles className="w-5 h-5" /> Executive Insight
                             </h3>
                             <p className="text-gray-700 leading-relaxed text-sm mb-4">{gapAnalysis}</p>
+
+                            {mapCompetitors.length > 0 && (
+                                <div className="mb-4">
+                                    <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
+                                        Competitors on map
+                                    </p>
+                                    <ul className="space-y-1.5">
+                                        {mapCompetitors.map((c) => (
+                                            <li
+                                                key={c.label}
+                                                className="flex items-center justify-between gap-2 text-sm border border-[#E2E8F0] rounded-lg px-3 py-2"
+                                            >
+                                                <span className="font-semibold text-[#0F172A]">
+                                                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#475569] text-white text-[10px] font-bold mr-2">
+                                                        {c.label}
+                                                    </span>
+                                                    {c.name}
+                                                    {!c.hasPin && (
+                                                        <span className="ml-2 text-[10px] font-bold text-gray-400">
+                                                            no pin
+                                                        </span>
+                                                    )}
+                                                </span>
+                                                <span className="text-gray-600 font-semibold shrink-0">
+                                                    {c.rating || '—'}★
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
                             <div className="flex gap-3">
                                 <button
                                     type="button"

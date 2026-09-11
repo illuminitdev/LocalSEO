@@ -478,7 +478,10 @@ async function nearbyCompetitors({
         photos: 0,
         trend: 'up',
         placeId: p.placeId || '',
-        types: p.types || []
+        types: p.types || [],
+        lat: typeof p.lat === 'number' && Number.isFinite(p.lat) ? p.lat : null,
+        lng: typeof p.lng === 'number' && Number.isFinite(p.lng) ? p.lng : null,
+        address: p.address || ''
     }));
 }
 
