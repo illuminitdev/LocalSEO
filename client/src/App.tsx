@@ -42,6 +42,9 @@ import AdminFullAuditDetail from './features/admin/AdminFullAuditDetail';
 import AdminLayout from './features/admin/AdminLayout';
 import SalesLayout from './features/sales/SalesLayout';
 import SalesQueue from './features/sales/SalesQueue';
+import SalesTasks from './features/sales/SalesTasks';
+import SalesReminders from './features/sales/SalesReminders';
+import SalesActivityLogs from './features/sales/SalesActivityLogs';
 import SalesLeadDetail from './features/sales/SalesLeadDetail';
 import SalesAccount from './features/sales/SalesAccount';
 
@@ -103,6 +106,9 @@ export default function App() {
           }
         >
           <Route path="/sales" element={<SalesQueue />} />
+          <Route path="/sales/tasks" element={<SalesTasks />} />
+          <Route path="/sales/reminders" element={<SalesReminders />} />
+          <Route path="/sales/calls" element={<SalesActivityLogs />} />
           <Route path="/sales/leads/:id" element={<SalesLeadDetail />} />
           <Route path="/sales/account" element={<SalesAccount />} />
         </Route>

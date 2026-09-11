@@ -929,6 +929,9 @@ async function ensureCrmTables() {
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
 
+            ALTER TABLE lead_tasks ADD COLUMN IF NOT EXISTS created_by_role TEXT DEFAULT 'admin';
+            ALTER TABLE lead_tasks ADD COLUMN IF NOT EXISTS created_by_name TEXT DEFAULT 'Admin';
+
             CREATE INDEX IF NOT EXISTS idx_lead_tasks_lead_id ON lead_tasks(lead_id);
             CREATE INDEX IF NOT EXISTS idx_lead_tasks_assigned_to ON lead_tasks(assigned_to_user_id);
             CREATE INDEX IF NOT EXISTS idx_lead_tasks_status ON lead_tasks(status);
@@ -971,6 +974,73 @@ router.get('/crm/sales-agents', requireAdmin, async (_req: Request, res: Respons
     }
 });
 
+/** Helper to extract lead details from submissions + audits or sales_leads for admin CRM */
+async function fetchAdminLeadMetadataMap(leadIds: string[]) {
+    if (!leadIds.length) return new Map<string, any>();
+    const map = new Map<string, any>();
+    const origin = zappSitesOrigin();
+
+    // 1. Try growth audit submissions
+    try {
+        const { rows: subRows } = await query(
+            `SELECT s.id, s.created_at, s.email AS submission_email, s.payload,
+                    a.id AS audit_id, a.data AS audit_data
+             FROM submissions s
+             LEFT JOIN audits a ON a.id::text = s.payload->>'auditId'
+             WHERE s.id::text = ANY($1::text[])`,
+            [leadIds]
+        );
+
+        for (const row of subRows) {
+            const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+            const auditData = row.audit_data && typeof row.audit_data === 'object' ? row.audit_data : {};
+            const business = auditData.business && typeof auditData.business === 'object' ? auditData.business : {};
+            const sharePath = String(payload.sharePath || '').trim() || null;
+            const scoreRaw = payload.scoreTotal ?? auditData.scoreTotal ?? auditData.score?.total ?? null;
+
+            map.set(String(row.id), {
+                id: String(row.id),
+                businessName: String(payload.businessName || business.name || 'Lead').trim(),
+                phone: String(payload.phone || business.phone || '').trim(),
+                email: String(payload.email || row.submission_email || business.email || '').trim().toLowerCase(),
+                website: String(payload.website || business.website || '').trim(),
+                address: String(payload.address || business.address || '').trim(),
+                city: String(payload.city || business.city || '').trim(),
+                scoreTotal: scoreRaw != null && Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw) : null,
+                reportUrl: sharePath ? `${origin}${sharePath.startsWith('/') ? '' : '/'}${sharePath}` : null,
+                source: String(payload.source || 'growth_audit').trim()
+            });
+        }
+    } catch {}
+
+    // 2. Try sales_leads for any remaining
+    const missing = leadIds.filter((id) => !map.has(id));
+    if (missing.length) {
+        try {
+            const { rows: salesRows } = await query(
+                `SELECT * FROM sales_leads WHERE id::text = ANY($1::text[])`,
+                [missing]
+            );
+            for (const row of salesRows) {
+                map.set(String(row.id), {
+                    id: String(row.id),
+                    businessName: row.name || 'Lead',
+                    phone: row.phone || '',
+                    email: row.email || '',
+                    website: '',
+                    address: '',
+                    city: '',
+                    scoreTotal: null,
+                    reportUrl: null,
+                    source: row.source || 'sales_lead'
+                });
+            }
+        } catch {}
+    }
+
+    return map;
+}
+
 /** Get all CRM tasks with optional filters */
 router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
     try {
@@ -980,6 +1050,7 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
         const status = String(req.query.status || '').trim();
         const priority = String(req.query.priority || '').trim();
         const taskType = String(req.query.taskType || '').trim();
+        const createdBy = String(req.query.createdBy || '').trim();
 
         const params: any[] = [];
         const where: string[] = ['1=1'];
@@ -1004,6 +1075,8 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
             params.push(taskType);
             where.push(`t.task_type = $${params.length}`);
         }
+        // Admin only sees tasks created by admin (exclude sales agent self-reminders)
+        where.push(`(t.created_by_role = 'admin' OR t.created_by_role IS NULL)`);
 
         const { rows } = await query(`
             SELECT 
@@ -1019,6 +1092,8 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
                 t.created_at AS "createdAt",
                 t.updated_at AS "updatedAt",
                 t.assigned_to_user_id AS "assignedToUserId",
+                COALESCE(t.created_by_role, 'admin') AS "createdByRole",
+                COALESCE(t.created_by_name, 'Admin') AS "createdByName",
                 u.name AS "assignedToName",
                 u.email AS "assignedToEmail",
                 u.avatar_url AS "assignedToAvatarUrl"
@@ -1037,7 +1112,26 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
             LIMIT 500
         `, params);
 
-        res.json({ tasks: rows });
+        const leadIds = Array.from(new Set(rows.map((t: any) => t.leadId).filter(Boolean))) as string[];
+        const leadMetaMap = await fetchAdminLeadMetadataMap(leadIds);
+
+        const enrichedTasks = rows.map((t: any) => {
+            const meta = leadMetaMap.get(t.leadId) || {};
+            return {
+                ...t,
+                leadBusinessName: meta.businessName || 'Lead',
+                leadPhone: meta.phone || '',
+                leadEmail: meta.email || '',
+                leadWebsite: meta.website || '',
+                leadAddress: meta.address || '',
+                leadCity: meta.city || '',
+                leadScoreTotal: meta.scoreTotal ?? null,
+                leadReportUrl: meta.reportUrl || null,
+                leadSource: meta.source || ''
+            };
+        });
+
+        res.json({ tasks: enrichedTasks });
     } catch (err: any) {
         console.error('Fetch CRM tasks error:', err);
         res.status(500).json({ error: err.message || 'Failed to fetch tasks' });
@@ -1073,8 +1167,8 @@ router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
 
         const { rows } = await query(`
             INSERT INTO lead_tasks (
-                lead_id, task_type, title, notes, priority, status, assigned_to_user_id, due_date
-            ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)
+                lead_id, task_type, title, notes, priority, status, assigned_to_user_id, due_date, created_by_role, created_by_name
+            ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, 'admin', 'Admin')
             RETURNING 
                 id,
                 lead_id AS "leadId",
@@ -1087,7 +1181,9 @@ router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
                 completed_at AS "completedAt",
                 created_at AS "createdAt",
                 updated_at AS "updatedAt",
-                assigned_to_user_id AS "assignedToUserId"
+                assigned_to_user_id AS "assignedToUserId",
+                created_by_role AS "createdByRole",
+                created_by_name AS "createdByName"
         `, [
             lead_id,
             sanitizedTaskType,
@@ -1105,7 +1201,7 @@ router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
             await query(`
                 INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
                 VALUES ($1, 'Admin', 'task_event', $2)
-            `, [lead_id, `Created task: "${task.title}"`]);
+            `, [lead_id, `Admin created task: "${task.title}"`]);
         } catch {}
 
         res.status(201).json({ task });
@@ -1175,7 +1271,9 @@ router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response)
                 completed_at AS "completedAt",
                 created_at AS "createdAt",
                 updated_at AS "updatedAt",
-                assigned_to_user_id AS "assignedToUserId"
+                assigned_to_user_id AS "assignedToUserId",
+                COALESCE(created_by_role, 'admin') AS "createdByRole",
+                COALESCE(created_by_name, 'Admin') AS "createdByName"
         `, params);
 
         if (!rows.length) {
@@ -1206,6 +1304,25 @@ router.delete('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response
     try {
         await ensureCrmTables();
         const taskId = req.params.id;
+
+        // Fetch task details before deleting so we can record an activity history event
+        const { rows: taskRows } = await query(
+            `SELECT title, lead_id, assigned_to_user_id FROM lead_tasks WHERE id = $1`,
+            [taskId]
+        );
+
+        if (taskRows.length > 0) {
+            const task = taskRows[0];
+            try {
+                await query(`
+                    INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
+                    VALUES ($1, 'Admin', 'task_event', $2)
+                `, [task.lead_id, `Task "${task.title}" was deleted by Admin`]);
+            } catch (actErr) {
+                console.warn('Failed to record task deletion activity:', actErr);
+            }
+        }
+
         await query(`DELETE FROM lead_tasks WHERE id = $1`, [taskId]);
         res.json({ success: true });
     } catch (err: any) {
@@ -1232,7 +1349,8 @@ router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, r
                 u.email AS "userEmail"
             FROM lead_activities a
             LEFT JOIN users u ON u.id = a.user_id
-            WHERE a.lead_id = $1
+            WHERE a.lead_id = $1 
+              AND (a.activity_type = 'call_log' OR (a.activity_type = 'task_event' AND a.note NOT LIKE 'Created task:%'))
             ORDER BY a.created_at DESC
             LIMIT 200
         `, [leadId]);
@@ -1286,6 +1404,18 @@ router.post('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, 
     } catch (err: any) {
         console.error('Create lead activity error:', err);
         res.status(500).json({ error: err.message || 'Failed to create activity' });
+    }
+});
+
+/** Clear all call logs & activity history */
+router.post('/crm/activities/clear', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        await query(`TRUNCATE TABLE lead_activities CASCADE`);
+        res.json({ success: true, message: 'All call logs and activity history cleared' });
+    } catch (err: any) {
+        console.error('Clear activities error:', err);
+        res.status(500).json({ error: err.message || 'Failed to clear activities' });
     }
 });
 
