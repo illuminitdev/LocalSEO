@@ -39,11 +39,6 @@ function fmtDateTime(value?: string | null) {
     }
 }
 
-function townLine(lead: GrowthAuditLead) {
-    const parts = [lead.city, lead.address].filter(Boolean);
-    return parts.length ? parts.join(' · ') : '—';
-}
-
 export default function AdminGrowthAuditLeads() {
     const [leads, setLeads] = useState<GrowthAuditLead[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
@@ -146,16 +141,14 @@ export default function AdminGrowthAuditLeads() {
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm min-w-[980px] table-fixed">
+                        <table className="w-full text-left text-sm min-w-[780px] table-fixed">
                             <colgroup>
-                                <col className="w-[120px]" />
-                                <col className="w-[180px]" />
-                                <col className="w-[120px]" />
-                                <col className="w-[160px]" />
-                                <col className="w-[180px]" />
-                                <col className="w-[110px]" />
-                                <col className="w-[72px]" />
-                                <col className="w-[72px]" />
+                                <col className="w-[130px]" />
+                                <col className="w-[220px]" />
+                                <col className="w-[140px]" />
+                                <col className="w-[200px]" />
+                                <col className="w-[80px]" />
+                                <col className="w-[80px]" />
                                 <col className="w-[140px]" />
                             </colgroup>
                             <thead>
@@ -163,9 +156,7 @@ export default function AdminGrowthAuditLeads() {
                                     <th className="px-3 py-2.5 font-bold">Date</th>
                                     <th className="px-3 py-2.5 font-bold">Business</th>
                                     <th className="px-3 py-2.5 font-bold">Service</th>
-                                    <th className="px-3 py-2.5 font-bold">Town / address</th>
                                     <th className="px-3 py-2.5 font-bold">Email</th>
-                                    <th className="px-3 py-2.5 font-bold">Phone</th>
                                     <th className="px-3 py-2.5 font-bold">Score</th>
                                     <th className="px-3 py-2.5 font-bold">Report</th>
                                     <th className="px-3 py-2.5 font-bold text-right">CRM & Tasks</th>
@@ -194,19 +185,10 @@ export default function AdminGrowthAuditLeads() {
                                             {lead.serviceLabel || lead.service || '—'}
                                         </td>
                                         <td
-                                            className="px-3 py-2.5 text-sm text-[#64748B] truncate"
-                                            title={townLine(lead)}
-                                        >
-                                            {townLine(lead)}
-                                        </td>
-                                        <td
                                             className="px-3 py-2.5 text-sm text-[#334155] truncate"
                                             title={lead.email || undefined}
                                         >
                                             {lead.email || '—'}
-                                        </td>
-                                        <td className="px-3 py-2.5 text-sm text-[#334155] whitespace-nowrap truncate">
-                                            {lead.phone || '—'}
                                         </td>
                                         <td className="px-3 py-2.5 text-sm font-bold text-[#0F172A] whitespace-nowrap">
                                             {lead.scoreTotal != null ? `${lead.scoreTotal}/100` : '—'}
