@@ -96,6 +96,17 @@ export type LeadTask = {
     assignedToName?: string | null;
     assignedToEmail?: string | null;
     assignedToAvatarUrl?: string | null;
+    createdByRole?: 'admin' | 'self' | string;
+    createdByName?: string | null;
+    leadBusinessName?: string | null;
+    leadPhone?: string | null;
+    leadEmail?: string | null;
+    leadWebsite?: string | null;
+    leadCity?: string | null;
+    leadAddress?: string | null;
+    leadScoreTotal?: number | null;
+    leadReportUrl?: string | null;
+    leadSource?: string | null;
 };
 
 export type LeadActivity = {
@@ -121,6 +132,7 @@ export async function fetchCrmTasks(params: {
     status?: string;
     priority?: string;
     taskType?: string;
+    createdBy?: string;
 } = {}): Promise<LeadTask[]> {
     const sp = new URLSearchParams();
     if (params.leadId) sp.set('leadId', params.leadId);
@@ -128,6 +140,7 @@ export async function fetchCrmTasks(params: {
     if (params.status) sp.set('status', params.status);
     if (params.priority) sp.set('priority', params.priority);
     if (params.taskType) sp.set('taskType', params.taskType);
+    if (params.createdBy) sp.set('createdBy', params.createdBy);
     const qs = sp.toString();
     const res = await adminGet(`/api/admin/crm/tasks${qs ? `?${qs}` : ''}`);
     return res.tasks || [];

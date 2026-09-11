@@ -1,24 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-    CheckCircle2,
-    Circle,
+    Check,
     Calendar,
     User,
     RefreshCw,
     Search,
     AlertCircle,
-    Trash2,
     CheckSquare,
     Sparkles,
-    ExternalLink
+    ExternalLink,
+    X,
+    Clock
 } from 'lucide-react';
 import {
     type LeadTask,
     type SalesAgent,
-    type TaskStatus,
     fetchCrmTasks,
-    updateCrmTask,
-    deleteCrmTask,
     fetchSalesAgents,
     adminGet
 } from './adminApi';
@@ -46,22 +43,23 @@ export default function AdminCrmTasks() {
         setLoading(true);
         setError('');
         try {
-            const [agents, taskList, leadsRes] = await Promise.all([
-                fetchSalesAgents(),
+            const [tasksData, agentsData, leadsData] = await Promise.all([
                 fetchCrmTasks({
                     assignedTo: selectedAgent !== 'all' ? selectedAgent : undefined,
                     taskType: selectedType !== 'all' ? selectedType : undefined,
                     status: selectedStatus !== 'all' ? selectedStatus : undefined,
-                    priority: selectedPriority !== 'all' ? selectedPriority : undefined
+                    priority: selectedPriority !== 'all' ? selectedPriority : undefined,
+                    createdBy: 'admin'
                 }),
-                adminGet('/api/admin/growth-audit-leads').catch(() => ({ leads: [] }))
+                fetchSalesAgents().catch(() => []),
+                adminGet('/api/admin/growth-audit-leads?limit=200').then((r: any) => r.leads || []).catch(() => [])
             ]);
 
-            setSalesAgents(agents);
-            setTasks(taskList);
-            setLeads(leadsRes.leads || []);
+            setTasks(tasksData);
+            setSalesAgents(agentsData);
+            setLeads(leadsData);
         } catch (err: any) {
-            setError(err.message || 'Failed to load CRM tasks');
+            setError(err.message || 'Failed to load tasks');
         } finally {
             setLoading(false);
         }
@@ -71,37 +69,23 @@ export default function AdminCrmTasks() {
         loadData();
     }, [loadData]);
 
-    const handleToggleTaskStatus = async (task: LeadTask) => {
-        const newStatus: TaskStatus = task.status === 'completed' ? 'pending' : 'completed';
-        try {
-            await updateCrmTask(task.id, { status: newStatus });
-            await loadData();
-        } catch (err: any) {
-            setError(err.message || 'Failed to update task');
-        }
-    };
-
-    const handleDeleteTask = async (taskId: string) => {
-        if (!confirm('Are you sure you want to delete this task?')) return;
-        try {
-            await deleteCrmTask(taskId);
-            await loadData();
-        } catch (err: any) {
-            setError(err.message || 'Failed to delete task');
-        }
-    };
-
     const openLeadDrawerForTask = (task: LeadTask) => {
         const matched = leads.find((l) => l.id === task.leadId);
         if (matched) {
             setActiveLead(matched);
         } else {
-            // Fallback object with lead ID
+            // Fallback object with lead ID and backend-enriched lead fields
             setActiveLead({
                 id: task.leadId,
-                businessName: 'Lead #' + task.leadId.slice(0, 8),
-                phone: null,
-                email: null
+                businessName: task.leadBusinessName || 'Lead #' + task.leadId.slice(0, 8),
+                phone: task.leadPhone || null,
+                email: task.leadEmail || null,
+                website: task.leadWebsite || null,
+                city: task.leadCity || null,
+                address: task.leadAddress || null,
+                scoreTotal: task.leadScoreTotal ?? null,
+                reportUrl: task.leadReportUrl || null,
+                source: task.leadSource || null
             });
         }
     };
@@ -125,11 +109,13 @@ export default function AdminCrmTasks() {
         return (
             t.title.toLowerCase().includes(q) ||
             t.notes.toLowerCase().includes(q) ||
+            (t.leadBusinessName && t.leadBusinessName.toLowerCase().includes(q)) ||
             (t.assignedToName && t.assignedToName.toLowerCase().includes(q))
         );
     });
 
-    const getLeadName = (leadId: string) => {
+    const getLeadName = (leadId: string, task?: LeadTask) => {
+        if (task?.leadBusinessName) return task.leadBusinessName;
         const match = leads.find((l) => l.id === leadId);
         return match?.businessName || `Lead #${leadId.slice(0, 8)}`;
     };
@@ -196,7 +182,7 @@ export default function AdminCrmTasks() {
                 </div>
 
                 {/* Filters Row */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-slate-100">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-2 border-t border-slate-100">
                     {/* Sales Agent Filter */}
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
@@ -297,13 +283,13 @@ export default function AdminCrmTasks() {
                         <table className="w-full text-left border-collapse text-sm">
                             <thead>
                                 <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                                    <th className="py-3 px-4 w-12 text-center">Status</th>
-                                    <th className="py-3 px-4">Task</th>
-                                    <th className="py-3 px-4">Lead / Business</th>
-                                    <th className="py-3 px-4">Assigned Agent</th>
-                                    <th className="py-3 px-4">Priority</th>
-                                    <th className="py-3 px-4">Due Date</th>
-                                    <th className="py-3 px-4 text-right">Actions</th>
+                                    <th className="py-3.5 px-4 min-w-[260px] max-w-sm">Task</th>
+                                    <th className="py-3.5 px-4 w-56 max-w-[220px]">Lead / Business</th>
+                                    <th className="py-3.5 px-4 w-40">Assigned Agent</th>
+                                    <th className="py-3.5 px-4 w-32">Priority</th>
+                                    <th className="py-3.5 px-4 w-32">Due Date</th>
+                                    <th className="py-3.5 px-4 w-36 text-center">Status</th>
+                                    <th className="py-3.5 px-4 w-28 text-right">Manage</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -311,58 +297,51 @@ export default function AdminCrmTasks() {
                                     const isDone = task.status === 'completed';
                                     const isOverdue = task.dueDate && !isDone && new Date(task.dueDate) < now && !task.dueDate.startsWith(todayStr);
                                     const isDueToday = task.dueDate && !isDone && task.dueDate.startsWith(todayStr);
+                                    const leadName = task.leadBusinessName || getLeadName(task.leadId, task);
 
                                     return (
                                         <tr
                                             key={task.id}
                                             className={cn(
-                                                "hover:bg-slate-50/70 transition-colors group",
-                                                isDone && "bg-slate-50/40 opacity-60"
+                                                "transition-colors group",
+                                                isDone ? "bg-emerald-50/40 hover:bg-emerald-50/70" : "hover:bg-slate-50/70"
                                             )}
                                         >
-                                            {/* Done Checkbox */}
-                                            <td className="py-3 px-4 text-center">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleToggleTaskStatus(task)}
-                                                    className="text-slate-300 hover:text-amber-500 transition-colors"
+                                            {/* Title & Notes & Creator */}
+                                            <td className="py-3.5 px-4 align-middle">
+                                                <div
+                                                    className={cn("font-semibold truncate max-w-md", isDone ? "text-emerald-950 font-bold" : "text-slate-900")}
+                                                    title={task.title}
                                                 >
-                                                    {isDone ? (
-                                                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                                                    ) : (
-                                                        <Circle className="w-5 h-5 text-slate-300 hover:text-amber-500" />
-                                                    )}
-                                                </button>
-                                            </td>
-
-                                            {/* Title & Notes */}
-                                            <td className="py-3 px-4 max-w-xs">
-                                                <div className="font-semibold text-slate-900 truncate">
                                                     {task.title}
                                                 </div>
                                                 {task.notes && (
-                                                    <div className="text-xs text-slate-500 truncate mt-0.5">
+                                                    <div className={cn("text-xs truncate max-w-md mt-1", isDone ? "text-emerald-800/70" : "text-slate-500")} title={task.notes}>
                                                         {task.notes}
                                                     </div>
                                                 )}
                                             </td>
 
                                             {/* Lead / Business */}
-                                            <td className="py-3 px-4">
+                                            <td className="py-3.5 px-4 align-middle max-w-[220px]">
                                                 <button
                                                     type="button"
                                                     onClick={() => openLeadDrawerForTask(task)}
-                                                    className="text-xs font-semibold text-amber-700 hover:text-amber-800 hover:underline inline-flex items-center gap-1"
+                                                    title={leadName}
+                                                    className="text-xs font-semibold text-amber-700 hover:text-amber-800 hover:underline inline-flex items-center gap-1.5 max-w-full truncate group/lead"
                                                 >
-                                                    {getLeadName(task.leadId)}
-                                                    <ExternalLink className="w-3 h-3 text-amber-500" />
+                                                    <span className="truncate">{leadName}</span>
+                                                    <ExternalLink className="w-3 h-3 text-amber-500 shrink-0 opacity-70 group-hover/lead:opacity-100" />
                                                 </button>
                                             </td>
 
                                             {/* Assigned Agent */}
-                                            <td className="py-3 px-4">
+                                            <td className="py-3.5 px-4 align-middle whitespace-nowrap">
                                                 {task.assignedToName ? (
-                                                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg">
+                                                    <span className={cn(
+                                                        "inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg",
+                                                        isDone ? "bg-emerald-100/70 text-emerald-800" : "bg-slate-100 text-slate-700"
+                                                    )}>
                                                         <User className="w-3 h-3 text-slate-400" />
                                                         {task.assignedToName}
                                                     </span>
@@ -372,7 +351,7 @@ export default function AdminCrmTasks() {
                                             </td>
 
                                             {/* Priority */}
-                                            <td className="py-3 px-4">
+                                            <td className="py-3.5 px-4 align-middle whitespace-nowrap">
                                                 <span className={cn(
                                                     "text-[10px] font-bold uppercase px-2.5 py-1 rounded-md",
                                                     task.priority === 'urgent' ? "bg-rose-100 text-rose-800" :
@@ -385,12 +364,13 @@ export default function AdminCrmTasks() {
                                             </td>
 
                                             {/* Due Date */}
-                                            <td className="py-3 px-4">
+                                            <td className="py-3.5 px-4 align-middle whitespace-nowrap">
                                                 {task.dueDate ? (
                                                     <span className={cn(
                                                         "inline-flex items-center gap-1 text-xs font-medium",
                                                         isOverdue ? "text-rose-600 font-bold bg-rose-50 px-2 py-0.5 rounded" :
                                                         isDueToday ? "text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded" :
+                                                        isDone ? "text-emerald-700" :
                                                         "text-slate-600"
                                                     )}>
                                                         <Calendar className="w-3.5 h-3.5" />
@@ -403,25 +383,31 @@ export default function AdminCrmTasks() {
                                                 )}
                                             </td>
 
+                                            {/* Status Badge */}
+                                            <td className="py-3.5 px-4 text-center align-middle whitespace-nowrap">
+                                                <span className={cn(
+                                                    "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-md border",
+                                                    task.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300" :
+                                                    task.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300" :
+                                                    task.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200" :
+                                                    "bg-slate-50 text-slate-700 border-slate-200"
+                                                )}>
+                                                    {task.status === 'completed' && <Check className="w-3 h-3 text-emerald-600" />}
+                                                    {task.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600" />}
+                                                    {task.status === 'cancelled' && <X className="w-3 h-3 text-rose-600" />}
+                                                    <span className="capitalize">{task.status.replace('_', ' ')}</span>
+                                                </span>
+                                            </td>
+
                                             {/* Actions */}
-                                            <td className="py-3 px-4 text-right">
-                                                <div className="flex items-center justify-end gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => openLeadDrawerForTask(task)}
-                                                        className="text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200 transition-colors"
-                                                    >
-                                                        Manage
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleDeleteTask(task.id)}
-                                                        className="p-1 text-slate-300 hover:text-rose-500 rounded-lg transition-colors"
-                                                        title="Delete Task"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                </div>
+                                            <td className="py-3.5 px-4 align-middle text-right whitespace-nowrap">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openLeadDrawerForTask(task)}
+                                                    className="text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 shadow-2xs transition-all hover:border-slate-300"
+                                                >
+                                                    Manage
+                                                </button>
                                             </td>
                                         </tr>
                                     );
