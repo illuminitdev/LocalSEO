@@ -10,16 +10,19 @@ type Props = {
 export function LegalPage({ title, children }: Props) {
     return (
         <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A]">
-            <header className="border-b border-[#E2E8F0] bg-white">
-                <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
-                    <Link to="/" className="flex items-center min-w-0">
+            <header className="border-b border-[#E2E8F0] bg-white sticky top-0 z-10">
+                <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-4">
+                    <Link to="/" className="flex items-center shrink-0">
                         <img
                             src="/localseo.png"
                             alt="Local SEO"
-                            className="h-8 w-auto max-w-[180px] object-contain object-left"
+                            width={130}
+                            height={32}
+                            style={{ height: '32px', width: 'auto', maxWidth: '140px', objectFit: 'contain' }}
+                            className="block"
                         />
                     </Link>
-                    <Link to="/" className="text-sm font-medium text-[#64748B] hover:text-[#0F172A]">
+                    <Link to="/" className="text-sm font-medium text-[#64748B] hover:text-[#0F172A] transition-colors">
                         Sign in
                     </Link>
                 </div>

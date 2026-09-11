@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState, type ComponentType } from 'react';
+import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
     Building2,
@@ -212,6 +212,7 @@ export default function Layout() {
                     src="/localseo.png"
                     alt="Local SEO"
                     className="h-9 w-auto max-w-[180px] object-contain object-left min-w-0 flex-1"
+                    style={{ maxHeight: '36px', maxWidth: '160px', objectFit: 'contain' }}
                 />
                 <button
                     type="button"
@@ -335,6 +336,7 @@ export default function Layout() {
                             src="/localseo.png"
                             alt="Local SEO"
                             className="h-7 w-auto max-w-[140px] object-contain object-left"
+                            style={{ maxHeight: '28px', maxWidth: '140px', objectFit: 'contain' }}
                         />
                     </div>
                 </header>
