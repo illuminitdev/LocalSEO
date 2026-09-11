@@ -553,15 +553,23 @@ function fallbackGapAnalysis(business: any, keyword: string, liveCompetitors: an
             rating,
             posts: dashboardState.weeklyPosts || 0,
             photos: dashboardState.photoCount || 0,
-            trend: 'up'
+            trend: 'up',
+            lat: business.lat ?? null,
+            lng: business.lng ?? null,
+            address: business.address || '',
+            placeId: business.placeId || ''
         },
-        ...liveCompetitors.slice(0, 2).map((c: any) => ({
+        ...liveCompetitors.slice(0, 5).map((c: any) => ({
             name: c.name,
             reviews: c.reviews || c.user_ratings_total || 0,
             rating: c.rating || 0,
             posts: c.posts || 0,
             photos: c.photos || 0,
-            trend: c.trend || 'flat'
+            trend: c.trend || 'flat',
+            lat: c.lat ?? null,
+            lng: c.lng ?? null,
+            address: c.address || '',
+            placeId: c.placeId || ''
         }))
     ];
 
@@ -606,7 +614,7 @@ function fallbackStrategyReport(business: any, stats: any, liveCompetitors: any[
     const name = business?.name || 'Your business';
     const category = business?.category || 'local business';
     const rivalNames = liveCompetitors
-        .slice(0, 3)
+        .slice(0, 5)
         .map((c: any) => c.name)
         .filter(Boolean);
     const rivalLine = rivalNames.length
@@ -620,7 +628,7 @@ function fallbackStrategyReport(business: any, stats: any, liveCompetitors: any[
     return {
         grade,
         source: 'fallback',
-        competitors: liveCompetitors.slice(0, 3),
+        competitors: liveCompetitors.slice(0, 5),
         positioningText: `${name} (${category}) currently shows ${completeness}% profile completeness, GeoGrid average rank ${rank || 'n/a'}, and ${top3}% Local 3-Pack coverage. ${rivalLine}${auditLine} Focus this week on the gaps below — listing completeness, review replies, and consistent GBP posts move local visibility fastest.`,
         roadmap: [
             {
@@ -1039,9 +1047,13 @@ app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('
                 rating: connectedBusiness.rating || 0,
                 posts: dashboardState.weeklyPosts || 0,
                 photos: dashboardState.photoCount || 0,
-                trend: 'up'
+                trend: 'up',
+                lat: connectedBusiness.lat ?? null,
+                lng: connectedBusiness.lng ?? null,
+                placeId: connectedBusiness.placeId || '',
+                address: connectedBusiness.address || ''
             },
-            ...liveCompetitors.slice(0, 2)
+            ...liveCompetitors.slice(0, 5)
         ];
         return data;
     };
@@ -1082,7 +1094,7 @@ Use the provided Places data only. Do not invent businesses. Competitors must be
 Return JSON only:
 {"gapAnalysis": "", "grid": [[1,2,3],[4,5,6],[7,8,9]], "competitors": [{"name": "", "reviews": 0, "rating": 0, "posts": 0, "photos": 0, "trend": "up"}]}
 grid is a 3x3 of estimated Local Pack ranks 1-20 for neighborhood cells around the business.
-First competitors item must be "${connectedBusiness.name} (You)" with reviews=${connectedBusiness.reviewsCount || 0} and rating=${connectedBusiness.rating || 0}. Include up to 2 real same-service competitors from the Places list when available.`
+First competitors item must be "${connectedBusiness.name} (You)" with reviews=${connectedBusiness.reviewsCount || 0} and rating=${connectedBusiness.rating || 0}. Include up to 5 real same-service competitors from the Places list when available.`
         );
         const data = parseJsonFromText(text);
         if (!data?.gapAnalysis) {
@@ -1215,7 +1227,7 @@ app.post('/api/ai/strategy-report', requireAuth, hydrateOrgFromDb, requireAllFea
     try {
         const audit = stats.lastVisibilityAudit;
         const competitorBlock = liveCompetitors.length
-            ? `Same-service competitors (use these; do not invent):\n${JSON.stringify(liveCompetitors.slice(0, 3))}`
+            ? `Same-service competitors (use these; do not invent):\n${JSON.stringify(liveCompetitors.slice(0, 5))}`
             : 'No same-service competitor list available.';
         const auditBlock =
             audit && typeof audit.total === 'number'
@@ -1252,7 +1264,7 @@ Return JSON only:
         res.json({
             ...data,
             source: 'gemini',
-            competitors: liveCompetitors.slice(0, 3),
+            competitors: liveCompetitors.slice(0, 5),
             metrics: { ...groundedMetrics, ...(data.metrics || {}), ...groundedMetrics }
         });
     } catch (err: any) {

@@ -21,7 +21,7 @@ export default function MustChangePasswordBanner() {
     if (!show) return null;
 
     return (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 print:hidden">
             <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white">
                 Mandatory
             </span>
