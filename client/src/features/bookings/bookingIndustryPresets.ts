@@ -44,6 +44,12 @@ export type BookingIndustryPreset = {
     uploadPrompt: string;
     notesPlaceholder: string;
     summaryBullet: string;
+    setupPlaceholders: {
+        name: string;
+        businessName: string;
+        contact: string;
+        serviceArea: string;
+    };
 };
 
 export const bookingIndustryPresets: BookingIndustryPreset[] = [
@@ -91,7 +97,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         ],
         uploadPrompt: 'Upload a photo of boiler serial plate, leak area or stopcock access',
         notesPlaceholder: 'E.g. Combi boiler in kitchen cupboard, pressure dropping to 0 bar.',
-        summaryBullet: 'Automated SMS notification & Gas Safe engineer calendar booking confirmed.'
+        summaryBullet: 'Automated SMS notification & Gas Safe engineer calendar booking confirmed.',
+        setupPlaceholders: {
+            name: 'e.g. Dave Miller',
+            businessName: 'e.g. Miller Plumbing Ltd',
+            contact: 'e.g. 07700 900123 or hello@millerplumbing.co.uk',
+            serviceArea: 'e.g. Greater Manchester, within 15 miles'
+        }
     },
     {
         id: 'electricians',
@@ -137,7 +149,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         ],
         uploadPrompt: 'Upload a clear photo of your existing fusebox / consumer unit',
         notesPlaceholder: 'E.g. Lights flickering in upstairs hallway, trip switch won’t reset.',
-        summaryBullet: 'NICEIC / Part P compliant booking logged into job management calendar.'
+        summaryBullet: 'NICEIC / Part P compliant booking logged into job management calendar.',
+        setupPlaceholders: {
+            name: 'e.g. Sam Patel',
+            businessName: 'e.g. Patel Electrical Ltd',
+            contact: 'e.g. 07700 900234 or jobs@pateelectrical.co.uk',
+            serviceArea: 'e.g. Birmingham & West Midlands'
+        }
     },
     {
         id: 'cleaners',
@@ -184,7 +202,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         uploadPrompt: 'Upload a photo of oven, kitchen or room needing deep clean',
         notesPlaceholder:
             'E.g. End of tenancy clean needed before 4pm check-out, oven needs double clean.',
-        summaryBullet: 'Instant booking deposit secured with key handover instructions saved.'
+        summaryBullet: 'Instant booking deposit secured with key handover instructions saved.',
+        setupPlaceholders: {
+            name: 'e.g. Amy Clarke',
+            businessName: 'e.g. Sparkle Clean Co',
+            contact: 'e.g. 07700 900345 or book@sparkleclean.co.uk',
+            serviceArea: 'e.g. Leeds, within 10 miles'
+        }
     },
     {
         id: 'valeting',
@@ -229,7 +253,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         ],
         uploadPrompt: 'Upload a photo of your vehicle or specific scratch/stain area',
         notesPlaceholder: 'E.g. BMW 3 Series in driveway, heavy dog hair in boot area.',
-        summaryBullet: 'Mobile rig location dispatch queued with instant customer confirmation.'
+        summaryBullet: 'Mobile rig location dispatch queued with instant customer confirmation.',
+        setupPlaceholders: {
+            name: 'e.g. Jordan Lee',
+            businessName: 'e.g. Lee Mobile Valeting',
+            contact: 'e.g. 07700 900456 or book@leevalet.co.uk',
+            serviceArea: 'e.g. Bristol & Bath'
+        }
     },
     {
         id: 'pressure-washing',
@@ -276,7 +306,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         uploadPrompt: 'Upload a photo of your driveway, patio or roof area',
         notesPlaceholder:
             'E.g. Block paving with weeds between joints, outdoor tap next to side gate.',
-        summaryBullet: 'Square metre estimate calculated with photo assessment stored.'
+        summaryBullet: 'Square metre estimate calculated with photo assessment stored.',
+        setupPlaceholders: {
+            name: 'e.g. Chris Walsh',
+            businessName: 'e.g. Walsh Exterior Clean',
+            contact: 'e.g. 07700 900567 or hello@walshexterior.co.uk',
+            serviceArea: 'e.g. Sheffield, South Yorkshire'
+        }
     },
     {
         id: 'pest-control',
@@ -313,7 +349,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         uploadPrompt: 'Upload a photo of pest activity, entry point or nest location',
         notesPlaceholder:
             'E.g. Wasp nest under roof tiles near bedroom window, active since yesterday.',
-        summaryBullet: 'Discreet BPCA-compliant technician visit confirmed with safety note.'
+        summaryBullet: 'Discreet BPCA-compliant technician visit confirmed with safety note.',
+        setupPlaceholders: {
+            name: 'e.g. Nina Brooks',
+            businessName: 'e.g. Brooks Pest Control',
+            contact: 'e.g. 07700 900678 or call@brookspest.co.uk',
+            serviceArea: 'e.g. Nottingham & surrounds'
+        }
     },
     {
         id: 'gardeners',
@@ -354,7 +396,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         ],
         uploadPrompt: 'Upload a photo of your garden, lawn or overgrown hedge',
         notesPlaceholder: 'E.g. Front and back lawns need cutting, side gate unlocked.',
-        summaryBullet: 'Seasonal maintenance slot reserved with green waste fee itemised.'
+        summaryBullet: 'Seasonal maintenance slot reserved with green waste fee itemised.',
+        setupPlaceholders: {
+            name: 'e.g. Tom Hayes',
+            businessName: 'e.g. Hayes Garden Care',
+            contact: 'e.g. 07700 900789 or hello@hayesgardens.co.uk',
+            serviceArea: 'e.g. Surrey, within 20 miles'
+        }
     },
     {
         id: 'salons',
@@ -391,7 +439,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         uploadPrompt: 'Upload a hair inspiration photo or current skin concern',
         notesPlaceholder:
             'E.g. Wanting to go from dark brown to balayage blonde, skin sensitive.',
-        summaryBullet: 'Automated deposit captured with intake medical questionnaire link sent.'
+        summaryBullet: 'Automated deposit captured with intake medical questionnaire link sent.',
+        setupPlaceholders: {
+            name: 'e.g. Ella Morgan',
+            businessName: 'e.g. Morgan Aesthetics',
+            contact: 'e.g. 07700 900890 or book@morganaesthetics.co.uk',
+            serviceArea: 'e.g. Central London / Chelsea'
+        }
     },
     {
         id: 'personal-trainers',
@@ -438,7 +492,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         uploadPrompt: 'Upload optional current physique photo or medical note',
         notesPlaceholder:
             'E.g. Want to lose 10kg before wedding in 4 months, minor lower back stiffness.',
-        summaryBullet: 'Discovery call synced to trainer calendar with health intake form.'
+        summaryBullet: 'Discovery call synced to trainer calendar with health intake form.',
+        setupPlaceholders: {
+            name: 'e.g. Alex Reid',
+            businessName: 'e.g. Reid Performance PT',
+            contact: 'e.g. 07700 900901 or coach@reidpt.co.uk',
+            serviceArea: 'e.g. Manchester city & Salford'
+        }
     },
     {
         id: 'restaurants',
@@ -480,7 +540,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         uploadPrompt: 'Upload optional cake request or seating preference image',
         notesPlaceholder:
             'E.g. High chair needed for toddler, booth seating preferred if available.',
-        summaryBullet: 'Instant SMS table confirmation sent with 15-minute hold policy.'
+        summaryBullet: 'Instant SMS table confirmation sent with 15-minute hold policy.',
+        setupPlaceholders: {
+            name: 'e.g. Maria Costa',
+            businessName: 'e.g. Costa Kitchen',
+            contact: 'e.g. 0161 000 0000 or reservations@costakitchen.co.uk',
+            serviceArea: 'e.g. Northern Quarter, Manchester'
+        }
     },
     {
         id: 'professional-services',
@@ -521,7 +587,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         ],
         uploadPrompt: 'Upload company accounts draft or HMRC notice for review',
         notesPlaceholder: 'E.g. Looking to restructure LTD company before end of tax year.',
-        summaryBullet: 'Calendar invite with Video link generated and NDA confirmation.'
+        summaryBullet: 'Calendar invite with Video link generated and NDA confirmation.',
+        setupPlaceholders: {
+            name: 'e.g. James Orr',
+            businessName: 'e.g. Orr Advisory LLP',
+            contact: 'e.g. 020 0000 0000 or office@orradvisory.co.uk',
+            serviceArea: 'e.g. City of London'
+        }
     },
     {
         id: 'small-business',
@@ -551,7 +623,13 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         ],
         uploadPrompt: 'Upload a photo of your project, site or item needing work',
         notesPlaceholder: 'E.g. Looking to get an upfront estimate before starting next week.',
-        summaryBullet: 'Instant enquiry confirmation logged into dashboard with notification.'
+        summaryBullet: 'Instant enquiry confirmation logged into dashboard with notification.',
+        setupPlaceholders: {
+            name: 'e.g. Priya Shah',
+            businessName: 'e.g. Shah Local Services',
+            contact: 'e.g. 07700 901012 or hello@shahlocal.co.uk',
+            serviceArea: 'e.g. Leicester & county'
+        }
     }
 ];
 

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiPut, cn, formatCents } from '../../shared/utils';
 import AvailabilityEditor, { type AvailabilitySavePayload, type AvailabilitySettings } from './AvailabilityEditor';
+import { getBookingPreset } from './bookingIndustryPresets';
 
 type Tab = 'events' | 'availability' | 'integrations' | 'profile' | 'reminders';
 
@@ -864,24 +865,33 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                             <h2 className="font-bold text-[#0F172A]">Profile details</h2>
                             <p className="text-sm text-[#64748B] mt-1">Edit what customers see on your booking page.</p>
                         </div>
-                        {([
-                            ['host_name', 'Your full name', 'e.g. Dave Miller'],
-                            ['name', 'Business name', 'e.g. Miller Heating Ltd'],
-                            ['trade_type', 'Service type', 'e.g. Electrician'],
-                            ['phone', 'Phone number', 'e.g. 07700900123'],
-                            ['email', 'Notification email', 'e.g. hello@yourbusiness.com'],
-                            ['service_area', 'Service area', 'e.g. Greater Manchester']
-                        ] as const).map(([field, label, placeholder]) => (
-                            <label key={field} className="block text-xs font-bold uppercase text-[#64748B]">
-                                {label}
-                                <input
-                                    value={org[field] || ''}
-                                    onChange={(e) => setOrg((o: any) => ({ ...o, [field]: e.target.value }))}
-                                    placeholder={placeholder}
-                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-medium text-[#0F172A]"
-                                />
-                            </label>
-                        ))}
+                        {(() => {
+                            const preset = getBookingPreset(org.booking_industry_id || org.trade_type);
+                            const ph = preset.setupPlaceholders;
+                            const emailHint = ph.contact.includes('@')
+                                ? `e.g. ${ph.contact.split(' or ').pop()}`
+                                : 'e.g. hello@yourbusiness.com';
+                            return (
+                                [
+                                    ['host_name', 'Your full name', ph.name],
+                                    ['name', 'Business name', ph.businessName],
+                                    ['trade_type', 'Service type', `e.g. ${preset.name}`],
+                                    ['phone', 'Phone number', 'e.g. 07700 900123'],
+                                    ['email', 'Notification email', emailHint],
+                                    ['service_area', 'Service area', ph.serviceArea]
+                                ] as const
+                            ).map(([field, label, placeholder]) => (
+                                <label key={field} className="block text-xs font-bold uppercase text-[#64748B]">
+                                    {label}
+                                    <input
+                                        value={org[field] || ''}
+                                        onChange={(e) => setOrg((o: any) => ({ ...o, [field]: e.target.value }))}
+                                        placeholder={placeholder}
+                                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-medium text-[#0F172A]"
+                                    />
+                                </label>
+                            ));
+                        })()}
                         <p className="text-xs text-[#94A3B8] leading-relaxed">
                             Add your <strong className="text-[#64748B]">phone</strong> and{' '}
                             <strong className="text-[#64748B]">notification email</strong>. When a customer books and pays,

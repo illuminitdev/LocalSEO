@@ -1,4 +1,4 @@
-﻿import { useState, type FormEvent } from 'react';
+﻿import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
     Building2,
@@ -85,7 +85,7 @@ export default function BookingSetupWizard({
     onComplete
 }: Props) {
     const hasSavedBusiness = Boolean(linked && linkedBusiness?.name?.trim());
-    const lockedFromCheckout = Boolean(initialIndustryId);
+    const lockedFromCheckout = Boolean(String(initialIndustryId || '').trim());
 
     const [path, setPath] = useState<'choose' | 'manual' | 'from-profile'>(
         hasSavedBusiness ? 'choose' : 'manual'
@@ -94,6 +94,17 @@ export default function BookingSetupWizard({
     const [form, setForm] = useState<SetupForm>(() => baseForm(initialIndustryId));
 
     const selectedPreset = getBookingPreset(form.bookingIndustryId);
+    const placeholders = selectedPreset.setupPlaceholders;
+
+    useEffect(() => {
+        if (!initialIndustryId) return;
+        const preset = getBookingPreset(initialIndustryId);
+        setForm((f) => ({
+            ...f,
+            bookingIndustryId: preset.id,
+            tradeType: preset.name
+        }));
+    }, [initialIndustryId]);
 
     const useSavedBusiness = () => {
         if (!linkedBusiness?.name) return;
@@ -127,15 +138,34 @@ export default function BookingSetupWizard({
         });
     };
 
-    const stepLabels = [
-        ['1', 'Your service'],
-        ['2', path === 'from-profile' ? 'Confirm details' : 'Your details'],
-        ['3', 'Bookings & deposit']
-    ];
+    const detailsStepNum = lockedFromCheckout ? 1 : 2;
+    const depositStepNum = lockedFromCheckout ? 2 : 3;
 
-    const onServiceStep = step === 1;
-    const onDetailsStep = step === 2;
-    const onDepositStep = step === 3;
+    const stepLabels = lockedFromCheckout
+        ? [
+              ['1', path === 'from-profile' ? 'Confirm details' : 'Your details'],
+              ['2', 'Bookings & deposit']
+          ]
+        : [
+              ['1', 'Your service'],
+              ['2', path === 'from-profile' ? 'Confirm details' : 'Your details'],
+              ['3', 'Bookings & deposit']
+          ];
+
+    const onServiceStep = !lockedFromCheckout && step === 1;
+    const onDetailsStep = step === detailsStepNum;
+    const onDepositStep = step === depositStepNum;
+
+    const goBackFromDetails = () => {
+        if (lockedFromCheckout) {
+            if (hasSavedBusiness) {
+                setPath('choose');
+                setStep(1);
+            }
+            return;
+        }
+        setStep(1);
+    };
 
     return (
         <div className="w-full max-w-3xl mx-auto space-y-5 animate-in fade-in duration-500">
@@ -202,6 +232,16 @@ export default function BookingSetupWizard({
                         ))}
                     </div>
 
+                    {lockedFromCheckout && (
+                        <div className="rounded-xl border border-[#F59E0B]/40 bg-[#FFFBEB] px-4 py-3 text-sm text-[#0F172A]">
+                            Booking forms for <strong>{selectedPreset.name}</strong>
+                            <span className="text-[#64748B]">
+                                {' '}
+                                — set at checkout. Customers will see this industry’s services and intake fields.
+                            </span>
+                        </div>
+                    )}
+
                     {path === 'from-profile' && (
                         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 flex items-start gap-2">
                             <Building2 className="w-4 h-4 mt-0.5 shrink-0" />
@@ -212,7 +252,7 @@ export default function BookingSetupWizard({
                         </div>
                     )}
 
-                    {path === 'manual' && !hasSavedBusiness && step === 2 && (
+                    {path === 'manual' && !hasSavedBusiness && onDetailsStep && (
                         <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-sm text-[#64748B]">
                             No business profile saved yet — enter booking details below. You can also{' '}
                             <Link to="/profile" className="font-semibold text-[#0F172A] underline">
@@ -230,9 +270,7 @@ export default function BookingSetupWizard({
                         <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 lg:p-6 shadow-sm">
                             <h2 className="font-bold text-lg text-[#0F172A]">Your service</h2>
                             <p className="text-sm text-[#64748B] mt-1 mb-4">
-                                {lockedFromCheckout
-                                    ? 'Industry from your booking plan checkout — customer forms will match this trade.'
-                                    : 'Choose your industry. Customer booking forms and services will match this preset.'}
+                                Choose your industry. Customer booking forms and services will match this preset.
                             </p>
                             <div className="grid sm:grid-cols-2 gap-2 max-h-80 overflow-y-auto pr-1">
                                 {bookingIndustryPresets.map((p) => {
@@ -241,14 +279,12 @@ export default function BookingSetupWizard({
                                         <button
                                             key={p.id}
                                             type="button"
-                                            disabled={lockedFromCheckout && !selected}
                                             onClick={() => selectIndustry(p.id)}
                                             className={cn(
                                                 'text-left rounded-xl border p-3 transition',
                                                 selected
                                                     ? 'border-[#F59E0B] bg-[#F59E0B]/15 ring-2 ring-[#F59E0B]/40'
-                                                    : 'border-[#E2E8F0] bg-white hover:border-[#0F172A]/30',
-                                                lockedFromCheckout && !selected && 'opacity-40 cursor-not-allowed'
+                                                    : 'border-[#E2E8F0] bg-white hover:border-[#0F172A]/30'
                                             )}
                                         >
                                             <div className="font-bold text-sm text-[#0F172A]">{p.shortName}</div>
@@ -292,7 +328,7 @@ export default function BookingSetupWizard({
                             onSubmit={(e) => {
                                 e.preventDefault();
                                 if (!form.name.trim() || !form.businessName.trim()) return;
-                                setStep(3);
+                                setStep(depositStepNum);
                             }}
                             className="bg-white rounded-2xl border border-[#E2E8F0] p-5 lg:p-6 shadow-sm space-y-4"
                         >
@@ -314,7 +350,7 @@ export default function BookingSetupWizard({
                                         required
                                         value={form.name}
                                         onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                                        placeholder="e.g. Dave Miller"
+                                        placeholder={placeholders.name}
                                         className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] pl-10 pr-3 py-2.5 text-sm focus:outline-none focus:border-[#0F172A] focus:bg-white"
                                     />
                                 </div>
@@ -327,7 +363,7 @@ export default function BookingSetupWizard({
                                         required
                                         value={form.businessName}
                                         onChange={(e) => setForm((f) => ({ ...f, businessName: e.target.value }))}
-                                        placeholder="e.g. Miller Plumbing Ltd"
+                                        placeholder={placeholders.businessName}
                                         className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] pl-10 pr-3 py-2.5 text-sm focus:outline-none focus:border-[#0F172A] focus:bg-white"
                                     />
                                 </div>
@@ -346,7 +382,7 @@ export default function BookingSetupWizard({
                                                 contact: restrictEmailOrPhoneInput(e.target.value)
                                             }))
                                         }
-                                        placeholder="e.g. 07700900123 or hello@yourbusiness.com"
+                                        placeholder={placeholders.contact}
                                         className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] pl-10 pr-3 py-2.5 text-sm focus:outline-none focus:border-[#0F172A] focus:bg-white"
                                     />
                                 </div>
@@ -358,19 +394,21 @@ export default function BookingSetupWizard({
                                     <input
                                         value={form.serviceArea}
                                         onChange={(e) => setForm((f) => ({ ...f, serviceArea: e.target.value }))}
-                                        placeholder="e.g. Greater Manchester, within 15 miles"
+                                        placeholder={placeholders.serviceArea}
                                         className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] pl-10 pr-3 py-2.5 text-sm focus:outline-none focus:border-[#0F172A] focus:bg-white"
                                     />
                                 </div>
                             </label>
                             <div className="flex gap-2 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setStep(1)}
-                                    className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
-                                >
-                                    Back
-                                </button>
+                                {(!lockedFromCheckout || hasSavedBusiness) && (
+                                    <button
+                                        type="button"
+                                        onClick={goBackFromDetails}
+                                        className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
+                                    >
+                                        Back
+                                    </button>
+                                )}
                                 <button
                                     type="submit"
                                     className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#0F172A] text-white text-sm font-bold"
@@ -436,7 +474,7 @@ export default function BookingSetupWizard({
                             <div className="flex gap-2 pt-2">
                                 <button
                                     type="button"
-                                    onClick={() => setStep(2)}
+                                    onClick={() => setStep(detailsStepNum)}
                                     className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]"
                                 >
                                     Back
