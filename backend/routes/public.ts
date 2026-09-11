@@ -30,6 +30,8 @@ import {
 } from '../lib/quotes';
 import { getPublicSite } from '../lib/marketing';
 import { applyReferralCode } from '../lib/marketing';
+import { getBookingPreset, normalizeBookingIndustryId } from '../lib/bookingIndustryPresets';
+import { createUploadPresign, mediaConfigured } from '../lib/media';
 
 function frontendOrigin() {
     return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -41,6 +43,38 @@ function normalizePhotoUrls(raw: any): string[] {
         .map((u) => String(u || '').trim())
         .filter((u) => /^https?:\/\//i.test(u))
         .slice(0, 12);
+}
+
+function normalizeIntakeAnswers(raw: any): Record<string, string> {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) {
+        const key = String(k || '').trim();
+        if (!key) continue;
+        const val = String(v ?? '').trim();
+        if (val) out[key] = val;
+    }
+    return out;
+}
+
+function industryPayload(org: any) {
+    const industryId =
+        normalizeBookingIndustryId(org?.booking_industry_id) ||
+        (org?.trade_type ? getBookingPreset(String(org.trade_type)).id : null);
+    if (!industryId) return null;
+    const preset = getBookingPreset(industryId);
+    return {
+        id: preset.id,
+        name: preset.name,
+        shortName: preset.shortName,
+        defaultService: preset.defaultService,
+        services: preset.services,
+        timeSlots: preset.timeSlots,
+        customFields: preset.customFields,
+        uploadPrompt: preset.uploadPrompt,
+        notesPlaceholder: preset.notesPlaceholder,
+        confirmationTitle: preset.confirmationTitle
+    };
 }
 
 function createPublicRouter({ stripeClient }: { stripeClient: any }) {
@@ -439,6 +473,25 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
+    router.post('/:hostSlug/upload-url', async (req: Request, res: Response) => {
+        try {
+            const org = await loadOrg(req.params.hostSlug);
+            if (!org) return res.status(404).json({ error: 'Business not found' });
+            if (!mediaConfigured()) {
+                return res.status(503).json({ error: 'Photo uploads are not configured', code: 'media_not_configured' });
+            }
+            const { contentType } = req.body || {};
+            const result = await createUploadPresign({
+                kind: 'job',
+                contentType: String(contentType || 'image/jpeg'),
+                orgId: org.id
+            });
+            res.json(result);
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message });
+        }
+    });
+
     router.get('/:hostSlug', async (req: Request, res: Response) => {
         try {
             const org = await loadOrg(req.params.hostSlug);
@@ -451,10 +504,13 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 slug: org.slug,
                 name: org.name,
                 tradeType: org.trade_type,
+                bookingIndustryId: org.booking_industry_id || null,
                 phone: org.phone,
                 email: org.email,
                 serviceArea: org.service_area,
-                eventTypes
+                eventTypes,
+                industry: industryPayload(org),
+                mediaUploadsEnabled: mediaConfigured()
             });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
@@ -468,7 +524,15 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const eventType = await loadEventType(org.id, req.params.eventSlug);
             if (!eventType) return res.status(404).json({ error: 'Service not found' });
             res.json({
-                host: { slug: org.slug, name: org.name, tradeType: org.trade_type, phone: org.phone, email: org.email, serviceArea: org.service_area },
+                host: {
+                    slug: org.slug,
+                    name: org.name,
+                    tradeType: org.trade_type,
+                    bookingIndustryId: org.booking_industry_id || null,
+                    phone: org.phone,
+                    email: org.email,
+                    serviceArea: org.service_area
+                },
                 eventType: {
                     slug: eventType.slug,
                     name: eventType.name,
@@ -477,6 +541,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     depositCents: eventType.deposit_cents,
                     totalCents: eventType.total_cents
                 },
+                industry: industryPayload(org),
+                mediaUploadsEnabled: mediaConfigured(),
                 paymentsMode: stripeClient ? 'stripe' : 'simulated',
                 stripePaymentsReady: Boolean(
                     stripeClient && org.stripe_account_id && org.stripe_charges_enabled
@@ -536,12 +602,23 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 endAt,
                 intakeType,
                 preferredSlots,
-                photoUrls
+                photoUrls,
+                intakeAnswers
             } = req.body || {};
 
             const isRequest = intakeType === 'request';
             if (!customerName?.trim() || !email?.trim() || !phone?.trim() || !address?.trim()) {
                 return res.status(400).json({ error: 'Name, email, phone, and address are required' });
+            }
+
+            const industry = industryPayload(org);
+            const answers = normalizeIntakeAnswers(intakeAnswers);
+            if (industry?.customFields?.length) {
+                for (const field of industry.customFields) {
+                    if (!answers[field.id]) {
+                        return res.status(400).json({ error: `${field.label.replace(/\s*\*$/, '')} is required` });
+                    }
+                }
             }
 
             let start = startAt;
@@ -621,9 +698,10 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 `INSERT INTO bookings (
                     org_id, event_type_id, status, customer_name, customer_email, customer_phone,
                     customer_address, description, start_at, end_at, deposit_cents, total_cents, manage_token,
-                    client_id, property_id, job_status, photo_urls, preferred_slots, intake_type, deposit_paid
+                    client_id, property_id, job_status, photo_urls, preferred_slots, intake_type, deposit_paid,
+                    intake_answers
                  ) VALUES (
-                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb,$19,$20
+                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb,$19,$20,$21::jsonb
                  ) RETURNING *`,
                 [
                     org.id,
@@ -645,7 +723,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     JSON.stringify(photos),
                     JSON.stringify(preferred),
                     isRequest ? 'request' : 'instant',
-                    isRequest
+                    isRequest,
+                    JSON.stringify(answers)
                 ]
             );
             const booking = pendingRes.rows[0];

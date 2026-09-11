@@ -1,7 +1,12 @@
 /**
- * Per-trade booking board templates.
- * Only Plumbing (Emergency Plumber) is implemented for now — extend when more trades are ready.
+ * Per-industry booking board templates — seeded from bookingIndustryPresets.
  */
+
+import {
+    getBookingPreset,
+    slugifyServiceName,
+    type BookingIndustryPreset
+} from './bookingIndustryPresets';
 
 export type TradeEventTypeTemplate = {
     slugBase: string;
@@ -14,6 +19,7 @@ export type TradeEventTypeTemplate = {
 
 export type TradeBookingCatalogEntry = {
     tradeType: string;
+    bookingIndustryId: string;
     standardDeposit: number;
     emergencyDeposit: number;
     acceptingEmergencies: boolean;
@@ -21,8 +27,37 @@ export type TradeBookingCatalogEntry = {
     eventTypes: TradeEventTypeTemplate[];
 };
 
+function isEmergencyService(name: string): boolean {
+    return /emergency|call-?out|express/i.test(name);
+}
+
+function catalogFromPreset(preset: BookingIndustryPreset): TradeBookingCatalogEntry {
+    const eventTypes: TradeEventTypeTemplate[] = preset.services.map((name, index) => {
+        const emergency = isEmergencyService(name);
+        return {
+            slugBase: slugifyServiceName(name),
+            name,
+            description: name,
+            durationMinutes: emergency ? 90 : 60,
+            sortOrder: index,
+            kind: emergency ? 'emergency' : 'standard'
+        };
+    });
+
+    return {
+        tradeType: preset.name,
+        bookingIndustryId: preset.id,
+        standardDeposit: 45,
+        emergencyDeposit: 60,
+        acceptingEmergencies: eventTypes.some((t) => t.kind === 'emergency'),
+        emergencyNote: '',
+        eventTypes
+    };
+}
+
 const GENERIC: TradeBookingCatalogEntry = {
     tradeType: '',
+    bookingIndustryId: 'small-business',
     standardDeposit: 45,
     emergencyDeposit: 60,
     acceptingEmergencies: true,
@@ -47,40 +82,15 @@ const GENERIC: TradeBookingCatalogEntry = {
     ]
 };
 
-const PLUMBER: TradeBookingCatalogEntry = {
-    tradeType: 'Emergency Plumber',
-    standardDeposit: 45,
-    emergencyDeposit: 60,
-    acceptingEmergencies: true,
-    emergencyNote: 'Burst pipes and active leaks get emergency windows.',
-    eventTypes: [
-        {
-            slugBase: 'plumbing-visit',
-            name: 'Plumbing Visit',
-            description: 'Scheduled leaks, pipes, and general plumbing work',
-            durationMinutes: 60,
-            sortOrder: 0,
-            kind: 'standard'
-        },
-        {
-            slugBase: 'emergency-leak-callout',
-            name: 'Emergency Leak / Burst',
-            description: 'Urgent same-day plumbing — burst pipes and active leaks',
-            durationMinutes: 90,
-            sortOrder: 1,
-            kind: 'emergency'
-        }
-    ]
-};
-
-const BY_TRADE: Record<string, TradeBookingCatalogEntry> = {
-    [PLUMBER.tradeType]: PLUMBER
-};
-
-export function getTradeBookingCatalog(tradeType: string | null | undefined): TradeBookingCatalogEntry {
-    const key = String(tradeType || '').trim();
-    if (key && BY_TRADE[key]) return BY_TRADE[key];
-    // Soft match for plumber variants
-    if (/plumb/i.test(key)) return PLUMBER;
-    return GENERIC;
+/**
+ * Resolve catalog from booking industry id and/or trade_type label.
+ */
+export function getTradeBookingCatalog(
+    tradeType: string | null | undefined,
+    bookingIndustryId?: string | null
+): TradeBookingCatalogEntry {
+    const industryHint = String(bookingIndustryId || tradeType || '').trim();
+    if (!industryHint) return GENERIC;
+    const preset = getBookingPreset(industryHint);
+    return catalogFromPreset(preset);
 }

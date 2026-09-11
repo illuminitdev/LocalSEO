@@ -21,6 +21,11 @@ import {
 } from './adminApi';
 import { FEATURE_LABELS, PLANS, type FeatureKey } from '../../shared/planCatalog';
 import { cn } from '../../shared/utils';
+import {
+    getBookingPreset,
+    isBookingPlanId,
+    bookingIndustryLabel
+} from '../bookings/bookingIndustryPresets';
 
 type ServiceModule = { id: string; name: string; enrolled: boolean };
 
@@ -37,6 +42,7 @@ type AdminUser = {
         name: string;
         slug: string;
         tradeType: string;
+        bookingIndustryId?: string | null;
     } | null;
     subscription: {
         planId: string;
@@ -335,7 +341,11 @@ export default function AdminUserDetail() {
                     {!isSalesAgent && user.organization && (
                         <p className="text-xs text-white/50 mt-2">
                             {user.organization.name}
-                            {user.organization.tradeType ? ` · ${user.organization.tradeType}` : ''}
+                            {user.organization.bookingIndustryId
+                                ? ` · ${bookingIndustryLabel(user.organization.bookingIndustryId) || user.organization.tradeType}`
+                                : user.organization.tradeType
+                                  ? ` · ${user.organization.tradeType}`
+                                  : ''}
                         </p>
                     )}
                     <div className="flex flex-wrap gap-2 mt-4">
@@ -446,6 +456,42 @@ export default function AdminUserDetail() {
                                     ))}
                             </div>
                         </div>
+
+                        {user.subscription &&
+                            isBookingPlanId(user.subscription.planId) &&
+                            (user.organization?.bookingIndustryId || user.organization?.tradeType) && (
+                                <div>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="font-bold text-[#0F172A]">Booking industry / services</h3>
+                                        <span className="text-xs text-[#64748B]">
+                                            {bookingIndustryLabel(user.organization.bookingIndustryId) ||
+                                                getBookingPreset(
+                                                    user.organization.bookingIndustryId ||
+                                                        user.organization.tradeType
+                                                ).name}
+                                        </span>
+                                    </div>
+                                    <div className="rounded-xl border border-[#E2E8F0] bg-white px-4 py-3 mb-2 text-sm text-[#64748B]">
+                                        Industry id:{' '}
+                                        <span className="font-semibold text-[#0F172A]">
+                                            {user.organization.bookingIndustryId ||
+                                                getBookingPreset(user.organization.tradeType).id}
+                                        </span>
+                                    </div>
+                                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {getBookingPreset(
+                                            user.organization.bookingIndustryId || user.organization.tradeType
+                                        ).services.map((svc) => (
+                                            <li
+                                                key={svc}
+                                                className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-sm text-[#0F172A]"
+                                            >
+                                                {svc}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                             <div className="rounded-2xl border border-[#E2E8F0] p-4">

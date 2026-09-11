@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { API_BASE, apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../shared/utils';
 import { monthDays, todayStr } from './bookingUtils';
+import { getBookingPreset } from './bookingIndustryPresets';
 
 type Slot = { startAt: string; endAt: string; date: string; label: string };
 
@@ -30,12 +31,26 @@ type EventType = {
 
 type BookingStep = 'schedule' | 'details' | 'payment';
 
+type IndustryFormConfig = {
+    id?: string;
+    name?: string;
+    customFields?: { id: string; label: string; type: string; options: string[] }[];
+    uploadPrompt?: string;
+    notesPlaceholder?: string;
+    confirmationTitle?: string;
+    services?: string[];
+    defaultService?: string;
+    timeSlots?: string[];
+};
+
 type Props = {
     hostSlug: string;
     eventSlug?: string;
     host: { name: string; tradeType?: string; phone?: string; email?: string; serviceArea?: string };
     eventType?: EventType;
     eventTypes?: EventType[];
+    industry?: IndustryFormConfig | null;
+    mediaUploadsEnabled?: boolean;
     onSuccess?: () => void;
 };
 
@@ -55,8 +70,14 @@ export function CustomerBookingFlow({
     host,
     eventType: initialEventType,
     eventTypes = [],
+    industry: industryProp,
+    mediaUploadsEnabled = false,
     onSuccess
 }: Props) {
+    const industry = {
+        ...getBookingPreset(host.tradeType || 'plumbing'),
+        ...(industryProp || {})
+    };
     const [activeEventSlug, setActiveEventSlug] = useState(initialEventSlug || '');
     const [eventType, setEventType] = useState<EventType | null>(initialEventType || null);
     const [paymentsMode, setPaymentsMode] = useState<'stripe' | 'simulated'>('stripe');
@@ -78,6 +99,8 @@ export function CustomerBookingFlow({
     const [address, setAddress] = useState('');
     const [description, setDescription] = useState('');
     const [photoUrl, setPhotoUrl] = useState('');
+    const [intakeAnswers, setIntakeAnswers] = useState<Record<string, string>>({});
+    const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const [intakeMode, setIntakeMode] = useState<'instant' | 'request'>('instant');
     const [preferredAt, setPreferredAt] = useState('');
     const [submitting, setSubmitting] = useState(false);
@@ -160,10 +183,40 @@ export function CustomerBookingFlow({
         if (!phone.trim()) errors.phone = 'Phone number is required.';
         else if (phone.replace(/\D/g, '').length < 10) errors.phone = 'Enter a valid phone number (at least 10 digits).';
         if (!address.trim()) errors.address = 'Property address is required.';
+        for (const field of industry.customFields || []) {
+            if (!String(intakeAnswers[field.id] || '').trim()) {
+                errors[field.id] = `${field.label.replace(/\s*\*$/, '')} is required.`;
+            }
+        }
         return errors;
     };
 
-    const detailsValid = useMemo(() => Object.keys(validateDetails()).length === 0, [customerName, email, phone, address]);
+    const detailsValid = useMemo(
+        () => Object.keys(validateDetails()).length === 0,
+        [customerName, email, phone, address, intakeAnswers, industry]
+    );
+
+    const uploadPhotoFile = async (file: File) => {
+        if (!mediaUploadsEnabled) return;
+        setUploadingPhoto(true);
+        setError('');
+        try {
+            const { uploadUrl, publicUrl } = await apiPost(`/api/public/${hostSlug}/upload-url`, {
+                contentType: file.type || 'image/jpeg'
+            });
+            const put = await fetch(uploadUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': file.type || 'image/jpeg' },
+                body: file
+            });
+            if (!put.ok) throw new Error('Photo upload failed');
+            setPhotoUrl(publicUrl);
+        } catch (e: any) {
+            setError(e.message || 'Photo upload failed');
+        } finally {
+            setUploadingPhoto(false);
+        }
+    };
 
     const goToDetails = () => {
         if (intakeMode === 'instant' && !selectedSlot) {
@@ -210,6 +263,7 @@ export function CustomerBookingFlow({
                 intakeType: 'request',
                 preferredSlots: [{ startAt: start.toISOString(), endAt: end.toISOString() }],
                 photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
+                intakeAnswers,
                 startAt: start.toISOString(),
                 endAt: end.toISOString()
             });
@@ -239,6 +293,7 @@ export function CustomerBookingFlow({
                 address: address.trim(),
                 description: description.trim(),
                 photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
+                intakeAnswers,
                 intakeType: 'instant',
                 startAt: selectedSlot.startAt,
                 endAt: selectedSlot.endAt
@@ -627,7 +682,7 @@ export function CustomerBookingFlow({
                                     {detailsTouched && fieldErrors.phone && <p className="text-xs text-red-600 mt-1">{fieldErrors.phone}</p>}
                                 </label>
                                 <label className="block sm:col-span-2">
-                                    <span className="text-xs font-bold text-[#64748B]">Property address <span className="text-red-500">*</span></span>
+                                    <span className="text-xs font-bold text-[#64748B]">Property address / postcode <span className="text-red-500">*</span></span>
                                     <input
                                         value={address}
                                         onChange={(e) => { setAddress(e.target.value); setFieldErrors((p) => ({ ...p, address: '' })); }}
@@ -636,25 +691,79 @@ export function CustomerBookingFlow({
                                     />
                                     {detailsTouched && fieldErrors.address && <p className="text-xs text-red-600 mt-1">{fieldErrors.address}</p>}
                                 </label>
+                                {(industry.customFields || []).map((field) => (
+                                    <label key={field.id} className="block sm:col-span-1">
+                                        <span className="text-xs font-bold text-[#64748B]">{field.label}</span>
+                                        <select
+                                            value={intakeAnswers[field.id] || ''}
+                                            onChange={(e) => {
+                                                setIntakeAnswers((prev) => ({ ...prev, [field.id]: e.target.value }));
+                                                setFieldErrors((p) => ({ ...p, [field.id]: '' }));
+                                            }}
+                                            onBlur={() => setFieldErrors((p) => ({ ...p, ...validateDetails() }))}
+                                            className={cn(
+                                                'mt-1 w-full rounded-xl border bg-white px-3 py-2.5 text-sm',
+                                                fieldErrors[field.id] && detailsTouched ? 'border-red-400' : 'border-[#E2E8F0]'
+                                            )}
+                                        >
+                                            <option value="">Select…</option>
+                                            {field.options.map((opt) => (
+                                                <option key={opt} value={opt}>
+                                                    {opt}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {detailsTouched && fieldErrors[field.id] && (
+                                            <p className="text-xs text-red-600 mt-1">{fieldErrors[field.id]}</p>
+                                        )}
+                                    </label>
+                                ))}
                                 <label className="block sm:col-span-2">
-                                    <span className="text-xs font-bold text-[#64748B]">Describe the job <span className="text-[#94A3B8] font-normal">(recommended)</span></span>
+                                    <span className="text-xs font-bold text-[#64748B]">Notes <span className="text-[#94A3B8] font-normal">(optional)</span></span>
                                     <textarea
                                         value={description}
                                         onChange={(e) => setDescription(e.target.value)}
                                         rows={3}
-                                        placeholder="e.g. fuse box tripping, lights not working…"
+                                        placeholder={industry.notesPlaceholder}
                                         className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm resize-none"
                                     />
                                 </label>
                                 <label className="block sm:col-span-2">
-                                    <span className="text-xs font-bold text-[#64748B]">Photo URL <span className="text-[#94A3B8] font-normal">(optional)</span></span>
-                                    <input
-                                        type="url"
-                                        value={photoUrl}
-                                        onChange={(e) => setPhotoUrl(e.target.value)}
-                                        placeholder="https://…"
-                                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm"
-                                    />
+                                    <span className="text-xs font-bold text-[#64748B]">
+                                        {industry.uploadPrompt}{' '}
+                                        <span className="text-[#94A3B8] font-normal">(optional)</span>
+                                    </span>
+                                    {mediaUploadsEnabled ? (
+                                        <input
+                                            type="file"
+                                            accept="image/jpeg,image/png,image/webp,image/gif"
+                                            disabled={uploadingPhoto}
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) void uploadPhotoFile(file);
+                                            }}
+                                            className="mt-1 w-full text-sm"
+                                        />
+                                    ) : (
+                                        <input
+                                            type="url"
+                                            value={photoUrl}
+                                            onChange={(e) => setPhotoUrl(e.target.value)}
+                                            placeholder="https://…"
+                                            className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm"
+                                        />
+                                    )}
+                                    {uploadingPhoto && <p className="text-xs text-[#64748B] mt-1">Uploading…</p>}
+                                    {photoUrl && (
+                                        <a
+                                            href={photoUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-xs text-[#0F172A] underline mt-1 inline-block"
+                                        >
+                                            View uploaded photo
+                                        </a>
+                                    )}
                                 </label>
                             </div>
 
@@ -790,6 +899,8 @@ export function PublicBookHost() {
                         email: data.email,
                         serviceArea: data.serviceArea
                     }}
+                    industry={data.industry || getBookingPreset(data.bookingIndustryId || data.tradeType)}
+                    mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
                     eventTypes={data.eventTypes.map((et: any) => ({
                         slug: et.slug,
                         name: et.name,
@@ -828,6 +939,8 @@ export function PublicBookEvent() {
                     hostSlug={hostSlug!}
                     eventSlug={eventSlug!}
                     host={data.host}
+                    industry={data.industry || getBookingPreset(data.host?.bookingIndustryId || data.host?.tradeType)}
+                    mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
                     eventType={{
                         slug: data.eventType.slug,
                         name: data.eventType.name,
