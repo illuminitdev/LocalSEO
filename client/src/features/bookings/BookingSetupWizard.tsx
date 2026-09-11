@@ -3,34 +3,21 @@ import { Link } from 'react-router-dom';
 import {
     Building2,
     ChevronRight,
-    Flame,
     Mail,
     MapPin,
     User,
-    Wallet,
-    Wrench
+    Wallet
 } from 'lucide-react';
 import { cn, restrictEmailOrPhoneInput } from '../../shared/utils';
-
-const PLUMBER_TRADE_TYPE = 'Emergency Plumber';
-
-const PLUMBER_SERVICE = {
-    type: PLUMBER_TRADE_TYPE,
-    label: 'Plumbing',
-    subtitle: 'Leaks, pipes, emergencies'
-} as const;
-
-/** Plumber booking defaults — aligned with backend trade catalog / BOOKING_DEMOS.plumber */
-export const PLUMBER_BOOKING_DEFAULTS = {
-    tradeType: PLUMBER_TRADE_TYPE,
-    standardDeposit: 45,
-    emergencyDeposit: 60,
-    acceptingEmergencies: true,
-    emergencyNote: 'Burst pipes and active leaks get emergency windows.'
-} as const;
+import {
+    bookingIndustryPresets,
+    getBookingPreset,
+    type BookingIndustryId
+} from './bookingIndustryPresets';
 
 export type SetupForm = {
     tradeType: string;
+    bookingIndustryId: BookingIndustryId | string;
     name: string;
     businessName: string;
     contact: string;
@@ -55,60 +42,89 @@ type Props = {
     linkedBusiness?: LinkedBusiness;
     busy: boolean;
     error: string;
+    /** Pre-select from Stripe checkout / org hydrate */
+    initialIndustryId?: string | null;
     onComplete: (form: SetupForm) => Promise<void>;
 };
 
-function plumberForm(overrides: Partial<SetupForm> = {}): SetupForm {
+function baseForm(industryId?: string | null, overrides: Partial<SetupForm> = {}): SetupForm {
+    const preset = getBookingPreset(industryId || 'plumbing');
     return {
-        tradeType: PLUMBER_TRADE_TYPE,
+        tradeType: preset.name,
+        bookingIndustryId: preset.id,
         name: '',
         businessName: '',
         contact: '',
         serviceArea: '',
-        standardDeposit: PLUMBER_BOOKING_DEFAULTS.standardDeposit,
-        emergencyDeposit: PLUMBER_BOOKING_DEFAULTS.emergencyDeposit,
+        standardDeposit: 45,
+        emergencyDeposit: 60,
         currency: '£',
-        acceptingEmergencies: PLUMBER_BOOKING_DEFAULTS.acceptingEmergencies,
-        emergencyNote: PLUMBER_BOOKING_DEFAULTS.emergencyNote,
+        acceptingEmergencies: true,
+        emergencyNote: '',
         ...overrides
     };
 }
 
-function formFromLinked(linkedBusiness: NonNullable<LinkedBusiness>): SetupForm {
-    return plumberForm({
+function formFromLinked(
+    linkedBusiness: NonNullable<LinkedBusiness>,
+    industryId?: string | null
+): SetupForm {
+    return baseForm(industryId, {
         businessName: linkedBusiness.name || '',
         contact: linkedBusiness.phone || '',
         serviceArea: linkedBusiness.address || ''
     });
 }
 
-export default function BookingSetupWizard({ linked, linkedBusiness, busy, error, onComplete }: Props) {
+export default function BookingSetupWizard({
+    linked,
+    linkedBusiness,
+    busy,
+    error,
+    initialIndustryId,
+    onComplete
+}: Props) {
     const hasSavedBusiness = Boolean(linked && linkedBusiness?.name?.trim());
+    const lockedFromCheckout = Boolean(initialIndustryId);
 
-    // Booking is separate from SEO tools: only use saved business profile when it exists.
     const [path, setPath] = useState<'choose' | 'manual' | 'from-profile'>(
         hasSavedBusiness ? 'choose' : 'manual'
     );
-    // Order: Your service (locked plumber) → Your details → Bookings & deposit
     const [step, setStep] = useState(1);
-    const [form, setForm] = useState<SetupForm>(() => plumberForm());
+    const [form, setForm] = useState<SetupForm>(() => baseForm(initialIndustryId));
+
+    const selectedPreset = getBookingPreset(form.bookingIndustryId);
 
     const useSavedBusiness = () => {
         if (!linkedBusiness?.name) return;
-        setForm(formFromLinked(linkedBusiness));
+        setForm(formFromLinked(linkedBusiness, initialIndustryId || form.bookingIndustryId));
         setPath('from-profile');
         setStep(1);
     };
 
     const enterManually = () => {
-        setForm(plumberForm());
+        setForm(baseForm(initialIndustryId));
         setPath('manual');
         setStep(1);
     };
 
+    const selectIndustry = (id: string) => {
+        const preset = getBookingPreset(id);
+        setForm((f) => ({
+            ...f,
+            bookingIndustryId: preset.id,
+            tradeType: preset.name
+        }));
+    };
+
     const finish = async (e: FormEvent) => {
         e.preventDefault();
-        await onComplete({ ...form, tradeType: PLUMBER_TRADE_TYPE });
+        const preset = getBookingPreset(form.bookingIndustryId);
+        await onComplete({
+            ...form,
+            bookingIndustryId: preset.id,
+            tradeType: preset.name
+        });
     };
 
     const stepLabels = [
@@ -214,16 +230,39 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                         <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 lg:p-6 shadow-sm">
                             <h2 className="font-bold text-lg text-[#0F172A]">Your service</h2>
                             <p className="text-sm text-[#64748B] mt-1 mb-4">
-                                This booking board is set up for plumbing — no need to choose a trade.
+                                {lockedFromCheckout
+                                    ? 'Industry from your booking plan checkout — customer forms will match this trade.'
+                                    : 'Choose your industry. Customer booking forms and services will match this preset.'}
                             </p>
-                            <div className="rounded-xl border-2 border-[#F59E0B] bg-[#F59E0B]/15 ring-2 ring-[#F59E0B]/40 p-4 max-w-md">
-                                <Wrench className="w-6 h-6 mb-2 text-[#0F172A]" />
-                                <div className="font-bold text-sm text-[#0F172A]">{PLUMBER_SERVICE.label}</div>
-                                <div className="text-xs text-[#64748B] mt-0.5">{PLUMBER_SERVICE.subtitle}</div>
-                                <p className="text-[10px] font-bold uppercase tracking-wider text-[#D97706] mt-3">
-                                    Locked for this setup
-                                </p>
+                            <div className="grid sm:grid-cols-2 gap-2 max-h-80 overflow-y-auto pr-1">
+                                {bookingIndustryPresets.map((p) => {
+                                    const selected = form.bookingIndustryId === p.id;
+                                    return (
+                                        <button
+                                            key={p.id}
+                                            type="button"
+                                            disabled={lockedFromCheckout && !selected}
+                                            onClick={() => selectIndustry(p.id)}
+                                            className={cn(
+                                                'text-left rounded-xl border p-3 transition',
+                                                selected
+                                                    ? 'border-[#F59E0B] bg-[#F59E0B]/15 ring-2 ring-[#F59E0B]/40'
+                                                    : 'border-[#E2E8F0] bg-white hover:border-[#0F172A]/30',
+                                                lockedFromCheckout && !selected && 'opacity-40 cursor-not-allowed'
+                                            )}
+                                        >
+                                            <div className="font-bold text-sm text-[#0F172A]">{p.shortName}</div>
+                                            <div className="text-xs text-[#64748B] mt-0.5 line-clamp-2">{p.tagline}</div>
+                                        </button>
+                                    );
+                                })}
                             </div>
+                            <p className="text-xs text-[#64748B] mt-3">
+                                Services seeded: {selectedPreset.services.slice(0, 2).join(' · ')}
+                                {selectedPreset.services.length > 2
+                                    ? ` · +${selectedPreset.services.length - 2} more`
+                                    : ''}
+                            </p>
                             <div className="flex gap-2 mt-5">
                                 {hasSavedBusiness && (
                                     <button
@@ -334,7 +373,7 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                                 </button>
                                 <button
                                     type="submit"
-                                    className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold"
+                                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#0F172A] text-white text-sm font-bold"
                                 >
                                     Continue <ChevronRight className="w-4 h-4" />
                                 </button>
@@ -343,101 +382,57 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                     )}
 
                     {onDepositStep && (
-                        <form onSubmit={finish} className="bg-white rounded-2xl border border-[#E2E8F0] p-5 lg:p-6 shadow-sm space-y-4">
+                        <form
+                            onSubmit={finish}
+                            className="bg-white rounded-2xl border border-[#E2E8F0] p-5 lg:p-6 shadow-sm space-y-4"
+                        >
                             <div>
-                                <h2 className="font-bold text-lg text-[#0F172A]">Bookings, emergencies & deposit</h2>
+                                <h2 className="font-bold text-lg text-[#0F172A] flex items-center gap-2">
+                                    <Wallet className="w-5 h-5 text-[#F59E0B]" /> Bookings & deposit
+                                </h2>
                                 <p className="text-sm text-[#64748B] mt-1">
-                                    Default weekly slots are added — you can edit them in Settings after launch.
+                                    Default deposits for {selectedPreset.shortName} services. You can edit each service
+                                    later.
                                 </p>
                             </div>
-
-                            <div className="rounded-xl border border-[#E2E8F0] p-4 space-y-3">
-                                <p className="text-sm font-bold text-[#0F172A] flex items-center gap-2">
-                                    <Flame className="w-4 h-4 text-red-500" /> Emergency bookings
-                                </p>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setForm((f) => ({ ...f, acceptingEmergencies: true }))}
-                                        className={cn(
-                                            'rounded-xl py-2.5 text-xs font-bold border',
-                                            form.acceptingEmergencies
-                                                ? 'bg-red-600 text-white border-red-600'
-                                                : 'bg-red-50 text-red-700 border-red-100'
-                                        )}
-                                    >
-                                        Yes — accept emergencies
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setForm((f) => ({ ...f, acceptingEmergencies: false }))}
-                                        className={cn(
-                                            'rounded-xl py-2.5 text-xs font-bold border',
-                                            !form.acceptingEmergencies
-                                                ? 'bg-[#0F172A] text-white border-[#0F172A]'
-                                                : 'bg-[#F8FAFC] border-[#E2E8F0]'
-                                        )}
-                                    >
-                                        Standard only
-                                    </button>
-                                </div>
-                                {form.acceptingEmergencies && (
+                            <div className="grid sm:grid-cols-2 gap-3">
+                                <label className="block text-xs font-bold uppercase text-[#64748B]">
+                                    Standard deposit (£)
                                     <input
-                                        value={form.emergencyNote}
-                                        onChange={(e) => setForm((f) => ({ ...f, emergencyNote: e.target.value }))}
-                                        placeholder="Emergency note for customers (optional)"
-                                        className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-sm"
+                                        type="number"
+                                        min={0}
+                                        step={1}
+                                        value={form.standardDeposit}
+                                        onChange={(e) =>
+                                            setForm((f) => ({
+                                                ...f,
+                                                standardDeposit: Number(e.target.value) || 0
+                                            }))
+                                        }
+                                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-sm focus:outline-none focus:border-[#0F172A]"
                                     />
-                                )}
-                            </div>
-
-                            <div className="rounded-xl bg-[#0F172A] text-white p-4 space-y-4">
-                                <p className="text-xs font-bold uppercase text-white/60 flex items-center gap-2">
-                                    <Wallet className="w-4 h-4 text-[#F59E0B]" /> Customer deposits (paid via Stripe)
-                                </p>
-                                <label className="block">
-                                    {form.acceptingEmergencies ? (
-                                        <span className="text-[10px] font-bold uppercase text-red-300 flex items-center gap-1">
-                                            <Flame className="w-3 h-3" /> Emergency deposit
-                                        </span>
-                                    ) : (
-                                        <span className="text-[10px] font-bold uppercase text-white/50">
-                                            Standard visit deposit
-                                        </span>
-                                    )}
-                                    <div className="flex gap-2 mt-1">
-                                        <select
-                                            value={form.currency}
-                                            onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
-                                            className="rounded-lg border-0 bg-white/10 text-white px-2 py-2 text-sm font-bold shrink-0"
-                                        >
-                                            <option value="£">£</option>
-                                            <option value="$">$</option>
-                                            <option value="€">€</option>
-                                        </select>
-                                        <input
-                                            type="number"
-                                            min={0}
-                                            value={form.acceptingEmergencies ? form.emergencyDeposit : form.standardDeposit}
-                                            onChange={(e) =>
-                                                setForm((f) =>
-                                                    f.acceptingEmergencies
-                                                        ? { ...f, emergencyDeposit: Number(e.target.value) }
-                                                        : { ...f, standardDeposit: Number(e.target.value) }
-                                                )
-                                            }
-                                            className="flex-1 min-w-0 rounded-lg border-0 bg-white/10 text-white px-3 py-2 text-xl font-black"
-                                        />
-                                    </div>
+                                </label>
+                                <label className="block text-xs font-bold uppercase text-[#64748B]">
+                                    Emergency / call-out deposit (£)
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        step={1}
+                                        value={form.emergencyDeposit}
+                                        onChange={(e) =>
+                                            setForm((f) => ({
+                                                ...f,
+                                                emergencyDeposit: Number(e.target.value) || 0
+                                            }))
+                                        }
+                                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-sm focus:outline-none focus:border-[#0F172A]"
+                                    />
                                 </label>
                             </div>
-
-                            <div className="rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] p-3 text-sm text-[#64748B]">
-                                <strong className="text-[#0F172A]">{form.businessName}</strong> · {form.tradeType}
-                                <br />
-                                {form.name} · {form.contact || 'No contact yet'}
-                            </div>
-
+                            <p className="text-sm text-[#64748B]">
+                                Launching <strong className="text-[#0F172A]">{form.businessName || 'your business'}</strong>{' '}
+                                · {form.tradeType}
+                            </p>
                             <div className="flex gap-2 pt-2">
                                 <button
                                     type="button"
@@ -449,9 +444,9 @@ export default function BookingSetupWizard({ linked, linkedBusiness, busy, error
                                 <button
                                     type="submit"
                                     disabled={busy}
-                                    className="flex-1 py-3 rounded-xl bg-[#F59E0B] text-white text-sm font-bold disabled:opacity-60"
+                                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#F59E0B] text-[#0F172A] text-sm font-black disabled:opacity-60"
                                 >
-                                    {busy ? 'Launching...' : 'Launch my booking board'}
+                                    {busy ? 'Launching…' : 'Launch booking board'}
                                 </button>
                             </div>
                         </form>

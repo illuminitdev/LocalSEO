@@ -101,6 +101,7 @@ function mapRegisteredUser(row: any) {
                   name: row.org_name,
                   slug: row.org_slug,
                   tradeType: row.trade_type,
+                  bookingIndustryId: row.booking_industry_id || null,
                   setupComplete: row.setup_complete
               }
             : null,
@@ -360,7 +361,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
             `SELECT DISTINCT ON (u.id)
                     u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
                     u.must_change_password, COALESCE(u.platform_role, 'customer') AS platform_role,
-                    o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.setup_complete,
+                    o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.booking_industry_id, o.setup_complete,
                     s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
                     s.stripe_subscription_id, s.stripe_customer_id, s.cancel_at_period_end,
@@ -438,7 +439,7 @@ router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Respon
         const { rows } = await query(
             `SELECT u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
                     u.must_change_password, COALESCE(u.platform_role, 'customer') AS platform_role,
-                    o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.setup_complete,
+                    o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.booking_industry_id, o.setup_complete,
                     s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
                     s.stripe_subscription_id, s.stripe_customer_id, s.cancel_at_period_end,

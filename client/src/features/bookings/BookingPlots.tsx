@@ -6,6 +6,16 @@ import { setBookingOrgSlug } from './bookingUtils';
 import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
 import BookingSettingsPanel from './BookingSettings';
 
+function intakeAnswersList(raw: unknown): { key: string; label: string; value: string }[] {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    return Object.entries(raw as Record<string, unknown>)
+        .map(([key, value]) => ({
+            key,
+            label: key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()),
+            value: String(value ?? '').trim()
+        }))
+        .filter((x) => x.value);
+}
 type BookingService = {
     id: string;
     slug: string;
@@ -374,6 +384,11 @@ export default function BookingPlots() {
                         linkedBusiness={addingService ? null : linkedBusiness}
                         busy={busy === 'setup'}
                         error={error}
+                        initialIndustryId={
+                            data?.organization?.booking_industry_id ||
+                            data?.bookingIndustry?.id ||
+                            null
+                        }
                         onComplete={completeSetup}
                     />
                 </div>
@@ -630,8 +645,36 @@ export default function BookingPlots() {
                                             {new Date(b.start_at).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                                         </p>
                                         <p className="text-xs text-[#64748B] line-clamp-2">{b.customer_address}</p>
+                                        {b.event_name && (
+                                            <p className="text-xs font-semibold text-[#0F172A]">Service: {b.event_name}</p>
+                                        )}
+                                        {intakeAnswersList(b.intake_answers).length > 0 && (
+                                            <div className="text-xs text-[#64748B] bg-[#F8FAFC] rounded-lg px-2 py-1.5 space-y-0.5">
+                                                {intakeAnswersList(b.intake_answers).map((a) => (
+                                                    <p key={a.key}>
+                                                        <span className="font-semibold text-[#0F172A]">{a.label}:</span>{' '}
+                                                        {a.value}
+                                                    </p>
+                                                ))}
+                                            </div>
+                                        )}
                                         {b.description && (
                                             <p className="text-xs text-[#64748B] bg-[#F8FAFC] rounded-lg px-2 py-1.5 line-clamp-2">{b.description}</p>
+                                        )}
+                                        {Array.isArray(b.photo_urls) && b.photo_urls.length > 0 && (
+                                            <div className="flex gap-1.5 flex-wrap">
+                                                {b.photo_urls.slice(0, 3).map((url: string) => (
+                                                    <a
+                                                        key={url}
+                                                        href={url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="block w-12 h-12 rounded-lg overflow-hidden border border-[#E2E8F0]"
+                                                    >
+                                                        <img src={url} alt="" className="w-full h-full object-cover" />
+                                                    </a>
+                                                ))}
+                                            </div>
                                         )}
                                         <div className="flex flex-wrap gap-2 pt-1">
                                             {b.deposit_paid && (
@@ -692,6 +735,20 @@ export default function BookingPlots() {
 
                 {panel === 'board' && (
                 <aside className="space-y-4">
+                        {data?.bookingIndustry?.services?.length > 0 && (
+                            <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4 space-y-2">
+                                <h3 className="text-[11px] font-bold uppercase tracking-wide text-[#64748B]">
+                                    {data.bookingIndustry.name} services
+                                </h3>
+                                <ul className="space-y-1.5">
+                                    {data.bookingIndustry.services.map((svc: string) => (
+                                        <li key={svc} className="text-xs text-[#0F172A] leading-snug">
+                                            · {svc}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                         {(!data?.stripeConfigured || !data?.stripeConnect?.ready) && (
                             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-2">
                                 <h3 className="text-xs font-bold uppercase text-amber-800">Stripe payouts</h3>

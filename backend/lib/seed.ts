@@ -12,10 +12,11 @@ async function seedDefaultEventTypes(
         standardDepositCents = 4500,
         emergencyDepositCents = 6000,
         acceptingEmergencies = true,
-        tradeType = ''
+        tradeType = '',
+        bookingIndustryId = ''
     }: any = {}
 ) {
-    const catalog = getTradeBookingCatalog(tradeType);
+    const catalog = getTradeBookingCatalog(tradeType, bookingIndustryId);
     const types = catalog.eventTypes.filter(
         (t) => t.kind !== 'emergency' || acceptingEmergencies !== false
     );
@@ -44,6 +45,7 @@ async function createBookingOrg({
     hostName,
     businessName,
     tradeType,
+    bookingIndustryId,
     phone,
     serviceArea,
     standardDeposit,
@@ -56,7 +58,7 @@ async function createBookingOrg({
     userId = null,
     createNew = false
 }: any) {
-    const catalog = getTradeBookingCatalog(tradeType);
+    const catalog = getTradeBookingCatalog(tradeType, bookingIndustryId);
     const resolvedStandard =
         standardDeposit != null && standardDeposit !== '' ? Number(standardDeposit) : catalog.standardDeposit;
     const resolvedEmergency =
@@ -73,6 +75,7 @@ async function createBookingOrg({
     const standardDepositCents = Math.round(resolvedStandard * 100) || 4500;
     const emergencyDepositCents = Math.round(resolvedEmergency * 100) || 6000;
     const currencyCode = currency === '£' || currency === 'GBP' ? 'GBP' : currency === '€' || currency === 'EUR' ? 'EUR' : 'USD';
+    const resolvedIndustryId = String(bookingIndustryId || catalog.bookingIndustryId || '').trim() || null;
     const resolvedTradeType = String(tradeType || catalog.tradeType || '').trim();
 
     // Update existing org only when completing first-time setup on that org (not createNew).
@@ -82,8 +85,9 @@ async function createBookingOrg({
               name = $1, host_name = $2, trade_type = $3, phone = $4, service_area = $5,
               email = COALESCE(NULLIF($6, ''), email), currency = $7,
               accepting_emergencies = $8, emergency_note = $9, setup_complete = TRUE,
-              slug = CASE WHEN slug LIKE 'my-business%' OR name = 'My business' THEN $10 ELSE slug END
-             WHERE id = $11 RETURNING *`,
+              booking_industry_id = COALESCE($10, booking_industry_id),
+              slug = CASE WHEN slug LIKE 'my-business%' OR name = 'My business' THEN $11 ELSE slug END
+             WHERE id = $12 RETURNING *`,
             [
                 String(businessName).trim(),
                 String(hostName).trim(),
@@ -94,6 +98,7 @@ async function createBookingOrg({
                 currencyCode,
                 resolvedAccepting,
                 resolvedNote,
+                resolvedIndustryId,
                 await uniqueOrgSlug(businessName, query),
                 orgId
             ]
@@ -106,7 +111,8 @@ async function createBookingOrg({
                 standardDepositCents,
                 emergencyDepositCents,
                 acceptingEmergencies: resolvedAccepting,
-                tradeType: resolvedTradeType
+                tradeType: resolvedTradeType,
+                bookingIndustryId: resolvedIndustryId
             });
         }
         return org;
@@ -115,8 +121,8 @@ async function createBookingOrg({
     const orgSlug = await uniqueOrgSlug(businessName, query);
     const orgRes = await query(
         `INSERT INTO organizations (slug, name, host_name, trade_type, phone, service_area, email, currency,
-          accepting_emergencies, emergency_note, setup_complete)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE) RETURNING *`,
+          accepting_emergencies, emergency_note, setup_complete, booking_industry_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE, $11) RETURNING *`,
         [
             orgSlug,
             String(businessName).trim(),
@@ -127,7 +133,8 @@ async function createBookingOrg({
             String(email || '').trim(),
             currencyCode,
             resolvedAccepting,
-            resolvedNote
+            resolvedNote,
+            resolvedIndustryId
         ]
     );
     const org = orgRes.rows[0];
@@ -135,7 +142,8 @@ async function createBookingOrg({
         standardDepositCents,
         emergencyDepositCents,
         acceptingEmergencies: resolvedAccepting,
-        tradeType: resolvedTradeType
+        tradeType: resolvedTradeType,
+        bookingIndustryId: resolvedIndustryId
     });
 
     if (userId) {

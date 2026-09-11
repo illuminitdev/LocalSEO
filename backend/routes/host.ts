@@ -80,6 +80,11 @@ import {
     sendCampaign,
     updateSiteContent
 } from '../lib/marketing';
+import { hydrateOrgBookingIndustry, setOrgBookingIndustry } from '../lib/bookingIndustryHydrate';
+import {
+    getBookingPreset,
+    normalizeBookingIndustryId
+} from '../lib/bookingIndustryPresets';
 
 function normalizePhotoUrls(raw: any): string[] {
     if (!Array.isArray(raw)) return [];
@@ -169,8 +174,15 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             if (!(req as any).orgId) {
                 return res.json({ ready: false, canResume: false });
             }
+            await hydrateOrgBookingIndustry((req as any).orgId).catch((err: any) => {
+                console.warn('Industry hydrate skipped:', err?.message || err);
+            });
             const data = await loadDashboard((req as any).orgId);
             const org = data?.organization;
+            const industryId =
+                normalizeBookingIndustryId(org?.booking_industry_id) ||
+                (org?.trade_type ? getBookingPreset(String(org.trade_type)).id : null);
+            const industryPreset = industryId ? getBookingPreset(industryId) : null;
             const hasBookingData = Boolean(
                 String(org?.trade_type || '').trim() && (data?.eventTypes || []).length > 0
             );
@@ -179,14 +191,23 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 return res.json({
                     ready: false,
                     canResume: hasBookingData,
-                    organization: hasBookingData
+                    organization: org
                         ? {
                               id: org.id,
                               slug: org.slug,
                               name: org.name,
                               host_name: org.host_name,
                               trade_type: org.trade_type,
-                              service_area: org.service_area
+                              service_area: org.service_area,
+                              booking_industry_id: org.booking_industry_id || industryId || null
+                          }
+                        : null,
+                    bookingIndustry: industryPreset
+                        ? {
+                              id: industryPreset.id,
+                              name: industryPreset.name,
+                              services: industryPreset.services,
+                              defaultService: industryPreset.defaultService
                           }
                         : null,
                     stripeConfigured: Boolean(stripeClient)
@@ -202,6 +223,18 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 ready: true,
                 canResume: false,
                 ...data,
+                bookingIndustry: industryPreset
+                    ? {
+                          id: industryPreset.id,
+                          name: industryPreset.name,
+                          services: industryPreset.services,
+                          defaultService: industryPreset.defaultService,
+                          customFields: industryPreset.customFields,
+                          uploadPrompt: industryPreset.uploadPrompt,
+                          notesPlaceholder: industryPreset.notesPlaceholder,
+                          timeSlots: industryPreset.timeSlots
+                      }
+                    : null,
                 stripeConfigured: Boolean(stripeClient),
                 stripeConnect: connectStatusPayload(org)
             });
@@ -269,6 +302,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 name,
                 businessName,
                 tradeType,
+                bookingIndustryId,
                 contact,
                 phone,
                 serviceArea,
@@ -286,7 +320,14 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const parsedPhone = isEmail ? '' : rawContact;
             const parsedEmail = isEmail ? rawContact.toLowerCase() : '';
 
-            if (!String(name || '').trim() || !String(businessName || '').trim() || !String(tradeType || '').trim()) {
+            const industryId =
+                normalizeBookingIndustryId(bookingIndustryId) ||
+                (tradeType ? getBookingPreset(String(tradeType)).id : null);
+            const resolvedTradeType = industryId
+                ? getBookingPreset(industryId).name
+                : String(tradeType || '').trim();
+
+            if (!String(name || '').trim() || !String(businessName || '').trim() || !resolvedTradeType) {
                 return res.status(400).json({ error: 'Your name, business name, and service type are required.' });
             }
 
@@ -311,7 +352,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const org = await createBookingOrg({
                 hostName: name,
                 businessName,
-                tradeType,
+                tradeType: resolvedTradeType,
+                bookingIndustryId: industryId,
                 phone: parsedPhone,
                 email: parsedEmail,
                 serviceArea,
@@ -374,6 +416,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 name,
                 businessName,
                 tradeType,
+                bookingIndustryId,
                 contact,
                 phone,
                 serviceArea,
@@ -390,7 +433,14 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const parsedPhone = isEmail ? '' : rawContact;
             const parsedEmail = isEmail ? rawContact.toLowerCase() : '';
 
-            if (!String(name || '').trim() || !String(businessName || '').trim() || !String(tradeType || '').trim()) {
+            const industryId =
+                normalizeBookingIndustryId(bookingIndustryId) ||
+                (tradeType ? getBookingPreset(String(tradeType)).id : null);
+            const resolvedTradeType = industryId
+                ? getBookingPreset(industryId).name
+                : String(tradeType || '').trim();
+
+            if (!String(name || '').trim() || !String(businessName || '').trim() || !resolvedTradeType) {
                 return res.status(400).json({ error: 'Your name, business name, and service type are required.' });
             }
 
@@ -402,7 +452,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const org = await createBookingOrg({
                 hostName: name,
                 businessName,
-                tradeType,
+                tradeType: resolvedTradeType,
+                bookingIndustryId: industryId,
                 phone: parsedPhone,
                 email: parsedEmail,
                 serviceArea,
@@ -624,50 +675,70 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
     });
 
     router.patch('/organization', async (req: Request, res: Response) => {
-        const allowed = [
-            'name',
-            'phone',
-            'email',
-            'service_area',
-            'trade_type',
-            'timezone',
-            'host_name',
-            'reminder_visit_hours',
-            'reminder_invoice_days',
-            'reminder_post_job_hours',
-            'reminders_enabled',
-            'sms_enabled',
-            'default_hourly_cents',
-            'zapier_webhook_url',
-            'zapier_secret'
-        ];
-        const sets: string[] = [];
-        const vals: any[] = [];
-        let i = 1;
-        const map: Record<string, string> = {
-            serviceArea: 'service_area',
-            tradeType: 'trade_type',
-            hostName: 'host_name',
-            reminderVisitHours: 'reminder_visit_hours',
-            reminderInvoiceDays: 'reminder_invoice_days',
-            reminderPostJobHours: 'reminder_post_job_hours',
-            remindersEnabled: 'reminders_enabled',
-            smsEnabled: 'sms_enabled',
-            defaultHourlyCents: 'default_hourly_cents',
-            zapierWebhookUrl: 'zapier_webhook_url',
-            zapierSecret: 'zapier_secret'
-        };
-        for (const [k, v] of Object.entries(req.body || {})) {
-            const col = map[k] || k;
-            if (allowed.includes(col)) {
-                sets.push(`${col} = $${i++}`);
-                vals.push(v);
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+
+            const body = req.body || {};
+            const industryRaw = body.bookingIndustryId ?? body.booking_industry_id;
+            if (industryRaw !== undefined && industryRaw !== null && String(industryRaw).trim()) {
+                await setOrgBookingIndustry((req as any).orgId, industryRaw);
             }
+
+            const allowed = [
+                'name',
+                'phone',
+                'email',
+                'service_area',
+                'trade_type',
+                'timezone',
+                'host_name',
+                'reminder_visit_hours',
+                'reminder_invoice_days',
+                'reminder_post_job_hours',
+                'reminders_enabled',
+                'sms_enabled',
+                'default_hourly_cents',
+                'zapier_webhook_url',
+                'zapier_secret'
+            ];
+            const sets: string[] = [];
+            const vals: any[] = [];
+            let i = 1;
+            const map: Record<string, string> = {
+                serviceArea: 'service_area',
+                tradeType: 'trade_type',
+                hostName: 'host_name',
+                reminderVisitHours: 'reminder_visit_hours',
+                reminderInvoiceDays: 'reminder_invoice_days',
+                reminderPostJobHours: 'reminder_post_job_hours',
+                remindersEnabled: 'reminders_enabled',
+                smsEnabled: 'sms_enabled',
+                defaultHourlyCents: 'default_hourly_cents',
+                zapierWebhookUrl: 'zapier_webhook_url',
+                zapierSecret: 'zapier_secret'
+            };
+            for (const [k, v] of Object.entries(body)) {
+                if (k === 'bookingIndustryId' || k === 'booking_industry_id') continue;
+                const col = map[k] || k;
+                if (allowed.includes(col)) {
+                    sets.push(`${col} = $${i++}`);
+                    vals.push(v);
+                }
+            }
+            if (!sets.length && industryRaw == null) return res.status(400).json({ error: 'No fields' });
+            if (!sets.length) {
+                const { rows } = await query('SELECT * FROM organizations WHERE id = $1', [(req as any).orgId]);
+                return res.json(rows[0]);
+            }
+            vals.push((req as any).orgId);
+            const { rows } = await query(
+                `UPDATE organizations SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`,
+                vals
+            );
+            res.json(rows[0]);
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
         }
-        if (!sets.length) return res.status(400).json({ error: 'No fields' });
-        vals.push((req as any).orgId);
-        const { rows } = await query(`UPDATE organizations SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`, vals);
-        res.json(rows[0]);
     });
 
     router.get('/clients', async (req: Request, res: Response) => {

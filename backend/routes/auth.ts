@@ -14,6 +14,11 @@ import {
 } from '../middleware/entitlements';
 import { PLANS, getPlanById, formatPrice, FEATURE_LABELS, getFeaturesForPlan } from '../lib/planCatalog';
 import Stripe from 'stripe';
+import {
+    industryIdFromStripeSubscription,
+    setOrgBookingIndustry
+} from '../lib/bookingIndustryHydrate';
+import { isBookingPlanId } from '../lib/bookingIndustryPresets';
 
 const router = Router();
 
@@ -109,6 +114,14 @@ async function claimPortalInvite(email: string, password: string) {
            )`,
         [org.id, email, invite.stripe_subscription_id || null]
     );
+
+    // Booking plans: store industry from Stripe subscription metadata when present.
+    if (isBookingPlanId(String(invite.plan_id || ''))) {
+        const industryId = await industryIdFromStripeSubscription(invite.stripe_subscription_id);
+        if (industryId) {
+            await setOrgBookingIndustry(org.id, industryId);
+        }
+    }
 
     await query(
         `UPDATE portal_invites
