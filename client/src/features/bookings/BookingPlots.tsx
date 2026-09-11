@@ -380,6 +380,7 @@ export default function BookingPlots() {
                         </div>
                     )}
                     <BookingSetupWizard
+                        key={`setup-${data?.organization?.booking_industry_id || data?.bookingIndustry?.id || 'pending'}`}
                         linked={linked && !addingService}
                         linkedBusiness={addingService ? null : linkedBusiness}
                         busy={busy === 'setup'}
@@ -389,6 +390,13 @@ export default function BookingPlots() {
                             data?.bookingIndustry?.id ||
                             null
                         }
+                        onRefreshIndustry={() => {
+                            setLoading(true);
+                            load().catch((e: any) => {
+                                setError(e.message);
+                                setLoading(false);
+                            });
+                        }}
                         onComplete={completeSetup}
                     />
                 </div>
