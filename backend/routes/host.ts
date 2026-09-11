@@ -184,8 +184,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const org = data?.organization;
             const industryId =
                 normalizeBookingIndustryId(org?.booking_industry_id) ||
-                normalizeBookingIndustryId(hydratedId) ||
-                (org?.trade_type ? getBookingPreset(String(org.trade_type)).id : null);
+                normalizeBookingIndustryId(hydratedId);
             const industryPreset = industryId ? getBookingPreset(industryId) : null;
             const hasBookingData = Boolean(
                 String(org?.trade_type || '').trim() && (data?.eventTypes || []).length > 0

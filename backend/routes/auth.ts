@@ -15,6 +15,7 @@ import {
 import { PLANS, getPlanById, formatPrice, FEATURE_LABELS, getFeaturesForPlan } from '../lib/planCatalog';
 import Stripe from 'stripe';
 import {
+    industryIdFromPaymentCheckoutSession,
     industryIdFromStripeSubscription,
     setOrgBookingIndustry
 } from '../lib/bookingIndustryHydrate';
@@ -64,8 +65,8 @@ function authUserPayload(user: {
 
 async function claimPortalInvite(email: string, password: string) {
     let inviteRes = await query(
-        `SELECT id, email, full_name, phone, plan_id, password_hash, stripe_subscription_id, features,
-                booking_industry_id
+        `SELECT id, email, full_name, phone, plan_id, password_hash, stripe_subscription_id,
+                stripe_session_id, features, booking_industry_id
          FROM portal_invites
          WHERE LOWER(email) = LOWER($1) AND status = 'paid' AND claimed_at IS NULL
          ORDER BY created_at DESC
@@ -74,7 +75,8 @@ async function claimPortalInvite(email: string, password: string) {
     ).catch(async (err: any) => {
         if (!/booking_industry_id/i.test(String(err?.message || ''))) throw err;
         return query(
-            `SELECT id, email, full_name, phone, plan_id, password_hash, stripe_subscription_id, features
+            `SELECT id, email, full_name, phone, plan_id, password_hash, stripe_subscription_id,
+                    stripe_session_id, features
              FROM portal_invites
              WHERE LOWER(email) = LOWER($1) AND status = 'paid' AND claimed_at IS NULL
              ORDER BY created_at DESC
@@ -126,15 +128,26 @@ async function claimPortalInvite(email: string, password: string) {
         [org.id, email, invite.stripe_subscription_id || null]
     );
 
-    // Booking plans: prefer invite.booking_industry_id (from checkout), Stripe as fallback.
+    // Booking plans: invite column → Payment API (live Stripe) → local Stripe key.
     if (isBookingPlanId(String(invite.plan_id || ''))) {
         let industryId = normalizeBookingIndustryId(invite.booking_industry_id);
+        if (!industryId) {
+            industryId = await industryIdFromPaymentCheckoutSession(invite.stripe_session_id);
+        }
         if (!industryId) {
             industryId = await industryIdFromStripeSubscription(invite.stripe_subscription_id);
         }
         if (industryId) {
             try {
                 await setOrgBookingIndustry(org.id, industryId);
+                if (!invite.booking_industry_id) {
+                    await query(
+                        `UPDATE portal_invites
+                         SET booking_industry_id = $2, updated_at = NOW()
+                         WHERE id = $1`,
+                        [invite.id, industryId]
+                    ).catch(() => undefined);
+                }
             } catch (err: any) {
                 console.warn('Claim: could not set booking_industry_id:', err?.message || err);
             }
