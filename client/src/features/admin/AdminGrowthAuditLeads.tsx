@@ -24,16 +24,15 @@ type GrowthAuditLead = {
     auditId: string | null;
 };
 
-function fmtDateTime(value?: string | null) {
+function fmtDate(value?: string | null) {
     if (!value) return '—';
     try {
-        return new Date(value).toLocaleString('en-GB', {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '—';
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yy = String(d.getFullYear()).slice(-2);
+        return `${dd}/${mm}/${yy}`;
     } catch {
         return '—';
     }
@@ -166,7 +165,7 @@ export default function AdminGrowthAuditLeads() {
                                 {leads.map((lead) => (
                                     <tr key={lead.id} className="group">
                                         <td className="px-3 py-2.5 text-xs text-[#64748B] whitespace-nowrap truncate">
-                                            {fmtDateTime(lead.createdAt)}
+                                            {fmtDate(lead.createdAt)}
                                         </td>
                                         <td className="px-3 py-2.5 text-sm font-semibold text-[#0F172A] max-w-0">
                                             <button

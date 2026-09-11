@@ -30,7 +30,19 @@ export function emptyDashboardState() {
         reviewResponseRate: 0,
         weeklyPosts: 0,
         photoCount: 0,
-        activities: [] as any[]
+        activities: [] as any[],
+        lastVisibilityAudit: null as null | {
+            total: number;
+            bandLabel: string;
+            createdAt: string;
+            query: string;
+        },
+        trackedKeywords: [] as Array<{
+            keyword: string;
+            avgRank: number;
+            top3Percentage: number;
+            updatedAt: string;
+        }>
     };
 }
 
