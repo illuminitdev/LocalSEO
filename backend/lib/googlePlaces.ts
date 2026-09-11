@@ -323,6 +323,7 @@ async function searchLocalTop({
                     mapsUrl: p.mapsUrl,
                     website: p.website,
                     phone: p.phone,
+                    types: Array.isArray(p.categories) ? p.categories : [],
                     isThisBusiness: false
                 }));
         }
@@ -356,7 +357,128 @@ async function searchLocalTop({
         mapsUrl: '',
         website: '',
         phone: '',
+        types: Array.isArray(p.types)
+            ? p.types.filter((t: string) => !['establishment', 'point_of_interest', 'premise'].includes(t))
+            : [],
         isThisBusiness: false
+    }));
+}
+
+/** Tokens used to soft-match Places types to the business category / keyword. */
+function categoryFamilyTokens(categoryOrKeyword = '') {
+    const raw = String(categoryOrKeyword || '')
+        .toLowerCase()
+        .replace(/[_-]+/g, ' ');
+    const tokens = new Set<string>();
+    for (const part of raw.split(/\s+/)) {
+        if (part.length >= 3) tokens.add(part);
+    }
+
+    const add = (...words: string[]) => words.forEach((w) => tokens.add(w));
+    if (/restaurant|diner|eatery|kitchen|bistro|food|cuisine|meal|indian|chinese|thai|pizza|sushi|cafe|café|bakery|bar|pub/.test(raw)) {
+        add('restaurant', 'food', 'meal_takeaway', 'meal_delivery', 'cafe', 'bakery', 'bar', 'indian_restaurant', 'chinese_restaurant');
+    }
+    if (/plumb/.test(raw)) add('plumber', 'home_goods_store');
+    if (/electric/.test(raw)) add('electrician');
+    if (/roof/.test(raw)) add('roofing_contractor', 'general_contractor');
+    if (/dentist|dental/.test(raw)) add('dentist', 'dental_clinic', 'health');
+    if (/hair|salon|barber/.test(raw)) add('hair_care', 'beauty_salon', 'hair_salon');
+    if (/solicitor|lawyer|attorney|legal/.test(raw)) add('lawyer', 'attorney');
+    if (/account/.test(raw)) add('accounting', 'accountant');
+    if (/estate|realtor|property agent/.test(raw)) add('real_estate_agency');
+    if (/garden|landscap/.test(raw)) add('florist', 'lawn_care');
+    if (/clean/.test(raw)) add('laundry');
+    if (/locksmith/.test(raw)) add('locksmith');
+    if (/paint|decorator/.test(raw)) add('painter', 'general_contractor');
+    if (/heat|boiler|hvac/.test(raw)) add('hvac_contractor', 'plumber');
+    if (/carpenter|joinery/.test(raw)) add('carpenter', 'general_contractor');
+    if (/build/.test(raw)) add('general_contractor', 'construction_company');
+    return tokens;
+}
+
+function placeMatchesFamily(types: string[] = [], family: Set<string>) {
+    if (!family.size || !types?.length) return false;
+    const normalized = types.map((t) => String(t).toLowerCase().replace(/_/g, ' '));
+    const typeSlugs = types.map((t) => String(t).toLowerCase());
+    for (const token of family) {
+        const t = token.toLowerCase().replace(/_/g, ' ');
+        if (typeSlugs.includes(token.toLowerCase())) return true;
+        if (normalized.some((n) => n.includes(t) || t.includes(n))) return true;
+    }
+    return false;
+}
+
+/**
+ * Same-service competitors via Places Text Search (not popularity Nearby).
+ * Prefer the ranking keyword; soft-filter to the business category family when possible.
+ */
+async function nearbyCompetitors({
+    lat,
+    lng,
+    keyword,
+    excludeName,
+    excludePlaceId,
+    category
+}: {
+    lat?: number | null;
+    lng?: number | null;
+    keyword?: string;
+    excludeName?: string;
+    excludePlaceId?: string;
+    category?: string;
+}) {
+    if (!requirePlacesConfigured() || lat == null || lng == null) return [];
+
+    const rawQuery = String(keyword || category || '').trim();
+    if (!rawQuery) return [];
+    const searchQuery = /\bnear\b/i.test(rawQuery) ? rawQuery : `${rawQuery} near me`;
+
+    let results: any[] = [];
+    try {
+        results = await searchLocalTop({
+            query: searchQuery,
+            lat,
+            lng,
+            maxResultCount: 12,
+            radiusMeters: 5000
+        });
+    } catch (err: any) {
+        console.warn('[googlePlaces] nearbyCompetitors text search failed:', err.message);
+        return [];
+    }
+
+    const excludeNameLc = String(excludeName || '')
+        .toLowerCase()
+        .trim();
+    const excludeId = String(excludePlaceId || '').trim();
+
+    let filtered = results.filter((p: any) => {
+        if (!p?.name) return false;
+        if (excludeId && p.placeId && p.placeId === excludeId) return false;
+        if (excludeNameLc) {
+            const nameLc = String(p.name).toLowerCase();
+            if (nameLc === excludeNameLc || nameLc.includes(excludeNameLc) || excludeNameLc.includes(nameLc)) {
+                return false;
+            }
+        }
+        return true;
+    });
+
+    const family = categoryFamilyTokens(category || keyword || '');
+    if (family.size) {
+        const sameFamily = filtered.filter((p: any) => placeMatchesFamily(p.types || [], family));
+        if (sameFamily.length >= 2) filtered = sameFamily;
+    }
+
+    return filtered.slice(0, 5).map((p: any) => ({
+        name: p.name,
+        reviews: p.reviewsCount || 0,
+        rating: p.rating || 0,
+        posts: 0,
+        photos: 0,
+        trend: 'up',
+        placeId: p.placeId || '',
+        types: p.types || []
     }));
 }
 
@@ -406,72 +528,6 @@ async function searchBusiness(query: string) {
     } catch (err) {
         throw lastErr || err;
     }
-}
-
-async function nearbyCompetitors({ lat, lng, keyword, excludeName }: any) {
-    if (!requirePlacesConfigured() || lat == null || lng == null) return [];
-
-    const key = placesKey();
-    // Prefer New API nearby
-    try {
-        const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Goog-Api-Key': key,
-                'X-Goog-FieldMask':
-                    'places.displayName,places.rating,places.userRatingCount,places.types,places.formattedAddress'
-            },
-            body: JSON.stringify({
-                includedTypes: keyword ? undefined : ['establishment'],
-                maxResultCount: 8,
-                locationRestriction: {
-                    circle: {
-                        center: { latitude: lat, longitude: lng },
-                        radius: 2500.0
-                    }
-                },
-                rankPreference: 'POPULARITY'
-            })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && Array.isArray(data.places)) {
-            return data.places
-                .map((p: any) => ({
-                    name: p.displayName?.text || '',
-                    reviews: p.userRatingCount || 0,
-                    rating: p.rating || 0,
-                    posts: 0,
-                    photos: 0,
-                    trend: 'up'
-                }))
-                .filter((c: any) => c.name && (!excludeName || c.name.toLowerCase() !== excludeName.toLowerCase()))
-                .slice(0, 5);
-        }
-    } catch (err: any) {
-        console.warn('[googlePlaces] nearby New API failed:', err.message);
-    }
-
-    // Legacy Nearby Search
-    const url = new URL('https://maps.googleapis.com/maps/api/place/nearbysearch/json');
-    url.searchParams.set('location', `${lat},${lng}`);
-    url.searchParams.set('radius', '2500');
-    if (keyword) url.searchParams.set('keyword', keyword);
-    url.searchParams.set('key', key);
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') return [];
-    return (data.results || [])
-        .map((p: any) => ({
-            name: p.name || '',
-            reviews: p.user_ratings_total || 0,
-            rating: p.rating || 0,
-            posts: 0,
-            photos: 0,
-            trend: 'up'
-        }))
-        .filter((c: any) => c.name && (!excludeName || c.name.toLowerCase() !== excludeName.toLowerCase()))
-        .slice(0, 5);
 }
 
 /**

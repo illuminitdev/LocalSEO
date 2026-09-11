@@ -10,14 +10,36 @@ import {
     TrendingDown,
     Radar,
     Loader2,
-    X
+    X,
+    FileText,
+    Download,
+    ListOrdered
 } from 'lucide-react';
-import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
+import { apiGet, apiPost, logDashboardActivity, updateDashboardStats } from '../../shared/utils';
 import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
 import PlacesMap, { geoGridMarkers, geocodeAddress, mapsJsConfigured } from '../../shared/PlacesMap';
-import { PRIMARY_SERVICES, saveVisibilityAuditReport } from './visibilityAudit';
+import {
+    PRIMARY_SERVICES,
+    loadVisibilityAuditReport,
+    saveVisibilityAuditReport
+} from './visibilityAudit';
 
 const GAP_STORAGE_KEY = 'localpulse_gap_analysis';
+const KEYWORDS_STORAGE_KEY = 'localpulse_tracked_keywords';
+
+type TrackedKeyword = {
+    keyword: string;
+    avgRank: number;
+    top3Percentage: number;
+    updatedAt: string;
+};
+
+type LastAuditSummary = {
+    total: number;
+    bandLabel: string;
+    createdAt: string;
+    query: string;
+};
 
 function loadGapAnalysis(): any | null {
     try {
@@ -47,6 +69,30 @@ function clearGapAnalysis() {
     }
 }
 
+function loadTrackedKeywordsLocal(): TrackedKeyword[] {
+    try {
+        const raw = sessionStorage.getItem(KEYWORDS_STORAGE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveTrackedKeywordsLocal(list: TrackedKeyword[]) {
+    try {
+        sessionStorage.setItem(KEYWORDS_STORAGE_KEY, JSON.stringify(list));
+    } catch {
+        /* ignore */
+    }
+}
+
+function upsertTrackedKeyword(list: TrackedKeyword[], entry: TrackedKeyword): TrackedKeyword[] {
+    const key = entry.keyword.toLowerCase();
+    return [entry, ...list.filter((k) => k.keyword.toLowerCase() !== key)].slice(0, 12);
+}
+
 const AUDIT_STEPS = [
     'Saving prospect details',
     'Checking if the website is live',
@@ -62,7 +108,12 @@ export default function RankTracker() {
     const [gapAnalysis, setGapAnalysis] = useState<string | null>(null);
     const [gridData, setGridData] = useState<number[][]>([]);
     const [keyword, setKeyword] = useState('');
+    const [activeKeyword, setActiveKeyword] = useState('');
+    const [businessCategory, setBusinessCategory] = useState('');
     const [competitors, setCompetitors] = useState<any[]>([]);
+    const [trackedKeywords, setTrackedKeywords] = useState<TrackedKeyword[]>([]);
+    const [lastAudit, setLastAudit] = useState<LastAuditSummary | null>(null);
+    const [hasAuditReport, setHasAuditReport] = useState(false);
     const [error, setError] = useState('');
 
     const [showAuditForm, setShowAuditForm] = useState(false);
@@ -82,55 +133,90 @@ export default function RankTracker() {
 
     useEffect(() => {
         const saved = loadGapAnalysis();
-        if (!saved) return;
-        setGapAnalysis(saved.gapAnalysis);
-        setGridData(Array.isArray(saved.grid) ? saved.grid : []);
-        setCompetitors(Array.isArray(saved.competitors) ? saved.competitors : []);
-        if (saved.keyword) setKeyword(saved.keyword);
-        if (saved.center && Number.isFinite(saved.center.lat) && Number.isFinite(saved.center.lng)) {
-            setLat(saved.center.lat);
-            setLng(saved.center.lng);
+        if (saved) {
+            setGapAnalysis(saved.gapAnalysis);
+            setGridData(Array.isArray(saved.grid) ? saved.grid : []);
+            setCompetitors(Array.isArray(saved.competitors) ? saved.competitors : []);
+            if (saved.keyword) {
+                setKeyword(saved.keyword);
+                setActiveKeyword(saved.keyword);
+            }
+            if (saved.center && Number.isFinite(saved.center.lat) && Number.isFinite(saved.center.lng)) {
+                setLat(saved.center.lat);
+                setLng(saved.center.lng);
+            }
         }
+        setTrackedKeywords(loadTrackedKeywordsLocal());
+        setHasAuditReport(Boolean(loadVisibilityAuditReport()));
     }, []);
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
             try {
-                const biz = await apiGet('/api/business');
-                if (cancelled || !biz) return;
-                if (biz.name) setBusinessName(biz.name);
-                if (biz.address) {
-                    setAddress(biz.address);
-                    const parts = String(biz.address)
-                        .split(',')
-                        .map((p: string) => p.trim())
-                        .filter(Boolean);
-                    if (parts.length >= 2) setCity(parts[parts.length - 2] || parts[0]);
-                    else if (parts[0]) setCity(parts[0]);
-                }
-                if (biz.website) setWebsite(biz.website);
-                if (biz.phone) setPhone(biz.phone);
-                if (biz.placeId) setPlaceId(biz.placeId);
-                if (biz.category && PRIMARY_SERVICES.includes(biz.category as any)) setService(biz.category);
-                else if (biz.category) {
-                    setService('Other');
-                    setServiceOther(biz.category);
-                }
-                let nextLat = typeof biz.lat === 'number' ? biz.lat : null;
-                let nextLng = typeof biz.lng === 'number' ? biz.lng : null;
-                if (nextLat == null || nextLng == null) {
-                    const query = [biz.name, biz.address].filter(Boolean).join(', ');
-                    const geo = await geocodeAddress(query || biz.address || '');
-                    if (geo) {
-                        nextLat = geo.lat;
-                        nextLng = geo.lng;
+                const [biz, stats] = await Promise.all([
+                    apiGet('/api/business').catch(() => null),
+                    apiGet('/api/dashboard/stats').catch(() => null)
+                ]);
+                if (cancelled) return;
+
+                if (biz) {
+                    if (biz.name) setBusinessName(biz.name);
+                    if (biz.category) setBusinessCategory(biz.category);
+                    if (biz.address) {
+                        setAddress(biz.address);
+                        const parts = String(biz.address)
+                            .split(',')
+                            .map((p: string) => p.trim())
+                            .filter(Boolean);
+                        if (parts.length >= 2) setCity(parts[parts.length - 2] || parts[0]);
+                        else if (parts[0]) setCity(parts[0]);
+                    }
+                    if (biz.website) setWebsite(biz.website);
+                    if (biz.phone) setPhone(biz.phone);
+                    if (biz.placeId) setPlaceId(biz.placeId);
+                    if (biz.category && PRIMARY_SERVICES.includes(biz.category as any)) setService(biz.category);
+                    else if (biz.category) {
+                        setService('Other');
+                        setServiceOther(biz.category);
+                    }
+                    let nextLat = typeof biz.lat === 'number' ? biz.lat : null;
+                    let nextLng = typeof biz.lng === 'number' ? biz.lng : null;
+                    if (nextLat == null || nextLng == null) {
+                        const query = [biz.name, biz.address].filter(Boolean).join(', ');
+                        const geo = await geocodeAddress(query || biz.address || '');
+                        if (geo) {
+                            nextLat = geo.lat;
+                            nextLng = geo.lng;
+                        }
+                    }
+                    if (!cancelled) {
+                        if (typeof nextLat === 'number') setLat(nextLat);
+                        if (typeof nextLng === 'number') setLng(nextLng);
+                    }
+                    if (!keyword.trim() && biz.category) {
+                        setKeyword(`${biz.category} near me`);
                     }
                 }
-                if (!cancelled) {
-                    if (typeof nextLat === 'number') setLat(nextLat);
-                    if (typeof nextLng === 'number') setLng(nextLng);
+
+                if (stats?.lastVisibilityAudit?.total != null) {
+                    setLastAudit(stats.lastVisibilityAudit);
+                } else {
+                    const report = loadVisibilityAuditReport();
+                    if (report?.score?.total != null) {
+                        setLastAudit({
+                            total: report.score.total,
+                            bandLabel: report.score.bandLabel || '',
+                            createdAt: report.createdAt,
+                            query: report.gbpLookup?.localRank?.query || report.input?.service || ''
+                        });
+                    }
                 }
+                if (Array.isArray(stats?.trackedKeywords) && stats.trackedKeywords.length) {
+                    setTrackedKeywords(stats.trackedKeywords);
+                    saveTrackedKeywordsLocal(stats.trackedKeywords);
+                }
+                setHasAuditReport(Boolean(loadVisibilityAuditReport()));
             } catch {
                 /* business may be gated — form still works manually */
             }
@@ -138,6 +224,7 @@ export default function RankTracker() {
         return () => {
             cancelled = true;
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once from profile/stats
     }, []);
 
     useEffect(() => {
@@ -173,6 +260,8 @@ export default function RankTracker() {
         return geoGridMarkers(lat, lng, gridData, 2);
     }, [lat, lng, gridData]);
 
+    const displayKeyword = activeKeyword || keyword || (businessCategory ? `${businessCategory} near me` : '');
+
     const resolveMapCenter = async (): Promise<{ lat: number; lng: number } | null> => {
         if (typeof lat === 'number' && typeof lng === 'number') return { lat, lng };
         const query = [businessName, address, city].filter(Boolean).join(', ');
@@ -186,16 +275,27 @@ export default function RankTracker() {
     };
 
     const handleGenerateGap = async () => {
+        const effective =
+            keyword.trim() || (businessCategory ? `${businessCategory} near me` : '');
+        if (!effective) {
+            setError('Enter a ranking keyword (e.g. South Indian restaurant near me) or set your business category.');
+            return;
+        }
+        if (!keyword.trim()) setKeyword(effective);
+
         setIsGeneratingGap(true);
         setError('');
         try {
-            const data = await apiPost('/api/ai/gap-analysis', { keyword });
+            const data = await apiPost('/api/ai/gap-analysis', { keyword: effective });
+            const usedKeyword = data.keyword || effective;
             const nextGap = data.gapAnalysis || '';
             const nextGrid = Array.isArray(data.grid) ? data.grid : [];
             const nextCompetitors = Array.isArray(data.competitors) ? data.competitors : [];
             setGapAnalysis(nextGap);
             setGridData(nextGrid);
             setCompetitors(nextCompetitors);
+            setKeyword(usedKeyword);
+            setActiveKeyword(usedKeyword);
 
             let center: { lat: number; lng: number } | null = null;
             if (data?.center && Number.isFinite(data.center.lat) && Number.isFinite(data.center.lng)) {
@@ -208,7 +308,7 @@ export default function RankTracker() {
 
             if (nextGap) {
                 saveGapAnalysis({
-                    keyword,
+                    keyword: usedKeyword,
                     gapAnalysis: nextGap,
                     grid: nextGrid,
                     competitors: nextCompetitors,
@@ -216,6 +316,27 @@ export default function RankTracker() {
                     savedAt: new Date().toISOString()
                 });
             }
+
+            const ranks = nextGrid.flat().filter((n: any) => typeof n === 'number');
+            const avgRank = ranks.length
+                ? Number((ranks.reduce((a: number, b: number) => a + b, 0) / ranks.length).toFixed(1))
+                : Number(data.trackedKeywords?.[0]?.avgRank) || 0;
+            const top3Percentage = ranks.length
+                ? Math.round((ranks.filter((r: number) => r <= 3).length / ranks.length) * 100)
+                : Number(data.trackedKeywords?.[0]?.top3Percentage) || 0;
+
+            const entry: TrackedKeyword = {
+                keyword: usedKeyword,
+                avgRank,
+                top3Percentage,
+                updatedAt: new Date().toISOString()
+            };
+            const nextKeywords = Array.isArray(data.trackedKeywords)
+                ? data.trackedKeywords
+                : upsertTrackedKeyword(trackedKeywords, entry);
+            setTrackedKeywords(nextKeywords);
+            saveTrackedKeywordsLocal(nextKeywords);
+            await updateDashboardStats({ trackedKeywords: nextKeywords });
 
             if (nextGrid.length && !center) {
                 setError(
@@ -225,7 +346,7 @@ export default function RankTracker() {
 
             await logDashboardActivity({
                 type: 'rank',
-                message: `GeoGrid analysis for "${keyword}".`,
+                message: `GeoGrid analysis for "${usedKeyword}".`,
                 icon: 'TrendingUp',
                 color: 'text-[#D97706]'
             });
@@ -233,6 +354,21 @@ export default function RankTracker() {
             setError(err.message || 'Gap analysis failed');
         } finally {
             setIsGeneratingGap(false);
+        }
+    };
+
+    const loadKeyword = (row: TrackedKeyword) => {
+        setKeyword(row.keyword);
+        setActiveKeyword(row.keyword);
+        const saved = loadGapAnalysis();
+        if (saved?.keyword === row.keyword && saved.gapAnalysis) {
+            setGapAnalysis(saved.gapAnalysis);
+            setGridData(Array.isArray(saved.grid) ? saved.grid : []);
+            setCompetitors(Array.isArray(saved.competitors) ? saved.competitors : []);
+            if (saved.center && Number.isFinite(saved.center.lat) && Number.isFinite(saved.center.lng)) {
+                setLat(saved.center.lat);
+                setLng(saved.center.lng);
+            }
         }
     };
 
@@ -260,6 +396,15 @@ export default function RankTracker() {
             });
             setAuditStep(AUDIT_STEPS.length - 1);
             saveVisibilityAuditReport(data);
+            setHasAuditReport(true);
+            const summary: LastAuditSummary = {
+                total: Number(data?.score?.total) || 0,
+                bandLabel: String(data?.score?.bandLabel || data?.score?.band || ''),
+                createdAt: String(data?.createdAt || new Date().toISOString()),
+                query: String(data?.gbpLookup?.localRank?.query || resolvedService)
+            };
+            setLastAudit(summary);
+            await updateDashboardStats({ lastVisibilityAudit: summary });
             await logDashboardActivity({
                 type: 'audit',
                 message: `Local Visibility Audit scored ${data?.score?.total ?? '—'}/100.`,
@@ -275,6 +420,10 @@ export default function RankTracker() {
             setAuditRunning(false);
         }
     };
+
+    const auditDateLabel = lastAudit?.createdAt
+        ? new Date(lastAudit.createdAt).toLocaleDateString()
+        : '';
 
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
@@ -292,7 +441,7 @@ export default function RankTracker() {
                         value={keyword}
                         onChange={(e) => setKeyword(e.target.value)}
                         className="px-4 py-2.5 bg-white border border-[#E2E8F0] rounded-xl text-sm font-semibold w-full md:w-64"
-                        placeholder="e.g. plumber near me"
+                        placeholder="e.g. South Indian restaurant near me"
                     />
                     <button
                         type="button"
@@ -307,6 +456,131 @@ export default function RankTracker() {
             {error && (
                 <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>
             )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+                <div className="bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-sm">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                        <div>
+                            <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Audit score & track</p>
+                            <h2 className="text-lg font-semibold text-[#0F172A] flex items-center gap-2 mt-1">
+                                <Radar className="w-5 h-5 text-[#F59E0B]" /> Local Visibility Audit
+                            </h2>
+                        </div>
+                        {lastAudit ? (
+                            <div className="text-right">
+                                <div className="text-3xl font-black text-[#0F172A]">
+                                    {lastAudit.total}
+                                    <span className="text-base font-bold text-gray-400">/100</span>
+                                </div>
+                                {lastAudit.bandLabel && (
+                                    <p className="text-xs font-bold text-[#D97706]">{lastAudit.bandLabel}</p>
+                                )}
+                            </div>
+                        ) : null}
+                    </div>
+                    {lastAudit ? (
+                        <>
+                            <p className="text-sm text-gray-600 mb-4">
+                                Last run {auditDateLabel}
+                                {lastAudit.query ? ` · ${lastAudit.query}` : ''}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                                <button
+                                    type="button"
+                                    disabled={!hasAuditReport}
+                                    onClick={() => navigate('/visibility-audit/report')}
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-[#0F172A] hover:bg-[#111827] text-white text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50"
+                                >
+                                    <FileText className="w-4 h-4" /> View report
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={!hasAuditReport}
+                                    onClick={() => navigate('/visibility-audit/report?print=1')}
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#E2E8F0] text-[#0F172A] text-sm font-bold rounded-lg cursor-pointer disabled:opacity-50"
+                                >
+                                    <Download className="w-4 h-4" /> Download / Print
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAuditForm(true)}
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-white text-sm font-bold rounded-lg cursor-pointer"
+                                >
+                                    Re-run audit
+                                </button>
+                            </div>
+                            {!hasAuditReport && (
+                                <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                                    Score is saved, but the full report is only in this browser session. Re-run the audit to
+                                    regenerate the detailed report.
+                                </p>
+                            )}
+                        </>
+                    ) : (
+                        <>
+                            <p className="text-sm text-gray-500 mb-4">
+                                No audit yet. Run a free Local Visibility Audit to see your score here and open the report
+                                anytime.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => setShowAuditForm(true)}
+                                className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0F172A] hover:bg-[#111827] text-white text-sm font-bold rounded-xl cursor-pointer"
+                            >
+                                <Radar className="w-4 h-4 text-amber-300" /> Run Local Visibility Audit
+                            </button>
+                        </>
+                    )}
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-sm">
+                    <div className="flex items-center gap-2 mb-3">
+                        <ListOrdered className="w-5 h-5 text-[#0F172A]" />
+                        <h2 className="text-lg font-semibold text-[#0F172A]">Ranking keywords</h2>
+                    </div>
+                    <p className="text-sm text-gray-500 mb-4">
+                        Keywords you have run through Gap Analysis, with average pack rank and Local 3-Pack coverage.
+                    </p>
+                    {trackedKeywords.length ? (
+                        <div className="overflow-x-auto rounded-xl border border-[#E2E8F0]">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-[#F8FAFC] text-gray-500 border-b border-[#E2E8F0]">
+                                    <tr>
+                                        <th className="px-3 py-2 font-bold">Keyword</th>
+                                        <th className="px-3 py-2 font-bold">Avg rank</th>
+                                        <th className="px-3 py-2 font-bold">Top 3%</th>
+                                        <th className="px-3 py-2 font-bold"></th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#E2E8F0]">
+                                    {trackedKeywords.map((row) => (
+                                        <tr key={row.keyword}>
+                                            <td className="px-3 py-2 font-semibold text-[#0F172A]">{row.keyword}</td>
+                                            <td className="px-3 py-2 font-bold text-[#D97706]">{row.avgRank || '—'}</td>
+                                            <td className="px-3 py-2 text-gray-600 font-semibold">
+                                                {row.top3Percentage ?? '—'}%
+                                            </td>
+                                            <td className="px-3 py-2 text-right">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => loadKeyword(row)}
+                                                    className="text-xs font-bold text-[#0F172A] hover:text-[#F59E0B] cursor-pointer"
+                                                >
+                                                    Load
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 text-sm text-gray-500 text-center">
+                            No tracked keywords yet. Generate Gap Analysis to start the list.
+                        </div>
+                    )}
+                </div>
+            </div>
 
             {showAuditForm && (
                 <div
@@ -469,7 +743,7 @@ export default function RankTracker() {
                 <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-sm">
                     <div className="flex justify-between items-center mb-6 gap-2 flex-wrap">
                         <h2 className="text-lg font-semibold flex items-center gap-2">
-                            <Map className="w-5 h-5 text-[#0F172A]" /> Keyword: {keyword || 'not set'}
+                            <Map className="w-5 h-5 text-[#0F172A]" /> Keyword: {displayKeyword || 'not set'}
                         </h2>
                         <div className="flex gap-2 text-xs font-semibold">
                             <span className="flex items-center gap-1">
@@ -518,7 +792,7 @@ export default function RankTracker() {
                         <Activity className="w-5 h-5 text-[#D97706]" /> AI Gap Analysis
                     </h2>
                     <p className="text-sm text-gray-500 mb-6 font-semibold animate-in">
-                        Fills the map pins and competitor table for your keyword.
+                        Fills the map pins and competitor table for your keyword (same-service rivals only).
                     </p>
 
                     {!gapAnalysis ? (
@@ -551,6 +825,7 @@ export default function RankTracker() {
                                         setGapAnalysis(null);
                                         setGridData([]);
                                         setCompetitors([]);
+                                        setActiveKeyword('');
                                         clearGapAnalysis();
                                     }}
                                     className="px-4 py-2 bg-[#F1F5F9] hover:bg-[#E2E8F0] text-[#0F172A] text-sm font-bold rounded-lg cursor-pointer"

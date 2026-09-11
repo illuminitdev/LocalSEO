@@ -121,7 +121,19 @@ const emptyDashboard = () => ({
     reviewResponseRate: 0,
     weeklyPosts: 0,
     photoCount: 0,
-    activities: []
+    activities: [] as any[],
+    lastVisibilityAudit: null as null | {
+        total: number;
+        bandLabel: string;
+        createdAt: string;
+        query: string;
+    },
+    trackedKeywords: [] as Array<{
+        keyword: string;
+        avgRank: number;
+        top3Percentage: number;
+        updatedAt: string;
+    }>
 });
 
 let connectedBusiness = emptyBusiness();
@@ -558,21 +570,22 @@ function fallbackGapAnalysis(business: any, keyword: string, liveCompetitors: an
         .map((c) => c.name)
         .filter(Boolean);
     const competitorLine = competitorNames.length
-        ? `Nearby Places competitors in view: ${competitorNames.join(', ')}.`
-        : 'No live competitor list from Places yet — connect lat/lng on the business profile and ensure Places API is enabled.';
+        ? `Same-service competitors in view: ${competitorNames.join(', ')}.`
+        : 'No live same-service competitor list from Places yet — connect lat/lng on the business profile and ensure Places API is enabled.';
 
     const gapAnalysis = `${business.name} for "${keyword}": estimated GeoGrid average rank ~${avg.toFixed(1)} with ~${top3}% of cells in the Local 3-Pack (model fallback — Gemini quota unavailable). Profile shows ${rating || 'n/a'}★ from ${reviews} reviews. ${competitorLine} Prioritize GBP completeness, fresh posts/photos, and review reply rate to pull neighborhood cells toward ranks 1–3.`;
 
     return { gapAnalysis, grid, competitors };
 }
 
-function fallbackStrategyReport(business: any, stats: any) {
+function fallbackStrategyReport(business: any, stats: any, liveCompetitors: any[] = []) {
     const completeness = Number(stats.completenessScore) || 0;
     const rank = Number(stats.visibilityRank) || 0;
     const top3 = Number(stats.top3Percentage) || 0;
     const replyRate = Number(stats.reviewResponseRate) || 0;
     const posts = Number(stats.weeklyPosts) || 0;
     const photos = Number(stats.photoCount) || 0;
+    const audit = stats.lastVisibilityAudit;
 
     let grade = 'C';
     const score = Math.round(
@@ -592,10 +605,23 @@ function fallbackStrategyReport(business: any, stats: any) {
 
     const name = business?.name || 'Your business';
     const category = business?.category || 'local business';
+    const rivalNames = liveCompetitors
+        .slice(0, 3)
+        .map((c: any) => c.name)
+        .filter(Boolean);
+    const rivalLine = rivalNames.length
+        ? `Closest same-service competitors: ${rivalNames.join(', ')}.`
+        : 'Run Local Search Grid gap analysis to lock in same-service competitor benchmarks.';
+    const auditLine =
+        audit && typeof audit.total === 'number'
+            ? ` Latest Local Visibility Audit scored ${audit.total}/100 (${audit.bandLabel || 'scored'}).`
+            : '';
 
     return {
         grade,
-        positioningText: `${name} (${category}) currently shows ${completeness}% profile completeness, GeoGrid average rank ${rank || 'n/a'}, and ${top3}% Local 3-Pack coverage. Focus this week on the gaps below — listing completeness, reviews replies, and consistent GBP posts move local visibility fastest.`,
+        source: 'fallback',
+        competitors: liveCompetitors.slice(0, 3),
+        positioningText: `${name} (${category}) currently shows ${completeness}% profile completeness, GeoGrid average rank ${rank || 'n/a'}, and ${top3}% Local 3-Pack coverage. ${rivalLine}${auditLine} Focus this week on the gaps below — listing completeness, review replies, and consistent GBP posts move local visibility fastest.`,
         roadmap: [
             {
                 id: 1,
@@ -626,7 +652,8 @@ function fallbackStrategyReport(business: any, stats: any) {
             localPackRank: rank,
             completeness,
             reviewResponseRate: replyRate,
-            missingMedia: photos ? `${photos} photos` : 'No photos yet'
+            missingMedia: photos ? `${photos} photos` : 'No photos yet',
+            visibilityAuditScore: audit?.total ?? null
         }
     };
 }
@@ -696,6 +723,12 @@ app.post('/api/visibility-audit', requireAuth, hydrateOrgFromDb, async (req, res
             }
         );
         console.log(`[visibility-audit] ok in ${Date.now() - started}ms score=${result.score?.total}`);
+        dashboardState.lastVisibilityAudit = {
+            total: Number(result.score?.total) || 0,
+            bandLabel: String(result.score?.bandLabel || result.score?.band || ''),
+            createdAt: String(result.createdAt || new Date().toISOString()),
+            query: String(result.gbpLookup?.localRank?.query || result.input?.service || '')
+        };
         res.json(result);
     } catch (err: any) {
         const status = err?.status || 502;
@@ -935,7 +968,8 @@ If the knowledge base does not contain the answer, say you do not have that deta
 
 app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
     if (!requireBusiness(res)) return;
-    const keyword = req.body?.keyword || `${connectedBusiness.category} near me`;
+    const bodyKeyword = String(req.body?.keyword || '').trim();
+    const keyword = bodyKeyword || `${connectedBusiness.category || 'local business'} near me`;
 
     // Ensure map center exists — geocode address if profile has no lat/lng yet.
     const hasCoords =
@@ -963,8 +997,10 @@ app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('
             liveCompetitors = await nearbyCompetitors({
                 lat: connectedBusiness.lat,
                 lng: connectedBusiness.lng,
-                keyword: connectedBusiness.category || keyword,
-                excludeName: connectedBusiness.name
+                keyword,
+                category: connectedBusiness.category || '',
+                excludeName: connectedBusiness.name,
+                excludePlaceId: connectedBusiness.placeId || ''
             });
         } catch (err: any) {
             console.warn('Nearby competitors lookup failed:', err.message);
@@ -979,26 +1015,39 @@ app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('
                 dashboardState.top3Percentage = Math.round((ranks.filter((r: number) => r <= 3).length / ranks.length) * 100);
             }
         }
+        const entry = {
+            keyword,
+            avgRank: Number(dashboardState.visibilityRank) || 0,
+            top3Percentage: Number(dashboardState.top3Percentage) || 0,
+            updatedAt: new Date().toISOString()
+        };
+        const existing = Array.isArray(dashboardState.trackedKeywords) ? dashboardState.trackedKeywords : [];
+        const next = [entry, ...existing.filter((k: any) => String(k?.keyword || '').toLowerCase() !== keyword.toLowerCase())].slice(
+            0,
+            12
+        );
+        dashboardState.trackedKeywords = next;
+        data.trackedKeywords = next;
     };
 
     const withCompetitors = (data: any) => {
-        if (!Array.isArray(data.competitors) || !data.competitors.length) {
-            data.competitors = [
-                {
-                    name: `${connectedBusiness.name} (You)`,
-                    reviews: connectedBusiness.reviewsCount || 0,
-                    rating: connectedBusiness.rating || 0,
-                    posts: dashboardState.weeklyPosts || 0,
-                    photos: dashboardState.photoCount || 0,
-                    trend: 'up'
-                },
-                ...liveCompetitors.slice(0, 2)
-            ];
-        }
+        // Always use live same-service Places results so Gemini cannot invent unrelated POIs.
+        data.competitors = [
+            {
+                name: `${connectedBusiness.name} (You)`,
+                reviews: connectedBusiness.reviewsCount || 0,
+                rating: connectedBusiness.rating || 0,
+                posts: dashboardState.weeklyPosts || 0,
+                photos: dashboardState.photoCount || 0,
+                trend: 'up'
+            },
+            ...liveCompetitors.slice(0, 2)
+        ];
         return data;
     };
 
-    const withCenter = (data: any) => {
+    const withMeta = (data: any) => {
+        data.keyword = keyword;
         if (
             typeof connectedBusiness.lat === 'number' &&
             typeof connectedBusiness.lng === 'number' &&
@@ -1013,14 +1062,14 @@ app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('
     // Never use Gemini googleSearch here — grounding quota is separate and often 429 on free/test keys.
     // Places supplies competitors; plain generateContent still works when grounding does not.
     if (!aiClient) {
-        const data = withCenter(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
+        const data = withMeta(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
         applyGridStats(data);
         return res.json(data);
     }
 
     try {
         const competitorBlock = liveCompetitors.length
-            ? `Live nearby competitors from Google Places (use these names/ratings; do not invent others):\n${JSON.stringify(liveCompetitors)}`
+            ? `Live same-service competitors from Google Places text search for "${keyword}" (use these names/ratings; do not invent others):\n${JSON.stringify(liveCompetitors)}`
             : 'No live competitor list from Places — do not invent competitor businesses; return only the "You" row if needed.';
 
         const text = await generateText(
@@ -1029,22 +1078,22 @@ Category: ${connectedBusiness.category || 'local business'}
 Rating: ${connectedBusiness.rating} (${connectedBusiness.reviewsCount} reviews)
 Target query: "${keyword}".
 ${competitorBlock}
-Use the provided Places data only. Do not invent businesses.
+Use the provided Places data only. Do not invent businesses. Competitors must be the same service type as the business (e.g. other restaurants for a restaurant) — never campuses, grocery chains, or unrelated POIs.
 Return JSON only:
 {"gapAnalysis": "", "grid": [[1,2,3],[4,5,6],[7,8,9]], "competitors": [{"name": "", "reviews": 0, "rating": 0, "posts": 0, "photos": 0, "trend": "up"}]}
 grid is a 3x3 of estimated Local Pack ranks 1-20 for neighborhood cells around the business.
-First competitors item must be "${connectedBusiness.name} (You)" with reviews=${connectedBusiness.reviewsCount || 0} and rating=${connectedBusiness.rating || 0}. Include up to 2 real nearby competitors from the Places list when available.`
+First competitors item must be "${connectedBusiness.name} (You)" with reviews=${connectedBusiness.reviewsCount || 0} and rating=${connectedBusiness.rating || 0}. Include up to 2 real same-service competitors from the Places list when available.`
         );
         const data = parseJsonFromText(text);
         if (!data?.gapAnalysis) {
             console.warn('[gap-analysis] unusable Gemini JSON — using fallback');
-            const fallback = withCenter(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
+            const fallback = withMeta(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
             applyGridStats(fallback);
             return res.json(fallback);
         }
 
         withCompetitors(data);
-        withCenter(data);
+        withMeta(data);
         applyGridStats(data);
         res.json(data);
     } catch (err: any) {
@@ -1052,7 +1101,7 @@ First competitors item must be "${connectedBusiness.name} (You)" with reviews=${
         if (isGeminiQuotaError(err)) {
             console.warn('[gap-analysis] Gemini quota/rate limit — using Places/fallback path');
         }
-        const fallback = withCenter(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
+        const fallback = withMeta(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
         applyGridStats(fallback);
         res.json(fallback);
     }
@@ -1128,12 +1177,51 @@ app.post('/api/ai/media-generate', requireAuth, hydrateOrgFromDb, requireFeature
 });
 
 app.post('/api/ai/strategy-report', requireAuth, hydrateOrgFromDb, requireAllFeatures(['local_growth', 'reporting']), async (req, res) => {
-    if (!requireGemini(res)) return;
     if (!requireBusiness(res)) return;
     const stats = { ...dashboardState, ...req.body };
-    const fallback = fallbackStrategyReport(connectedBusiness, stats);
+
+    let liveCompetitors: any[] = [];
+    if (requirePlacesConfigured() && connectedBusiness.lat != null && connectedBusiness.lng != null) {
+        try {
+            const keywordHint =
+                (Array.isArray(stats.trackedKeywords) && stats.trackedKeywords[0]?.keyword) ||
+                `${connectedBusiness.category || 'local business'} near me`;
+            liveCompetitors = await nearbyCompetitors({
+                lat: connectedBusiness.lat,
+                lng: connectedBusiness.lng,
+                keyword: keywordHint,
+                category: connectedBusiness.category || '',
+                excludeName: connectedBusiness.name,
+                excludePlaceId: connectedBusiness.placeId || ''
+            });
+        } catch (err: any) {
+            console.warn('Strategy report competitors lookup failed:', err.message);
+        }
+    }
+
+    const fallback = fallbackStrategyReport(connectedBusiness, stats, liveCompetitors);
+    const groundedMetrics = {
+        localPackRank: Number(stats.visibilityRank) || 0,
+        completeness: Number(stats.completenessScore) || 0,
+        reviewResponseRate: Number(stats.reviewResponseRate) || 0,
+        missingMedia: stats.photoCount ? `${stats.photoCount} photos` : 'No photos yet',
+        visibilityAuditScore: stats.lastVisibilityAudit?.total ?? null
+    };
+
+    if (!aiClient) {
+        return res.json(fallback);
+    }
 
     try {
+        const audit = stats.lastVisibilityAudit;
+        const competitorBlock = liveCompetitors.length
+            ? `Same-service competitors (use these; do not invent):\n${JSON.stringify(liveCompetitors.slice(0, 3))}`
+            : 'No same-service competitor list available.';
+        const auditBlock =
+            audit && typeof audit.total === 'number'
+                ? `Last Local Visibility Audit: ${audit.total}/100 (${audit.bandLabel || 'scored'}) for "${audit.query || 'n/a'}" on ${audit.createdAt || 'n/a'}.`
+                : 'No Local Visibility Audit score saved yet.';
+
         const text = await withTimeout(
             generateText(
                 `Create an executive local SEO report for ${connectedBusiness.name} (${connectedBusiness.category || 'local business'}) at ${connectedBusiness.address}.
@@ -1147,9 +1235,11 @@ Use only these live metrics. Do not invent extra numbers.
 - Review response rate: ${stats.reviewResponseRate}%
 - Weekly posts: ${stats.weeklyPosts}
 - Photo count: ${stats.photoCount}
-Write a practical report a trade-business owner can act on this week. Keep it concise.
+${auditBlock}
+${competitorBlock}
+Write a practical report a trade-business owner can act on this week. Keep it concise. Competitor positioning must reference only the competitors listed above (same service type).
 Return JSON only:
-{"grade":"A+|A|A-|B+|B|B-|C+|C","positioningText":"2-3 sentences","roadmap":[{"id":1,"title":"","desc":""},{"id":2,"title":"","desc":""},{"id":3,"title":"","desc":""}],"metrics":{"localPackRank":${stats.visibilityRank},"completeness":${stats.completenessScore},"reviewResponseRate":${stats.reviewResponseRate},"missingMedia":"${stats.photoCount ? `${stats.photoCount} photos` : 'No photos yet'}"}}`
+{"grade":"A+|A|A-|B+|B|B-|C+|C","positioningText":"2-3 sentences","roadmap":[{"id":1,"title":"","desc":""},{"id":2,"title":"","desc":""},{"id":3,"title":"","desc":""}],"metrics":{"localPackRank":${groundedMetrics.localPackRank},"completeness":${groundedMetrics.completeness},"reviewResponseRate":${groundedMetrics.reviewResponseRate},"missingMedia":"${groundedMetrics.missingMedia}"}}`
             ),
             18000,
             'strategy-report'
@@ -1161,7 +1251,9 @@ Return JSON only:
         }
         res.json({
             ...data,
-            metrics: data.metrics || fallback.metrics
+            source: 'gemini',
+            competitors: liveCompetitors.slice(0, 3),
+            metrics: { ...groundedMetrics, ...(data.metrics || {}), ...groundedMetrics }
         });
     } catch (err: any) {
         console.error('Strategy report error (serving fallback):', errMessage(err));
@@ -1183,9 +1275,19 @@ app.post('/api/dashboard/activity', requireAuth, hydrateOrgFromDb, requireFeatur
 });
 
 app.post('/api/dashboard/update-stats', requireAuth, hydrateOrgFromDb, requireFeature('reporting'), (req, res) => {
-    const allowed = ['completenessScore', 'visibilityRank', 'top3Percentage', 'searchViewsIncrease', 'reviewResponseRate', 'weeklyPosts', 'photoCount'];
+    const allowed = [
+        'completenessScore',
+        'visibilityRank',
+        'top3Percentage',
+        'searchViewsIncrease',
+        'reviewResponseRate',
+        'weeklyPosts',
+        'photoCount',
+        'lastVisibilityAudit',
+        'trackedKeywords'
+    ];
     for (const key of allowed) {
-        if (req.body[key] !== undefined) dashboardState[key] = req.body[key];
+        if (req.body[key] !== undefined) (dashboardState as any)[key] = req.body[key];
     }
     res.json({ success: true, stats: dashboardState });
 });

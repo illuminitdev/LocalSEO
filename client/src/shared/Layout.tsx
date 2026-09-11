@@ -284,7 +284,7 @@ export default function Layout() {
         <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden">
             {/* Desktop sidebar */}
             <aside
-                className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden"
+                className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden print:hidden"
                 style={{ width: sidebarWidth }}
             >
                 {sidebar}
@@ -313,14 +313,14 @@ export default function Layout() {
                         aria-label="Close menu"
                         onClick={() => setNavOpen(false)}
                     />
-                    <aside className="absolute inset-y-0 left-0 w-[min(288px,88vw)] max-w-full bg-white border-r border-[#E2E8F0] flex flex-col shadow-xl animate-in slide-in-from-left">
+                    <aside className="absolute inset-y-0 left-0 w-[min(288px,88vw)] max-w-full bg-white border-r border-[#E2E8F0] flex flex-col shadow-xl animate-in slide-in-from-left print:hidden">
                         {sidebar}
                     </aside>
                 </div>
             )}
 
             <div className="flex-1 flex flex-col min-w-0 min-h-0">
-                <header className="lg:hidden shrink-0 sticky top-0 z-30 flex items-center gap-3 px-3 sm:px-4 py-3 border-b border-[#E2E8F0] bg-white/95 backdrop-blur safe-pt">
+                <header className="lg:hidden shrink-0 sticky top-0 z-30 flex items-center gap-3 px-3 sm:px-4 py-3 border-b border-[#E2E8F0] bg-white/95 backdrop-blur safe-pt print:hidden">
                     <button
                         type="button"
                         className="inline-flex items-center justify-center w-10 h-10 rounded-xl border border-[#E2E8F0] bg-white text-[#0F172A]"

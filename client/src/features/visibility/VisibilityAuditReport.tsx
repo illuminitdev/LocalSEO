@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     ArrowRight,
     CheckCircle2,
@@ -51,8 +51,16 @@ function Donut({
 
 export default function VisibilityAuditReport() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const [copied, setCopied] = useState(false);
     const report = useMemo(() => loadVisibilityAuditReport(), []) as VisibilityAuditReport | null;
+
+    useEffect(() => {
+        if (!report) return;
+        if (searchParams.get('print') !== '1') return;
+        const t = window.setTimeout(() => window.print(), 400);
+        return () => window.clearTimeout(t);
+    }, [report, searchParams]);
 
     if (!report) {
         return (
