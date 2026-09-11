@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+﻿import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { API_BASE, apiPost } from '../../shared/utils';
@@ -106,7 +106,7 @@ export default function Login() {
 
     return (
         <AuthShell title="Welcome back" subtitle="Sign in to your account.">
-            {/* Uncontrolled inputs — browser autofill writes DOM values React controlled state often misses */}
+            {/* Uncontrolled inputs ΓÇö browser autofill writes DOM values React controlled state often misses */}
             <form onSubmit={submit} className="space-y-4" autoComplete="on">
                 {error && (
                     <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>
@@ -166,7 +166,7 @@ export default function Login() {
                     disabled={busy}
                     className="w-full py-3 rounded-lg bg-[#0F172A] text-white text-sm font-semibold hover:bg-[#1E293B] disabled:opacity-55"
                 >
-                    {busy ? 'Signing in…' : 'Sign in'}
+                    {busy ? 'Signing inΓÇª' : 'Sign in'}
                 </button>
             </form>
             <p className="text-sm text-[#64748B] mt-6 text-center leading-relaxed">
