@@ -82,14 +82,14 @@ async function findBookingSubscriptionRows(orgId: string): Promise<SubRow[]> {
     let byInvite: SubRow[] = [];
     if (emails.length) {
         const { rows } = await query(
-            `SELECT plan_id, stripe_subscription_id
+            `SELECT plan_id, stripe_subscription_id, booking_industry_id
              FROM portal_invites
              WHERE LOWER(email) = ANY($1::text[])
                 OR org_id = $2
              ORDER BY updated_at DESC NULLS LAST, created_at DESC
              LIMIT 10`,
             [emails, orgId]
-        ).catch(() => ({ rows: [] as SubRow[] }));
+        ).catch(() => ({ rows: [] as any[] }));
         byInvite = rows;
     }
 
@@ -105,9 +105,48 @@ async function findBookingSubscriptionRows(orgId: string): Promise<SubRow[]> {
     return unique;
 }
 
+async function industryIdFromInvite(orgId: string): Promise<BookingIndustryId | null> {
+    const { rows: orgRows } = await query(`SELECT email FROM organizations WHERE id = $1`, [orgId]);
+    const orgEmail = String(orgRows[0]?.email || '')
+        .trim()
+        .toLowerCase();
+
+    const { rows: memberEmails } = await query(
+        `SELECT LOWER(u.email) AS email
+         FROM memberships m
+         JOIN users u ON u.id = m.user_id
+         WHERE m.org_id = $1`,
+        [orgId]
+    );
+    const emails = Array.from(
+        new Set(
+            [orgEmail, ...memberEmails.map((r: any) => String(r.email || '').trim().toLowerCase())].filter(
+                Boolean
+            )
+        )
+    );
+
+    const { rows } = await query(
+        `SELECT booking_industry_id
+         FROM portal_invites
+         WHERE booking_industry_id IS NOT NULL
+           AND TRIM(booking_industry_id) <> ''
+           AND (org_id = $1 OR ($2::text[] IS NOT NULL AND LOWER(email) = ANY($2::text[])))
+         ORDER BY updated_at DESC NULLS LAST, created_at DESC
+         LIMIT 5`,
+        [orgId, emails.length ? emails : null]
+    ).catch(() => ({ rows: [] as any[] }));
+
+    for (const row of rows) {
+        const id = normalizeBookingIndustryId(row.booking_industry_id);
+        if (id) return id;
+    }
+    return null;
+}
+
 /**
  * If org has a booking-* plan and no industry yet,
- * pull from Stripe subscription metadata (and invite/email fallbacks) and persist.
+ * pull from invite column first, then Stripe subscription metadata, and persist.
  */
 export async function hydrateOrgBookingIndustry(orgId: string): Promise<BookingIndustryId | null> {
     if (!orgId) return null;
@@ -128,20 +167,23 @@ export async function hydrateOrgBookingIndustry(orgId: string): Promise<BookingI
     const existing = normalizeBookingIndustryId(org.booking_industry_id);
     if (existing) return existing;
 
-    const subRows = await findBookingSubscriptionRows(orgId);
-    const bookingSub =
-        subRows.find((s) => isBookingPlanId(String(s.plan_id || ''))) ||
-        subRows.find((s) => Boolean(s.stripe_subscription_id));
+    // 1) Invite column written at ZappSites checkout (preferred)
+    let industryId = await industryIdFromInvite(orgId);
 
-    let industryId: BookingIndustryId | null = null;
-    if (bookingSub?.stripe_subscription_id) {
-        industryId = await industryIdFromStripeSubscription(bookingSub.stripe_subscription_id);
+    // 2) Stripe subscription metadata
+    if (!industryId) {
+        const subRows = await findBookingSubscriptionRows(orgId);
+        const bookingSub =
+            subRows.find((s) => isBookingPlanId(String(s.plan_id || ''))) ||
+            subRows.find((s) => Boolean(s.stripe_subscription_id));
+        if (bookingSub?.stripe_subscription_id) {
+            industryId = await industryIdFromStripeSubscription(bookingSub.stripe_subscription_id);
+        }
     }
 
     // Soft fallback from trade_type text if Stripe meta missing
     if (!industryId && org.trade_type) {
         const preset = getBookingPreset(String(org.trade_type));
-        // Only accept if trade_type looked like a real industry label / id
         if (String(org.trade_type).trim()) industryId = preset.id;
     }
 
@@ -161,7 +203,6 @@ export async function hydrateOrgBookingIndustry(orgId: string): Promise<BookingI
         );
     } catch (err: any) {
         if (!/booking_industry_id/i.test(String(err?.message || ''))) throw err;
-        // Column missing — still return id so UI can lock to checkout industry this request.
         console.warn('Could not persist booking_industry_id (run migration 024):', err.message);
     }
 

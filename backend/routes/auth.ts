@@ -18,7 +18,7 @@ import {
     industryIdFromStripeSubscription,
     setOrgBookingIndustry
 } from '../lib/bookingIndustryHydrate';
-import { isBookingPlanId } from '../lib/bookingIndustryPresets';
+import { isBookingPlanId, normalizeBookingIndustryId } from '../lib/bookingIndustryPresets';
 
 const router = Router();
 
@@ -63,14 +63,25 @@ function authUserPayload(user: {
 }
 
 async function claimPortalInvite(email: string, password: string) {
-    const inviteRes = await query(
-        `SELECT id, email, full_name, phone, plan_id, password_hash, stripe_subscription_id, features
+    let inviteRes = await query(
+        `SELECT id, email, full_name, phone, plan_id, password_hash, stripe_subscription_id, features,
+                booking_industry_id
          FROM portal_invites
          WHERE LOWER(email) = LOWER($1) AND status = 'paid' AND claimed_at IS NULL
          ORDER BY created_at DESC
          LIMIT 1`,
         [email]
-    );
+    ).catch(async (err: any) => {
+        if (!/booking_industry_id/i.test(String(err?.message || ''))) throw err;
+        return query(
+            `SELECT id, email, full_name, phone, plan_id, password_hash, stripe_subscription_id, features
+             FROM portal_invites
+             WHERE LOWER(email) = LOWER($1) AND status = 'paid' AND claimed_at IS NULL
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [email]
+        );
+    });
     if (!inviteRes.rows.length) return null;
 
     const invite = inviteRes.rows[0];
@@ -115,11 +126,18 @@ async function claimPortalInvite(email: string, password: string) {
         [org.id, email, invite.stripe_subscription_id || null]
     );
 
-    // Booking plans: store industry from Stripe subscription metadata when present.
+    // Booking plans: prefer invite.booking_industry_id (from checkout), Stripe as fallback.
     if (isBookingPlanId(String(invite.plan_id || ''))) {
-        const industryId = await industryIdFromStripeSubscription(invite.stripe_subscription_id);
+        let industryId = normalizeBookingIndustryId(invite.booking_industry_id);
+        if (!industryId) {
+            industryId = await industryIdFromStripeSubscription(invite.stripe_subscription_id);
+        }
         if (industryId) {
-            await setOrgBookingIndustry(org.id, industryId);
+            try {
+                await setOrgBookingIndustry(org.id, industryId);
+            } catch (err: any) {
+                console.warn('Claim: could not set booking_industry_id:', err?.message || err);
+            }
         }
     }
 
