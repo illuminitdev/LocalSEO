@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, LogOut, Menu, UserRound, X } from 'lucide-react';
+import { LayoutDashboard, LogOut, Menu, UserRound, X, Bell, CheckSquare, PhoneCall } from 'lucide-react';
 import { apiGet, cn } from '../../shared/utils';
 import { clearToken } from '../auth/auth';
 
@@ -10,8 +10,13 @@ const SIDEBAR_DEFAULT = 260;
 
 const NAV_GROUPS = [
     {
-        section: 'OVERVIEW',
-        items: [{ name: 'Dashboard', to: '/sales', icon: LayoutDashboard, end: true }]
+        section: 'WORK & PIPELINE',
+        items: [
+            { name: 'Dashboard', to: '/sales', icon: LayoutDashboard, end: true },
+            { name: 'Tasks', to: '/sales/tasks', icon: CheckSquare, end: true },
+            { name: 'Self Reminders', to: '/sales/reminders', icon: Bell, end: true },
+            { name: 'Call Logs', to: '/sales/calls', icon: PhoneCall, end: true }
+        ]
     },
     {
         section: 'ACCOUNT',
@@ -22,6 +27,15 @@ const NAV_GROUPS = [
 function pageTitle(pathname: string) {
     if (pathname.startsWith('/sales/account')) {
         return { title: 'Settings', subtitle: 'Manage your account profile and security.' };
+    }
+    if (pathname.startsWith('/sales/tasks')) {
+        return { title: 'Admin Tasks', subtitle: 'Tasks assigned to you by administrators. Review, execute, and mark completed.' };
+    }
+    if (pathname.startsWith('/sales/reminders')) {
+        return { title: 'Self Reminders', subtitle: 'Manage your follow-ups, scheduled calls, and personal work tasks.' };
+    }
+    if (pathname.startsWith('/sales/calls')) {
+        return { title: 'Call Logs & Activity', subtitle: 'Log customer conversations, track call dispositions, and view CRM communication history.' };
     }
     if (pathname.startsWith('/sales/leads/')) {
         return { title: 'Lead', subtitle: 'Call, log outcome, and update status.' };
