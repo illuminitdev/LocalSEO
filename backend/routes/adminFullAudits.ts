@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../middleware/adminAuth';
+import { sendFullAuditShareEmail } from '../lib/bookingEmail';
 import {
     proxyZappSitesOps,
     proxyZappSitesPdf,
@@ -121,6 +122,115 @@ router.get('/full-audits/:id/pdf', requireAdmin, async (req: Request, res: Respo
         res.status(502).json({
             success: false,
             error: err.message || 'PDF generation failed. Please try again in a moment.'
+        });
+    }
+});
+
+/**
+ * Email the company contact on the audit with the report PDF + score pitch (SES).
+ * To address comes from the audit record only (business.email / email).
+ */
+router.post('/full-audits/:id/share-email', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const id = String(req.params.id || '').trim();
+        if (!id) return res.status(400).json({ success: false, error: 'Missing audit id' });
+
+        const detail = await proxyZappSitesOps('GET', `/api/ops/audits/${encodeURIComponent(id)}`);
+        if (detail.status >= 400 || !detail.json || typeof detail.json !== 'object') {
+            return sendProxyJson(res, detail);
+        }
+        const body = detail.json as { success?: boolean; data?: Record<string, unknown>; error?: string };
+        const audit = (body.data || {}) as Record<string, unknown>;
+        if (!audit.id && !body.success) {
+            return res.status(detail.status || 404).json({
+                success: false,
+                error: body.error || 'Audit not found'
+            });
+        }
+
+        const business =
+            audit.business && typeof audit.business === 'object'
+                ? (audit.business as Record<string, unknown>)
+                : {};
+        const email = String(business.email || audit.email || '')
+            .trim()
+            .toLowerCase();
+        if (!email || !email.includes('@')) {
+            return res.status(400).json({
+                success: false,
+                error: 'This audit has no company email to share with.'
+            });
+        }
+
+        const published = Boolean(audit.published ?? business.published);
+        if (!published) {
+            return res.status(400).json({
+                success: false,
+                error: 'Publish the audit before emailing the PDF report.'
+            });
+        }
+
+        const businessName = String(
+            business.businessName || audit.businessName || 'there'
+        ).trim();
+        const website = String(business.website || audit.website || '').trim();
+        const scoreObj =
+            audit.score && typeof audit.score === 'object'
+                ? (audit.score as { total?: number })
+                : null;
+        const scoreRaw =
+            (audit.totalScore as number | null | undefined) ?? scoreObj?.total ?? null;
+        const score =
+            scoreRaw != null && Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw) : null;
+        const reportUrl = reportShareUrl(id);
+
+        const pdfResult = await proxyZappSitesPdf(id);
+        if (!pdfResult.buffer || pdfResult.status !== 200) {
+            const errBody =
+                pdfResult.json && typeof pdfResult.json === 'object'
+                    ? (pdfResult.json as { error?: string })
+                    : null;
+            return res.status(pdfResult.status || 502).json({
+                success: false,
+                error: errBody?.error || 'Could not load the audit PDF to attach.'
+            });
+        }
+
+        const safeName =
+            businessName
+                .replace(/[^a-z0-9]+/gi, '-')
+                .replace(/^-|-$/g, '')
+                .slice(0, 40)
+                .toLowerCase() || 'audit';
+
+        const result = await sendFullAuditShareEmail({
+            to: email,
+            businessName,
+            website,
+            score,
+            reportUrl,
+            pdfBuffer: pdfResult.buffer,
+            pdfFilename: `zappsites-audit-${safeName}.pdf`
+        });
+
+        if (!result.sent) {
+            return res.status(502).json({
+                success: false,
+                error: 'Email could not be delivered via SES. Check sender identity and try again.'
+            });
+        }
+
+        return res.json({
+            success: true,
+            to: email,
+            attached: result.attached,
+            reportUrl
+        });
+    } catch (err: any) {
+        console.error('Admin full-audit share-email error:', err);
+        res.status(502).json({
+            success: false,
+            error: err.message || 'Failed to email audit report'
         });
     }
 });

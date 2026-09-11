@@ -20,7 +20,10 @@ const NAV = [
 
 function pageTitle(pathname: string) {
     if (pathname.match(/\/admin\/users\/(user|invite)\//)) {
-        return { title: 'User details', subtitle: 'Plan, renew date, autopay status, and tools for this user.' };
+        return {
+            title: 'User details',
+            subtitle: 'Account info for this user. Sales agents show assigned tasks instead of plans.'
+        };
     }
     if (pathname.startsWith('/admin/users')) {
         return { title: 'User Management', subtitle: 'Create and manage system users.' };
