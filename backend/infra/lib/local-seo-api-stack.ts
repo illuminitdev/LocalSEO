@@ -195,7 +195,11 @@ export class LocalSeoApiStack extends cdk.Stack {
     mediaBucket.addToResourcePolicy(
       new iam.PolicyStatement({
         actions: ['s3:GetObject'],
-        resources: [`${mediaBucket.bucketArn}/avatars/*`, `${mediaBucket.bucketArn}/jobs/*`],
+        resources: [
+          `${mediaBucket.bucketArn}/avatars/*`,
+          `${mediaBucket.bucketArn}/jobs/*`,
+          `${mediaBucket.bucketArn}/logos/*`,
+        ],
         principals: [new iam.AnyPrincipal()],
       })
     );

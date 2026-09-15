@@ -23,7 +23,7 @@ export async function createUploadPresign({
     orgId,
     userId
 }: {
-    kind: 'avatar' | 'job';
+    kind: 'avatar' | 'job' | 'logo';
     contentType: string;
     orgId?: string;
     userId?: string;
@@ -37,8 +37,11 @@ export async function createUploadPresign({
         throw Object.assign(new Error('Only JPEG, PNG, WebP, or GIF images are allowed'), { status: 400 });
     }
     const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : type === 'image/gif' ? 'gif' : 'jpg';
-    const prefix = kind === 'avatar' ? 'avatars' : 'jobs';
+    const prefix = kind === 'avatar' ? 'avatars' : kind === 'logo' ? 'logos' : 'jobs';
     const owner = kind === 'avatar' ? userId || 'user' : orgId || 'org';
+    if ((kind === 'job' || kind === 'logo') && !orgId) {
+        throw Object.assign(new Error('Organization required for this upload'), { status: 400 });
+    }
     const key = `${prefix}/${owner}/${randomUUID()}.${ext}`;
 
     const command = new PutObjectCommand({

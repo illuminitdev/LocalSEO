@@ -72,6 +72,15 @@ function poundsToCents(value: string) {
     return Math.round(n * 100);
 }
 
+/** Allows £0 (e.g. free consultation slots). Returns null if invalid. */
+function poundsToCentsAllowZero(value: string): number | null {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return null;
+    const n = parseFloat(trimmed.replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(n) || n < 0) return null;
+    return Math.round(n * 100);
+}
+
 type Props = {
     embedded?: boolean;
     onBack?: () => void;
@@ -138,6 +147,9 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
     const [selectedTemplate, setSelectedTemplate] = useState<EventTemplateKey>('standard');
     const [newDepositPounds, setNewDepositPounds] = useState('60');
     const [addingEvent, setAddingEvent] = useState(false);
+    const [newSlotName, setNewSlotName] = useState('');
+    const [newSlotDuration, setNewSlotDuration] = useState('60');
+    const [newSlotDeposit, setNewSlotDeposit] = useState('0');
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editDepositPounds, setEditDepositPounds] = useState('');
     const [savingEdit, setSavingEdit] = useState(false);
@@ -264,6 +276,43 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
             setNewDepositPounds(selectedTemplate === 'standard' ? '60' : selectedTemplate === 'emergency' ? '80' : '100');
         } catch (e: any) {
             setError(e.message);
+        } finally {
+            setAddingEvent(false);
+        }
+    };
+
+    const addAppointmentSlot = async () => {
+        const name = newSlotName.trim();
+        if (!name) {
+            setError('Enter a name for the appointment slot.');
+            return;
+        }
+        const durationMinutes = parseInt(newSlotDuration, 10);
+        if (!Number.isFinite(durationMinutes) || durationMinutes < 15) {
+            setError('Duration must be at least 15 minutes.');
+            return;
+        }
+        const depositCents = poundsToCentsAllowZero(newSlotDeposit);
+        if (depositCents == null) {
+            setError('Enter a valid deposit (0 is allowed for free slots).');
+            return;
+        }
+        setAddingEvent(true);
+        setError('');
+        try {
+            const et = await apiPost('/api/host/event-types', {
+                name,
+                description: name,
+                durationMinutes,
+                depositCents,
+                totalCents: depositCents
+            });
+            setEventTypes((prev) => [...prev, et]);
+            setNewSlotName('');
+            setNewSlotDuration('60');
+            setNewSlotDeposit('0');
+        } catch (e: any) {
+            setError(e.message || 'Could not add appointment slot');
         } finally {
             setAddingEvent(false);
         }
@@ -518,7 +567,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                     {isRestaurant
                                         ? 'Guests who choose Book a table pick a date/time against this offer. Food menu and online orders are managed under the Menu tab.'
                                         : isDentists
-                                          ? 'Calendar slots guests book against. Add treatments above under Price list items (or use the Price list tab).'
+                                          ? 'Calendar slots guests book against (e.g. Free Consultation, Routine Check-up). Add more below if you need them.'
                                           : 'Set the deposit customers pay when booking each service type.'}
                                 </p>
                             </div>
@@ -526,7 +575,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                             {eventTypes.length === 0 && (
                                 <p className="text-sm text-[#94A3B8] border border-dashed border-[#E2E8F0] rounded-xl px-4 py-6 text-center">
                                     {isDentists
-                                        ? 'No event types yet — run booking setup or contact support to seed appointment slots.'
+                                        ? 'No appointment slots yet — add one below.'
                                         : 'No services yet — add Standard, Emergency, or Serious below.'}
                                 </p>
                             )}
@@ -627,6 +676,63 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                     );
                                 })}
                             </div>
+
+                            {isDentists && (
+                                <div className="border-t border-[#E2E8F0] pt-4 space-y-3">
+                                    <div>
+                                        <p className="text-xs font-bold uppercase text-[#64748B]">Add appointment slot</p>
+                                        <p className="text-sm text-[#64748B] mt-0.5">
+                                            e.g. Free Consultation, New Patient Exam — sets duration and deposit for the calendar.
+                                        </p>
+                                    </div>
+                                    <div className="grid sm:grid-cols-3 gap-3">
+                                        <label className="block sm:col-span-1">
+                                            <span className="text-xs font-bold text-[#64748B]">Name *</span>
+                                            <input
+                                                type="text"
+                                                value={newSlotName}
+                                                onChange={(e) => setNewSlotName(e.target.value)}
+                                                placeholder="e.g. Free Consultation"
+                                                className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
+                                            />
+                                        </label>
+                                        <label className="block">
+                                            <span className="text-xs font-bold text-[#64748B]">Duration (min)</span>
+                                            <input
+                                                type="number"
+                                                min={15}
+                                                step={15}
+                                                value={newSlotDuration}
+                                                onChange={(e) => setNewSlotDuration(e.target.value)}
+                                                className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
+                                            />
+                                        </label>
+                                        <label className="block">
+                                            <span className="text-xs font-bold text-[#64748B]">Deposit (£)</span>
+                                            <div className="relative mt-1">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B] font-bold">£</span>
+                                                <input
+                                                    type="text"
+                                                    inputMode="decimal"
+                                                    value={newSlotDeposit}
+                                                    onChange={(e) => setNewSlotDeposit(e.target.value)}
+                                                    placeholder="0"
+                                                    className="w-full rounded-xl border border-[#E2E8F0] pl-8 pr-3 py-2.5 text-sm font-bold"
+                                                />
+                                            </div>
+                                        </label>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        disabled={addingEvent || !newSlotName.trim()}
+                                        onClick={addAppointmentSlot}
+                                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold disabled:opacity-40"
+                                    >
+                                        <Plus className="w-4 h-4" />
+                                        {addingEvent ? 'Adding…' : 'Add slot'}
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         {!isDentists && (

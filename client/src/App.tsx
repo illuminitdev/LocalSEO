@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import Layout from './shared/Layout';
 import { RequireAuth, RequireAdmin, RequireSales } from './shared/AuthGuards';
 import FeatureGate from './shared/FeatureGate';
+import { OrgBrandProvider } from './shared/OrgBrandContext';
 import Dashboard from './features/dashboard/Dashboard';
 import ProfileAudit from './features/local-presence/ProfileAudit';
 import PostAutomation from './features/local-presence/PostAutomation';
@@ -118,7 +119,9 @@ export default function App() {
         <Route
           element={
             <RequireAuth>
-              <Layout />
+              <OrgBrandProvider>
+                <Layout />
+              </OrgBrandProvider>
             </RequireAuth>
           }
         >
