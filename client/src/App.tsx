@@ -13,6 +13,7 @@ import ReportGenerator from './features/report/ReportGenerator';
 import Citations from './features/local-presence/Citations';
 import BookingPlots from './features/bookings/BookingPlots';
 import PublicBookHost, { PublicBookEvent, BookSuccess, BookManage } from './features/bookings/PublicBooking';
+import { FoodOrderTrack, FoodOrderSuccess } from './features/bookings/FoodOrderTrack';
 import ClientPortal from './features/bookings/ClientPortal';
 import { ClientsListPage, ClientDetailPage } from './features/clients/Clients';
 import { QuotesListPage, QuoteNewPage, QuoteDetailPage } from './features/quotes/Quotes';
@@ -90,6 +91,8 @@ export default function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/book/success" element={<BookSuccess />} />
+        <Route path="/book/food-order/success" element={<FoodOrderSuccess />} />
+        <Route path="/book/food-order/:token" element={<FoodOrderTrack />} />
         <Route path="/book/manage/:token" element={<BookManage />} />
         <Route path="/book/portal/:token" element={<ClientPortal />} />
         <Route path="/quote/:token" element={<PublicQuote />} />

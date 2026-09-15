@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { query } from '../lib/db';
 import { confirmBookingPayment } from '../lib/confirmBooking';
 import { confirmQuoteDeposit } from '../lib/quotes';
+import { confirmFoodOrderPayment } from '../lib/foodOrders';
 import { syncOrgStripeAccount } from '../lib/stripeConnect';
 import { syncStripeSubscriptionRecord } from '../middleware/entitlements';
 import { fireZapierEvent } from '../lib/zapier';
@@ -52,6 +53,13 @@ function createStripeWebhookHandler(stripeClient: any) {
                 if (session.payment_status === 'paid' && session.metadata?.quoteId) {
                     await confirmQuoteDeposit({
                         quoteId: session.metadata.quoteId,
+                        stripeSessionId: session.id,
+                        paymentIntentId: session.payment_intent
+                    });
+                }
+                if (session.payment_status === 'paid' && session.metadata?.foodOrderId) {
+                    await confirmFoodOrderPayment({
+                        foodOrderId: session.metadata.foodOrderId,
                         stripeSessionId: session.id,
                         paymentIntentId: session.payment_intent
                     });

@@ -14,13 +14,15 @@ import {
     ShieldAlert,
     Wallet,
     Wrench,
-    X
+    X,
+    Utensils
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiPut, cn, formatCents } from '../../shared/utils';
 import AvailabilityEditor, { type AvailabilitySavePayload, type AvailabilitySettings } from './AvailabilityEditor';
-import { getBookingPreset } from './bookingIndustryPresets';
+import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryPresets';
+import RestaurantMenuEditor from './RestaurantMenuEditor';
 
-type Tab = 'events' | 'availability' | 'integrations' | 'profile' | 'reminders';
+type Tab = 'events' | 'menu' | 'availability' | 'integrations' | 'profile' | 'reminders';
 
 type EventTemplateKey = 'standard' | 'emergency' | 'serious';
 
@@ -84,13 +86,6 @@ type Props = {
 export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, initialDashboard, onRefresh }: Props) {
     const [searchParams, setSearchParams] = useSearchParams();
     const tabParam = searchParams.get('tab');
-    const tab: Tab =
-        tabParam === 'availability' ||
-        tabParam === 'integrations' ||
-        tabParam === 'profile' ||
-        tabParam === 'reminders'
-            ? tabParam
-            : 'events';
     const [loading, setLoading] = useState(true);
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState('');
@@ -104,6 +99,15 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         bufferMinutes: 15
     });
     const [org, setOrg] = useState<any>(null);
+    const isRestaurant = normalizeBookingIndustryId(org?.booking_industry_id) === 'restaurants';
+    const tab: Tab =
+        tabParam === 'availability' ||
+        tabParam === 'integrations' ||
+        tabParam === 'profile' ||
+        tabParam === 'reminders' ||
+        (tabParam === 'menu' && isRestaurant)
+            ? (tabParam as Tab)
+            : 'events';
     const [googleConnected, setGoogleConnected] = useState(false);
     const [stripeStatus, setStripeStatus] = useState<{
         configured?: boolean;
@@ -434,17 +438,20 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 )}
 
                 <div className="flex flex-wrap gap-2">
-                    {([
-                        ['events', 'Event types', Settings],
-                        ['availability', 'Availability', Calendar],
-                        ['integrations', 'Integrations', CreditCard],
-                        ['reminders', 'Reminders', Bell],
-                        ['profile', 'Profile', Wallet]
-                    ] as const).map(([key, label, Icon]) => (
+                    {(
+                        [
+                            ['events', isRestaurant ? 'Book a table' : 'Event types', Settings],
+                            ...(isRestaurant ? [['menu', 'Menu', Utensils] as const] : []),
+                            ['availability', 'Availability', Calendar],
+                            ['integrations', 'Integrations', CreditCard],
+                            ['reminders', 'Reminders', Bell],
+                            ['profile', 'Profile', Wallet]
+                        ] as const
+                    ).map(([key, label, Icon]) => (
                         <button
                             key={key}
                             type="button"
-                            onClick={() => setTab(key)}
+                            onClick={() => setTab(key as Tab)}
                             className={cn(
                                 'inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border',
                                 tab === key ? 'bg-[#0F172A] text-white border-[#0F172A]' : 'bg-white border-[#E2E8F0] text-[#64748B]'
@@ -458,12 +465,22 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
                 {saved && <p className="text-sm text-emerald-700 bg-emerald-50 rounded-xl px-4 py-2">Saved.</p>}
 
+                {tab === 'menu' && isRestaurant && (
+                    <RestaurantMenuEditor org={org} onOrgUpdated={setOrg} />
+                )}
+
                 {tab === 'events' && (
                     <div className="space-y-4">
                         <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
                             <div>
-                                <h2 className="font-bold text-[#0F172A]">Your services</h2>
-                                <p className="text-sm text-[#64748B] mt-1">Set the deposit customers pay when booking each service type.</p>
+                                <h2 className="font-bold text-[#0F172A]">
+                                    {isRestaurant ? 'Table booking' : 'Your services'}
+                                </h2>
+                                <p className="text-sm text-[#64748B] mt-1">
+                                    {isRestaurant
+                                        ? 'Guests who choose Book a table pick a date/time against this offer. Food menu and online orders are managed under the Menu tab.'
+                                        : 'Set the deposit customers pay when booking each service type.'}
+                                </p>
                             </div>
 
                             {eventTypes.length === 0 && (

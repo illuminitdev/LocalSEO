@@ -16,7 +16,8 @@ import {
 } from 'lucide-react';
 import { API_BASE, apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../shared/utils';
 import { monthDays, todayStr } from './bookingUtils';
-import { getBookingPreset } from './bookingIndustryPresets';
+import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryPresets';
+import FoodOrderFlow from './FoodOrderFlow';
 
 type Slot = { startAt: string; endAt: string; date: string; label: string };
 
@@ -872,24 +873,129 @@ export function CustomerBookingFlow({
 
 export function PublicBookHost() {
     const { hostSlug } = useParams();
+    const [searchParams] = useSearchParams();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [data, setData] = useState<any>(null);
+    const [path, setPath] = useState<'choose' | 'table' | 'food' | null>(null);
 
     useEffect(() => {
         if (!hostSlug) return;
         apiGet(`/api/public/${hostSlug}`)
-            .then(setData)
+            .then((d) => {
+                setData(d);
+                const isRestaurant = normalizeBookingIndustryId(d.bookingIndustryId) === 'restaurants';
+                if (!isRestaurant) {
+                    setPath('table');
+                } else if (searchParams.get('food') === '1') {
+                    setPath('food');
+                } else {
+                    setPath('choose');
+                }
+            })
             .catch((e) => setError(e.message))
             .finally(() => setLoading(false));
-    }, [hostSlug]);
+    }, [hostSlug, searchParams]);
 
-    if (loading) return <div className="min-h-screen flex items-center justify-center text-[#64748B]">Loading…</div>;
-    if (error || !data) return <div className="min-h-screen flex items-center justify-center text-red-600 p-6">{error || 'Not found'}</div>;
+    if (loading || path === null) {
+        return <div className="min-h-screen flex items-center justify-center text-[#64748B]">Loading…</div>;
+    }
+    if (error || !data) {
+        return (
+            <div className="min-h-screen flex items-center justify-center text-red-600 p-6">{error || 'Not found'}</div>
+        );
+    }
+
+    const eventTypes = (data.eventTypes || []).map((et: any) => ({
+        slug: et.slug,
+        name: et.name,
+        description: et.description,
+        durationMinutes: et.duration_minutes,
+        depositCents: et.deposit_cents,
+        totalCents: et.total_cents
+    }));
+    const menuItems = data.menuItems || [];
+    const hasMenu = menuItems.length > 0;
+
+    if (path === 'choose') {
+        return (
+            <div className="min-h-screen bg-[#F8FAFC] py-6 px-4">
+                <div className="max-w-lg mx-auto space-y-4">
+                    <div className="bg-[#0F172A] text-white rounded-2xl px-5 py-6">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-[#F59E0B]">
+                            {data.tradeType || 'Restaurant'}
+                        </p>
+                        <h1 className="text-2xl font-black mt-1">{data.name}</h1>
+                        <p className="text-sm text-white/70 mt-2">Book a table, or order food for delivery / pickup.</p>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setPath('table')}
+                        className="w-full text-left bg-white rounded-2xl border border-[#E2E8F0] p-5 hover:border-[#F59E0B] transition"
+                    >
+                        <p className="font-black text-[#0F172A] text-lg">Book a table</p>
+                        <p className="text-sm text-[#64748B] mt-1">Reserve a date and time. Order with your waiter when you arrive.</p>
+                    </button>
+                    <button
+                        type="button"
+                        disabled={!hasMenu}
+                        onClick={() => hasMenu && setPath('food')}
+                        className={cn(
+                            'w-full text-left rounded-2xl border p-5 transition',
+                            hasMenu
+                                ? 'bg-white border-[#E2E8F0] hover:border-[#F59E0B]'
+                                : 'bg-[#F8FAFC] border-[#E2E8F0] opacity-60 cursor-not-allowed'
+                        )}
+                    >
+                        <p className="font-black text-[#0F172A] text-lg">Order food</p>
+                        <p className="text-sm text-[#64748B] mt-1">
+                            {hasMenu
+                                ? 'Browse the menu, pay online, delivery to your home or collection.'
+                                : 'Menu not published yet — check back soon.'}
+                        </p>
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    if (path === 'food') {
+        return (
+            <div className="min-h-screen bg-[#F8FAFC] py-6 px-4">
+                <div className="max-w-lg mx-auto">
+                    <FoodOrderFlow
+                        hostSlug={hostSlug!}
+                        hostName={data.name}
+                        menuItems={menuItems}
+                        foodOrdering={
+                            data.foodOrdering || {
+                                deliveryEnabled: true,
+                                pickupEnabled: true,
+                                deliveryFeeCents: 0,
+                                deliveryMinOrderCents: 0,
+                                deliveryNotes: ''
+                            }
+                        }
+                        eventSlugForPickup={eventTypes[0]?.slug}
+                        onBack={() => setPath('choose')}
+                    />
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-[#F8FAFC] py-6 px-4">
-            <div className="max-w-5xl mx-auto">
+            <div className="max-w-5xl mx-auto space-y-3">
+                {normalizeBookingIndustryId(data.bookingIndustryId) === 'restaurants' && (
+                    <button
+                        type="button"
+                        onClick={() => setPath('choose')}
+                        className="text-xs font-bold text-[#F59E0B] underline"
+                    >
+                        ← Back to options
+                    </button>
+                )}
                 <CustomerBookingFlow
                     hostSlug={hostSlug!}
                     host={{
@@ -901,14 +1007,8 @@ export function PublicBookHost() {
                     }}
                     industry={data.industry || getBookingPreset(data.bookingIndustryId || data.tradeType)}
                     mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
-                    eventTypes={data.eventTypes.map((et: any) => ({
-                        slug: et.slug,
-                        name: et.name,
-                        description: et.description,
-                        durationMinutes: et.duration_minutes,
-                        depositCents: et.deposit_cents,
-                        totalCents: et.total_cents
-                    }))}
+                    eventTypes={eventTypes}
+                    eventSlug={eventTypes.length === 1 ? eventTypes[0].slug : undefined}
                 />
             </div>
         </div>
