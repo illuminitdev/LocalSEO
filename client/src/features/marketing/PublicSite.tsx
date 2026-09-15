@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { apiGet } from '../../shared/utils';
+import { orgBrandStyle, resolveOrgBrand } from '../../shared/orgBrand';
 
 export default function PublicSite() {
     const { orgSlug } = useParams();
@@ -28,21 +29,41 @@ export default function PublicSite() {
     }
 
     const org = data.org;
+    const brand = resolveOrgBrand({
+        logoUrl: org.logoUrl || org.logo_url,
+        brandPrimary: org.brandPrimary || org.brand_primary,
+        brandSecondary: org.brandSecondary || org.brand_secondary
+    });
     const services = String(org.site_services || '')
         .split('\n')
         .map((s: string) => s.trim())
         .filter(Boolean);
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-[#0F172A] via-[#1E293B] to-[#0F172A] text-white">
+        <div
+            className="min-h-screen text-white"
+            style={{
+                ...orgBrandStyle(brand),
+                background: `linear-gradient(to bottom, var(--brand-secondary), color-mix(in srgb, var(--brand-secondary) 85%, white), var(--brand-secondary))`
+            }}
+        >
             <div className="max-w-2xl mx-auto px-6 py-16 space-y-8">
-                <p className="text-sm text-white/50 uppercase tracking-widest">{org.trade_type || 'Local services'}</p>
+                {brand.logoUrl ? (
+                    <img
+                        src={brand.logoUrl}
+                        alt=""
+                        className="h-14 w-14 rounded-2xl object-contain bg-white/10 p-2"
+                    />
+                ) : null}
+                <p className="text-sm uppercase tracking-widest" style={{ color: 'var(--brand-primary)' }}>
+                    {org.trade_type || 'Local services'}
+                </p>
                 <h1 className="text-4xl font-black tracking-tight">{org.site_headline || org.name}</h1>
                 <p className="text-lg text-white/70">{org.site_blurb || org.service_area}</p>
                 <div className="flex flex-wrap gap-3">
                     <a
                         href={`/book/${org.slug}`}
-                        className="rounded-xl bg-[#F59E0B] text-[#0F172A] px-5 py-3 font-bold"
+                        className="rounded-xl px-5 py-3 font-bold text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
                     >
                         Book now
                     </a>

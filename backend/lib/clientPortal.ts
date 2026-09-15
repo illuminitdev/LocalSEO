@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
 import { query } from './db';
+import { orgBrandingFields } from './branding';
 
 const PORTAL_TOKEN_DAYS = 90;
 
@@ -32,7 +33,8 @@ export async function loadPortalByToken(token: string) {
         `SELECT t.*, c.name AS client_name, c.email AS client_email, c.phone AS client_phone,
                 c.status AS client_status, c.notes AS client_notes,
                 o.slug AS org_slug, o.name AS org_name, o.phone AS org_phone, o.email AS org_email,
-                o.host_name, o.trade_type, o.currency
+                o.host_name, o.trade_type, o.currency,
+                o.logo_url, o.brand_primary, o.brand_secondary
          FROM client_portal_tokens t
          JOIN clients c ON c.id = t.client_id
          JOIN organizations o ON o.id = t.org_id
@@ -88,7 +90,8 @@ export async function loadPortalByToken(token: string) {
             email: row.org_email,
             hostName: row.host_name,
             tradeType: row.trade_type,
-            currency: row.currency || 'GBP'
+            currency: row.currency || 'GBP',
+            ...orgBrandingFields(row)
         },
         client: {
             id: row.client_id,

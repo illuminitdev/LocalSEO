@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import { query } from './db';
 import { sendMail } from './bookingEmail';
+import { orgBrandingFields } from './branding';
 
 export async function ensureReferralCode(clientId: string, orgId: string) {
     const { rows } = await query(`SELECT * FROM clients WHERE id = $1 AND org_id = $2`, [clientId, orgId]);
@@ -36,7 +37,8 @@ export async function applyReferralCode(orgId: string, newClientId: string, code
 export async function getPublicSite(orgSlug: string) {
     const { rows } = await query(
         `SELECT id, name, slug, phone, email, trade_type, service_area, host_name,
-                site_headline, site_blurb, site_services, marketing_enabled
+                site_headline, site_blurb, site_services, marketing_enabled,
+                logo_url, brand_primary, brand_secondary
          FROM organizations WHERE slug = $1 LIMIT 1`,
         [orgSlug]
     );
@@ -46,7 +48,16 @@ export async function getPublicSite(orgSlug: string) {
          WHERE org_id = $1 AND active = TRUE ORDER BY sort_order, created_at LIMIT 12`,
         [rows[0].id]
     );
-    return { org: rows[0], events };
+    const branding = orgBrandingFields(rows[0]);
+    return {
+        org: {
+            ...rows[0],
+            logoUrl: branding.logoUrl,
+            brandPrimary: branding.brandPrimary,
+            brandSecondary: branding.brandSecondary
+        },
+        events
+    };
 }
 
 export async function updateSiteContent(orgId: string, body: any) {

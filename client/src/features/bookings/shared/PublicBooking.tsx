@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
     ArrowLeft,
@@ -18,6 +18,7 @@ import { API_BASE, apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '
 import { monthDays, todayStr } from './bookingUtils';
 import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryPresets';
 import FoodOrderFlow from '../restaurants/FoodOrderFlow';
+import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
 
 type Slot = { startAt: string; endAt: string; date: string; label: string };
 
@@ -52,10 +53,21 @@ type MenuItemPublic = {
     priceCents: number;
 };
 
+type HostBrand = {
+    name: string;
+    tradeType?: string;
+    phone?: string;
+    email?: string;
+    serviceArea?: string;
+    logoUrl?: string;
+    brandPrimary?: string;
+    brandSecondary?: string;
+};
+
 type Props = {
     hostSlug: string;
     eventSlug?: string;
-    host: { name: string; tradeType?: string; phone?: string; email?: string; serviceArea?: string };
+    host: HostBrand;
     eventType?: EventType;
     eventTypes?: EventType[];
     menuItems?: MenuItemPublic[];
@@ -63,6 +75,52 @@ type Props = {
     mediaUploadsEnabled?: boolean;
     onSuccess?: () => void;
 };
+
+function BrandHeader({
+    host,
+    title,
+    subtitle,
+    children,
+    compact
+}: {
+    host: HostBrand;
+    title?: string;
+    subtitle?: ReactNode;
+    children?: ReactNode;
+    compact?: boolean;
+}) {
+    const brand = resolveOrgBrand(host);
+    return (
+        <div
+            className={cn('text-white rounded-2xl px-5', compact ? 'py-4' : 'py-5')}
+            style={{ background: 'var(--brand-secondary)' }}
+        >
+            <div className="flex items-start gap-3">
+                {brand.logoUrl ? (
+                    <img
+                        src={brand.logoUrl}
+                        alt=""
+                        className={cn(
+                            'rounded-xl object-contain bg-white/10 shrink-0',
+                            compact ? 'h-10 w-10 p-1' : 'h-12 w-12 p-1.5'
+                        )}
+                    />
+                ) : null}
+                <div className="min-w-0 flex-1">
+                    <p
+                        className="text-[10px] font-black uppercase tracking-widest"
+                        style={{ color: 'var(--brand-primary)' }}
+                    >
+                        {title || host.tradeType || 'Book online'}
+                    </p>
+                    <h1 className={cn('font-black mt-1', compact ? 'text-xl' : 'text-2xl')}>{host.name}</h1>
+                    {subtitle}
+                </div>
+                {children}
+            </div>
+        </div>
+    );
+}
 
 
 function isDateSelectable(dateStr: string, maxDaysAhead: number) {
@@ -422,17 +480,18 @@ export function CustomerBookingFlow({
 
     if (showServicePicker) {
         return (
-            <div className="min-h-screen bg-[#F8FAFC] py-8 px-4">
+            <div className="min-h-screen bg-[#F8FAFC] py-8 px-4" style={orgBrandStyle(host)}>
                 <div className="max-w-2xl mx-auto space-y-6">
-                    <div className="bg-[#0F172A] text-white rounded-2xl px-5 py-5">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-[#F59E0B]">{host.tradeType || 'Book online'}</p>
-                        <h1 className="text-2xl font-black mt-1">{host.name}</h1>
-                        {host.serviceArea && (
-                            <p className="text-xs text-white/50 mt-2 flex items-center gap-1.5">
-                                <MapPin className="w-3.5 h-3.5 shrink-0" /> {host.serviceArea}
-                            </p>
-                        )}
-                    </div>
+                    <BrandHeader
+                        host={host}
+                        subtitle={
+                            host.serviceArea ? (
+                                <p className="text-xs text-white/50 mt-2 flex items-center gap-1.5">
+                                    <MapPin className="w-3.5 h-3.5 shrink-0" /> {host.serviceArea}
+                                </p>
+                            ) : null
+                        }
+                    />
                     <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4 shadow-sm">
                         <h2 className="font-bold text-lg text-[#0F172A]">What do you need?</h2>
                         <p className="text-sm text-[#64748B]">
@@ -451,7 +510,7 @@ export function CustomerBookingFlow({
                                             'w-full text-left rounded-xl border p-4 transition',
                                             emergency
                                                 ? 'border-red-200 hover:border-red-400 hover:bg-red-50/50'
-                                                : 'border-[#E2E8F0] hover:border-[#F59E0B] hover:bg-[#F59E0B]/5'
+                                                : 'border-[#E2E8F0] hover:border-[var(--brand-primary)] hover:bg-[color-mix(in_srgb,var(--brand-primary)_5%,white)]'
                                         )}
                                     >
                                         <div className="flex items-center justify-between gap-3">
@@ -471,7 +530,10 @@ export function CustomerBookingFlow({
                                                 <p className="text-[10px] font-bold uppercase text-[#64748B]">
                                                     {et.depositCents > 0 ? 'From' : 'Price'}
                                                 </p>
-                                                <p className={cn('text-xl font-black', emergency ? 'text-red-600' : 'text-[#F59E0B]')}>
+                                                <p
+                                                    className={cn('text-xl font-black', emergency ? 'text-red-600' : '')}
+                                                    style={emergency ? undefined : { color: 'var(--brand-primary)' }}
+                                                >
                                                     {formatCents(et.depositCents)}
                                                 </p>
                                             </div>
@@ -484,7 +546,7 @@ export function CustomerBookingFlow({
                                     key={`menu-${item.id}`}
                                     type="button"
                                     onClick={() => pickCatalogItem(item)}
-                                    className="w-full text-left rounded-xl border border-[#E2E8F0] p-4 transition hover:border-[#F59E0B] hover:bg-[#F59E0B]/5"
+                                    className="w-full text-left rounded-xl border border-[#E2E8F0] p-4 transition hover:border-[var(--brand-primary)] hover:bg-[color-mix(in_srgb,var(--brand-primary)_5%,white)]"
                                 >
                                     <div className="flex items-center justify-between gap-3">
                                         <div>
@@ -500,7 +562,7 @@ export function CustomerBookingFlow({
                                         </div>
                                         <div className="text-right shrink-0">
                                             <p className="text-[10px] font-bold uppercase text-[#64748B]">Price</p>
-                                            <p className="text-xl font-black text-[#F59E0B]">
+                                            <p className="text-xl font-black" style={{ color: 'var(--brand-primary)' }}>
                                                 {formatCents(item.priceCents)}
                                             </p>
                                         </div>
@@ -524,37 +586,51 @@ export function CustomerBookingFlow({
     }
 
     return (
-        <div className="min-h-screen bg-[#F8FAFC] py-6 px-4">
+        <div className="min-h-screen bg-[#F8FAFC] py-6 px-4" style={orgBrandStyle(host)}>
             <div className="max-w-4xl mx-auto space-y-4">
-                <div className="bg-[#0F172A] text-white rounded-2xl px-5 py-4">
-                    <div className="flex items-start justify-between gap-3">
-                        <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-[#F59E0B]">{host.tradeType}</p>
-                            <h1 className="text-xl font-black mt-0.5">{host.name}</h1>
-                            {host.serviceArea && (
-                                <p className="text-xs text-white/50 mt-2 flex items-center gap-1.5">
-                                    <MapPin className="w-3.5 h-3.5 shrink-0" /> {host.serviceArea}
-                                </p>
-                            )}
-                        </div>
-                        {(host.phone || host.email) && (
-                            host.email && !host.phone ? (
-                                <a href={`mailto:${host.email}`} className="shrink-0 w-10 h-10 rounded-full bg-[#F59E0B] flex items-center justify-center" title={host.email}>
-                                    <Mail className="w-4 h-4" />
-                                </a>
-                            ) : (
-                                <a href={`tel:${(host.phone || '').replace(/\s/g, '')}`} className="shrink-0 w-10 h-10 rounded-full bg-[#F59E0B] flex items-center justify-center" title={host.phone}>
-                                    <Phone className="w-4 h-4" />
-                                </a>
-                            )
-                        )}
-                    </div>
-                    {!initialEventSlug && (eventTypes.length > 0 || menuItems.length > 0) && (
-                        <button type="button" onClick={backToServicePicker} className="mt-2 text-xs font-bold text-[#F59E0B] underline">
-                            ← Change service
-                        </button>
-                    )}
-                </div>
+                <BrandHeader
+                    host={host}
+                    compact
+                    title={host.tradeType}
+                    subtitle={
+                        host.serviceArea ? (
+                            <p className="text-xs text-white/50 mt-2 flex items-center gap-1.5">
+                                <MapPin className="w-3.5 h-3.5 shrink-0" /> {host.serviceArea}
+                            </p>
+                        ) : null
+                    }
+                >
+                    {(host.phone || host.email) &&
+                        (host.email && !host.phone ? (
+                            <a
+                                href={`mailto:${host.email}`}
+                                className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center"
+                                style={{ background: 'var(--brand-primary)' }}
+                                title={host.email}
+                            >
+                                <Mail className="w-4 h-4" />
+                            </a>
+                        ) : (
+                            <a
+                                href={`tel:${(host.phone || '').replace(/\s/g, '')}`}
+                                className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center"
+                                style={{ background: 'var(--brand-primary)' }}
+                                title={host.phone}
+                            >
+                                <Phone className="w-4 h-4" />
+                            </a>
+                        ))}
+                </BrandHeader>
+                {!initialEventSlug && (eventTypes.length > 0 || menuItems.length > 0) && (
+                    <button
+                        type="button"
+                        onClick={backToServicePicker}
+                        className="text-xs font-bold underline"
+                        style={{ color: 'var(--brand-primary)' }}
+                    >
+                        ← Change service
+                    </button>
+                )}
 
                 <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm overflow-hidden">
                     <div className="px-5 pt-5 pb-3 border-b border-[#E2E8F0] bg-[#FAFBFC]">
@@ -574,9 +650,14 @@ export function CustomerBookingFlow({
                                     className={cn(
                                         'px-3 py-1.5 rounded-lg text-xs font-bold border',
                                         intakeMode === 'instant'
-                                            ? 'bg-[#0F172A] text-white border-[#0F172A]'
+                                            ? 'text-white border-transparent'
                                             : 'bg-white text-[#64748B] border-[#E2E8F0]'
                                     )}
+                                    style={
+                                        intakeMode === 'instant'
+                                            ? { background: 'var(--brand-secondary)', borderColor: 'var(--brand-secondary)' }
+                                            : undefined
+                                    }
                                 >
                                     Book a time
                                 </button>
@@ -590,9 +671,14 @@ export function CustomerBookingFlow({
                                     className={cn(
                                         'px-3 py-1.5 rounded-lg text-xs font-bold border',
                                         intakeMode === 'request'
-                                            ? 'bg-[#0F172A] text-white border-[#0F172A]'
+                                            ? 'text-white border-transparent'
                                             : 'bg-white text-[#64748B] border-[#E2E8F0]'
                                     )}
+                                    style={
+                                        intakeMode === 'request'
+                                            ? { background: 'var(--brand-secondary)', borderColor: 'var(--brand-secondary)' }
+                                            : undefined
+                                    }
                                 >
                                     Request a visit
                                 </button>
@@ -614,7 +700,7 @@ export function CustomerBookingFlow({
                                     <button
                                         type="button"
                                         onClick={goToDetails}
-                                        className="px-5 py-3 rounded-xl bg-[#F59E0B] text-[#0F172A] font-bold text-sm"
+                                        className="px-5 py-3 rounded-xl font-bold text-sm text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
                                     >
                                         Continue to your details
                                     </button>
@@ -625,7 +711,7 @@ export function CustomerBookingFlow({
                                         <div className="p-5">
                                             <div className="flex items-center justify-between mb-4">
                                                 <h2 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
-                                                    <Calendar className="w-4 h-4 text-[#F59E0B]" /> Pick a date
+                                                    <Calendar className="w-4 h-4 text-[var(--brand-primary)]" /> Pick a date
                                                 </h2>
                                                 <div className="flex gap-1">
                                                     <button type="button" onClick={() => setMonth((m) => (m.month === 0 ? { year: m.year - 1, month: 11 } : { year: m.year, month: m.month - 1 }))} className="p-1.5 rounded-lg border border-[#E2E8F0]">
@@ -655,8 +741,10 @@ export function CustomerBookingFlow({
                                                             onClick={() => { setSelectedDate(d.date); setError(''); }}
                                                             className={cn(
                                                                 'aspect-square rounded-lg text-sm font-bold transition',
-                                                                selectable ? 'hover:bg-[#0F172A] hover:text-white border border-[#E2E8F0] bg-[#F8FAFC]' : 'text-[#CBD5E1] cursor-not-allowed',
-                                                                selectedDate === d.date && 'bg-[#0F172A] text-white',
+                                                                selectable
+                                                                    ? 'hover:bg-[var(--brand-secondary)] hover:text-white border border-[#E2E8F0] bg-[#F8FAFC]'
+                                                                    : 'text-[#CBD5E1] cursor-not-allowed',
+                                                                selectedDate === d.date && 'bg-[var(--brand-secondary)] text-white',
                                                                 isPast && !selectable && 'opacity-40'
                                                             )}
                                                         >
@@ -669,7 +757,7 @@ export function CustomerBookingFlow({
 
                                         <div className="p-5">
                                             <h2 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm mb-4">
-                                                <Clock className="w-4 h-4 text-[#F59E0B]" />
+                                                <Clock className="w-4 h-4 text-[var(--brand-primary)]" />
                                                 {selectedDate
                                                     ? new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })
                                                     : 'Select a date first'}
@@ -697,8 +785,8 @@ export function CustomerBookingFlow({
                                                         className={cn(
                                                             'py-2.5 rounded-xl border text-sm font-bold transition',
                                                             selectedSlot?.startAt === s.startAt
-                                                                ? 'bg-[#0F172A] text-white border-[#0F172A]'
-                                                                : 'border-[#E2E8F0] hover:border-[#0F172A]/40'
+                                                                ? 'bg-[var(--brand-secondary)] text-white border-[var(--brand-secondary)]'
+                                                                : 'border-[#E2E8F0] hover:border-[color-mix(in_srgb,var(--brand-secondary)_40%,transparent)]'
                                                         )}
                                                     >
                                                         {new Date(s.startAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
@@ -714,7 +802,7 @@ export function CustomerBookingFlow({
                                             type="button"
                                             disabled={!selectedSlot}
                                             onClick={goToDetails}
-                                            className="w-full py-3.5 rounded-xl bg-[#0F172A] text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
+                                            className="w-full py-3.5 rounded-xl bg-[var(--brand-secondary)] text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
                                         >
                                             Next — enter your details
                                             <ChevronRight className="w-4 h-4" />
@@ -754,7 +842,7 @@ export function CustomerBookingFlow({
                             </div>
 
                             <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
-                                <User className="w-4 h-4 text-[#F59E0B]" /> Your details
+                                <User className="w-4 h-4 text-[var(--brand-primary)]" /> Your details
                             </h3>
                             <p className="text-xs text-[#64748B]"><span className="text-red-500">*</span> Required fields</p>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -887,7 +975,7 @@ export function CustomerBookingFlow({
                                     type="button"
                                     disabled={!detailsValid || submitting}
                                     onClick={goToPayment}
-                                    className="flex-1 py-3 rounded-xl bg-[#0F172A] text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
+                                    className="flex-1 py-3 rounded-xl bg-[var(--brand-secondary)] text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
                                 >
                                     {submitting
                                         ? 'Submitting…'
@@ -904,7 +992,7 @@ export function CustomerBookingFlow({
                     {step === 'payment' && selectedSlot && (
                         <div className="p-5 space-y-4">
                             <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
-                                <ShieldCheck className="w-4 h-4 text-[#F59E0B]" /> Review & pay deposit
+                                <ShieldCheck className="w-4 h-4 text-[var(--brand-primary)]" /> Review & pay deposit
                             </h3>
 
                             <div className="rounded-xl border border-[#E2E8F0] divide-y divide-[#E2E8F0] text-sm">
@@ -932,7 +1020,7 @@ export function CustomerBookingFlow({
                                     <span className="font-bold text-[#0F172A]">
                                         {chargeCents > 0 ? 'Amount due today' : 'Amount due'}
                                     </span>
-                                    <span className="font-black text-[#F59E0B] text-lg">{formatCents(chargeCents)}</span>
+                                    <span className="font-black text-[var(--brand-primary)] text-lg">{formatCents(chargeCents)}</span>
                                 </div>
                             </div>
 
@@ -960,7 +1048,7 @@ export function CustomerBookingFlow({
                                             (paymentsMode === 'simulated' || !stripePaymentsReady))
                                     }
                                     onClick={submit}
-                                    className="flex-1 py-3.5 rounded-xl bg-[#F59E0B] text-white font-bold text-sm disabled:opacity-60 flex items-center justify-center gap-2"
+                                    className="flex-1 py-3.5 rounded-xl bg-[var(--brand-primary)] text-white font-bold text-sm disabled:opacity-60 flex items-center justify-center gap-2"
                                 >
                                     <ShieldCheck className="w-4 h-4" />
                                     {submitting
@@ -1034,19 +1122,34 @@ export function PublicBookHost() {
 
     if (path === 'choose') {
         return (
-            <div className="min-h-screen bg-[#F8FAFC] py-6 px-4">
+            <div
+                className="min-h-screen bg-[#F8FAFC] py-6 px-4"
+                style={orgBrandStyle({
+                    logoUrl: data.logoUrl,
+                    brandPrimary: data.brandPrimary,
+                    brandSecondary: data.brandSecondary
+                })}
+            >
                 <div className="max-w-lg mx-auto space-y-4">
-                    <div className="bg-[#0F172A] text-white rounded-2xl px-5 py-6">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-[#F59E0B]">
-                            {data.tradeType || 'Restaurant'}
-                        </p>
-                        <h1 className="text-2xl font-black mt-1">{data.name}</h1>
-                        <p className="text-sm text-white/70 mt-2">Book a table, or order food for delivery / pickup.</p>
-                    </div>
+                    <BrandHeader
+                        host={{
+                            name: data.name,
+                            tradeType: data.tradeType,
+                            logoUrl: data.logoUrl,
+                            brandPrimary: data.brandPrimary,
+                            brandSecondary: data.brandSecondary
+                        }}
+                        title={data.tradeType || 'Restaurant'}
+                        subtitle={
+                            <p className="text-sm text-white/70 mt-2">
+                                Book a table, or order food for delivery / pickup.
+                            </p>
+                        }
+                    />
                     <button
                         type="button"
                         onClick={() => setPath('table')}
-                        className="w-full text-left bg-white rounded-2xl border border-[#E2E8F0] p-5 hover:border-[#F59E0B] transition"
+                        className="w-full text-left bg-white rounded-2xl border border-[#E2E8F0] p-5 hover:border-[var(--brand-primary)] transition"
                     >
                         <p className="font-black text-[#0F172A] text-lg">Book a table</p>
                         <p className="text-sm text-[#64748B] mt-1">Reserve a date and time. Order with your waiter when you arrive.</p>
@@ -1058,7 +1161,7 @@ export function PublicBookHost() {
                         className={cn(
                             'w-full text-left rounded-2xl border p-5 transition',
                             hasMenu
-                                ? 'bg-white border-[#E2E8F0] hover:border-[#F59E0B]'
+                                ? 'bg-white border-[#E2E8F0] hover:border-[var(--brand-primary)]'
                                 : 'bg-[#F8FAFC] border-[#E2E8F0] opacity-60 cursor-not-allowed'
                         )}
                     >
@@ -1076,7 +1179,14 @@ export function PublicBookHost() {
 
     if (path === 'food') {
         return (
-            <div className="min-h-screen bg-[#F8FAFC] py-6 px-4">
+            <div
+                className="min-h-screen bg-[#F8FAFC] py-6 px-4"
+                style={orgBrandStyle({
+                    logoUrl: data.logoUrl,
+                    brandPrimary: data.brandPrimary,
+                    brandSecondary: data.brandSecondary
+                })}
+            >
                 <div className="max-w-lg mx-auto">
                     <FoodOrderFlow
                         hostSlug={hostSlug!}
@@ -1100,13 +1210,20 @@ export function PublicBookHost() {
     }
 
     return (
-        <div className="min-h-screen bg-[#F8FAFC] py-6 px-4">
+        <div
+            className="min-h-screen bg-[#F8FAFC] py-6 px-4"
+            style={orgBrandStyle({
+                logoUrl: data.logoUrl,
+                brandPrimary: data.brandPrimary,
+                brandSecondary: data.brandSecondary
+            })}
+        >
             <div className="max-w-5xl mx-auto space-y-3">
                 {normalizeBookingIndustryId(data.bookingIndustryId) === 'restaurants' && (
                     <button
                         type="button"
                         onClick={() => setPath('choose')}
-                        className="text-xs font-bold text-[#F59E0B] underline"
+                        className="text-xs font-bold text-[var(--brand-primary)] underline"
                     >
                         ← Back to options
                     </button>
@@ -1118,7 +1235,10 @@ export function PublicBookHost() {
                         tradeType: data.tradeType,
                         phone: data.phone,
                         email: data.email,
-                        serviceArea: data.serviceArea
+                        serviceArea: data.serviceArea,
+                        logoUrl: data.logoUrl,
+                        brandPrimary: data.brandPrimary,
+                        brandSecondary: data.brandSecondary
                     }}
                     industry={data.industry || getBookingPreset(data.bookingIndustryId || data.tradeType)}
                     mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
@@ -1155,7 +1275,7 @@ export function PublicBookEvent() {
     if (error || !data) return <div className="min-h-screen flex items-center justify-center text-red-600 p-6">{error || 'Not found'}</div>;
 
     return (
-        <div className="min-h-screen bg-[#F8FAFC] py-6 px-4">
+        <div className="min-h-screen bg-[#F8FAFC] py-6 px-4" style={orgBrandStyle(data.host)}>
             <div className="max-w-5xl mx-auto">
                 <CustomerBookingFlow
                     hostSlug={hostSlug!}

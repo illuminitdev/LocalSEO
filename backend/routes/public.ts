@@ -32,6 +32,7 @@ import { getPublicSite } from '../lib/marketing';
 import { applyReferralCode } from '../lib/marketing';
 import { getBookingPreset, normalizeBookingIndustryId } from '../lib/bookingIndustryPresets';
 import { createUploadPresign, mediaConfigured } from '../lib/media';
+import { orgBrandingFields } from '../lib/branding';
 import {
     catalogEnquiryOptionLabel,
     isCatalogOrg,
@@ -554,6 +555,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 phone: org.phone,
                 email: org.email,
                 serviceArea: org.service_area,
+                ...orgBrandingFields(org),
                 eventTypes,
                 industry: industryPayload(org, menuItems),
                 mediaUploadsEnabled: mediaConfigured(),
@@ -618,7 +620,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     bookingIndustryId: org.booking_industry_id || null,
                     phone: org.phone,
                     email: org.email,
-                    serviceArea: org.service_area
+                    serviceArea: org.service_area,
+                    ...orgBrandingFields(org)
                 },
                 eventType: {
                     slug: eventType.slug,

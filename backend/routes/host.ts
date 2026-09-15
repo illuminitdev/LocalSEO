@@ -36,6 +36,7 @@ import {
 } from '../lib/field';
 import { fireZapierEvent } from '../lib/zapier';
 import { createUploadPresign, isAllowedMediaUrl } from '../lib/media';
+import { isValidBrandHex, normalizeBrandHex } from '../lib/branding';
 import { newManageToken } from '../lib/authTokens';
 import {
     cancelRemindersForCancelledBooking,
@@ -801,7 +802,10 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 'food_pickup_enabled',
                 'delivery_fee_cents',
                 'delivery_min_order_cents',
-                'delivery_notes'
+                'delivery_notes',
+                'logo_url',
+                'brand_primary',
+                'brand_secondary'
             ];
             const sets: string[] = [];
             const vals: any[] = [];
@@ -822,15 +826,37 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 foodPickupEnabled: 'food_pickup_enabled',
                 deliveryFeeCents: 'delivery_fee_cents',
                 deliveryMinOrderCents: 'delivery_min_order_cents',
-                deliveryNotes: 'delivery_notes'
+                deliveryNotes: 'delivery_notes',
+                logoUrl: 'logo_url',
+                brandPrimary: 'brand_primary',
+                brandSecondary: 'brand_secondary'
             };
             for (const [k, v] of Object.entries(body)) {
                 if (k === 'bookingIndustryId' || k === 'booking_industry_id') continue;
                 const col = map[k] || k;
-                if (allowed.includes(col)) {
-                    sets.push(`${col} = $${i++}`);
-                    vals.push(v);
+                if (!allowed.includes(col)) continue;
+
+                let value: any = v;
+                if (col === 'brand_primary' || col === 'brand_secondary') {
+                    if (v === null || v === '') {
+                        value = col === 'brand_primary' ? '#F59E0B' : '#0F172A';
+                    } else if (!isValidBrandHex(v)) {
+                        return res.status(400).json({
+                            error: `${col === 'brand_primary' ? 'Primary' : 'Secondary'} color must be a hex value like #F59E0B`
+                        });
+                    } else {
+                        value = normalizeBrandHex(v);
+                    }
                 }
+                if (col === 'logo_url') {
+                    value = v == null ? null : String(v).trim() || null;
+                    if (value && !isAllowedMediaUrl(value) && !String(value).startsWith('https://')) {
+                        return res.status(400).json({ error: 'Logo URL must be a valid https URL' });
+                    }
+                }
+
+                sets.push(`${col} = $${i++}`);
+                vals.push(value);
             }
             if (!sets.length && industryRaw == null) return res.status(400).json({ error: 'No fields' });
             if (!sets.length) {
@@ -1027,8 +1053,11 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
     // --- Media ---
     router.post('/media/presign', async (req: Request, res: Response) => {
         try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            const kindRaw = String(req.body?.kind || 'job').toLowerCase();
+            const kind = kindRaw === 'logo' ? 'logo' : 'job';
             const data = await createUploadPresign({
-                kind: 'job',
+                kind,
                 contentType: String(req.body?.contentType || 'image/jpeg'),
                 orgId: (req as any).orgId
             });
