@@ -5,6 +5,8 @@ import { apiGet, apiPost, formatCents, cn, restrictPhoneInput } from '../../shar
 import { setBookingOrgSlug } from './bookingUtils';
 import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
 import BookingSettingsPanel from './BookingSettings';
+import FoodOrdersHostPanel from './FoodOrdersHostPanel';
+import { normalizeBookingIndustryId } from './bookingIndustryPresets';
 
 function intakeAnswersList(raw: unknown): { key: string; label: string; value: string }[] {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
@@ -64,7 +66,7 @@ export default function BookingPlots() {
     const [addingService, setAddingService] = useState(false);
     const [linked, setLinked] = useState(false);
     const [linkedBusiness, setLinkedBusiness] = useState<any>(null);
-    const [filter, setFilter] = useState<'upcoming' | 'requests' | 'active' | 'past' | 'cancelled'>('upcoming');
+    const [filter, setFilter] = useState<'upcoming' | 'requests' | 'active' | 'past' | 'cancelled' | 'food'>('upcoming');
     const [copied, setCopied] = useState(false);
     const [busy, setBusy] = useState('');
     const [showManual, setShowManual] = useState(false);
@@ -117,6 +119,7 @@ export default function BookingPlots() {
 
     const ready = Boolean(data?.ready);
     const org = data?.organization;
+    const isRestaurant = normalizeBookingIndustryId(org?.booking_industry_id) === 'restaurants';
     const eventTypes = data?.eventTypes || [];
     const bookings = data?.bookings || [];
     const displayServices: BookingService[] =
@@ -510,11 +513,21 @@ export default function BookingPlots() {
                     ) : (
                         <>
                     <div className="flex flex-wrap gap-1 p-2 border-b border-[#E2E8F0] bg-[#F8FAFC] items-center">
-                        {(['upcoming', 'requests', 'active', 'past', 'cancelled'] as const).map((f) => (
+                        {(
+                            [
+                                'upcoming',
+                                'requests',
+                                'active',
+                                'past',
+                                'cancelled',
+                                ...(isRestaurant ? (['food'] as const) : [])
+                            ] as const
+                        ).map((f) => (
                             <button key={f} type="button" onClick={() => setFilter(f)} className={cn('px-3 py-2 rounded-lg text-xs font-bold capitalize', filter === f ? 'bg-white shadow-sm text-[#0F172A]' : 'text-[#64748B]')}>
-                                {f === 'active' ? 'In progress' : f}
+                                {f === 'active' ? 'In progress' : f === 'food' ? 'Food orders' : f}
                             </button>
                         ))}
+                        {filter !== 'food' && (
                         <button
                             type="button"
                             onClick={() => {
@@ -528,7 +541,14 @@ export default function BookingPlots() {
                         >
                             <Plus className="w-3.5 h-3.5" /> Add job
                         </button>
+                        )}
                     </div>
+                    {filter === 'food' && isRestaurant ? (
+                        <div className="p-4">
+                            <FoodOrdersHostPanel />
+                        </div>
+                    ) : (
+                    <>
                     {showManual && (
                         <form onSubmit={createManualBooking} className="p-4 border-b border-[#E2E8F0] bg-[#FAFBFC] space-y-3">
                             <div className="flex justify-between items-center">
@@ -737,6 +757,8 @@ export default function BookingPlots() {
                         })}
                         </div>
                     </div>
+                    </>
+                    )}
                         </>
                     )}
                 </div>

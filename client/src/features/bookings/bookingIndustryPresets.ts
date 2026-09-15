@@ -510,14 +510,8 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         demoTitle: 'How Restaurants Capture Out-of-Hours Tables 24/7',
         confirmationTitle: 'Table Reservation Confirmed!',
         tagline: 'Automated table booking with party size, sitting times, and dietary intake.',
-        defaultService: 'Standard Table Reservation (2-6 Guests)',
-        services: [
-            'Standard Reservation (2-6 Guests)',
-            'Sunday Roast Family Table',
-            'Private Room Hire (8-16 Guests)',
-            'Chef Tasting Menu Reservation',
-            'Outdoor Terrace Table'
-        ],
+        defaultService: 'Book a table',
+        services: ['Book a table'],
         timeSlots: ['12:30 PM', '02:00 PM', '06:00 PM', '08:15 PM'],
         customFields: [
             {
