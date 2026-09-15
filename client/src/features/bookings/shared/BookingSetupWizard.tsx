@@ -9,8 +9,8 @@ import {
     User,
     Wallet
 } from 'lucide-react';
-import { useEntitlements } from '../../shared/EntitlementsContext';
-import { restrictEmailOrPhoneInput } from '../../shared/utils';
+import { useEntitlements } from '../../../shared/EntitlementsContext';
+import { restrictEmailOrPhoneInput } from '../../../shared/utils';
 import { getBookingPreset, type BookingIndustryId } from './bookingIndustryPresets';
 
 export type SetupForm = {

@@ -16,7 +16,7 @@ import { PLANS } from '../../shared/planCatalog';
 import {
     bookingIndustrySelectOptions,
     isBookingPlanId
-} from '../bookings/bookingIndustryPresets';
+} from '../bookings/shared/bookingIndustryPresets';
 import { cn } from '../../shared/utils';
 
 type AdminUser = {

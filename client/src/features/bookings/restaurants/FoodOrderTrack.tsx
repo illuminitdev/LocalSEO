@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { apiGet, formatCents } from '../../shared/utils';
+import { apiGet, formatCents } from '../../../shared/utils';
 
 const STATUS_STEPS_DELIVERY = ['paid', 'preparing', 'out_for_delivery', 'delivered'];
 const STATUS_STEPS_PICKUP = ['paid', 'preparing', 'ready', 'collected'];
