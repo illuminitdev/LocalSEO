@@ -90,6 +90,7 @@ import {
     deleteMenuItem,
     importMenuItems,
     listMenuItems,
+    loadOrgForFoodOrders,
     loadOrgForMenu,
     updateMenuItem
 } from '../lib/orgMenu';
@@ -688,7 +689,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
     router.get('/food-orders', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
-            await loadOrgForMenu((req as any).orgId);
+            await loadOrgForFoodOrders((req as any).orgId);
             const orders = await listFoodOrders((req as any).orgId, {
                 limit: Number(req.query.limit) || 50
             });
@@ -701,7 +702,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
     router.patch('/food-orders/:id', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
-            await loadOrgForMenu((req as any).orgId);
+            await loadOrgForFoodOrders((req as any).orgId);
             const order = await updateFoodOrderStatus(
                 (req as any).orgId,
                 String(req.params.id),

@@ -32,7 +32,14 @@ import { getPublicSite } from '../lib/marketing';
 import { applyReferralCode } from '../lib/marketing';
 import { getBookingPreset, normalizeBookingIndustryId } from '../lib/bookingIndustryPresets';
 import { createUploadPresign, mediaConfigured } from '../lib/media';
-import { isRestaurantOrg, listMenuItems, publicMenuItem } from '../lib/orgMenu';
+import {
+    catalogEnquiryOptionLabel,
+    isCatalogOrg,
+    isDentistsOrg,
+    isRestaurantOrg,
+    listMenuItems,
+    publicMenuItem
+} from '../lib/orgMenu';
 import {
     createFoodOrderCheckout,
     loadFoodOrderByToken,
@@ -64,12 +71,14 @@ function normalizeIntakeAnswers(raw: any): Record<string, string> {
     return out;
 }
 
-function industryPayload(org: any) {
+function industryPayload(org: any, menuItems: any[] = []) {
     const industryId =
         normalizeBookingIndustryId(org?.booking_industry_id) ||
         (org?.trade_type ? getBookingPreset(String(org.trade_type)).id : null);
     if (!industryId) return null;
     const preset = getBookingPreset(industryId);
+    // Enquiry Type removed from booking form — price list items show on the public start page instead
+    const customFields = (preset.customFields || []).filter((field) => field.id !== 'enquiryType');
     return {
         id: preset.id,
         name: preset.name,
@@ -77,10 +86,11 @@ function industryPayload(org: any) {
         defaultService: preset.defaultService,
         services: preset.services,
         timeSlots: preset.timeSlots,
-        customFields: preset.customFields,
+        customFields,
         uploadPrompt: preset.uploadPrompt,
         notesPlaceholder: preset.notesPlaceholder,
-        confirmationTitle: preset.confirmationTitle
+        confirmationTitle: preset.confirmationTitle,
+        priceListCount: isDentistsOrg(org) ? menuItems.length : undefined
     };
 }
 
@@ -532,7 +542,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 [org.id]
             );
             let menuItems: any[] = [];
-            if (isRestaurantOrg(org)) {
+            if (isCatalogOrg(org)) {
                 const rows = await listMenuItems(org.id, { activeOnly: true });
                 menuItems = rows.map(publicMenuItem);
             }
@@ -545,7 +555,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 email: org.email,
                 serviceArea: org.service_area,
                 eventTypes,
-                industry: industryPayload(org),
+                industry: industryPayload(org, menuItems),
                 mediaUploadsEnabled: mediaConfigured(),
                 menuItems,
                 foodOrdering: isRestaurantOrg(org)
@@ -595,6 +605,11 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             if (!org) return res.status(404).json({ error: 'Business not found' });
             const eventType = await loadEventType(org.id, req.params.eventSlug);
             if (!eventType) return res.status(404).json({ error: 'Service not found' });
+            let menuItems: any[] = [];
+            if (isCatalogOrg(org)) {
+                const rows = await listMenuItems(org.id, { activeOnly: true });
+                menuItems = rows.map(publicMenuItem);
+            }
             res.json({
                 host: {
                     slug: org.slug,
@@ -613,7 +628,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     depositCents: eventType.deposit_cents,
                     totalCents: eventType.total_cents
                 },
-                industry: industryPayload(org),
+                industry: industryPayload(org, menuItems),
+                menuItems,
                 mediaUploadsEnabled: mediaConfigured(),
                 paymentsMode: stripeClient ? 'stripe' : 'simulated',
                 stripePaymentsReady: Boolean(
@@ -683,7 +699,12 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 return res.status(400).json({ error: 'Name, email, phone, and address are required' });
             }
 
-            const industry = industryPayload(org);
+            let bookMenuItems: any[] = [];
+            if (isCatalogOrg(org)) {
+                const rows = await listMenuItems(org.id, { activeOnly: true });
+                bookMenuItems = rows.map(publicMenuItem);
+            }
+            const industry = industryPayload(org, bookMenuItems);
             const answers = normalizeIntakeAnswers(intakeAnswers);
             if (industry?.customFields?.length) {
                 for (const field of industry.customFields) {
@@ -740,7 +761,32 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
 
             const photos = normalizePhotoUrls(photoUrls);
             const manageToken = newManageToken();
-            const depositCents = isRequest ? 0 : Number(eventType.deposit_cents) || 0;
+            let depositCents = isRequest ? 0 : Number(eventType.deposit_cents) || 0;
+            // Dental & aesthetics: charge the price-list item chosen on the start page
+            if (!isRequest && isDentistsOrg(org) && bookMenuItems.length) {
+                const itemId = String(answers.priceListItemId || '').trim();
+                const selectedLabel = String(answers.selectedService || answers.enquiryType || '').trim();
+                const matched = itemId
+                    ? bookMenuItems.find((m) => String(m.id) === itemId)
+                    : bookMenuItems.find(
+                          (m) =>
+                              catalogEnquiryOptionLabel({
+                                  name: m.name,
+                                  priceCents: m.priceCents,
+                                  category: m.category
+                              }) === selectedLabel || m.name === selectedLabel
+                      );
+                if (matched) {
+                    depositCents = Number(matched.priceCents) || 0;
+                } else if (selectedLabel) {
+                    const parsed = selectedLabel.match(/£\s*([\d,]+(?:\.\d{1,2})?)/);
+                    if (parsed) {
+                        const n = parseFloat(parsed[1].replace(/,/g, ''));
+                        if (Number.isFinite(n) && n >= 0) depositCents = Math.round(n * 100);
+                    }
+                }
+            }
+            const totalCents = depositCents;
             const allowSimulated =
                 String(process.env.ALLOW_SIMULATED_PAYMENTS || '').toLowerCase() === 'true' ||
                 String(process.env.ALLOW_SIMULATED_PAYMENTS || '') === '1';
@@ -765,6 +811,10 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
 
             const initialStatus = isRequest ? 'confirmed' : 'awaiting_payment';
             const jobStatus = isRequest ? 'requested' : 'scheduled';
+            const enquiryNote = answers.selectedService || answers.enquiryType
+                ? `Selected: ${answers.selectedService || answers.enquiryType}`
+                : '';
+            const bookingDescription = [String(description || '').trim(), enquiryNote].filter(Boolean).join('\n');
 
             const pendingRes = await query(
                 `INSERT INTO bookings (
@@ -783,11 +833,11 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     email.toLowerCase(),
                     phone,
                     address,
-                    description || '',
+                    bookingDescription,
                     start,
                     end,
-                    isRequest ? 0 : eventType.deposit_cents,
-                    eventType.total_cents,
+                    isRequest ? 0 : depositCents,
+                    isRequest ? 0 : totalCents,
                     manageToken,
                     client.id,
                     property?.id || null,

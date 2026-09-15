@@ -9,6 +9,7 @@ import {
     User,
     Wallet
 } from 'lucide-react';
+import { useEntitlements } from '../../shared/EntitlementsContext';
 import { restrictEmailOrPhoneInput } from '../../shared/utils';
 import { getBookingPreset, type BookingIndustryId } from './bookingIndustryPresets';
 
@@ -83,6 +84,12 @@ export default function BookingSetupWizard({
     onRefreshIndustry,
     onComplete
 }: Props) {
+    const { features, entitlementsDisabled } = useEntitlements();
+    /** SEO profile CTA only when they have booking + other (non-booking) plan features */
+    const hasNonBookingFeatures =
+        entitlementsDisabled ||
+        features.some((f) => f === 'local_presence' || f === 'local_growth' || f === 'reporting');
+
     const hasSavedBusiness = Boolean(linked && linkedBusiness?.name?.trim());
     const checkoutIndustryId = String(initialIndustryId || '').trim();
     const hasCheckoutIndustry = Boolean(checkoutIndustryId);
@@ -278,7 +285,10 @@ export default function BookingSetupWizard({
                                 </div>
                             )}
 
-                            {path === 'manual' && !hasSavedBusiness && onDetailsStep && (
+                            {path === 'manual' &&
+                                !hasSavedBusiness &&
+                                onDetailsStep &&
+                                hasNonBookingFeatures && (
                                 <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-sm text-[#64748B]">
                                     No business profile saved yet — enter booking details below. You can also{' '}
                                     <Link to="/profile" className="font-semibold text-[#0F172A] underline">

@@ -44,12 +44,21 @@ type IndustryFormConfig = {
     timeSlots?: string[];
 };
 
+type MenuItemPublic = {
+    id: string;
+    category?: string;
+    name: string;
+    description?: string;
+    priceCents: number;
+};
+
 type Props = {
     hostSlug: string;
     eventSlug?: string;
     host: { name: string; tradeType?: string; phone?: string; email?: string; serviceArea?: string };
     eventType?: EventType;
     eventTypes?: EventType[];
+    menuItems?: MenuItemPublic[];
     industry?: IndustryFormConfig | null;
     mediaUploadsEnabled?: boolean;
     onSuccess?: () => void;
@@ -71,16 +80,21 @@ export function CustomerBookingFlow({
     host,
     eventType: initialEventType,
     eventTypes = [],
+    menuItems = [],
     industry: industryProp,
     mediaUploadsEnabled = false,
     onSuccess
 }: Props) {
     const industry = {
         ...getBookingPreset(host.tradeType || 'plumbing'),
-        ...(industryProp || {})
+        ...(industryProp || {}),
+        customFields: (industryProp?.customFields || getBookingPreset(host.tradeType || 'plumbing').customFields || []).filter(
+            (f) => f.id !== 'enquiryType'
+        )
     };
     const [activeEventSlug, setActiveEventSlug] = useState(initialEventSlug || '');
     const [eventType, setEventType] = useState<EventType | null>(initialEventType || null);
+    const [selectedCatalog, setSelectedCatalog] = useState<MenuItemPublic | null>(null);
     const [paymentsMode, setPaymentsMode] = useState<'stripe' | 'simulated'>('stripe');
     const [stripePaymentsReady, setStripePaymentsReady] = useState(true);
     const [maxDaysAhead, setMaxDaysAhead] = useState(60);
@@ -110,9 +124,36 @@ export function CustomerBookingFlow({
     const [detailsTouched, setDetailsTouched] = useState(false);
     const [done, setDone] = useState(false);
 
-    const showServicePicker = !activeEventSlug && eventTypes.length > 0;
+    const slotEventSlug =
+        eventTypes.find((e) => /free\s*consultation/i.test(e.name))?.slug ||
+        eventTypes[0]?.slug ||
+        '';
+
+    const catalogLabel = (m: MenuItemPublic) => {
+        const cat = String(m.category || '').trim();
+        const pounds = ((Number(m.priceCents) || 0) / 100).toFixed(2).replace(/\.00$/, '');
+        return cat ? `${cat}: ${m.name} (£${pounds})` : `${m.name} (£${pounds})`;
+    };
+
+    const showServicePicker = !activeEventSlug && !initialEventSlug;
     const isEmergency = activeEventSlug.includes('emergency');
     const days = useMemo(() => monthDays(month.year, month.month), [month]);
+
+    const serviceLabel = selectedCatalog
+        ? catalogLabel(selectedCatalog)
+        : eventType?.name || 'Appointment';
+    const chargeCents = selectedCatalog
+        ? Number(selectedCatalog.priceCents) || 0
+        : Number(eventType?.depositCents) || 0;
+
+    const bookingIntakeAnswers = useMemo(() => {
+        const base = { ...intakeAnswers };
+        if (selectedCatalog) {
+            base.selectedService = catalogLabel(selectedCatalog);
+            base.priceListItemId = selectedCatalog.id;
+        }
+        return base;
+    }, [intakeAnswers, selectedCatalog]);
 
     useEffect(() => {
         if (!activeEventSlug) return;
@@ -168,9 +209,32 @@ export function CustomerBookingFlow({
     }, [hostSlug, activeEventSlug, selectedDate]);
 
     const pickService = (et: EventType) => {
+        setSelectedCatalog(null);
         setActiveEventSlug(et.slug);
         setEventType(et);
         setError('');
+        setStep('schedule');
+        setSelectedDate('');
+        setSelectedSlot(null);
+    };
+
+    const pickCatalogItem = (item: MenuItemPublic) => {
+        if (!slotEventSlug) {
+            setError('No bookable appointment slot is set up yet. Add an event type in Schedule settings.');
+            return;
+        }
+        setSelectedCatalog(item);
+        setActiveEventSlug(slotEventSlug);
+        setError('');
+        setStep('schedule');
+        setSelectedDate('');
+        setSelectedSlot(null);
+    };
+
+    const backToServicePicker = () => {
+        setActiveEventSlug('');
+        setEventType(null);
+        setSelectedCatalog(null);
         setStep('schedule');
         setSelectedDate('');
         setSelectedSlot(null);
@@ -264,7 +328,7 @@ export function CustomerBookingFlow({
                 intakeType: 'request',
                 preferredSlots: [{ startAt: start.toISOString(), endAt: end.toISOString() }],
                 photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
-                intakeAnswers,
+                intakeAnswers: bookingIntakeAnswers,
                 startAt: start.toISOString(),
                 endAt: end.toISOString()
             });
@@ -294,7 +358,7 @@ export function CustomerBookingFlow({
                 address: address.trim(),
                 description: description.trim(),
                 photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
-                intakeAnswers,
+                intakeAnswers: bookingIntakeAnswers,
                 intakeType: 'instant',
                 startAt: selectedSlot.startAt,
                 endAt: selectedSlot.endAt
@@ -350,7 +414,7 @@ export function CustomerBookingFlow({
                 <p className="text-sm text-[#64748B] mt-2 max-w-sm">
                     {intakeMode === 'request'
                         ? `The business will review your preferred time and get back to you.${email ? ` We noted ${email}.` : ''}`
-                        : `Deposit of ${eventType ? formatCents(eventType.depositCents) : ''} recorded.${email ? ` Confirmation sent to ${email}.` : ''}`}
+                        : `Payment of ${formatCents(chargeCents)} recorded.${email ? ` Confirmation sent to ${email}.` : ''}`}
                 </p>
             </div>
         );
@@ -371,13 +435,16 @@ export function CustomerBookingFlow({
                     </div>
                     <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4 shadow-sm">
                         <h2 className="font-bold text-lg text-[#0F172A]">What do you need?</h2>
-                        <p className="text-sm text-[#64748B]">Choose a service — each has its own deposit.</p>
+                        <p className="text-sm text-[#64748B]">
+                            Choose a service or treatment — then pick a date and time.
+                        </p>
+                        {error && <p className="text-sm text-red-600">{error}</p>}
                         <div className="space-y-3">
                             {eventTypes.map((et) => {
                                 const emergency = et.slug.includes('emergency');
                                 return (
                                     <button
-                                        key={et.slug}
+                                        key={`et-${et.slug}`}
                                         type="button"
                                         onClick={() => pickService(et)}
                                         className={cn(
@@ -393,13 +460,17 @@ export function CustomerBookingFlow({
                                                     {emergency && <Flame className="w-4 h-4 text-red-500" />}
                                                     {et.name}
                                                 </p>
-                                                {et.description && <p className="text-sm text-[#64748B] mt-1">{et.description}</p>}
+                                                {et.description && et.description !== et.name && (
+                                                    <p className="text-sm text-[#64748B] mt-1">{et.description}</p>
+                                                )}
                                                 <p className="text-xs text-[#64748B] mt-1 flex items-center gap-1">
                                                     <Clock className="w-3 h-3" /> {et.durationMinutes} min
                                                 </p>
                                             </div>
                                             <div className="text-right shrink-0">
-                                                <p className="text-[10px] font-bold uppercase text-[#64748B]">Deposit</p>
+                                                <p className="text-[10px] font-bold uppercase text-[#64748B]">
+                                                    {et.depositCents > 0 ? 'From' : 'Price'}
+                                                </p>
                                                 <p className={cn('text-xl font-black', emergency ? 'text-red-600' : 'text-[#F59E0B]')}>
                                                     {formatCents(et.depositCents)}
                                                 </p>
@@ -408,6 +479,39 @@ export function CustomerBookingFlow({
                                     </button>
                                 );
                             })}
+                            {menuItems.map((item) => (
+                                <button
+                                    key={`menu-${item.id}`}
+                                    type="button"
+                                    onClick={() => pickCatalogItem(item)}
+                                    className="w-full text-left rounded-xl border border-[#E2E8F0] p-4 transition hover:border-[#F59E0B] hover:bg-[#F59E0B]/5"
+                                >
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            {item.category && (
+                                                <p className="text-[10px] font-bold uppercase text-[#94A3B8]">
+                                                    {item.category}
+                                                </p>
+                                            )}
+                                            <p className="font-bold text-[#0F172A]">{item.name}</p>
+                                            {item.description && (
+                                                <p className="text-sm text-[#64748B] mt-1">{item.description}</p>
+                                            )}
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                            <p className="text-[10px] font-bold uppercase text-[#64748B]">Price</p>
+                                            <p className="text-xl font-black text-[#F59E0B]">
+                                                {formatCents(item.priceCents)}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </button>
+                            ))}
+                            {eventTypes.length === 0 && menuItems.length === 0 && (
+                                <p className="text-sm text-[#94A3B8] text-center py-6">
+                                    No services available yet.
+                                </p>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -427,9 +531,11 @@ export function CustomerBookingFlow({
                         <div>
                             <p className="text-[10px] font-black uppercase tracking-widest text-[#F59E0B]">{host.tradeType}</p>
                             <h1 className="text-xl font-black mt-0.5">{host.name}</h1>
-                            <p className="text-sm text-white/70 mt-1">
-                                {eventType.name} · Deposit <span className="text-[#F59E0B] font-bold">{formatCents(eventType.depositCents)}</span>
-                            </p>
+                            {host.serviceArea && (
+                                <p className="text-xs text-white/50 mt-2 flex items-center gap-1.5">
+                                    <MapPin className="w-3.5 h-3.5 shrink-0" /> {host.serviceArea}
+                                </p>
+                            )}
                         </div>
                         {(host.phone || host.email) && (
                             host.email && !host.phone ? (
@@ -443,8 +549,8 @@ export function CustomerBookingFlow({
                             )
                         )}
                     </div>
-                    {eventTypes.length > 1 && (
-                        <button type="button" onClick={() => { setActiveEventSlug(''); setEventType(null); setStep('schedule'); setSelectedDate(''); setSelectedSlot(null); }} className="mt-2 text-xs font-bold text-[#F59E0B] underline">
+                    {!initialEventSlug && (eventTypes.length > 0 || menuItems.length > 0) && (
+                        <button type="button" onClick={backToServicePicker} className="mt-2 text-xs font-bold text-[#F59E0B] underline">
                             ← Change service
                         </button>
                     )}
@@ -629,7 +735,7 @@ export function CustomerBookingFlow({
                                             Preferred: {new Date(preferredAt).toLocaleString('en-GB')}
                                         </p>
                                         <p className="text-xs text-[#64748B] mt-0.5">
-                                            Request · {eventType.name} · business will confirm
+                                            Request · {serviceLabel} · business will confirm
                                         </p>
                                     </>
                                 ) : selectedSlot ? (
@@ -639,7 +745,10 @@ export function CustomerBookingFlow({
                                             {' at '}
                                             {new Date(selectedSlot.startAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
                                         </p>
-                                        <p className="text-xs text-[#64748B] mt-0.5">{eventType.name} · {eventType.durationMinutes} min</p>
+                                        <p className="text-xs text-[#64748B] mt-0.5">
+                                            {serviceLabel}
+                                            {eventType.durationMinutes ? ` · ${eventType.durationMinutes} min` : ''}
+                                        </p>
                                     </>
                                 ) : null}
                             </div>
@@ -799,9 +908,9 @@ export function CustomerBookingFlow({
                             </h3>
 
                             <div className="rounded-xl border border-[#E2E8F0] divide-y divide-[#E2E8F0] text-sm">
-                                <div className="px-4 py-3 flex justify-between">
-                                    <span className="text-[#64748B]">Service</span>
-                                    <span className="font-bold text-[#0F172A]">{eventType.name}</span>
+                                <div className="px-4 py-3 flex justify-between gap-3">
+                                    <span className="text-[#64748B] shrink-0">Service</span>
+                                    <span className="font-bold text-[#0F172A] text-right">{serviceLabel}</span>
                                 </div>
                                 <div className="px-4 py-3 flex justify-between">
                                     <span className="text-[#64748B]">When</span>
@@ -820,18 +929,20 @@ export function CustomerBookingFlow({
                                     <span className="font-bold text-[#0F172A] text-right max-w-[60%]">{address}</span>
                                 </div>
                                 <div className="px-4 py-3 flex justify-between bg-[#FAFBFC]">
-                                    <span className="font-bold text-[#0F172A]">Deposit due today</span>
-                                    <span className="font-black text-[#F59E0B] text-lg">{formatCents(eventType.depositCents)}</span>
+                                    <span className="font-bold text-[#0F172A]">
+                                        {chargeCents > 0 ? 'Amount due today' : 'Amount due'}
+                                    </span>
+                                    <span className="font-black text-[#F59E0B] text-lg">{formatCents(chargeCents)}</span>
                                 </div>
                             </div>
 
                             {error && <p className="text-sm text-red-600">{error}</p>}
-                            {!error && paymentsMode === 'simulated' && eventType.depositCents > 0 && (
+                            {!error && paymentsMode === 'simulated' && chargeCents > 0 && (
                                 <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
                                     Card payments are not configured on the server yet. Pay will not open Stripe until keys are deployed.
                                 </p>
                             )}
-                            {!error && paymentsMode === 'stripe' && !stripePaymentsReady && eventType.depositCents > 0 && (
+                            {!error && paymentsMode === 'stripe' && !stripePaymentsReady && chargeCents > 0 && (
                                 <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
                                     This business has not connected Stripe yet, so deposits cannot be collected.
                                 </p>
@@ -845,14 +956,18 @@ export function CustomerBookingFlow({
                                     type="button"
                                     disabled={
                                         submitting ||
-                                        (eventType.depositCents > 0 &&
+                                        (chargeCents > 0 &&
                                             (paymentsMode === 'simulated' || !stripePaymentsReady))
                                     }
                                     onClick={submit}
                                     className="flex-1 py-3.5 rounded-xl bg-[#F59E0B] text-white font-bold text-sm disabled:opacity-60 flex items-center justify-center gap-2"
                                 >
                                     <ShieldCheck className="w-4 h-4" />
-                                    {submitting ? 'Processing…' : `Pay ${formatCents(eventType.depositCents)} deposit & book`}
+                                    {submitting
+                                        ? 'Processing…'
+                                        : chargeCents > 0
+                                          ? `Pay ${formatCents(chargeCents)} & book`
+                                          : 'Confirm booking'}
                                 </button>
                             </div>
                             <p className="text-[11px] text-[#64748B] text-center">
@@ -1008,7 +1123,14 @@ export function PublicBookHost() {
                     industry={data.industry || getBookingPreset(data.bookingIndustryId || data.tradeType)}
                     mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
                     eventTypes={eventTypes}
-                    eventSlug={eventTypes.length === 1 ? eventTypes[0].slug : undefined}
+                    menuItems={(data.menuItems || []).map((m: any) => ({
+                        id: m.id,
+                        category: m.category || '',
+                        name: m.name,
+                        description: m.description || '',
+                        priceCents: Number(m.priceCents ?? m.price_cents) || 0
+                    }))}
+                    eventSlug={eventTypes.length === 1 && !(data.menuItems || []).length ? eventTypes[0].slug : undefined}
                 />
             </div>
         </div>

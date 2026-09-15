@@ -1,19 +1,69 @@
 import { query } from './db';
-import { normalizeBookingIndustryId } from './bookingIndustryPresets';
+import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryPresets';
+
+function resolveOrgIndustryId(org: any): string | null {
+    const fromCol = normalizeBookingIndustryId(org?.booking_industry_id);
+    if (fromCol) return fromCol;
+    const trade = String(org?.trade_type || '').trim();
+    if (!trade) return null;
+    return getBookingPreset(trade).id;
+}
 
 export function isRestaurantOrg(org: any): boolean {
-    return normalizeBookingIndustryId(org?.booking_industry_id) === 'restaurants';
+    return resolveOrgIndustryId(org) === 'restaurants';
+}
+
+/** Orgs that manage a catalog in org_menu_items (restaurant food menu or dental price list). */
+export function isCatalogOrg(org: any): boolean {
+    const id = resolveOrgIndustryId(org);
+    return id === 'restaurants' || id === 'dentists';
+}
+
+export function isDentistsOrg(org: any): boolean {
+    return resolveOrgIndustryId(org) === 'dentists';
 }
 
 export function assertRestaurantOrg(org: { booking_industry_id?: string | null; trade_type?: string | null }) {
     if (isRestaurantOrg(org)) return;
-    const err: any = new Error('Menu and food orders are only available for restaurants');
+    const err: any = new Error('Food orders are only available for restaurants');
     err.status = 403;
     err.code = 'restaurants_only';
     throw err;
 }
 
+export function assertCatalogOrg(org: { booking_industry_id?: string | null; trade_type?: string | null }) {
+    if (isCatalogOrg(org)) return;
+    const err: any = new Error('Price list is only available for Dental & Aesthetics (and Menu for restaurants)');
+    err.status = 403;
+    err.code = 'catalog_only';
+    throw err;
+}
+
 export async function loadOrgForMenu(orgId: string) {
+    const { rows } = await query('SELECT * FROM organizations WHERE id = $1', [orgId]);
+    if (!rows[0]) {
+        const err: any = new Error('Organization not found');
+        err.status = 404;
+        throw err;
+    }
+    // Price list / menu catalog is allowed for dentists + restaurants (and harmless for others).
+    // Do NOT use assertRestaurantOrg here — that blocked Dental & Aesthetics.
+    const resolved = resolveOrgIndustryId(rows[0]);
+    if (resolved && !normalizeBookingIndustryId(rows[0].booking_industry_id)) {
+        try {
+            await query(`UPDATE organizations SET booking_industry_id = $2 WHERE id = $1`, [
+                orgId,
+                resolved
+            ]);
+            rows[0].booking_industry_id = resolved;
+        } catch {
+            /* column may be missing on older DBs */
+        }
+    }
+    return rows[0];
+}
+
+export async function loadOrgForFoodOrders(orgId: string) {
     const { rows } = await query('SELECT * FROM organizations WHERE id = $1', [orgId]);
     if (!rows[0]) {
         const err: any = new Error('Organization not found');
@@ -189,4 +239,13 @@ export function publicMenuItem(row: any) {
         priceCents: Number(row.price_cents) || 0,
         sortOrder: Number(row.sort_order) || 0
     };
+}
+
+/** Label shown in Enquiry Type dropdown (name + price). */
+export function catalogEnquiryOptionLabel(item: { name: string; priceCents?: number; category?: string }) {
+    const pounds = ((Number(item.priceCents) || 0) / 100).toFixed(2).replace(/\.00$/, '');
+    const pricePart = `£${pounds}`;
+    const cat = String(item.category || '').trim();
+    if (cat) return `${cat}: ${item.name} (${pricePart})`;
+    return `${item.name} (${pricePart})`;
 }
