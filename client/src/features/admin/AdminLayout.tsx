@@ -12,7 +12,7 @@ const NAV = [
     { name: 'Overview', to: '/admin', icon: LayoutDashboard, end: true },
     { name: 'Users', to: '/admin/users', icon: Users },
     { name: 'Full Audit', to: '/admin/full-audits', icon: ClipboardCheck },
-    { name: 'Growth leads', to: '/admin/growth-audit-leads', icon: ClipboardList },
+    { name: 'Leads', to: '/admin/growth-audit-leads', icon: ClipboardList },
     { name: 'CRM', to: '/admin/tasks', icon: CheckSquare },
     { name: 'Plan guide', to: '/admin/services', icon: Layers },
     { name: 'Settings', to: '/admin/settings', icon: Settings }
@@ -48,8 +48,8 @@ function pageTitle(pathname: string) {
     }
     if (pathname.startsWith('/admin/growth-audit-leads')) {
         return {
-            title: 'Growth audit leads',
-            subtitle: 'Prospects who submitted the Free Growth Audit on ZappSites.'
+            title: 'Leads',
+            subtitle: 'ZappSites form submissions — contact, start, visibility, growth audit, and checkout.'
         };
     }
     if (pathname.startsWith('/admin/tasks')) {

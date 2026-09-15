@@ -519,17 +519,38 @@ function growthAuditTablesMissing(err: any) {
     return /relation ["']?(submissions|audits)["']? does not exist/i.test(msg);
 }
 
-function mapGrowthAuditLead(row: any, origin: string) {
+const ADMIN_LEAD_TYPES = [
+    'growth_audit_lead',
+    'contact',
+    'audit_intake',
+    'visibility_check',
+    'checkout_lead'
+] as const;
+
+function normalizeLeadStatus(raw: unknown): string | null {
+    const s = String(raw || '')
+        .trim()
+        .toLowerCase();
+    if (!s) return null;
+    if (s === 'otp_pending' || s === 'unverified' || s === 'pending') return s === 'pending' ? 'otp_pending' : s;
+    if (s === 'completed' || s === 'submitted' || s === 'converted') return s;
+    return s;
+}
+
+function mapAdminLead(row: any, origin: string) {
     const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
     const auditData = row.audit_data && typeof row.audit_data === 'object' ? row.audit_data : {};
     const business =
         auditData.business && typeof auditData.business === 'object' ? auditData.business : {};
+    const customer =
+        payload.customer && typeof payload.customer === 'object' ? payload.customer : {};
 
     const email =
-        String(payload.email || row.submission_email || business.email || '')
+        String(payload.email || row.submission_email || business.email || customer.email || '')
             .trim()
             .toLowerCase() || null;
-    const phone = String(payload.phone || business.phone || '').trim() || null;
+    const phone =
+        String(payload.phone || business.phone || customer.phone || '').trim() || null;
     const sharePath = String(payload.sharePath || '').trim() || null;
     const scoreRaw = payload.scoreTotal ?? auditData.scoreTotal ?? auditData.score?.total ?? null;
     const scoreTotal =
@@ -539,12 +560,45 @@ function mapGrowthAuditLead(row: any, origin: string) {
               ? Number(scoreRaw)
               : null;
 
+    const name =
+        String(
+            payload.name ||
+                payload.contactName ||
+                payload.fullName ||
+                customer.name ||
+                ''
+        ).trim() || null;
+
+    const service =
+        String(payload.service || payload.primaryService || payload.businessType || '').trim() ||
+        null;
+    const serviceLabel =
+        String(payload.serviceLabel || payload.service || payload.primaryService || '').trim() ||
+        null;
+
+    const type = String(row.type || '').trim() || null;
+    const status = normalizeLeadStatus(payload.status);
+    const otpVerified =
+        payload.otpVerified === true ||
+        payload.otpVerified === 'true' ||
+        status === 'completed' ||
+        status === 'converted'
+            ? true
+            : payload.otpVerified === false || payload.otpVerified === 'false'
+              ? false
+              : null;
+
     return {
         id: row.id,
         createdAt: row.created_at,
-        businessName: String(payload.businessName || business.name || '').trim() || null,
-        service: String(payload.service || '').trim() || null,
-        serviceLabel: String(payload.serviceLabel || payload.service || '').trim() || null,
+        type,
+        status,
+        name,
+        businessName:
+            String(payload.businessName || business.name || business.businessName || '').trim() ||
+            null,
+        service,
+        serviceLabel,
         address: String(payload.address || business.address || '').trim() || null,
         city: String(payload.city || business.city || '').trim() || null,
         website: String(payload.website || business.website || '').trim() || null,
@@ -553,12 +607,15 @@ function mapGrowthAuditLead(row: any, origin: string) {
         scoreTotal,
         sharePath,
         reportUrl: sharePath ? `${origin}${sharePath.startsWith('/') ? '' : '/'}${sharePath}` : null,
-        source: String(payload.source || '').trim() || null,
-        auditId: String(payload.auditId || row.audit_id || '').trim() || null
+        source: String(payload.source || type || '').trim() || null,
+        auditId: String(payload.auditId || row.audit_id || '').trim() || null,
+        pageUrl: String(payload.pageUrl || '').trim() || null,
+        planId: String(payload.planId || '').trim() || null,
+        otpVerified
     };
 }
 
-/** Read-only list of ZappSites Free Growth Audit leads (shared RDS submissions + audits). */
+/** Read-only list of ZappSites marketing leads (shared RDS submissions + audits). */
 router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Response) => {
     try {
         const q = String(req.query.q || '').trim();
@@ -568,28 +625,28 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                 ? hasContact
                 : 'any';
 
-        const params: any[] = [];
-        const where: string[] = [`s.type = 'growth_audit_lead'`];
+        const params: any[] = [ADMIN_LEAD_TYPES];
+        const where: string[] = [`s.type = ANY($1::text[])`];
 
         where.push(`(
-            NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', '')), '') IS NOT NULL
-            OR NULLIF(TRIM(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', '')), '') IS NOT NULL
+            NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', s.payload->'customer'->>'email', '')), '') IS NOT NULL
+            OR NULLIF(TRIM(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', s.payload->'customer'->>'phone', '')), '') IS NOT NULL
         )`);
 
         if (contactFilter === 'email') {
             where.push(
-                `NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', '')), '') IS NOT NULL`
+                `NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', s.payload->'customer'->>'email', '')), '') IS NOT NULL`
             );
         } else if (contactFilter === 'phone') {
             where.push(
-                `NULLIF(TRIM(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', '')), '') IS NOT NULL`
+                `NULLIF(TRIM(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', s.payload->'customer'->>'phone', '')), '') IS NOT NULL`
             );
         } else if (contactFilter === 'both') {
             where.push(
-                `NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', '')), '') IS NOT NULL`
+                `NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', s.payload->'customer'->>'email', '')), '') IS NOT NULL`
             );
             where.push(
-                `NULLIF(TRIM(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', '')), '') IS NOT NULL`
+                `NULLIF(TRIM(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', s.payload->'customer'->>'phone', '')), '') IS NOT NULL`
             );
         }
 
@@ -598,13 +655,14 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
             const p = `$${params.length}`;
             where.push(`(
                 LOWER(COALESCE(s.payload->>'businessName', '')) LIKE ${p}
+                OR LOWER(COALESCE(s.payload->>'name', s.payload->>'contactName', s.payload->>'fullName', s.payload->'customer'->>'name', '')) LIKE ${p}
                 OR LOWER(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', '')) LIKE ${p}
                 OR LOWER(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', '')) LIKE ${p}
             )`);
         }
 
         const { rows } = await query(
-            `SELECT s.id, s.created_at, s.email AS submission_email, s.payload,
+            `SELECT s.id, s.type, s.created_at, s.email AS submission_email, s.payload,
                     a.id AS audit_id, a.data AS audit_data
              FROM submissions s
              LEFT JOIN audits a ON a.id::text = s.payload->>'auditId'
@@ -617,7 +675,7 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
         const origin = zappSitesOrigin();
         res.json({
             stage: resolveAdminCredentials().stage,
-            leads: rows.map((row) => mapGrowthAuditLead(row, origin))
+            leads: rows.map((row) => mapAdminLead(row, origin))
         });
     } catch (err: any) {
         console.error('Admin growth-audit-leads error:', err);
@@ -626,7 +684,7 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                 error: "Growth audit tables are not available on this environment's database."
             });
         }
-        res.status(500).json({ error: err.message || 'Failed to load growth audit leads' });
+        res.status(500).json({ error: err.message || 'Failed to load leads' });
     }
 });
 
