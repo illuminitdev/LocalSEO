@@ -32,6 +32,13 @@ import { getPublicSite } from '../lib/marketing';
 import { applyReferralCode } from '../lib/marketing';
 import { getBookingPreset, normalizeBookingIndustryId } from '../lib/bookingIndustryPresets';
 import { createUploadPresign, mediaConfigured } from '../lib/media';
+import { isRestaurantOrg, listMenuItems, publicMenuItem } from '../lib/orgMenu';
+import {
+    createFoodOrderCheckout,
+    loadFoodOrderByToken,
+    publicFoodOrderPayload,
+    verifyFoodOrderCheckout
+} from '../lib/foodOrders';
 
 function frontendOrigin() {
     return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -169,6 +176,30 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             });
         } catch (err: any) {
             console.error('Verify error:', err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    router.get('/food-orders/checkout/verify', async (req: Request, res: Response) => {
+        try {
+            const sessionId = String(req.query.session_id || '').trim();
+            if (!sessionId) return res.status(400).json({ error: 'session_id required' });
+            const data = await verifyFoodOrderCheckout(stripeClient, sessionId);
+            res.json(data);
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message });
+        }
+    });
+
+    router.get('/food-orders/:token', async (req: Request, res: Response) => {
+        try {
+            const data = await loadFoodOrderByToken(String(req.params.token));
+            if (!data?.order) return res.status(404).json({ error: 'Order not found' });
+            res.json({
+                order: publicFoodOrderPayload(data.order),
+                org: data.org
+            });
+        } catch (err: any) {
             res.status(500).json({ error: err.message });
         }
     });
@@ -500,6 +531,11 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 'SELECT id, slug, name, description, duration_minutes, deposit_cents, total_cents FROM event_types WHERE org_id = $1 AND active = TRUE ORDER BY sort_order',
                 [org.id]
             );
+            let menuItems: any[] = [];
+            if (isRestaurantOrg(org)) {
+                const rows = await listMenuItems(org.id, { activeOnly: true });
+                menuItems = rows.map(publicMenuItem);
+            }
             res.json({
                 slug: org.slug,
                 name: org.name,
@@ -510,10 +546,46 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 serviceArea: org.service_area,
                 eventTypes,
                 industry: industryPayload(org),
-                mediaUploadsEnabled: mediaConfigured()
+                mediaUploadsEnabled: mediaConfigured(),
+                menuItems,
+                foodOrdering: isRestaurantOrg(org)
+                    ? {
+                          deliveryEnabled: org.food_delivery_enabled !== false,
+                          pickupEnabled: org.food_pickup_enabled !== false,
+                          deliveryFeeCents: Number(org.delivery_fee_cents) || 0,
+                          deliveryMinOrderCents: Number(org.delivery_min_order_cents) || 0,
+                          deliveryNotes: org.delivery_notes || ''
+                      }
+                    : null,
+                stripePaymentsReady: Boolean(
+                    stripeClient && org.stripe_account_id && org.stripe_charges_enabled
+                )
             });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
+        }
+    });
+
+    router.post('/:hostSlug/food-orders', async (req: Request, res: Response) => {
+        try {
+            const org = await loadOrg(req.params.hostSlug);
+            if (!org) return res.status(404).json({ error: 'Business not found' });
+            const body = req.body || {};
+            const result = await createFoodOrderCheckout({
+                org,
+                stripeClient,
+                customerName: body.customerName,
+                email: body.email,
+                phone: body.phone,
+                fulfillment: body.fulfillment === 'pickup' ? 'pickup' : 'delivery',
+                deliveryAddress: body.deliveryAddress,
+                deliveryNotes: body.deliveryNotes,
+                pickupAt: body.pickupAt,
+                items: body.items || []
+            });
+            res.status(201).json(result);
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message, code: err.code });
         }
     });
 

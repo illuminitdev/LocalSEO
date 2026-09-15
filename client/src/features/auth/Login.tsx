@@ -166,7 +166,7 @@ export default function Login() {
                     disabled={busy}
                     className="w-full py-3 rounded-lg bg-[#0F172A] text-white text-sm font-semibold hover:bg-[#1E293B] disabled:opacity-55"
                 >
-                    {busy ? 'Signing inΓÇª' : 'Sign in'}
+                    {busy ? 'Signing in...' : 'Sign in'}
                 </button>
             </form>
             <p className="text-sm text-[#64748B] mt-6 text-center leading-relaxed">

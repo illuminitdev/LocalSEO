@@ -85,6 +85,15 @@ import {
     getBookingPreset,
     normalizeBookingIndustryId
 } from '../lib/bookingIndustryPresets';
+import {
+    createMenuItem,
+    deleteMenuItem,
+    importMenuItems,
+    listMenuItems,
+    loadOrgForMenu,
+    updateMenuItem
+} from '../lib/orgMenu';
+import { listFoodOrders, updateFoodOrderStatus } from '../lib/foodOrders';
 
 function normalizePhotoUrls(raw: any): string[] {
     if (!Array.isArray(raw)) return [];
@@ -184,8 +193,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const org = data?.organization;
             const industryId =
                 normalizeBookingIndustryId(org?.booking_industry_id) ||
-                normalizeBookingIndustryId(hydratedId) ||
-                (org?.trade_type ? getBookingPreset(String(org.trade_type)).id : null);
+                normalizeBookingIndustryId(hydratedId);
             const industryPreset = industryId ? getBookingPreset(industryId) : null;
             const hasBookingData = Boolean(
                 String(org?.trade_type || '').trim() && (data?.eventTypes || []).length > 0
@@ -621,6 +629,90 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         res.json({ success: true });
     });
 
+    router.get('/menu-items', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            await loadOrgForMenu((req as any).orgId);
+            const items = await listMenuItems((req as any).orgId);
+            res.json({ items });
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message, code: err.code });
+        }
+    });
+
+    router.post('/menu-items', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            await loadOrgForMenu((req as any).orgId);
+            const item = await createMenuItem((req as any).orgId, req.body || {});
+            res.status(201).json(item);
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message, code: err.code });
+        }
+    });
+
+    router.patch('/menu-items/:id', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            await loadOrgForMenu((req as any).orgId);
+            const item = await updateMenuItem((req as any).orgId, String(req.params.id), req.body || {});
+            res.json(item);
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message, code: err.code });
+        }
+    });
+
+    router.delete('/menu-items/:id', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            await loadOrgForMenu((req as any).orgId);
+            await deleteMenuItem((req as any).orgId, String(req.params.id));
+            res.json({ success: true });
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message, code: err.code });
+        }
+    });
+
+    router.post('/menu-items/import', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            await loadOrgForMenu((req as any).orgId);
+            const mode = String(req.body?.mode || 'append').toLowerCase() === 'replace' ? 'replace' : 'append';
+            const items = await importMenuItems((req as any).orgId, req.body?.items || [], mode);
+            res.status(201).json({ items, count: items.length, mode });
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message, code: err.code });
+        }
+    });
+
+    router.get('/food-orders', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            await loadOrgForMenu((req as any).orgId);
+            const orders = await listFoodOrders((req as any).orgId, {
+                limit: Number(req.query.limit) || 50
+            });
+            res.json({ orders });
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message, code: err.code });
+        }
+    });
+
+    router.patch('/food-orders/:id', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            await loadOrgForMenu((req as any).orgId);
+            const order = await updateFoodOrderStatus(
+                (req as any).orgId,
+                String(req.params.id),
+                String(req.body?.status || '')
+            );
+            res.json({ order });
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message, code: err.code });
+        }
+    });
+
     router.get('/availability', async (req: Request, res: Response) => {
         const { rows: org } = await query('SELECT timezone, min_notice_hours, max_days_ahead, buffer_minutes FROM organizations WHERE id = $1', [(req as any).orgId]);
         const { rows: dateRules } = await query(
@@ -703,7 +795,12 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 'sms_enabled',
                 'default_hourly_cents',
                 'zapier_webhook_url',
-                'zapier_secret'
+                'zapier_secret',
+                'food_delivery_enabled',
+                'food_pickup_enabled',
+                'delivery_fee_cents',
+                'delivery_min_order_cents',
+                'delivery_notes'
             ];
             const sets: string[] = [];
             const vals: any[] = [];
@@ -719,7 +816,12 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 smsEnabled: 'sms_enabled',
                 defaultHourlyCents: 'default_hourly_cents',
                 zapierWebhookUrl: 'zapier_webhook_url',
-                zapierSecret: 'zapier_secret'
+                zapierSecret: 'zapier_secret',
+                foodDeliveryEnabled: 'food_delivery_enabled',
+                foodPickupEnabled: 'food_pickup_enabled',
+                deliveryFeeCents: 'delivery_fee_cents',
+                deliveryMinOrderCents: 'delivery_min_order_cents',
+                deliveryNotes: 'delivery_notes'
             };
             for (const [k, v] of Object.entries(body)) {
                 if (k === 'bookingIndustryId' || k === 'booking_industry_id') continue;

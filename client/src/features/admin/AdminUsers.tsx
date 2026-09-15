@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
+    ChevronLeft,
     ChevronRight,
     Headphones,
     Plus,
@@ -34,6 +35,8 @@ type AdminUser = {
 };
 
 type RoleFilter = 'all' | 'customer' | 'sales_agent' | 'invite';
+
+const PAGE_SIZE = 10;
 
 function fmtDate(value?: string | null) {
     if (!value) return '—';
@@ -72,6 +75,7 @@ export default function AdminUsers() {
     const [msg, setMsg] = useState('');
     const [query, setQuery] = useState('');
     const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
+    const [page, setPage] = useState(1);
     const [addOpen, setAddOpen] = useState(false);
     const [addBusy, setAddBusy] = useState(false);
     const [deletingKey, setDeletingKey] = useState<string | null>(null);
@@ -118,6 +122,23 @@ export default function AdminUsers() {
         });
     }, [users, query, roleFilter]);
 
+    useEffect(() => {
+        setPage(1);
+    }, [query, roleFilter]);
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    const safePage = Math.min(page, totalPages);
+    const pageUsers = useMemo(() => {
+        const start = (safePage - 1) * PAGE_SIZE;
+        return filtered.slice(start, start + PAGE_SIZE);
+    }, [filtered, safePage]);
+
+    useEffect(() => {
+        if (page !== safePage) setPage(safePage);
+    }, [page, safePage]);
+
+    const rangeStart = filtered.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+    const rangeEnd = Math.min(safePage * PAGE_SIZE, filtered.length);
     const resetForm = () => {
         setForm({ name: '', email: '', password: '', role: '', businessName: '', planId: '' });
     };
@@ -282,7 +303,7 @@ export default function AdminUsers() {
                             </p>
                         </div>
                     ) : (
-                        filtered.map((user) => {
+                        pageUsers.map((user) => {
                             const rowKey = user.userId || user.invite?.id || user.email;
                             const busy = deletingKey === rowKey;
                             const role = roleOf(user);
@@ -365,8 +386,38 @@ export default function AdminUsers() {
                         })
                     )}
                 </div>
-            </div>
 
+                {filtered.length > 0 && (
+                    <div className="px-4 sm:px-5 py-3 border-t border-[#E2E8F0] bg-[#FCFDFE] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <p className="text-xs text-[#64748B]">
+                            Showing {rangeStart}–{rangeEnd} of {filtered.length}
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                disabled={safePage <= 1}
+                                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
+                            >
+                                <ChevronLeft className="w-3.5 h-3.5" />
+                                Previous
+                            </button>
+                            <span className="text-xs font-bold text-[#475569] tabular-nums px-1">
+                                {safePage} / {totalPages}
+                            </span>
+                            <button
+                                type="button"
+                                disabled={safePage >= totalPages}
+                                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
+                            >
+                                Next
+                                <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
             {addOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
                     <div className="w-full max-w-md rounded-2xl bg-white border border-[#E2E8F0] shadow-xl">
