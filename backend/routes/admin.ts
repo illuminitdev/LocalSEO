@@ -12,6 +12,11 @@ import {
     formatPrice,
     isValidPlanId
 } from '../lib/planCatalog';
+import {
+    isBookingPlanId,
+    normalizeBookingIndustryId
+} from '../lib/bookingIndustryPresets';
+import { setOrgBookingIndustry } from '../lib/bookingIndustryHydrate';
 import Stripe from 'stripe';
 import adminFullAuditsRouter from './adminFullAudits';
 
@@ -700,6 +705,9 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
             .toLowerCase();
         const businessName = String(req.body?.businessName || name || 'My business').trim();
         const planId = req.body?.planId ? String(req.body.planId).trim() : '';
+        const bookingIndustryId = normalizeBookingIndustryId(
+            req.body?.bookingIndustryId ?? req.body?.booking_industry_id
+        );
 
         if (!email || !name || !password || !role) {
             return res.status(400).json({ error: 'Name, email, password, and role are required.' });
@@ -712,6 +720,18 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
         }
         if (role === 'customer' && planId && !isValidPlanId(planId)) {
             return res.status(400).json({ error: 'Invalid plan.' });
+        }
+        if (role === 'customer' && planId && isBookingPlanId(planId) && !bookingIndustryId) {
+            return res.status(400).json({
+                error: 'Select a service (industry) for booking plans (e.g. dentists, salons, restaurants).'
+            });
+        }
+        if (
+            role === 'customer' &&
+            (req.body?.bookingIndustryId || req.body?.booking_industry_id) &&
+            !bookingIndustryId
+        ) {
+            return res.status(400).json({ error: 'Invalid booking industry / services selection.' });
         }
 
         const existing = await query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email]);
@@ -757,6 +777,10 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
             'owner'
         ]);
 
+        if (bookingIndustryId) {
+            await setOrgBookingIndustry(org.id, bookingIndustryId, { syncTradeType: true });
+        }
+
         if (planId) {
             await upsertOrgSubscription(org.id, planId);
         }
@@ -769,7 +793,12 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
                 email: user.email,
                 name: user.name,
                 platformRole: user.platform_role,
-                organization: { id: org.id, name: org.name, slug: org.slug }
+                organization: {
+                    id: org.id,
+                    name: org.name,
+                    slug: org.slug,
+                    bookingIndustryId: bookingIndustryId || null
+                }
             }
         });
     } catch (err: any) {

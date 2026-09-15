@@ -23,7 +23,11 @@ async function seedDefaultEventTypes(
 
     for (const t of types) {
         const slug = await uniqueEventSlug(orgId, t.slugBase, query);
-        const depositCents = t.kind === 'emergency' ? emergencyDepositCents : standardDepositCents;
+        const depositCents = t.freeDeposit
+            ? 0
+            : t.kind === 'emergency'
+              ? emergencyDepositCents
+              : standardDepositCents;
         await query(
             `INSERT INTO event_types (org_id, slug, name, description, duration_minutes, deposit_cents, total_cents, sort_order)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,

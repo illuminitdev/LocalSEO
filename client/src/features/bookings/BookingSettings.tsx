@@ -7,17 +7,19 @@ import {
     Check,
     CreditCard,
     Flame,
+    ListOrdered,
     LogOut,
     Pencil,
     Plus,
     Settings,
     ShieldAlert,
+    Trash2,
     Wallet,
     Wrench,
     X,
     Utensils
 } from 'lucide-react';
-import { apiGet, apiPatch, apiPost, apiPut, cn, formatCents } from '../../shared/utils';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, cn, formatCents } from '../../shared/utils';
 import AvailabilityEditor, { type AvailabilitySavePayload, type AvailabilitySettings } from './AvailabilityEditor';
 import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryPresets';
 import RestaurantMenuEditor from './RestaurantMenuEditor';
@@ -99,13 +101,18 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         bufferMinutes: 15
     });
     const [org, setOrg] = useState<any>(null);
-    const isRestaurant = normalizeBookingIndustryId(org?.booking_industry_id) === 'restaurants';
+    const industryId =
+        normalizeBookingIndustryId(org?.booking_industry_id) ||
+        (org?.trade_type ? getBookingPreset(org.trade_type).id : null);
+    const isRestaurant = industryId === 'restaurants';
+    const isDentists = industryId === 'dentists';
+    const hasCatalogTab = isRestaurant || isDentists;
     const tab: Tab =
         tabParam === 'availability' ||
         tabParam === 'integrations' ||
         tabParam === 'profile' ||
         tabParam === 'reminders' ||
-        (tabParam === 'menu' && isRestaurant)
+        (tabParam === 'menu' && hasCatalogTab)
             ? (tabParam as Tab)
             : 'events';
     const [googleConnected, setGoogleConnected] = useState(false);
@@ -270,7 +277,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
 
     const saveEdit = async (et: any) => {
         const depositCents = poundsToCents(editDepositPounds);
-        if (!depositCents) {
+        if (depositCents == null || depositCents < 0) {
             setError('Enter a valid deposit amount.');
             return;
         }
@@ -287,6 +294,18 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
             setError(e.message);
         } finally {
             setSavingEdit(false);
+        }
+    };
+
+    const deleteEventType = async (et: any) => {
+        if (!window.confirm(`Delete “${et.name}”? This cannot be undone.`)) return;
+        setError('');
+        try {
+            await apiDelete(`/api/host/event-types/${et.id}`);
+            setEventTypes((prev) => prev.filter((x) => x.id !== et.id));
+            if (editingId === et.id) setEditingId(null);
+        } catch (e: any) {
+            setError(e.message || 'Could not delete service');
         }
     };
 
@@ -441,7 +460,11 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                     {(
                         [
                             ['events', isRestaurant ? 'Book a table' : 'Event types', Settings],
-                            ...(isRestaurant ? [['menu', 'Menu', Utensils] as const] : []),
+                            ...(isRestaurant
+                                ? [['menu', 'Menu', Utensils] as const]
+                                : isDentists
+                                  ? [['menu', 'Price list', ListOrdered] as const]
+                                  : []),
                             ['availability', 'Availability', Calendar],
                             ['integrations', 'Integrations', CreditCard],
                             ['reminders', 'Reminders', Bell],
@@ -465,27 +488,46 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
                 {saved && <p className="text-sm text-emerald-700 bg-emerald-50 rounded-xl px-4 py-2">Saved.</p>}
 
-                {tab === 'menu' && isRestaurant && (
-                    <RestaurantMenuEditor org={org} onOrgUpdated={setOrg} />
+                {tab === 'menu' && hasCatalogTab && (
+                    <RestaurantMenuEditor
+                        org={org}
+                        onOrgUpdated={setOrg}
+                        variant={isDentists ? 'priceList' : 'restaurant'}
+                        sections={isDentists ? 'form' : 'all'}
+                    />
                 )}
 
                 {tab === 'events' && (
                     <div className="space-y-4">
+                        {isDentists && (
+                            <RestaurantMenuEditor
+                                key={`price-list-${tab}`}
+                                org={org}
+                                onOrgUpdated={setOrg}
+                                variant="priceList"
+                                sections="list"
+                            />
+                        )}
+
                         <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
                             <div>
                                 <h2 className="font-bold text-[#0F172A]">
-                                    {isRestaurant ? 'Table booking' : 'Your services'}
+                                    {isRestaurant ? 'Table booking' : isDentists ? 'Appointment slots' : 'Your services'}
                                 </h2>
                                 <p className="text-sm text-[#64748B] mt-1">
                                     {isRestaurant
                                         ? 'Guests who choose Book a table pick a date/time against this offer. Food menu and online orders are managed under the Menu tab.'
-                                        : 'Set the deposit customers pay when booking each service type.'}
+                                        : isDentists
+                                          ? 'Calendar slots guests book against. Add treatments above under Price list items (or use the Price list tab).'
+                                          : 'Set the deposit customers pay when booking each service type.'}
                                 </p>
                             </div>
 
                             {eventTypes.length === 0 && (
                                 <p className="text-sm text-[#94A3B8] border border-dashed border-[#E2E8F0] rounded-xl px-4 py-6 text-center">
-                                    No services yet — add Standard, Emergency, or Serious below.
+                                    {isDentists
+                                        ? 'No event types yet — run booking setup or contact support to seed appointment slots.'
+                                        : 'No services yet — add Standard, Emergency, or Serious below.'}
                                 </p>
                             )}
 
@@ -515,14 +557,24 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                                     </div>
                                                 </div>
                                                 {!isEditing && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => startEdit(et)}
-                                                        className="p-2 rounded-lg border border-[#E2E8F0] text-[#64748B] hover:text-[#0F172A] hover:border-[#0F172A]/30 shrink-0"
-                                                        title="Edit deposit"
-                                                    >
-                                                        <Pencil className="w-4 h-4" />
-                                                    </button>
+                                                    <div className="flex items-center gap-1 shrink-0">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => startEdit(et)}
+                                                            className="p-2 rounded-lg border border-[#E2E8F0] text-[#64748B] hover:text-[#0F172A] hover:border-[#0F172A]/30"
+                                                            title="Edit deposit"
+                                                        >
+                                                            <Pencil className="w-4 h-4" />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => deleteEventType(et)}
+                                                            className="p-2 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                                                            title="Delete service"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </div>
 
@@ -577,70 +629,72 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                             </div>
                         </div>
 
-                        <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
-                            <div>
-                                <p className="text-xs font-bold uppercase text-[#64748B]">Add a service</p>
-                                <p className="text-sm text-[#64748B] mt-0.5">Pick a type and set the deposit amount.</p>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                {(Object.keys(EVENT_TEMPLATES) as EventTemplateKey[]).map((key) => {
-                                    const tpl = EVENT_TEMPLATES[key];
-                                    const Icon = tpl.icon;
-                                    const taken = existingTemplateKeys.has(key);
-                                    return (
-                                        <button
-                                            key={key}
-                                            type="button"
-                                            disabled={taken}
-                                            onClick={() => {
-                                                setSelectedTemplate(key);
-                                                if (key === 'standard') setNewDepositPounds('60');
-                                                else if (key === 'emergency') setNewDepositPounds('80');
-                                                else setNewDepositPounds('100');
-                                            }}
-                                            className={cn(
-                                                'rounded-xl border p-3 text-left transition',
-                                                taken && 'opacity-40 cursor-not-allowed',
-                                                selectedTemplate === key && !taken
-                                                    ? 'border-[#0F172A] bg-[#0F172A]/5 ring-1 ring-[#0F172A]'
-                                                    : tpl.border
-                                            )}
-                                        >
-                                            <Icon className={cn('w-5 h-5 mb-2', tpl.accent)} />
-                                            <p className="font-bold text-sm text-[#0F172A]">{tpl.name}</p>
-                                            <p className="text-[10px] text-[#64748B] mt-0.5">{taken ? 'Already added' : tpl.description}</p>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-
-                            <label className="block max-w-xs">
-                                <span className="text-xs font-bold text-[#64748B]">Deposit amount (£)</span>
-                                <div className="relative mt-1">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B] font-bold text-lg">£</span>
-                                    <input
-                                        type="text"
-                                        inputMode="decimal"
-                                        value={newDepositPounds}
-                                        onChange={(e) => setNewDepositPounds(e.target.value)}
-                                        disabled={existingTemplateKeys.has(selectedTemplate)}
-                                        className="w-full rounded-xl border border-[#E2E8F0] pl-9 pr-3 py-3 text-lg font-black text-[#0F172A] disabled:opacity-50"
-                                        placeholder="60"
-                                    />
+                        {!isDentists && (
+                            <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
+                                <div>
+                                    <p className="text-xs font-bold uppercase text-[#64748B]">Add a service</p>
+                                    <p className="text-sm text-[#64748B] mt-0.5">Pick a type and set the deposit amount.</p>
                                 </div>
-                            </label>
 
-                            <button
-                                type="button"
-                                disabled={addingEvent || existingTemplateKeys.has(selectedTemplate) || !poundsToCents(newDepositPounds)}
-                                onClick={addEvent}
-                                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold disabled:opacity-40"
-                            >
-                                <Plus className="w-4 h-4" />
-                                {addingEvent ? 'Adding…' : `Add ${EVENT_TEMPLATES[selectedTemplate].name}`}
-                            </button>
-                        </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    {(Object.keys(EVENT_TEMPLATES) as EventTemplateKey[]).map((key) => {
+                                        const tpl = EVENT_TEMPLATES[key];
+                                        const Icon = tpl.icon;
+                                        const taken = existingTemplateKeys.has(key);
+                                        return (
+                                            <button
+                                                key={key}
+                                                type="button"
+                                                disabled={taken}
+                                                onClick={() => {
+                                                    setSelectedTemplate(key);
+                                                    if (key === 'standard') setNewDepositPounds('60');
+                                                    else if (key === 'emergency') setNewDepositPounds('80');
+                                                    else setNewDepositPounds('100');
+                                                }}
+                                                className={cn(
+                                                    'rounded-xl border p-3 text-left transition',
+                                                    taken && 'opacity-40 cursor-not-allowed',
+                                                    selectedTemplate === key && !taken
+                                                        ? 'border-[#0F172A] bg-[#0F172A]/5 ring-1 ring-[#0F172A]'
+                                                        : tpl.border
+                                                )}
+                                            >
+                                                <Icon className={cn('w-5 h-5 mb-2', tpl.accent)} />
+                                                <p className="font-bold text-sm text-[#0F172A]">{tpl.name}</p>
+                                                <p className="text-[10px] text-[#64748B] mt-0.5">{taken ? 'Already added' : tpl.description}</p>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                <label className="block max-w-xs">
+                                    <span className="text-xs font-bold text-[#64748B]">Deposit amount (£)</span>
+                                    <div className="relative mt-1">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B] font-bold text-lg">£</span>
+                                        <input
+                                            type="text"
+                                            inputMode="decimal"
+                                            value={newDepositPounds}
+                                            onChange={(e) => setNewDepositPounds(e.target.value)}
+                                            disabled={existingTemplateKeys.has(selectedTemplate)}
+                                            className="w-full rounded-xl border border-[#E2E8F0] pl-9 pr-3 py-3 text-lg font-black text-[#0F172A] disabled:opacity-50"
+                                            placeholder="60"
+                                        />
+                                    </div>
+                                </label>
+
+                                <button
+                                    type="button"
+                                    disabled={addingEvent || existingTemplateKeys.has(selectedTemplate) || !poundsToCents(newDepositPounds)}
+                                    onClick={addEvent}
+                                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold disabled:opacity-40"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                    {addingEvent ? 'Adding…' : `Add ${EVENT_TEMPLATES[selectedTemplate].name}`}
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
 

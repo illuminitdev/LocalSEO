@@ -15,6 +15,8 @@ export type TradeEventTypeTemplate = {
     durationMinutes: number;
     sortOrder: number;
     kind: 'standard' | 'emergency';
+    /** When true, seed with deposit_cents / total_cents = 0 */
+    freeDeposit?: boolean;
 };
 
 export type TradeBookingCatalogEntry = {
@@ -31,6 +33,10 @@ function isEmergencyService(name: string): boolean {
     return /emergency|call-?out|express/i.test(name);
 }
 
+export function isFreeDepositService(name: string): boolean {
+    return /\bfree\b|\(£0\)|\(0\)/i.test(String(name || ''));
+}
+
 function catalogFromPreset(preset: BookingIndustryPreset): TradeBookingCatalogEntry {
     const eventTypes: TradeEventTypeTemplate[] = preset.services.map((name, index) => {
         const emergency = isEmergencyService(name);
@@ -40,7 +46,8 @@ function catalogFromPreset(preset: BookingIndustryPreset): TradeBookingCatalogEn
             description: name,
             durationMinutes: emergency ? 90 : 60,
             sortOrder: index,
-            kind: emergency ? 'emergency' : 'standard'
+            kind: emergency ? 'emergency' : 'standard',
+            freeDeposit: isFreeDepositService(name)
         };
     });
 
