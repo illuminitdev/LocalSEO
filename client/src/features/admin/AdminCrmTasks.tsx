@@ -275,7 +275,7 @@ export default function AdminCrmTasks() {
                         <Sparkles className="w-10 h-10 text-slate-300 mx-auto mb-3" />
                         <h3 className="text-sm font-semibold text-slate-800">No tasks match your filters</h3>
                         <p className="text-xs text-slate-500 mt-1">
-                            Try adjusting your filters or go to <strong>Growth Leads</strong> to create a new task.
+                            Try adjusting your filters or go to <strong>Leads</strong> to create a new task.
                         </p>
                     </div>
                 ) : (

@@ -33,6 +33,9 @@ export type GrowthAuditLeadRef = {
     id: string;
     createdAt?: string;
     businessName: string | null;
+    name?: string | null;
+    type?: string | null;
+    status?: string | null;
     service?: string | null;
     serviceLabel?: string | null;
     address?: string | null;
@@ -48,6 +51,41 @@ export type GrowthAuditLeadRef = {
     sharePath?: string | null;
     reportUrl?: string | null;
 };
+
+const TYPE_LABELS: Record<string, string> = {
+    growth_audit_lead: 'Growth audit',
+    contact: 'Contact',
+    audit_intake: 'Start',
+    visibility_check: 'Visibility',
+    checkout_lead: 'Checkout'
+};
+
+function leadTypeLabel(type?: string | null) {
+    if (!type) return null;
+    return TYPE_LABELS[type] || type;
+}
+
+function leadStatusBadge(status?: string | null) {
+    const s = String(status || '')
+        .trim()
+        .toLowerCase();
+    if (s === 'otp_pending' || s === 'pending') {
+        return { label: 'OTP pending', className: 'bg-amber-100 text-amber-800' };
+    }
+    if (s === 'unverified') {
+        return { label: 'Unverified', className: 'bg-orange-100 text-orange-800' };
+    }
+    if (s === 'completed') {
+        return { label: 'Completed', className: 'bg-emerald-100 text-emerald-800' };
+    }
+    if (s === 'converted') {
+        return { label: 'Converted', className: 'bg-sky-100 text-sky-800' };
+    }
+    if (s === 'submitted') {
+        return { label: 'Submitted', className: 'bg-slate-200 text-slate-700' };
+    }
+    return null;
+}
 
 const TASK_PRESETS: Array<{ type: TaskType; label: string; icon: string; defaultTitle: string; defaultPriority: TaskPriority }> = [
     { type: 'prepare_audit', label: 'Prepare Audit', icon: '📊', defaultTitle: 'Prepare SEO Growth Audit', defaultPriority: 'high' },
@@ -171,9 +209,11 @@ export default function LeadCrmDrawer({
 
     if (!lead) return null;
 
-    const bizName = lead.businessName || 'Lead Details';
+    const bizName = lead.businessName || lead.name || 'Lead Details';
     const cleanPhone = (lead.phone || '').replace(/[^0-9+]/g, '');
     const displayScore = lead.scoreTotal ?? lead.leadScoreTotal;
+    const typeLabel = leadTypeLabel(lead.type);
+    const statusBadge = leadStatusBadge(lead.status);
 
     return (
         <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/40 backdrop-blur-sm flex justify-end transition-opacity">
@@ -185,6 +225,21 @@ export default function LeadCrmDrawer({
                             <h2 className="text-xl font-bold text-slate-900 truncate">
                                 {bizName}
                             </h2>
+                            {typeLabel && (
+                                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-200 text-slate-700">
+                                    {typeLabel}
+                                </span>
+                            )}
+                            {statusBadge && (
+                                <span
+                                    className={cn(
+                                        'px-2.5 py-0.5 rounded-full text-xs font-semibold',
+                                        statusBadge.className
+                                    )}
+                                >
+                                    {statusBadge.label}
+                                </span>
+                            )}
                             {displayScore != null && (
                                 <span className={cn(
                                     "px-2.5 py-0.5 rounded-full text-xs font-semibold",

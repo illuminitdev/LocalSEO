@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
     CheckSquare,
+    ChevronLeft,
+    ChevronRight,
     ClipboardCheck,
     Copy,
     Download,
@@ -23,6 +25,7 @@ import {
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { cn } from '../../shared/utils';
 
+const PAGE_SIZE = 10;
 async function copyText(text: string) {
     try {
         await navigator.clipboard.writeText(text);
@@ -58,6 +61,7 @@ export default function AdminFullAudits() {
     const [message, setMessage] = useState('');
     const [busyId, setBusyId] = useState('');
     const [busyAction, setBusyAction] = useState<'pdf' | 'share' | 'delete' | ''>('');
+    const [page, setPage] = useState(1);
 
     const load = useCallback(() => {
         setLoading(true);
@@ -66,6 +70,7 @@ export default function AdminFullAudits() {
             .then(([list, agents]) => {
                 setAudits(list);
                 setSalesAgents(agents);
+                setPage(1);
             })
             .catch((err: Error) => {
                 setAudits([]);
@@ -78,6 +83,19 @@ export default function AdminFullAudits() {
         load();
     }, [load]);
 
+    const totalPages = Math.max(1, Math.ceil(audits.length / PAGE_SIZE));
+    const safePage = Math.min(page, totalPages);
+    const pageAudits = useMemo(() => {
+        const start = (safePage - 1) * PAGE_SIZE;
+        return audits.slice(start, start + PAGE_SIZE);
+    }, [audits, safePage]);
+
+    useEffect(() => {
+        if (page !== safePage) setPage(safePage);
+    }, [page, safePage]);
+
+    const rangeStart = audits.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+    const rangeEnd = Math.min(safePage * PAGE_SIZE, audits.length);
     const onCopy = async (url: string) => {
         const ok = await copyText(url);
         setMessage(ok ? 'Shareable link copied.' : url);
@@ -212,7 +230,7 @@ export default function AdminFullAudits() {
                 ) : null}
 
                 <ul className="divide-y divide-[#F1F5F9]">
-                    {audits.map((a) => {
+                    {pageAudits.map((a) => {
                         const share = a.shareUrl || a.reportUrl || '';
                         const busy = busyId === a.id;
                         const canShare = Boolean(a.email && a.published);
@@ -342,8 +360,38 @@ export default function AdminFullAudits() {
                         );
                     })}
                 </ul>
-            </div>
 
+                {!loading && audits.length > 0 ? (
+                    <div className="px-4 sm:px-5 py-3 border-t border-[#E2E8F0] bg-[#FCFDFE] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <p className="text-xs text-[#64748B]">
+                            Showing {rangeStart}–{rangeEnd} of {audits.length}
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                disabled={safePage <= 1}
+                                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
+                            >
+                                <ChevronLeft className="w-3.5 h-3.5" />
+                                Previous
+                            </button>
+                            <span className="text-xs font-bold text-[#475569] tabular-nums px-1">
+                                {safePage} / {totalPages}
+                            </span>
+                            <button
+                                type="button"
+                                disabled={safePage >= totalPages}
+                                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
+                            >
+                                Next
+                                <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    </div>
+                ) : null}
+            </div>
             {activeLead ? (
                 <LeadCrmDrawer
                     lead={activeLead}
