@@ -19,10 +19,10 @@ import {
     X,
     Utensils
 } from 'lucide-react';
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut, cn, formatCents } from '../../shared/utils';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, cn, formatCents } from '../../../shared/utils';
 import AvailabilityEditor, { type AvailabilitySavePayload, type AvailabilitySettings } from './AvailabilityEditor';
 import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryPresets';
-import RestaurantMenuEditor from './RestaurantMenuEditor';
+import RestaurantMenuEditor from '../restaurants/RestaurantMenuEditor';
 
 type Tab = 'events' | 'menu' | 'availability' | 'integrations' | 'profile' | 'reminders';
 

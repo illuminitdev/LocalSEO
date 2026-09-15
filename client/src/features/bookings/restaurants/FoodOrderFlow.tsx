@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Minus, Plus, ShoppingBag } from 'lucide-react';
-import { apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../shared/utils';
-import { todayStr } from './bookingUtils';
+import { apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../../shared/utils';
+import { todayStr } from '../shared/bookingUtils';
 
 export type MenuItemPublic = {
     id: string;

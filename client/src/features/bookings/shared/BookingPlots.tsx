@@ -1,11 +1,11 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Calendar, CheckCircle2, Copy, ExternalLink, LogIn, Plus, Play, QrCode, Settings, User, Wrench } from 'lucide-react';
-import { apiGet, apiPost, formatCents, cn, restrictPhoneInput } from '../../shared/utils';
+import { apiGet, apiPost, formatCents, cn, restrictPhoneInput } from '../../../shared/utils';
 import { setBookingOrgSlug } from './bookingUtils';
 import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
 import BookingSettingsPanel from './BookingSettings';
-import FoodOrdersHostPanel from './FoodOrdersHostPanel';
+import FoodOrdersHostPanel from '../restaurants/FoodOrdersHostPanel';
 import { normalizeBookingIndustryId } from './bookingIndustryPresets';
 
 function intakeAnswersList(raw: unknown): { key: string; label: string; value: string }[] {

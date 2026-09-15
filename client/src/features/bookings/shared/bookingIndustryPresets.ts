@@ -1,7 +1,7 @@
 /**
  * Booking industry presets — keep in sync with
  * zappsites/frontend/src/data/bookingDemosData.js and
- * client/src/features/bookings/bookingIndustryPresets.ts
+ * client/src/features/bookings/shared/bookingIndustryPresets.ts
  */
 
 export const BOOKING_INDUSTRY_IDS = [

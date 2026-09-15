@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Download, Pencil, Plus, Trash2, Upload, Check, X } from 'lucide-react';
-import { apiDelete, apiGet, apiPatch, apiPost, cn, formatCents } from '../../shared/utils';
+import { apiDelete, apiGet, apiPatch, apiPost, cn, formatCents } from '../../../shared/utils';
 
 type MenuItem = {
     id: string;

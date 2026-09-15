@@ -2,7 +2,7 @@ import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 
 import { authHeaders, getToken } from '../features/auth/auth';
-import { bookingOrgHeaders } from '../features/bookings/bookingUtils';
+import { bookingOrgHeaders } from '../features/bookings/shared/bookingUtils';
 
 import { API_BASE } from './apiConfig';
 

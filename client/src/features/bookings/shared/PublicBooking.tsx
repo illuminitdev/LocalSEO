@@ -14,10 +14,10 @@ import {
     ShieldCheck,
     User
 } from 'lucide-react';
-import { API_BASE, apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../shared/utils';
+import { API_BASE, apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../../shared/utils';
 import { monthDays, todayStr } from './bookingUtils';
 import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryPresets';
-import FoodOrderFlow from './FoodOrderFlow';
+import FoodOrderFlow from '../restaurants/FoodOrderFlow';
 
 type Slot = { startAt: string; endAt: string; date: string; label: string };
 

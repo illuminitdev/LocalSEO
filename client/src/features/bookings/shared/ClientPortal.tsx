@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Calendar, FileText, Plus, ShieldCheck } from 'lucide-react';
-import { apiGet, apiPost, cn, formatCents } from '../../shared/utils';
+import { apiGet, apiPost, cn, formatCents } from '../../../shared/utils';
 
 export default function ClientPortal() {
     const { token } = useParams();
