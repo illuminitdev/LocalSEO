@@ -10,7 +10,8 @@ import {
     Sparkles,
     ExternalLink,
     X,
-    Clock
+    Clock,
+    MessageSquare
 } from 'lucide-react';
 import {
     type LeadTask,
@@ -283,12 +284,12 @@ export default function AdminCrmTasks() {
                         <table className="w-full text-left border-collapse text-sm">
                             <thead>
                                 <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                                    <th className="py-3.5 px-4 min-w-[260px] max-w-sm">Task</th>
-                                    <th className="py-3.5 px-4 w-56 max-w-[220px]">Lead / Business</th>
-                                    <th className="py-3.5 px-4 w-40">Assigned Agent</th>
-                                    <th className="py-3.5 px-4 w-32">Priority</th>
+                                    <th className="py-3.5 px-4 min-w-[220px] max-w-xs">Task</th>
+                                    <th className="py-3.5 px-4 w-52 max-w-[200px]">Lead / Business</th>
+                                    <th className="py-3.5 px-4 w-36">Assigned Agent</th>
+                                    <th className="py-3.5 px-4 w-28">Priority</th>
                                     <th className="py-3.5 px-4 w-32">Due Date</th>
-                                    <th className="py-3.5 px-4 w-36 text-center">Status</th>
+                                    <th className="py-3.5 px-4 min-w-[200px] w-56 text-center">Status & Notes</th>
                                     <th className="py-3.5 px-4 w-28 text-right">Manage</th>
                                 </tr>
                             </thead>
@@ -307,23 +308,18 @@ export default function AdminCrmTasks() {
                                                 isDone ? "bg-emerald-50/40 hover:bg-emerald-50/70" : "hover:bg-slate-50/70"
                                             )}
                                         >
-                                            {/* Title & Notes & Creator */}
-                                            <td className="py-3.5 px-4 align-middle">
+                                            {/* Title */}
+                                            <td className="py-3.5 px-4 align-top">
                                                 <div
-                                                    className={cn("font-semibold truncate max-w-md", isDone ? "text-emerald-950 font-bold" : "text-slate-900")}
+                                                    className={cn("font-semibold text-sm max-w-md leading-snug", isDone ? "text-emerald-950 font-bold" : "text-slate-900")}
                                                     title={task.title}
                                                 >
                                                     {task.title}
                                                 </div>
-                                                {task.notes && (
-                                                    <div className={cn("text-xs truncate max-w-md mt-1", isDone ? "text-emerald-800/70" : "text-slate-500")} title={task.notes}>
-                                                        {task.notes}
-                                                    </div>
-                                                )}
                                             </td>
 
                                             {/* Lead / Business */}
-                                            <td className="py-3.5 px-4 align-middle max-w-[220px]">
+                                            <td className="py-3.5 px-4 align-top max-w-[200px]">
                                                 <button
                                                     type="button"
                                                     onClick={() => openLeadDrawerForTask(task)}
@@ -336,7 +332,7 @@ export default function AdminCrmTasks() {
                                             </td>
 
                                             {/* Assigned Agent */}
-                                            <td className="py-3.5 px-4 align-middle whitespace-nowrap">
+                                            <td className="py-3.5 px-4 align-top whitespace-nowrap">
                                                 {task.assignedToName ? (
                                                     <span className={cn(
                                                         "inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg",
@@ -351,7 +347,7 @@ export default function AdminCrmTasks() {
                                             </td>
 
                                             {/* Priority */}
-                                            <td className="py-3.5 px-4 align-middle whitespace-nowrap">
+                                            <td className="py-3.5 px-4 align-top whitespace-nowrap">
                                                 <span className={cn(
                                                     "text-[10px] font-bold uppercase px-2.5 py-1 rounded-md",
                                                     task.priority === 'urgent' ? "bg-rose-100 text-rose-800" :
@@ -364,7 +360,7 @@ export default function AdminCrmTasks() {
                                             </td>
 
                                             {/* Due Date */}
-                                            <td className="py-3.5 px-4 align-middle whitespace-nowrap">
+                                            <td className="py-3.5 px-4 align-top whitespace-nowrap">
                                                 {task.dueDate ? (
                                                     <span className={cn(
                                                         "inline-flex items-center gap-1 text-xs font-medium",
@@ -383,20 +379,35 @@ export default function AdminCrmTasks() {
                                                 )}
                                             </td>
 
-                                            {/* Status Badge */}
-                                            <td className="py-3.5 px-4 text-center align-middle whitespace-nowrap">
-                                                <span className={cn(
-                                                    "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-md border",
-                                                    task.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300" :
-                                                    task.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300" :
-                                                    task.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200" :
-                                                    "bg-slate-50 text-slate-700 border-slate-200"
-                                                )}>
-                                                    {task.status === 'completed' && <Check className="w-3 h-3 text-emerald-600" />}
-                                                    {task.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600" />}
-                                                    {task.status === 'cancelled' && <X className="w-3 h-3 text-rose-600" />}
-                                                    <span className="capitalize">{task.status.replace('_', ' ')}</span>
-                                                </span>
+                                            {/* Status Badge & Note */}
+                                            <td className="py-3.5 px-4 align-top">
+                                                <div className="flex flex-col items-center">
+                                                    <span className={cn(
+                                                        "inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-md border",
+                                                        task.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300" :
+                                                        task.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300" :
+                                                        task.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200" :
+                                                        "bg-slate-50 text-slate-700 border-slate-200"
+                                                    )}>
+                                                        {task.status === 'completed' && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                                                        {task.status === 'in_progress' && <Clock className="w-3.5 h-3.5 text-amber-600" />}
+                                                        {task.status === 'cancelled' && <X className="w-3.5 h-3.5 text-rose-600" />}
+                                                        <span className="capitalize">{task.status.replace('_', ' ')}</span>
+                                                    </span>
+
+                                                    {task.notes && (
+                                                        <div
+                                                            className={cn(
+                                                                "text-xs flex items-start gap-1.5 mt-1.5 w-full text-left",
+                                                                isDone ? "text-emerald-800" : "text-slate-600"
+                                                            )}
+                                                            title={task.notes}
+                                                        >
+                                                            <MessageSquare className={cn("w-3 h-3 shrink-0 mt-0.5", isDone ? "text-emerald-600" : "text-slate-400")} />
+                                                            <span className="leading-tight break-words">{task.notes}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </td>
 
                                             {/* Actions */}

@@ -43,6 +43,7 @@ import AdminFullAuditDetail from './features/admin/AdminFullAuditDetail';
 import AdminLayout from './features/admin/AdminLayout';
 import SalesLayout from './features/sales/SalesLayout';
 import SalesQueue from './features/sales/SalesQueue';
+import CustomersPage from './features/sales/CustomersPage';
 import SalesTasks from './features/sales/SalesTasks';
 import SalesReminders from './features/sales/SalesReminders';
 import SalesActivityLogs from './features/sales/SalesActivityLogs';
@@ -74,6 +75,7 @@ export default function App() {
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/admin/users/:kind/:id" element={<AdminUserDetail />} />
           <Route path="/admin/growth-audit-leads" element={<AdminGrowthAuditLeads />} />
+          <Route path="/admin/customers" element={<Navigate to="/admin/users" replace />} />
           <Route path="/admin/full-audits" element={<AdminFullAudits />} />
           <Route path="/admin/full-audits/new" element={<AdminFullAuditNew />} />
           <Route path="/admin/full-audits/:id" element={<AdminFullAuditDetail />} />
@@ -109,6 +111,7 @@ export default function App() {
           }
         >
           <Route path="/sales" element={<SalesQueue />} />
+          <Route path="/sales/customers" element={<CustomersPage />} />
           <Route path="/sales/tasks" element={<SalesTasks />} />
           <Route path="/sales/reminders" element={<SalesReminders />} />
           <Route path="/sales/calls" element={<SalesActivityLogs />} />

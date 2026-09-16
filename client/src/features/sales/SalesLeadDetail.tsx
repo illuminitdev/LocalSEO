@@ -26,9 +26,16 @@ import {
     type SalesLeadActivity,
     type SalesTaskStatus,
     fetchSalesLeadCrm,
-    updateSalesTask
+    updateSalesTask,
+    convertLeadToCustomer
 } from './salesApi';
 import { cn } from '../../shared/utils';
+import {
+    Sparkles,
+    Bot,
+    Store,
+    Award
+} from 'lucide-react';
 
 export default function SalesLeadDetail() {
     const { id } = useParams<{ id: string }>();
@@ -38,6 +45,7 @@ export default function SalesLeadDetail() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [msg, setMsg] = useState('');
+    const [converting, setConverting] = useState(false);
 
     const loadLead = useCallback(async () => {
         if (!id) return;
@@ -67,14 +75,17 @@ export default function SalesLeadDetail() {
         setConfirmModalTask({ task });
     };
 
-    const handleConfirmToggleStatus = async (chosenStatus?: CrmTaskStatus) => {
+    const handleConfirmToggleStatus = async (chosenStatus?: CrmTaskStatus, statusNotes?: string) => {
         if (!confirmModalTask) return;
         const { task } = confirmModalTask;
         setModalLoading(true);
         setError('');
         try {
             const nextStatus: SalesTaskStatus = (chosenStatus as SalesTaskStatus) || (task.status === 'completed' ? 'pending' : 'completed');
-            await updateSalesTask(task.id, { status: nextStatus });
+            await updateSalesTask(task.id, {
+                status: nextStatus,
+                notes: statusNotes !== undefined ? statusNotes : undefined
+            });
             const statusLabels: Record<string, string> = {
                 completed: 'Task marked as completed! 🎉',
                 in_progress: 'Task set to In Progress 🟡',
@@ -88,6 +99,23 @@ export default function SalesLeadDetail() {
             setError(err.message || 'Failed to update task');
         } finally {
             setModalLoading(false);
+        }
+    };
+
+    const handleConvertToCustomer = async () => {
+        if (!id) return;
+        if (!window.confirm(`Convert ${lead?.businessName || 'this lead'} into an active Customer?`)) return;
+
+        setConverting(true);
+        setError('');
+        try {
+            await convertLeadToCustomer(id, 'Converted to Customer from Sales Lead Detail');
+            setMsg('🎉 Lead successfully converted to Customer!');
+            await loadLead();
+        } catch (err: any) {
+            setError(err.message || 'Failed to convert lead');
+        } finally {
+            setConverting(false);
         }
     };
 
@@ -127,17 +155,36 @@ export default function SalesLeadDetail() {
                     Back to Dashboard
                 </Link>
 
-                {lead.reportUrl && (
-                    <a
-                        href={lead.reportUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 text-xs font-bold rounded-xl transition-colors shadow-2xs"
-                    >
-                        <span>View Live SEO Audit</span>
-                        <ArrowUpRight className="w-3.5 h-3.5" />
-                    </a>
-                )}
+                <div className="flex items-center gap-2">
+                    {lead.isCustomer ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl border border-emerald-200">
+                            <Award className="w-4 h-4 text-emerald-600" />
+                            Active Customer
+                        </span>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={handleConvertToCustomer}
+                            disabled={converting}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors disabled:opacity-50"
+                        >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>{converting ? 'Converting...' : 'Convert to Customer'}</span>
+                        </button>
+                    )}
+
+                    {lead.reportUrl && (
+                        <a
+                            href={lead.reportUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 text-xs font-bold rounded-xl transition-colors shadow-2xs"
+                        >
+                            <span>View Live SEO Audit</span>
+                            <ArrowUpRight className="w-3.5 h-3.5" />
+                        </a>
+                    )}
+                </div>
             </div>
 
             {/* Notification Messages */}
@@ -155,11 +202,16 @@ export default function SalesLeadDetail() {
             )}
 
             {/* Lead Context Header Card */}
-            <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-xs">
+            <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2.5 mb-1.5">
                             <h1 className="text-2xl font-black text-[#0F172A] tracking-tight">{bizName}</h1>
+                            {lead.industry && (
+                                <span className="bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold px-2.5 py-0.5 rounded-lg">
+                                    {lead.industry}
+                                </span>
+                            )}
                             {lead.scoreTotal != null && (
                                 <span className="bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-black px-2.5 py-0.5 rounded-lg shadow-2xs">
                                     Score: {lead.scoreTotal}/100
@@ -195,8 +247,40 @@ export default function SalesLeadDetail() {
                     </div>
                 </div>
 
+                {/* Lead Opportunity & Pitch Angle Banner */}
+                {(lead.leadOpportunity || lead.opportunityLevel) && (
+                    <div className={cn(
+                        "p-3.5 rounded-xl border flex items-start gap-3 text-xs",
+                        lead.opportunityLevel === 'high'
+                            ? "bg-emerald-50/80 border-emerald-200 text-emerald-950"
+                            : lead.opportunityLevel === 'low'
+                              ? "bg-slate-50 border-slate-200 text-slate-700"
+                              : "bg-amber-50/80 border-amber-200 text-amber-950"
+                    )}>
+                        <Sparkles className={cn(
+                            "w-4 h-4 shrink-0 mt-0.5",
+                            lead.opportunityLevel === 'high' ? "text-emerald-600" : "text-amber-600"
+                        )} />
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                                <span className={cn(
+                                    "font-black uppercase tracking-wider text-[10px] px-2 py-0.5 rounded-md",
+                                    lead.opportunityLevel === 'high'
+                                        ? "bg-emerald-600 text-white"
+                                        : "bg-amber-600 text-white"
+                                )}>
+                                    {lead.opportunityLevel?.toUpperCase() || 'MEDIUM'} OPPORTUNITY
+                                </span>
+                            </div>
+                            <p className="font-semibold text-xs leading-relaxed">
+                                {lead.leadOpportunity || 'Ready for audit pitch & booking system outreach.'}
+                            </p>
+                        </div>
+                    </div>
+                )}
+
                 {/* Contact Attributes Bar */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-5 pt-5 border-t border-[#F1F5F9]">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-[#F1F5F9]">
                     <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl flex items-center gap-2.5">
                         <Phone className="w-4 h-4 text-[#F59E0B] shrink-0" />
                         <div className="min-w-0">
@@ -243,12 +327,53 @@ export default function SalesLeadDetail() {
                         <div className="min-w-0">
                             <p className="text-[10px] font-bold uppercase text-[#94A3B8]">Location</p>
                             <p className="text-xs font-bold text-[#0F172A] truncate">
-                                {lead.city || lead.address || 'Not specified'}
+                                {lead.address || lead.city || 'Not specified'}
                             </p>
                         </div>
                     </div>
                 </div>
             </div>
+
+            {/* Observations Section (GBP, AI Visibility, and Conclusion Takeaway) */}
+            {(lead.gbpObservation || lead.aiVisibilityObservation || lead.notes) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {lead.gbpObservation && (
+                        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs space-y-2">
+                            <div className="flex items-center gap-2 text-indigo-700 font-bold text-xs uppercase tracking-wider">
+                                <Store className="w-4 h-4 text-indigo-600" />
+                                <span>GBP Observation</span>
+                            </div>
+                            <div className="text-xs text-slate-700 whitespace-pre-line leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-100 font-sans">
+                                {lead.gbpObservation}
+                            </div>
+                        </div>
+                    )}
+
+                    {lead.aiVisibilityObservation && (
+                        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs space-y-2">
+                            <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs uppercase tracking-wider">
+                                <Bot className="w-4 h-4 text-emerald-600" />
+                                <span>AI Visibility Observation</span>
+                            </div>
+                            <div className="text-xs text-slate-700 whitespace-pre-line leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-100 font-sans">
+                                {lead.aiVisibilityObservation}
+                            </div>
+                        </div>
+                    )}
+
+                    {lead.notes && (
+                        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs space-y-2 md:col-span-2 lg:col-span-1">
+                            <div className="flex items-center gap-2 text-amber-700 font-bold text-xs uppercase tracking-wider">
+                                <MessageSquare className="w-4 h-4 text-amber-600" />
+                                <span>Conclusion Takeaway</span>
+                            </div>
+                            <div className="text-xs text-slate-700 whitespace-pre-line leading-relaxed bg-amber-50/50 p-3.5 rounded-xl border border-amber-200/60 font-sans">
+                                {lead.notes}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Two-Column CRM Workspace: Left = Tasks for this Lead, Right = Unified CRM Activity Timeline */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -444,6 +569,7 @@ export default function SalesLeadDetail() {
                 leadName={lead?.businessName}
                 priority={confirmModalTask?.task.priority}
                 currentStatus={confirmModalTask?.task.status}
+                initialNotes={confirmModalTask?.task.notes || ''}
                 isCompleting={confirmModalTask ? confirmModalTask.task.status !== 'completed' : true}
                 loading={modalLoading}
             />

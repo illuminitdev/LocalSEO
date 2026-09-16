@@ -275,4 +275,87 @@ export async function downloadFullAuditPdf(id: string, filenameHint?: string) {
     URL.revokeObjectURL(objectUrl);
 }
 
+export type AdminCrmLead = {
+    id: string;
+    name: string;
+    businessName: string;
+    phone: string;
+    email: string;
+    notes?: string;
+    status: string;
+    source: string;
+    industry?: string;
+    address?: string;
+    website?: string;
+    gbpObservation?: string;
+    aiVisibilityObservation?: string;
+    leadOpportunity?: string;
+    opportunityLevel?: 'high' | 'medium' | 'low' | string;
+    isCustomer?: boolean;
+    convertedAt?: string | null;
+    assignedTo?: string | null;
+    assignedAgentName?: string | null;
+    assignedAgentEmail?: string | null;
+    nextFollowUpAt?: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export async function fetchAdminCrmLeads(params: {
+    industry?: string;
+    status?: string;
+    opportunityLevel?: string;
+    q?: string;
+    isCustomer?: boolean;
+} = {}): Promise<AdminCrmLead[]> {
+    const sp = new URLSearchParams();
+    if (params.industry && params.industry !== 'all') sp.set('industry', params.industry);
+    if (params.status && params.status !== 'all') sp.set('status', params.status);
+    if (params.opportunityLevel && params.opportunityLevel !== 'all') sp.set('opportunityLevel', params.opportunityLevel);
+    if (params.q) sp.set('q', params.q);
+    if (params.isCustomer !== undefined) sp.set('isCustomer', String(params.isCustomer));
+    const qs = sp.toString();
+    const res = await adminGet(`/api/admin/crm/leads${qs ? `?${qs}` : ''}`);
+    return res.leads || [];
+}
+
+export async function createAdminCrmLead(lead: Partial<AdminCrmLead>): Promise<AdminCrmLead> {
+    const res = await adminPost('/api/admin/crm/leads', lead);
+    return res.lead;
+}
+
+export async function bulkImportAdminCrmLeads(leads: any[]): Promise<{ count: number; created: number; skipped: number; leads: AdminCrmLead[] }> {
+    return adminPost('/api/admin/crm/leads/bulk-import', { leads });
+}
+
+export async function convertAdminCrmLead(leadId: string, note?: string): Promise<{ success: boolean; lead: AdminCrmLead }> {
+    return adminPatch(`/api/admin/crm/leads/${encodeURIComponent(leadId)}/convert`, { note });
+}
+
+export async function fetchAdminCrmCustomers(params: {
+    industry?: string;
+    q?: string;
+} = {}): Promise<AdminCrmLead[]> {
+    const sp = new URLSearchParams();
+    if (params.industry && params.industry !== 'all') sp.set('industry', params.industry);
+    if (params.q) sp.set('q', params.q);
+    const qs = sp.toString();
+    const res = await adminGet(`/api/admin/crm/customers${qs ? `?${qs}` : ''}`);
+    return res.customers || [];
+}
+
+export async function fetchAdminCrmIndustries(): Promise<Array<{ name: string; count: number }>> {
+    const res = await adminGet('/api/admin/crm/industries');
+    return res.industries || [];
+}
+
+export async function deleteAdminExcelLeads(): Promise<{ success: boolean; count: number; message: string }> {
+    return adminDelete('/api/admin/crm/leads/excel');
+}
+
+export async function deleteAdminCrmLead(leadId: string): Promise<{ success: boolean; id: string }> {
+    return adminDelete(`/api/admin/crm/leads/${encodeURIComponent(leadId)}`);
+}
+
+
 

@@ -46,6 +46,8 @@ export interface SalesLeadActivity {
 
 export interface SalesSummaryMetrics {
     pendingTasksCount: number;
+    inProgressTasksCount?: number;
+    activeTasksCount?: number;
     dueTodayTasksCount: number;
     callsTodayCount: number;
     completedTasksCount: number;
@@ -55,14 +57,26 @@ export interface SalesSummaryMetrics {
 export interface SalesUnifiedLead {
     id: string;
     businessName: string;
+    name?: string;
     phone: string;
     email: string;
     website: string;
     address: string;
-    city: string;
-    scoreTotal: number | null;
-    reportUrl: string | null;
-    source: string;
+    city?: string;
+    industry?: string;
+    gbpObservation?: string;
+    aiVisibilityObservation?: string;
+    leadOpportunity?: string;
+    opportunityLevel?: 'high' | 'medium' | 'low' | string;
+    isCustomer?: boolean;
+    convertedAt?: string | null;
+    notes?: string;
+    status?: string;
+    scoreTotal?: number | null;
+    reportUrl?: string | null;
+    source?: string;
+    assignedTo?: string | null;
+    nextFollowUpAt?: string | null;
 }
 
 export interface SalesLeadCrmDetail {
@@ -158,3 +172,52 @@ export async function fetchSalesActivities(params: {
     const res = await apiGet(`/api/sales/activities${qs ? `?${qs}` : ''}`);
     return res.activities || [];
 }
+
+export async function fetchSalesLeads(params: {
+    status?: string;
+    industry?: string;
+    opportunityLevel?: string;
+    q?: string;
+    isCustomer?: boolean;
+} = {}): Promise<SalesUnifiedLead[]> {
+    const sp = new URLSearchParams();
+    if (params.status && params.status !== 'all') sp.set('status', params.status);
+    if (params.industry && params.industry !== 'all') sp.set('industry', params.industry);
+    if (params.opportunityLevel && params.opportunityLevel !== 'all') sp.set('opportunityLevel', params.opportunityLevel);
+    if (params.q) sp.set('q', params.q);
+    if (params.isCustomer !== undefined) sp.set('isCustomer', String(params.isCustomer));
+    const qs = sp.toString();
+    const res = await apiGet(`/api/sales/leads${qs ? `?${qs}` : ''}`);
+    return res.leads || [];
+}
+
+export async function createSalesLead(lead: Partial<SalesUnifiedLead>): Promise<SalesUnifiedLead> {
+    const res = await apiPost('/api/sales/leads', lead);
+    return res.lead;
+}
+
+export async function bulkImportSalesLeads(leads: any[]): Promise<{ count: number; created: number; skipped: number; leads: SalesUnifiedLead[] }> {
+    return apiPost('/api/sales/leads/bulk-import', { leads });
+}
+
+export async function convertLeadToCustomer(leadId: string, note?: string): Promise<{ success: boolean; lead: SalesUnifiedLead }> {
+    return apiPatch(`/api/sales/leads/${encodeURIComponent(leadId)}/convert`, { note });
+}
+
+export async function fetchSalesCustomers(params: {
+    industry?: string;
+    q?: string;
+} = {}): Promise<SalesUnifiedLead[]> {
+    const sp = new URLSearchParams();
+    if (params.industry && params.industry !== 'all') sp.set('industry', params.industry);
+    if (params.q) sp.set('q', params.q);
+    const qs = sp.toString();
+    const res = await apiGet(`/api/sales/customers${qs ? `?${qs}` : ''}`);
+    return res.customers || [];
+}
+
+export async function fetchSalesIndustries(): Promise<Array<{ name: string; count: number }>> {
+    const res = await apiGet('/api/sales/industries');
+    return res.industries || [];
+}
+

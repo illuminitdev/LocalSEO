@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
+    Award,
     ChevronLeft,
     ChevronRight,
     Headphones,
@@ -11,16 +12,22 @@ import {
     UserRound,
     X
 } from 'lucide-react';
-import { adminDelete, adminGet, adminPost } from './adminApi';
+import { adminDelete, adminGet, adminPost, fetchSalesAgents, type SalesAgent } from './adminApi';
+import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { PLANS } from '../../shared/planCatalog';
 import { cn } from '../../shared/utils';
 
 type AdminUser = {
-    kind: 'user' | 'invite';
+    kind: 'user' | 'invite' | 'converted_lead';
     userId: string | null;
+    leadId?: string | null;
     email: string;
     name: string;
+    phone?: string | null;
     createdAt: string;
+    convertedAt?: string | null;
+    convertedByTelecaller?: boolean;
+    telecallerName?: string | null;
     platformRole?: 'customer' | 'sales_agent';
     organization: { id: string; name: string; tradeType: string } | null;
     subscription: {
@@ -34,7 +41,7 @@ type AdminUser = {
     invite: { id: string } | null;
 };
 
-type RoleFilter = 'all' | 'customer' | 'sales_agent' | 'invite';
+type RoleFilter = 'all' | 'customer' | 'sales_agent' | 'converted_lead' | 'invite';
 
 const PAGE_SIZE = 10;
 
@@ -57,7 +64,8 @@ function detailPath(user: AdminUser) {
     return '/admin/users';
 }
 
-function roleOf(user: AdminUser): 'customer' | 'sales_agent' | 'invite' {
+function roleOf(user: AdminUser): 'customer' | 'sales_agent' | 'converted_lead' | 'invite' {
+    if (user.kind === 'converted_lead' || user.convertedByTelecaller) return 'converted_lead';
     if (user.kind === 'invite') return 'invite';
     return user.platformRole === 'sales_agent' ? 'sales_agent' : 'customer';
 }
@@ -65,12 +73,15 @@ function roleOf(user: AdminUser): 'customer' | 'sales_agent' | 'invite' {
 function roleLabel(user: AdminUser) {
     const r = roleOf(user);
     if (r === 'sales_agent') return 'Sales Agent';
+    if (r === 'converted_lead') return user.telecallerName ? `Converted (${user.telecallerName})` : 'Converted Customer';
     if (r === 'invite') return 'Pending invite';
     return 'User';
 }
 
 export default function AdminUsers() {
     const [users, setUsers] = useState<AdminUser[]>([]);
+    const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
+    const [activeLeadRef, setActiveLeadRef] = useState<GrowthAuditLeadRef | null>(null);
     const [error, setError] = useState('');
     const [msg, setMsg] = useState('');
     const [query, setQuery] = useState('');
@@ -98,11 +109,13 @@ export default function AdminUsers() {
 
     useEffect(() => {
         load();
+        fetchSalesAgents().then(setSalesAgents).catch(() => {});
     }, []);
 
     const totalUsers = users.length;
     const portalUsers = users.filter((u) => roleOf(u) === 'customer').length;
-    const salesAgents = users.filter((u) => roleOf(u) === 'sales_agent').length;
+    const salesAgentsCount = users.filter((u) => roleOf(u) === 'sales_agent').length;
+    const convertedLeads = users.filter((u) => roleOf(u) === 'converted_lead').length;
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -110,11 +123,14 @@ export default function AdminUsers() {
             const role = roleOf(u);
             if (roleFilter === 'customer' && role !== 'customer') return false;
             if (roleFilter === 'sales_agent' && role !== 'sales_agent') return false;
+            if (roleFilter === 'converted_lead' && role !== 'converted_lead') return false;
             if (roleFilter === 'invite' && role !== 'invite') return false;
             if (!q) return true;
             return (
                 u.email.toLowerCase().includes(q) ||
                 (u.name || '').toLowerCase().includes(q) ||
+                (u.phone || '').toLowerCase().includes(q) ||
+                (u.telecallerName || '').toLowerCase().includes(q) ||
                 (u.organization?.name || '').toLowerCase().includes(q) ||
                 (u.subscription?.planName || '').toLowerCase().includes(q) ||
                 roleLabel(u).toLowerCase().includes(q)
@@ -174,7 +190,7 @@ export default function AdminUsers() {
         const label = user.name || user.email;
         if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
 
-        const key = user.userId || user.invite?.id || user.email;
+        const key = user.userId || user.leadId || user.invite?.id || user.email;
         setDeletingKey(key);
         setError('');
         setMsg('');
@@ -183,6 +199,8 @@ export default function AdminUsers() {
                 await adminDelete(`/api/admin/users/user/${user.userId}`);
             } else if (user.invite?.id) {
                 await adminDelete(`/api/admin/users/invite/${user.invite.id}`);
+            } else if (user.kind === 'converted_lead' && user.leadId) {
+                await adminDelete(`/api/admin/users/converted-lead/${user.leadId}`);
             } else {
                 throw new Error('Nothing to delete.');
             }
@@ -224,12 +242,12 @@ export default function AdminUsers() {
                 </p>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 flex items-start justify-between gap-3">
                     <div>
-                        <p className="text-xs font-semibold text-[#64748B]">Total Users</p>
+                        <p className="text-xs font-semibold text-[#64748B]">Total Accounts</p>
                         <p className="text-3xl font-bold text-[#0F172A] mt-1 tabular-nums">{totalUsers}</p>
-                        <p className="text-xs text-[#94A3B8] mt-1">All registered users</p>
+                        <p className="text-xs text-[#94A3B8] mt-1">All accounts</p>
                     </div>
                     <div className="w-10 h-10 rounded-xl bg-[#E2E8F0] text-[#475569] flex items-center justify-center shrink-0">
                         <Users className="w-5 h-5" />
@@ -248,11 +266,21 @@ export default function AdminUsers() {
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 flex items-start justify-between gap-3">
                     <div>
                         <p className="text-xs font-semibold text-emerald-800/80">Sales Agents</p>
-                        <p className="text-3xl font-bold text-emerald-700 mt-1 tabular-nums">{salesAgents}</p>
+                        <p className="text-3xl font-bold text-emerald-700 mt-1 tabular-nums">{salesAgentsCount}</p>
                         <p className="text-xs text-emerald-700/70 mt-1">Telecallers</p>
                     </div>
                     <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
                         <Headphones className="w-5 h-5" />
+                    </div>
+                </div>
+                <div className="rounded-2xl border border-purple-100 bg-purple-50/70 p-4 flex items-start justify-between gap-3">
+                    <div>
+                        <p className="text-xs font-semibold text-purple-800/80">Converted Leads</p>
+                        <p className="text-3xl font-bold text-purple-700 mt-1 tabular-nums">{convertedLeads}</p>
+                        <p className="text-xs text-purple-700/70 mt-1">By telecallers</p>
+                    </div>
+                    <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+                        <Award className="w-5 h-5" />
                     </div>
                 </div>
             </div>
@@ -275,7 +303,7 @@ export default function AdminUsers() {
                                 className="w-full rounded-xl border border-[#E2E8F0] bg-white pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
                             />
                         </div>
-                        <label className="block text-xs font-semibold text-[#64748B] lg:w-56 shrink-0">
+                        <label className="block text-xs font-semibold text-[#64748B] lg:w-64 shrink-0">
                             Filter by Role
                             <select
                                 value={roleFilter}
@@ -285,6 +313,7 @@ export default function AdminUsers() {
                                 <option value="all">All Roles</option>
                                 <option value="customer">Users</option>
                                 <option value="sales_agent">Sales Agents</option>
+                                <option value="converted_lead">Converted by Telecallers</option>
                                 <option value="invite">Pending invites</option>
                             </select>
                         </label>
@@ -304,7 +333,7 @@ export default function AdminUsers() {
                         </div>
                     ) : (
                         pageUsers.map((user) => {
-                            const rowKey = user.userId || user.invite?.id || user.email;
+                            const rowKey = user.userId || user.leadId || user.invite?.id || user.email;
                             const busy = deletingKey === rowKey;
                             const role = roleOf(user);
                             return (
@@ -312,66 +341,107 @@ export default function AdminUsers() {
                                     key={rowKey}
                                     className="flex items-center gap-3 px-4 sm:px-5 py-4 hover:bg-[#F8FAFC] transition-colors group"
                                 >
-                                    <Link
-                                        to={detailPath(user)}
-                                        className="flex items-center gap-4 min-w-0 flex-1"
-                                    >
+                                    {role === 'converted_lead' ? (
                                         <div
-                                            className={cn(
-                                                'w-10 h-10 rounded-xl flex items-center justify-center font-bold shrink-0',
-                                                role === 'sales_agent'
-                                                    ? 'bg-emerald-100 text-emerald-700'
-                                                    : role === 'invite'
-                                                      ? 'bg-amber-50 text-amber-800'
-                                                      : 'bg-[#0F172A] text-[#F59E0B]'
-                                            )}
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={() => {
+                                                setActiveLeadRef({
+                                                    id: user.leadId || '',
+                                                    businessName: user.name,
+                                                    email: user.email,
+                                                    phone: user.phone || undefined
+                                                });
+                                            }}
+                                            className="flex items-center gap-4 min-w-0 flex-1 cursor-pointer text-left"
                                         >
-                                            {(user.name || user.email || '?').charAt(0).toUpperCase()}
-                                        </div>
-                                        <div className="min-w-0 flex-1">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <p className="font-bold text-[#0F172A] truncate">
-                                                    {user.name || user.email}
-                                                </p>
-                                                <span
-                                                    className={cn(
-                                                        'text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border',
-                                                        role === 'sales_agent'
-                                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                                            : role === 'invite'
-                                                              ? 'bg-amber-50 text-amber-900 border-amber-200'
-                                                              : 'bg-sky-50 text-sky-800 border-sky-200'
-                                                    )}
-                                                >
-                                                    {roleLabel(user)}
-                                                </span>
-                                                {user.kind === 'user' &&
-                                                    role === 'customer' &&
-                                                    (user.subscription?.status === 'active' ? (
-                                                        <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
-                                                            Live
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                                                            No plan
-                                                        </span>
-                                                    ))}
+                                            <div className="w-10 h-10 rounded-xl flex items-center justify-center font-bold shrink-0 bg-purple-100 text-purple-700">
+                                                {(user.name || user.email || '?').charAt(0).toUpperCase()}
                                             </div>
-                                            <p className="text-xs text-[#64748B] truncate mt-0.5">{user.email}</p>
-                                            {role !== 'sales_agent' && (
-                                                <p className="text-xs text-[#334155] mt-1.5">
-                                                    {user.subscription?.planName || 'No plan'}
-                                                    {user.subscription?.priceLabel
-                                                        ? ` · ${user.subscription.priceLabel}`
-                                                        : ''}
-                                                    {user.subscription?.periodEnd
-                                                        ? ` · ends ${fmtDate(user.subscription.periodEnd)}`
-                                                        : ''}
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <p className="font-bold text-[#0F172A] truncate">
+                                                        {user.name || user.email}
+                                                    </p>
+                                                    <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border bg-purple-50 text-purple-800 border-purple-200">
+                                                        {roleLabel(user)}
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-[#64748B] truncate mt-0.5">{user.email}</p>
+                                                <p className="text-xs text-purple-800/90 font-medium mt-1.5 flex flex-wrap items-center gap-2">
+                                                    <span>Converted by <strong className="font-bold text-purple-900">{user.telecallerName || 'Telecaller'}</strong></span>
+                                                    {user.phone && <span className="text-slate-500">· Tel: {user.phone}</span>}
+                                                    {(user.convertedAt || user.createdAt) && (
+                                                        <span className="text-slate-400">· {fmtDate(user.convertedAt || user.createdAt)}</span>
+                                                    )}
                                                 </p>
-                                            )}
+                                            </div>
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg shrink-0">
+                                                CRM Drawer
+                                            </span>
                                         </div>
-                                        <ChevronRight className="w-5 h-5 text-[#CBD5E1] group-hover:text-[#F59E0B] shrink-0 hidden sm:block" />
-                                    </Link>
+                                    ) : (
+                                        <Link
+                                            to={detailPath(user)}
+                                            className="flex items-center gap-4 min-w-0 flex-1"
+                                        >
+                                            <div
+                                                className={cn(
+                                                    'w-10 h-10 rounded-xl flex items-center justify-center font-bold shrink-0',
+                                                    role === 'sales_agent'
+                                                        ? 'bg-emerald-100 text-emerald-700'
+                                                        : role === 'invite'
+                                                          ? 'bg-amber-50 text-amber-800'
+                                                          : 'bg-[#0F172A] text-[#F59E0B]'
+                                                )}
+                                            >
+                                                {(user.name || user.email || '?').charAt(0).toUpperCase()}
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <p className="font-bold text-[#0F172A] truncate">
+                                                        {user.name || user.email}
+                                                    </p>
+                                                    <span
+                                                        className={cn(
+                                                            'text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border',
+                                                            role === 'sales_agent'
+                                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                                : role === 'invite'
+                                                                  ? 'bg-amber-50 text-amber-900 border-amber-200'
+                                                                  : 'bg-sky-50 text-sky-800 border-sky-200'
+                                                        )}
+                                                    >
+                                                        {roleLabel(user)}
+                                                    </span>
+                                                    {user.kind === 'user' &&
+                                                        role === 'customer' &&
+                                                        (user.subscription?.status === 'active' ? (
+                                                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                                                 Live
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                                                No plan
+                                                            </span>
+                                                        ))}
+                                                </div>
+                                                <p className="text-xs text-[#64748B] truncate mt-0.5">{user.email}</p>
+                                                {role !== 'sales_agent' && (
+                                                    <p className="text-xs text-[#334155] mt-1.5">
+                                                        {user.subscription?.planName || 'No plan'}
+                                                        {user.subscription?.priceLabel
+                                                            ? ` · ${user.subscription.priceLabel}`
+                                                            : ''}
+                                                        {user.subscription?.periodEnd
+                                                            ? ` · ends ${fmtDate(user.subscription.periodEnd)}`
+                                                            : ''}
+                                                    </p>
+                                                )}
+                                            </div>
+                                            <ChevronRight className="w-5 h-5 text-[#CBD5E1] group-hover:text-[#F59E0B] shrink-0 hidden sm:block" />
+                                        </Link>
+                                    )}
                                     <button
                                         type="button"
                                         title="Delete"
@@ -532,6 +602,16 @@ export default function AdminUsers() {
                         </form>
                     </div>
                 </div>
+            )}
+            {activeLeadRef && (
+                <LeadCrmDrawer
+                    lead={activeLeadRef}
+                    salesAgents={salesAgents}
+                    onClose={() => {
+                        setActiveLeadRef(null);
+                        load();
+                    }}
+                />
             )}
         </div>
     );
