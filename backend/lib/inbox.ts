@@ -5,10 +5,10 @@ function snsClient() {
     return new SNSClient({ region: process.env.AWS_REGION || process.env.SES_REGION || 'us-east-1' });
 }
 
-/** On Lambda, IAM sns:Publish is enough. Locally set SMS_VIA_SNS=true (or any AWS creds) to attempt send. */
+
 export function smsConfigured() {
     if (String(process.env.SMS_DISABLED || '').toLowerCase() === 'true') return false;
-    // Always attempt on Lambda; locally allow log-only unless explicitly enabled
+    
     if (process.env.AWS_LAMBDA_FUNCTION_NAME) return true;
     if (String(process.env.SMS_VIA_SNS || '').toLowerCase() === 'true') return true;
     if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE) return true;
@@ -168,7 +168,7 @@ export async function getThreadMessages(orgId: string, threadId: string) {
     return { thread: threads[0], messages };
 }
 
-/** Best-effort SMS when org has sms_enabled and client has phone. */
+
 export async function maybeSendReminderSms(org: any, phone: string, text: string, clientId?: string) {
     if (!org?.sms_enabled) return null;
     const p = normalizePhone(phone);

@@ -1,7 +1,7 @@
-/**
- * Google Places (New) helpers for Full Audit worker — fill GBP NAP + photos
- * when the upstream ZappSites Places search missed the listing.
- */
+
+
+
+
 
 function placesKey(): string {
   return String(process.env.GOOGLE_PLACES_API_KEY || '').trim();
@@ -67,7 +67,7 @@ async function resolvePhotoDataUrl(photoName: string, maxPx = 800): Promise<stri
       }
     }
   } catch {
-    // ignore
+    
   }
   return null;
 }

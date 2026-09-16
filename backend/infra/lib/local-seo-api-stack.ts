@@ -35,7 +35,7 @@ const STAGE_CONFIG: Record<
     lambdaSgId: 'sg-0167438f34915d1e2',
     proxyEndpoint: 'rdsproxy.proxy-cehyac2sc676.us-east-1.rds.amazonaws.com',
     dbSecretName: 'ZappsitesDatabase-dev/credentials',
-    // Local SEO staging SPA (dev branch → test.zappsites.com)
+    
     clientOrigin: process.env.CLIENT_ORIGIN || 'https://test.zappsites.com',
     zappSitesOrigin: process.env.ZAPP_SITES_ORIGIN || 'https://staging.zappsites.com',
   },
@@ -85,9 +85,9 @@ export class LocalSeoApiStack extends cdk.Stack {
       },
     });
 
-    // Shared with ZappSites Full Crawl ops routes (Phase 1 BFF).
-    // Deep history + worker currently live on ZappSites prod API — use that stage's secret
-    // unless ZAPP_SITES_API_BASE points at another stage.
+    
+    
+    
     const zappSitesApiBase =
       (stage === 'prod'
         ? process.env.ZAPP_SITES_API_BASE_PROD
@@ -115,7 +115,7 @@ export class LocalSeoApiStack extends cdk.Stack {
       removalPolicy: stage === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
     });
 
-    // Stage-locked API bases (do not reuse localhost / wrong-stage API_BASE_URL from .env)
+    
     const apiBaseUrl =
       (stage === 'prod'
         ? process.env.API_BASE_URL_PROD
@@ -124,13 +124,13 @@ export class LocalSeoApiStack extends cdk.Stack {
         ? 'https://zw8pq7vyi2.execute-api.us-east-1.amazonaws.com'
         : 'https://ud9zl0ww6d.execute-api.us-east-1.amazonaws.com');
 
-    // Paid Gemini → prod only (GEMINI_API_KEY_PROD). Dev may use a separate free/test GEMINI_API_KEY.
+    
     const geminiKey =
       stage === 'prod'
         ? process.env.GEMINI_API_KEY_PROD || ''
         : process.env.GEMINI_API_KEY || '';
 
-    // Stripe: test keys (STRIPE_*) → LocalSeoApi-dev only; live (*_PROD) → LocalSeoApi-prod only
+    
     const stripeSecretKey =
       stage === 'prod'
         ? process.env.STRIPE_SECRET_KEY_PROD || ''
@@ -144,7 +144,7 @@ export class LocalSeoApiStack extends cdk.Stack {
         ? process.env.STRIPE_WEBHOOK_SECRET_PROD || ''
         : process.env.STRIPE_WEBHOOK_SECRET || '';
 
-    // Never use localhost GOOGLE_REDIRECT_URI from .env on Lambda
+    
     const googleRedirectUri =
       process.env.GOOGLE_REDIRECT_URI_DEPLOY ||
       `${apiBaseUrl.replace(/\/$/, '')}/api/integrations/google/callback`;
@@ -283,7 +283,7 @@ export class LocalSeoApiStack extends cdk.Stack {
     mediaBucket.grantPut(fn);
     mediaBucket.grantRead(fn);
 
-    // Allow Lambda to send booking emails through SES
+    
     fn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['ses:SendEmail', 'ses:SendRawEmail'],
@@ -291,7 +291,7 @@ export class LocalSeoApiStack extends cdk.Stack {
       })
     );
 
-    // Outbound SMS via Amazon SNS (Publish to phone number)
+    
     fn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['sns:Publish'],
@@ -301,7 +301,7 @@ export class LocalSeoApiStack extends cdk.Stack {
 
     const integration = new HttpLambdaIntegration('ApiIntegration', fn);
 
-    // Explicit origins on both stages (no wildcard) — Express CORS mirrors this list.
+    
     const allowOrigins = spaOrigins;
 
     const httpApi = new apigwv2.HttpApi(this, 'HttpApi', {
@@ -323,8 +323,8 @@ export class LocalSeoApiStack extends cdk.Stack {
       defaultIntegration: integration,
     });
 
-    // Stage throttling (API Gateway rate limits). Note: AWS WAF does not support
-    // HTTP APIs (ApiGatewayV2) — only REST APIs — so security is Express + throttle.
+    
+    
     const cfnStage = httpApi.defaultStage?.node.defaultChild as apigwv2.CfnStage | undefined;
     if (cfnStage) {
       cfnStage.defaultRouteSettings = {

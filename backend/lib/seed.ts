@@ -3,7 +3,7 @@ import { uniqueOrgSlug, uniqueEventSlug } from './slug';
 import { getTradeBookingCatalog } from './bookingTradeCatalog';
 
 async function seedDefaultAvailability(_orgId: any) {
-    // Engineers configure their own hours in booking settings — no default slots.
+    
 }
 
 async function seedDefaultEventTypes(
@@ -82,7 +82,7 @@ async function createBookingOrg({
     const resolvedIndustryId = String(bookingIndustryId || catalog.bookingIndustryId || '').trim() || null;
     const resolvedTradeType = String(tradeType || catalog.tradeType || '').trim();
 
-    // Update existing org only when completing first-time setup on that org (not createNew).
+    
     if (orgId && !createNew) {
         const orgRes = await query(
             `UPDATE organizations SET

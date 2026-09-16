@@ -7,7 +7,7 @@ export function isValidBrandHex(value: unknown): value is string {
     return typeof value === 'string' && HEX_RE.test(value.trim());
 }
 
-/** Normalize #RGB → #RRGGBB uppercase-ready; returns null if invalid. */
+
 export function normalizeBrandHex(value: unknown, fallback?: string): string | null {
     const raw = String(value ?? '').trim();
     if (!HEX_RE.test(raw)) {

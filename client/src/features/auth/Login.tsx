@@ -8,7 +8,7 @@ import { clearAdminToken, setAdminToken } from '../admin/adminApi';
 import { useEntitlements } from '../../shared/EntitlementsContext';
 import AuthShell from './AuthShell';
 
-/* ── helpers ── */
+
 
 async function tryAdminLogin(email: string, password: string) {
     const res = await fetch(`${API_BASE}/api/admin/login`, {
@@ -23,14 +23,14 @@ async function tryAdminLogin(email: string, password: string) {
     return data;
 }
 
-/* ── styles ── */
+
 
 const fieldWrap =
     'mt-1.5 flex items-center gap-3 rounded-[11px] border border-[#E2E8F0] bg-white px-3.5 transition-colors focus-within:border-[#FF6A00] focus-within:ring-1 focus-within:ring-[#FF6A00]/25';
 const fieldInput =
     'flex-1 min-w-0 bg-transparent text-[13.5px] text-[#101828] placeholder:text-[#94A3B8] focus:outline-none py-[13px]';
 
-/* ── component ── */
+
 
 export default function Login() {
     const navigate = useNavigate();
@@ -121,7 +121,7 @@ export default function Login() {
                     </p>
                 )}
 
-                {/* Email */}
+                {}
                 <div>
                     <label className="block text-[13px] font-medium" style={{ color: '#344054' }}>
                         Email
@@ -140,7 +140,7 @@ export default function Login() {
                     </div>
                 </div>
 
-                {/* Password */}
+                {}
                 <div>
                     <div className="flex items-center justify-between gap-3">
                         <label className="text-[13px] font-medium" style={{ color: '#344054' }}>Password</label>
@@ -179,7 +179,7 @@ export default function Login() {
                     </div>
                 </div>
 
-                {/* Sign in button */}
+                {}
                 <button
                     type="submit"
                     disabled={busy}
@@ -196,7 +196,7 @@ export default function Login() {
                 </button>
             </form>
 
-            {/* Divider & Get Started CTA */}
+            {}
             <div className="flex items-center gap-4 mt-6">
                 <div className="flex-1 h-px" style={{ background: '#E2E8F0' }} />
                 <p className="text-[13px] text-center" style={{ color: '#64748B' }}>

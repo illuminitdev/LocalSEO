@@ -1,4 +1,4 @@
-/** Service choices for Full Audit (mirrors ZappSites auditServices). */
+
 
 export type AuditServiceOption = {
     id: string;

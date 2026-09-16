@@ -59,6 +59,6 @@ export function isAllowedMediaUrl(url: string) {
     if (!u.startsWith('https://')) return false;
     const bucket = mediaBucket();
     if (bucket && u.includes(`${bucket}.s3`)) return true;
-    // Allow any https for job photos when bucket unset (local / URL fallback)
+    
     return !bucket;
 }

@@ -38,14 +38,14 @@ function normalizeTime(t: any): string {
 }
 
 function dayOfWeekForDate(dateStr: string): number {
-    // Noon avoids DST / UTC edge cases on date-only strings
+    
     return new Date(`${dateStr}T12:00:00`).getDay();
 }
 
-/**
- * Date overrides win when any row exists for that date (including disabled = closed).
- * Otherwise fall back to weekly day_of_week rules.
- */
+
+
+
+
 function resolveRulesForDate(dateStr: string, dateRules: any[], weeklyRules: any[]) {
     const overrides = (dateRules || []).filter((r: any) => ruleDateStr(r) === dateStr);
     if (overrides.length > 0) {
@@ -86,7 +86,7 @@ function generateSlots({
     const minStart = new Date(now.getTime() + minNoticeHours * 60 * 60 * 1000);
     const maxEnd = new Date(now.getTime() + maxDaysAhead * 24 * 60 * 60 * 1000);
 
-    // Back-compat: older callers passed only `rules` (date rules)
+    
     const resolvedDateRules = dateRules || rules || [];
     const resolvedWeekly = weeklyRules || [];
 

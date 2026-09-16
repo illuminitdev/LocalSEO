@@ -1,9 +1,9 @@
 import { config } from '../config.js';
 
-/**
- * Capture a compressed homepage screenshot for the deep audit report.
- * Returns a data URL (JPEG) or null if Chromium is unavailable.
- */
+
+
+
+
 export async function captureHomepageScreenshot(url) {
   if (!url) return null;
   let target = String(url).trim();
@@ -44,7 +44,7 @@ export async function captureHomepageScreenshot(url) {
       encoding: 'binary'
     });
     const b64 = Buffer.from(buffer).toString('base64');
-    // Cap ~180KB base64 to keep audit JSON manageable
+    
     if (b64.length > 240_000) {
       return {
         skipped: true,
@@ -73,7 +73,7 @@ export async function captureHomepageScreenshot(url) {
       try {
         await browser.close();
       } catch {
-        // ignore
+        
       }
     }
   }

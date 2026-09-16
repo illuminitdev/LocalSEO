@@ -10,23 +10,23 @@ type Props = {
     showLegalFooter?: boolean;
 };
 
-/* ── Laptop mockup ── */
+
 function LaptopMockup() {
     return (
         <div className="relative mx-auto" style={{ width: 300, maxWidth: '100%' }}>
-            {/* Screen bezel */}
+            {}
             <div className="rounded-t-xl overflow-hidden" style={{ border: '5px solid #1E293B', borderBottom: 'none' }}>
                 <div style={{ background: '#fff' }}>
-                    {/* Browser chrome */}
+                    {}
                     <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-[#E2E8F0]" style={{ background: '#F8FAFC' }}>
                         <span className="w-[7px] h-[7px] rounded-full bg-[#FCA5A5]" />
                         <span className="w-[7px] h-[7px] rounded-full bg-[#FDE68A]" />
                         <span className="w-[7px] h-[7px] rounded-full bg-[#86EFAC]" />
                         <div className="ml-2 flex-1 h-3.5 rounded-sm bg-white border border-[#E2E8F0]" />
                     </div>
-                    {/* Dashboard */}
+                    {}
                     <div className="px-3.5 py-2.5 space-y-2.5">
-                        {/* Nav */}
+                        {}
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-1.5">
                                 <div className="w-4 h-4 rounded" style={{ background: '#FF6A00' }} />
@@ -37,11 +37,11 @@ function LaptopMockup() {
                                 <div className="w-8 h-[5px] rounded-full bg-[#E2E8F0]" />
                             </div>
                         </div>
-                        {/* Hero banner */}
+                        {}
                         <div className="h-[50px] rounded-md flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #FFF7ED, #FFEDD5)' }}>
                             <Image className="w-5 h-5" style={{ color: '#FF6A00' }} strokeWidth={1.5} />
                         </div>
-                        {/* Stat cards */}
+                        {}
                         <div className="grid grid-cols-3 gap-1.5">
                             {[BarChart3, Search, Star].map((Icon, i) => (
                                 <div key={i} className="rounded bg-[#F8FAFC] border border-[#F1F5F9] p-1.5 flex flex-col items-center gap-1">
@@ -50,7 +50,7 @@ function LaptopMockup() {
                                 </div>
                             ))}
                         </div>
-                        {/* Text lines */}
+                        {}
                         <div className="space-y-1 pb-0.5">
                             <div className="w-full h-[4px] rounded-full bg-[#F1F5F9]" />
                             <div className="w-2/3 h-[4px] rounded-full bg-[#F1F5F9]" />
@@ -58,7 +58,7 @@ function LaptopMockup() {
                     </div>
                 </div>
             </div>
-            {/* Laptop base / hinge */}
+            {}
             <div
                 className="h-[10px] rounded-b-lg"
                 style={{
@@ -67,7 +67,7 @@ function LaptopMockup() {
                     marginLeft: '-7.5%',
                 }}
             />
-            {/* Keyboard surface */}
+            {}
             <div
                 className="h-[3px] rounded-b-xl"
                 style={{
@@ -83,14 +83,14 @@ function LaptopMockup() {
 export default function AuthShell({ children, title, subtitle, showLegalFooter = true }: Props) {
     return (
         <div className="h-screen flex flex-col lg:flex-row overflow-hidden bg-white">
-            {/* ────── LEFT: Login ────── */}
+            {}
             <div
                 className="w-full lg:w-[45%] flex flex-col justify-between px-6 sm:px-10 lg:px-14 xl:px-16 py-6 lg:py-8 bg-[#F8FAFC] overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
             >
                 <div className="w-full max-w-[420px] mx-auto flex-1 flex flex-col justify-center">
-                    {/* Floating Form Box */}
+                    {}
                     <div className="bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-[#E2E8F0] px-6 py-8 sm:px-10 sm:py-10">
-                        {/* Logo */}
+                        {}
                         <img
                             src="/localseo.png"
                             alt="ZappSites · Local SEO"
@@ -100,7 +100,7 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
                             style={{ width: 140, height: 'auto' }}
                         />
 
-                        {/* Heading */}
+                        {}
                         <h1 className="text-[24px] font-bold tracking-tight text-center" style={{ color: '#101828' }}>
                             {title}
                         </h1>
@@ -108,10 +108,10 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
                             {subtitle}
                         </p>
 
-                        {/* Form slot */}
+                        {}
                         <div className="mt-6">{children}</div>
 
-                        {/* Legal footer positioned inside the floating box */}
+                        {}
                         {showLegalFooter && (
                             <div className="mt-2 text-center">
                                 <p className="text-[12px]" style={{ color: '#94A3B8' }}>
@@ -125,12 +125,12 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
                 </div>
             </div>
 
-            {/* ────── RIGHT: Marketing ────── */}
+            {}
             <div
                 className="hidden lg:flex w-[55%] relative overflow-hidden items-center justify-center"
                 style={{ background: '#FFFAF5' }}
             >
-                {/* Decorative blobs */}
+                {}
                 <div
                     className="absolute rounded-full pointer-events-none"
                     style={{
@@ -163,9 +163,9 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
                     }}
                 />
 
-                {/* Content */}
+                {}
                 <div className="relative z-10 w-full max-w-lg px-8 xl:px-12 text-center">
-                    {/* Heading */}
+                    {}
                     <h2
                         className="text-[28px] xl:text-[32px] font-bold leading-tight tracking-tight"
                         style={{ color: '#101828' }}
@@ -182,9 +182,9 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
                         Modern websites. Better visibility. More customers.
                     </p>
 
-                    {/* Laptop + annotations */}
+                    {}
                     <div className="relative mt-10">
-                        {/* Handwritten annotation */}
+                        {}
                         <div
                             className="absolute z-20 pointer-events-none select-none"
                             style={{
@@ -199,7 +199,7 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
                             }}
                         >
                             Your business<br />online, locally
-                            {/* Curved arrow below text */}
+                            {}
                             <svg
                                 width="40"
                                 height="30"
@@ -223,12 +223,12 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
                             </svg>
                         </div>
 
-                        {/* Laptop */}
+                        {}
                         <div className="mr-auto" style={{ maxWidth: 280 }}>
                             <LaptopMockup />
                         </div>
 
-                        {/* Feature badges */}
+                        {}
                         <div className="absolute z-20 flex flex-col gap-3" style={{ right: -50, top: 6 }}>
                             {([
                                 { icon: Globe, label: 'Professional', sub: 'Websites', color: '#FF6A00', bg: '#FFF7ED', border: '#FDBA74' },
@@ -258,7 +258,7 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
                 </div>
             </div>
 
-            {/* ────── MOBILE: Marketing (below login on small screens) ────── */}
+            {}
             <div
                 className="lg:hidden w-full py-10 px-6 text-center relative overflow-hidden"
                 style={{ background: '#FFFAF5' }}
@@ -293,7 +293,7 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
     );
 }
 
-/* Exported for PasswordReset compatibility */
+
 export const authFieldClass =
     'mt-1.5 w-full bg-white text-sm placeholder:text-[#94A3B8] focus:outline-none transition-colors'
     + ' rounded-[11px] border border-[#E2E8F0] px-4 py-[14px]'

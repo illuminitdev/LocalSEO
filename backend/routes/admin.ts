@@ -83,7 +83,7 @@ async function verifyAdminPassword(password: string) {
             return comparePassword(password, rows[0].password_hash);
         }
     } catch {
-        /* table may not exist until migrate */
+        
     }
     const { passwordHash, password: plain } = resolveAdminCredentials();
     if (passwordHash) return comparePassword(password, passwordHash);
@@ -222,7 +222,7 @@ router.post('/login', async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Email and password are required.' });
         }
 
-        // Dev email only on STAGE=dev; prod email only on STAGE=prod
+        
         if (email !== adminEmail) {
             return res.status(401).json({
                 error: 'Invalid admin credentials for this environment.',
@@ -254,7 +254,7 @@ router.get('/me', requireAdmin, async (req: Request, res: Response) => {
         );
         passwordUpdatedAt = rows[0]?.updated_at || null;
     } catch {
-        /* ignore */
+        
     }
     res.json({
         admin: (req as any).admin,
@@ -396,13 +396,13 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
              ORDER BY u.id, s.created_at DESC NULLS LAST`
         );
 
-        // Re-sort by join date for display
+        
         rows.sort(
             (a: any, b: any) =>
                 new Date(b.user_created_at).getTime() - new Date(a.user_created_at).getTime()
         );
 
-        // Also include paid invites not yet claimed as portal users
+        
         const inviteOnly = await query(
             `SELECT pi.id AS invite_id, pi.email, pi.full_name, pi.phone, pi.plan_id, pi.status,
                     pi.claimed_at, pi.credentials_emailed_at, pi.created_at AS invite_created_at,
@@ -620,7 +620,7 @@ function mapAdminLead(row: any, origin: string) {
     };
 }
 
-/** Read-only list of ZappSites marketing leads (shared RDS submissions + audits). */
+
 router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Response) => {
     try {
         const q = String(req.query.q || '').trim();
@@ -890,7 +890,7 @@ router.patch('/organizations/:orgId/subscription', requireAdmin, async (req: Req
         const { rows: orgRows } = await query('SELECT id, name, slug FROM organizations WHERE id = $1', [orgId]);
         if (!orgRows.length) return res.status(404).json({ error: 'Organization not found' });
 
-        // Autopay-only update (keep current plan)
+        
         if (!planId && hasAutopay && autopayEnabled !== undefined) {
             const result = await setOrgAutopay(orgId, autopayEnabled, getStripeClient());
             return res.json({
@@ -992,9 +992,9 @@ router.get('/services', requireAdmin, (_req: Request, res: Response) => {
     });
 });
 
-/* =========================================================================
-   TELECALLER CRM & TASK ASSIGNMENT ENDPOINTS
-   ========================================================================= */
+
+
+
 
 let crmTablesChecked = false;
 async function ensureCrmTables() {
@@ -1044,7 +1044,7 @@ async function ensureCrmTables() {
     }
 }
 
-/** Get list of sales agents / telecallers available for assignment */
+
 router.get('/crm/sales-agents', requireAdmin, async (_req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1061,13 +1061,13 @@ router.get('/crm/sales-agents', requireAdmin, async (_req: Request, res: Respons
     }
 });
 
-/** Helper to extract lead details from submissions + audits or sales_leads for admin CRM */
+
 async function fetchAdminLeadMetadataMap(leadIds: string[]) {
     if (!leadIds.length) return new Map<string, any>();
     const map = new Map<string, any>();
     const origin = zappSitesOrigin();
 
-    // 1. Try growth audit submissions
+    
     try {
         const { rows: subRows } = await query(
             `SELECT s.id, s.created_at, s.email AS submission_email, s.payload,
@@ -1100,7 +1100,7 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
         }
     } catch {}
 
-    // 2. Try sales_leads for any remaining
+    
     const missing = leadIds.filter((id) => !map.has(id));
     if (missing.length) {
         try {
@@ -1128,7 +1128,7 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
     return map;
 }
 
-/** Get all CRM tasks with optional filters */
+
 router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1162,7 +1162,7 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
             params.push(taskType);
             where.push(`t.task_type = $${params.length}`);
         }
-        // Admin only sees tasks created by admin (exclude sales agent self-reminders)
+        
         where.push(`(t.created_by_role = 'admin' OR t.created_by_role IS NULL)`);
 
         const { rows } = await query(`
@@ -1225,7 +1225,7 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
     }
 });
 
-/** Create a new task for a lead */
+
 router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1283,7 +1283,7 @@ router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
 
         const task = rows[0];
 
-        // Add auto activity log
+        
         try {
             await query(`
                 INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
@@ -1298,7 +1298,7 @@ router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
     }
 });
 
-/** Update task details / status */
+
 router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1369,7 +1369,7 @@ router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response)
 
         const task = rows[0];
 
-        // If status changed, record activity log
+        
         if (status) {
             try {
                 await query(`
@@ -1386,13 +1386,13 @@ router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response)
     }
 });
 
-/** Delete a task */
+
 router.delete('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
         const taskId = req.params.id;
 
-        // Fetch task details before deleting so we can record an activity history event
+        
         const { rows: taskRows } = await query(
             `SELECT title, lead_id, assigned_to_user_id FROM lead_tasks WHERE id = $1`,
             [taskId]
@@ -1418,7 +1418,7 @@ router.delete('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response
     }
 });
 
-/** Get lead activities / call notes */
+
 router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1449,7 +1449,7 @@ router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, r
     }
 });
 
-/** Log an activity / call note for a lead */
+
 router.post('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1494,7 +1494,7 @@ router.post('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, 
     }
 });
 
-/** Clear all call logs & activity history */
+
 router.post('/crm/activities/clear', requireAdmin, async (_req: Request, res: Response) => {
     try {
         await ensureCrmTables();

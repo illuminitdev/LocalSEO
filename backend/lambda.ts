@@ -1,7 +1,7 @@
-/**
- * AWS Lambda entry — Express via @codegenie/serverless-express.
- * Runs LocalPulse-owned migrations once per cold start (skips ZappSites 005/006 on SHARED_RDS).
- */
+
+
+
+
 import serverlessExpress from '@codegenie/serverless-express';
 import app from './server';
 import { migrate } from './lib/db';

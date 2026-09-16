@@ -29,14 +29,14 @@ export default function AdminCrmTasks() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    // Filters
+    
     const [selectedAgent, setSelectedAgent] = useState<string>('all');
     const [selectedType, setSelectedType] = useState<string>('all');
     const [selectedStatus, setSelectedStatus] = useState<string>('all');
     const [selectedPriority, setSelectedPriority] = useState<string>('all');
     const [searchQuery, setSearchQuery] = useState('');
 
-    // Selected lead for CRM drawer
+    
     const [activeLead, setActiveLead] = useState<GrowthAuditLeadRef | null>(null);
 
     const loadData = useCallback(async () => {
@@ -74,7 +74,7 @@ export default function AdminCrmTasks() {
         if (matched) {
             setActiveLead(matched);
         } else {
-            // Fallback object with lead ID and backend-enriched lead fields
+            
             setActiveLead({
                 id: task.leadId,
                 businessName: task.leadBusinessName || 'Lead #' + task.leadId.slice(0, 8),
@@ -90,7 +90,7 @@ export default function AdminCrmTasks() {
         }
     };
 
-    // Calculate KPI Stats
+    
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
     const overdueCount = tasks.filter(
@@ -102,7 +102,7 @@ export default function AdminCrmTasks() {
     const pendingCount = tasks.filter((t) => t.status !== 'completed').length;
     const completedCount = tasks.filter((t) => t.status === 'completed').length;
 
-    // Filter by search query
+    
     const filteredTasks = tasks.filter((t) => {
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
@@ -132,7 +132,7 @@ export default function AdminCrmTasks() {
                 </div>
             )}
 
-            {/* KPI Cards */}
+            {}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
                     <p className="text-xs font-medium text-slate-500">Overdue Tasks</p>
@@ -156,10 +156,10 @@ export default function AdminCrmTasks() {
                 </div>
             </div>
 
-            {/* Filter Bar */}
+            {}
             <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                    {/* Search */}
+                    {}
                     <div className="relative flex-1 max-w-md">
                         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input
@@ -181,9 +181,9 @@ export default function AdminCrmTasks() {
                     </button>
                 </div>
 
-                {/* Filters Row */}
+                {}
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-2 border-t border-slate-100">
-                    {/* Sales Agent Filter */}
+                    {}
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Sales Agent
@@ -202,7 +202,7 @@ export default function AdminCrmTasks() {
                         </select>
                     </div>
 
-                    {/* Task Type Filter */}
+                    {}
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Task Type
@@ -221,7 +221,7 @@ export default function AdminCrmTasks() {
                         </select>
                     </div>
 
-                    {/* Status Filter */}
+                    {}
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Status
@@ -239,7 +239,7 @@ export default function AdminCrmTasks() {
                         </select>
                     </div>
 
-                    {/* Priority Filter */}
+                    {}
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Priority
@@ -259,7 +259,7 @@ export default function AdminCrmTasks() {
                 </div>
             </div>
 
-            {/* Task Table */}
+            {}
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
                 <div className="p-4 border-b border-slate-100 flex items-center justify-between">
                     <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
@@ -307,7 +307,7 @@ export default function AdminCrmTasks() {
                                                 isDone ? "bg-emerald-50/40 hover:bg-emerald-50/70" : "hover:bg-slate-50/70"
                                             )}
                                         >
-                                            {/* Title & Notes & Creator */}
+                                            {}
                                             <td className="py-3.5 px-4 align-middle">
                                                 <div
                                                     className={cn("font-semibold truncate max-w-md", isDone ? "text-emerald-950 font-bold" : "text-slate-900")}
@@ -322,7 +322,7 @@ export default function AdminCrmTasks() {
                                                 )}
                                             </td>
 
-                                            {/* Lead / Business */}
+                                            {}
                                             <td className="py-3.5 px-4 align-middle max-w-[220px]">
                                                 <button
                                                     type="button"
@@ -335,7 +335,7 @@ export default function AdminCrmTasks() {
                                                 </button>
                                             </td>
 
-                                            {/* Assigned Agent */}
+                                            {}
                                             <td className="py-3.5 px-4 align-middle whitespace-nowrap">
                                                 {task.assignedToName ? (
                                                     <span className={cn(
@@ -350,7 +350,7 @@ export default function AdminCrmTasks() {
                                                 )}
                                             </td>
 
-                                            {/* Priority */}
+                                            {}
                                             <td className="py-3.5 px-4 align-middle whitespace-nowrap">
                                                 <span className={cn(
                                                     "text-[10px] font-bold uppercase px-2.5 py-1 rounded-md",
@@ -363,7 +363,7 @@ export default function AdminCrmTasks() {
                                                 </span>
                                             </td>
 
-                                            {/* Due Date */}
+                                            {}
                                             <td className="py-3.5 px-4 align-middle whitespace-nowrap">
                                                 {task.dueDate ? (
                                                     <span className={cn(
@@ -383,7 +383,7 @@ export default function AdminCrmTasks() {
                                                 )}
                                             </td>
 
-                                            {/* Status Badge */}
+                                            {}
                                             <td className="py-3.5 px-4 text-center align-middle whitespace-nowrap">
                                                 <span className={cn(
                                                     "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-md border",
@@ -399,7 +399,7 @@ export default function AdminCrmTasks() {
                                                 </span>
                                             </td>
 
-                                            {/* Actions */}
+                                            {}
                                             <td className="py-3.5 px-4 align-middle text-right whitespace-nowrap">
                                                 <button
                                                     type="button"
@@ -418,7 +418,7 @@ export default function AdminCrmTasks() {
                 )}
             </div>
 
-            {/* Slide-over CRM Drawer */}
+            {}
             {activeLead && (
                 <LeadCrmDrawer
                     lead={activeLead}

@@ -1,7 +1,7 @@
-/**
- * Excel-aligned Growth Audit checklist schema.
- * Placeholders: {service}, {city}, {serviceSlug}
- */
+
+
+
+
 
 export const PILLARS = [
   { id: 'gbp', label: 'Google Business Profile', sectionIds: ['gbp'], max: 10 },
@@ -184,9 +184,9 @@ function check(id, section, label, source, extra = {}) {
   };
 }
 
-/**
- * Build a full checklist instance for a trade + city.
- */
+
+
+
 export function buildChecklist({
   tradeId = 'general',
   city = 'Manchester',
@@ -201,7 +201,7 @@ export function buildChecklist({
   const service = trade.primaryService;
   const checks = [];
 
-  // §1 GBP — operator
+  
   const gbpItems = [
     'Is the business listed on Google Maps?',
     'Correct business name?',
@@ -227,7 +227,7 @@ export function buildChecklist({
     checks.push(check(`gbp_${i + 1}`, 'gbp', label, 'operator', { sectionTitle: '1. Google Business Profile — Highest Priority' }));
   });
 
-  // §2 Maps competitors — operator
+  
   trade.mapQueries(city).forEach((q, i) => {
     checks.push(
       check(`maps_query_${i + 1}`, 'maps_competitors', `Search: ${q}`, 'operator', {
@@ -255,7 +255,7 @@ export function buildChecklist({
     );
   });
 
-  // §3 Website basic — crawl
+  
   [
     'Website available?',
     'HTTPS?',
@@ -275,7 +275,7 @@ export function buildChecklist({
     );
   });
 
-  // §3 Homepage — crawl
+  
   [
     'What they do is clearly communicated?',
     'Where they operate is clearly communicated?',
@@ -290,7 +290,7 @@ export function buildChecklist({
     );
   });
 
-  // §4 Service pages — crawl
+  
   trade.servicePages.forEach((name, i) => {
     checks.push(
       check(`svc_${i + 1}`, 'service_pages', `${name} page`, 'crawl', {
@@ -300,7 +300,7 @@ export function buildChecklist({
     );
   });
 
-  // §5 Local SEO / location pages — crawl
+  
   locs.forEach((loc, i) => {
     checks.push(
       check(`loc_${i + 1}`, 'local_seo', `${loc} location page exists?`, 'crawl', {
@@ -323,7 +323,7 @@ export function buildChecklist({
     );
   });
 
-  // §6 On-page SEO — crawl
+  
   [
     'SEO title',
     'Meta description',
@@ -344,7 +344,7 @@ export function buildChecklist({
     );
   });
 
-  // §7 AI SEO — crawl heuristics
+  
   trade.aiQuestions(city).forEach((q, i) => {
     checks.push(
       check(`ai_q_${i + 1}`, 'ai_seo', `Content answers: ${q}`, 'crawl', {
@@ -365,7 +365,7 @@ export function buildChecklist({
     );
   });
 
-  // §8 Technical SEO
+  
   const tech = [
     ['Page speed', 'lighthouse'],
     ['Mobile usability', 'crawl'],
@@ -393,7 +393,7 @@ export function buildChecklist({
     );
   });
 
-  // AEO extras
+  
   [
     'FAQPage schema markup',
     'Visible FAQ / Q&A blocks',
@@ -406,7 +406,7 @@ export function buildChecklist({
     );
   });
 
-  // GEO extras
+  
   [
     'llms.txt published',
     'Content crawlable (not SPA shell)',
@@ -420,7 +420,7 @@ export function buildChecklist({
     );
   });
 
-  // NAP crawl compares
+  
   ['Phone consistent with GBP/claimed', 'Address consistent with GBP/claimed'].forEach((label, i) => {
     checks.push(
       check(`nap_${i + 1}`, 'local_seo', label, 'crawl', {
@@ -429,7 +429,7 @@ export function buildChecklist({
     );
   });
 
-  // §9 Citations — operator
+  
   CITATION_DIRS.forEach((name, i) => {
     checks.push(
       check(`cite_${i + 1}`, 'citations', name, 'operator', {
@@ -447,7 +447,7 @@ export function buildChecklist({
     }
   );
 
-  // §10 Reviews — operator
+  
   [
     'Total Google reviews',
     'Average rating',
@@ -466,7 +466,7 @@ export function buildChecklist({
     );
   });
 
-  // §11 Conversion — crawl
+  
   [
     'Phone number visible immediately?',
     'Click-to-call on mobile?',
@@ -489,7 +489,7 @@ export function buildChecklist({
     );
   });
 
-  // §12 Competitor gap — mostly operator + some crawl for prospect site
+  
   const gapDims = [
     'Google Reviews',
     'Rating',

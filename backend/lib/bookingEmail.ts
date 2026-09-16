@@ -225,7 +225,7 @@ function encodeSubject(subject: string) {
     return `=?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`;
 }
 
-/** SES raw message soft cap (~10MB). Base64 expands ~33%, so keep binaries under ~7MB. */
+
 const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
 
 async function sendMailWithAttachment({

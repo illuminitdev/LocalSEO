@@ -65,7 +65,7 @@ export default function LogCallModal({
                 className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-lg w-full p-6 relative animate-in zoom-in-95 duration-150 space-y-5"
                 onClick={(e) => e.stopPropagation()}
             >
-                {/* Header */}
+                {}
                 <div className="flex items-start justify-between pb-3 border-b border-slate-100">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-[#F59E0B]">
@@ -95,7 +95,7 @@ export default function LogCallModal({
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Call Disposition */}
+                    {}
                     <div>
                         <label className="block text-[11px] font-bold uppercase text-[#94A3B8] mb-1.5">
                             Call Disposition
@@ -119,7 +119,7 @@ export default function LogCallModal({
                         </div>
                     </div>
 
-                    {/* Discussion Summary */}
+                    {}
                     <div>
                         <label className="block text-[11px] font-bold uppercase text-[#94A3B8] mb-1">
                             Call Notes & Discussion Summary *
@@ -134,7 +134,7 @@ export default function LogCallModal({
                         />
                     </div>
 
-                    {/* Schedule Follow-Up */}
+                    {}
                     <div>
                         <label className="block text-[11px] font-bold uppercase text-[#94A3B8] mb-1">
                             Schedule Next Follow-Up (Auto-creates Self Reminder)
@@ -147,7 +147,7 @@ export default function LogCallModal({
                         />
                     </div>
 
-                    {/* Actions */}
+                    {}
                     <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
                         <button
                             type="button"

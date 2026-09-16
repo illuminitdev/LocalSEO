@@ -28,7 +28,7 @@ function effectiveJobTotalCents(booking: any, eventType: any) {
     let totalCents = Math.max(Number(booking.total_cents) || 0, Number(eventType.total_cents) || 0);
     if (depositCents <= 0) return totalCents;
     if (totalCents <= depositCents) return depositCents;
-    // Legacy setups auto-set total to deposit × 3.33 — treat as deposit-only (no balance invoice)
+    
     const legacyEstimate = Math.round(depositCents * 3.33);
     if (Math.abs(totalCents - legacyEstimate) <= 2) return depositCents;
     return totalCents;
@@ -114,11 +114,11 @@ async function createBalanceInvoice(stripeClient: any, booking: any, eventType: 
     };
 }
 
-/**
- * Refund a Connect direct-charge deposit.
- * Must use the connected account id — charges live on the host Express account, not the platform.
- * Platform keeps application fee (refund_application_fee: false).
- */
+
+
+
+
+
 async function refundBookingDeposit(
     stripeClient: any,
     booking: any,
@@ -153,7 +153,7 @@ async function refundBookingDeposit(
         return { skipped: true, reason: 'No Stripe payment found to refund' };
     }
 
-    // Direct charge refund on connected account. Do NOT refund application fee — platform keeps commission.
+    
     const refund = await stripeClient.refunds.create(
         {
             payment_intent: paymentIntentId,
@@ -170,7 +170,7 @@ async function refundBookingDeposit(
         depositCents,
         refundToCustomerCents: refund.amount,
         platformFeeKeptCents: platformFeeCents,
-        // Host originally received deposit − fee − Stripe card fee; full deposit leaves their balance on refund.
+        
         hostNetAfterRefundNote:
             'Host Express balance is reduced by the refund. Platform keeps the application fee. Stripe card fees are usually not returned.',
         currency: (refund.currency || 'gbp').toUpperCase()

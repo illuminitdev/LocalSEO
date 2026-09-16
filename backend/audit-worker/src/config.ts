@@ -1,7 +1,7 @@
-/**
- * Minimal env config for the Full Audit Docker worker.
- * Matches ZappSites worker env: STAGE, DB_*, GEMINI_API_KEY, GOOGLE_PLACES_API_KEY, S3_BUCKET.
- */
+
+
+
+
 export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   stage: process.env.STAGE || 'development',

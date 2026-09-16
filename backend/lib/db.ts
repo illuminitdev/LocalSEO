@@ -90,7 +90,7 @@ async function query(text: string, params?: any[]) {
 }
 
 function resolveMigrationsDir() {
-    // Source: backend/lib → backend/migrations; compiled: dist/lib → backend/migrations
+    
     const candidates = [
         path.join(__dirname, '..', 'migrations'),
         path.join(__dirname, '..', '..', 'migrations')

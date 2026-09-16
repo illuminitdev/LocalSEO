@@ -27,7 +27,7 @@ export type OrgBrand = {
     brandSecondary?: string | null;
 };
 
-/** CSS variables for white-label surfaces (public + host app). */
+
 export function orgBrandStyle(brand?: OrgBrand | null): CSSProperties {
     const primary = normalizeBrandHex(brand?.brandPrimary || '', DEFAULT_BRAND_PRIMARY);
     const secondary = normalizeBrandHex(brand?.brandSecondary || '', DEFAULT_BRAND_SECONDARY);

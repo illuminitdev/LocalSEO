@@ -67,7 +67,7 @@ export function OrgBrandProvider({ children }: { children: ReactNode }) {
             const me = await apiGet('/api/auth/me');
             applyBrand(me.organization || {});
         } catch {
-            /* keep current */
+            
         } finally {
             setLoading(false);
         }

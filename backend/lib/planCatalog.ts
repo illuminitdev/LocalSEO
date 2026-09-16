@@ -1,4 +1,4 @@
-/** Plan catalog — keep in sync with client/src/lib/planCatalog.ts */
+
 
 const FEATURE_KEYS = ['bookings', 'local_presence', 'local_growth', 'reporting'];
 
@@ -29,7 +29,7 @@ const PLAN_FEATURES: Record<string, string[]> = {
     'complete-growth-system': ['local_presence', 'local_growth', 'reporting', 'bookings']
 };
 
-/** Route path → single feature key, or array for multi-feature gates */
+
 const ROUTE_FEATURES: Record<string, string | string[] | null> = {
     '/dashboard': null,
     '/rank-tracker': 'local_growth',
@@ -68,7 +68,7 @@ function planIncludesAllFeatures(planId: string, featureKeys: string[]) {
     return featureKeys.every((k) => features.includes(k));
 }
 
-/** Lowest-priced plan that includes the feature (for upgrade hints). */
+
 function getRequiredPlanHint(featureKey: string) {
     const candidates = PLANS.filter((p) => planIncludesFeature(p.id, featureKey));
     if (!candidates.length) return null;

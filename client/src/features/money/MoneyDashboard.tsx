@@ -23,14 +23,14 @@ export default function MoneyDashboard() {
 
     useEffect(() => {
         load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        
     }, []);
 
     const downloadCsv = () => {
         const base = import.meta.env.VITE_API_BASE || '';
         const token = getToken();
         window.open(`${base}/api/host/money/expenses.csv?token=${encodeURIComponent(token || '')}`, '_blank');
-        // Prefer fetch blob if auth header needed
+        
         fetch(`${base}/api/host/money/expenses.csv`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {}
         })

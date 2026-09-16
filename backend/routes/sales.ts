@@ -68,13 +68,13 @@ async function ensureCrmTables() {
     }
 }
 
-/** Helper to extract lead details from submissions + audits or sales_leads */
+
 async function fetchLeadMetadataMap(leadIds: string[]) {
     if (!leadIds.length) return new Map<string, any>();
     const map = new Map<string, any>();
     const origin = zappSitesOrigin();
 
-    // 1. Try growth audit submissions
+    
     try {
         const { rows: subRows } = await query(
             `SELECT s.id, s.created_at, s.email AS submission_email, s.payload,
@@ -107,7 +107,7 @@ async function fetchLeadMetadataMap(leadIds: string[]) {
         }
     } catch {}
 
-    // 2. Try sales_leads for any remaining
+    
     const missing = leadIds.filter((id) => !map.has(id));
     if (missing.length) {
         try {
@@ -149,7 +149,7 @@ router.get('/me', async (req: Request, res: Response) => {
     });
 });
 
-/** Sales Agent summary metrics for Dashboard header */
+
 router.get('/summary', async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -176,7 +176,7 @@ router.get('/summary', async (req: Request, res: Response) => {
     }
 });
 
-/** Get CRM tasks assigned to this sales agent */
+
 router.get('/tasks', async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -272,7 +272,7 @@ router.get('/tasks', async (req: Request, res: Response) => {
     }
 });
 
-/** Create a new task (sales agent creating follow-up task) */
+
 router.post('/tasks', async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -339,7 +339,7 @@ router.post('/tasks', async (req: Request, res: Response) => {
     }
 });
 
-/** Update task status / notes */
+
 router.patch('/tasks/:id', async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -404,7 +404,7 @@ router.patch('/tasks/:id', async (req: Request, res: Response) => {
 
         const task = rows[0];
 
-        // If status changed, record activity log in lead_activities so both admin and sales see it in real-time
+        
         if (status) {
             try {
                 const agentName = (req as any).user.name || 'Sales Agent';
@@ -425,7 +425,7 @@ router.patch('/tasks/:id', async (req: Request, res: Response) => {
     }
 });
 
-/** Delete task (sales agent deleting their task) */
+
 router.delete('/tasks/:id', async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -466,7 +466,7 @@ router.delete('/tasks/:id', async (req: Request, res: Response) => {
     }
 });
 
-/** Unified Lead CRM detail for Sales Agent */
+
 router.get('/leads/:id/crm', async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -540,7 +540,7 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
     }
 });
 
-/** Log an activity / call note for a lead from Sales Portal */
+
 router.post('/leads/:id/crm/activities', async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -578,7 +578,7 @@ router.post('/leads/:id/crm/activities', async (req: Request, res: Response) => 
 
         const activity = rows[0];
 
-        // If next follow-up is provided, auto-create follow-up task as self-created
+        
         if (nextFollowUpAt) {
             try {
                 await query(`
@@ -603,7 +603,7 @@ router.post('/leads/:id/crm/activities', async (req: Request, res: Response) => 
     }
 });
 
-/** Get all CRM activity & call logs for the logged-in agent */
+
 router.get('/activities', async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -706,10 +706,10 @@ router.get('/leads', async (req: Request, res: Response) => {
             String(req.query.followUpToday || '') === '1' ||
             String(req.query.followUpToday || '').toLowerCase() === 'true';
 
-        // 1. Leads from sales_leads table
+        
         const salesLeadsList = await listAssignedLeads(agentId, { status, followUpToday }).catch(() => []);
 
-        // 2. Leads from lead_tasks assigned to this agent
+        
         const { rows: taskLeadRows } = await query(`
             SELECT DISTINCT lead_id FROM lead_tasks WHERE assigned_to_user_id = $1
         `, [agentId]).catch(() => ({ rows: [] }));
@@ -717,7 +717,7 @@ router.get('/leads', async (req: Request, res: Response) => {
         const taskLeadIds = taskLeadRows.map((r: any) => String(r.lead_id)).filter(Boolean);
         const metaMap = await fetchLeadMetadataMap(taskLeadIds);
 
-        // Combine into unified map
+        
         const leadMap = new Map<string, any>();
 
         for (const l of salesLeadsList) {
@@ -758,7 +758,7 @@ router.get('/leads/:id', async (req: Request, res: Response) => {
     try {
         const detail = await getAssignedLead(String(req.params.id), (req as any).user.id);
         if (!detail) {
-            // Fallback to unified lead CRM lookup
+            
             const metaMap = await fetchLeadMetadataMap([String(req.params.id)]);
             const lead = metaMap.get(String(req.params.id));
             if (lead) {

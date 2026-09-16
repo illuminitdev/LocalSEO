@@ -78,7 +78,7 @@ function industryPayload(org: any, menuItems: any[] = []) {
         (org?.trade_type ? getBookingPreset(String(org.trade_type)).id : null);
     if (!industryId) return null;
     const preset = getBookingPreset(industryId);
-    // Enquiry Type removed from booking form — price list items show on the public start page instead
+    
     const customFields = (preset.customFields || []).filter((field) => field.id !== 'enquiryType');
     return {
         id: preset.id,
@@ -732,7 +732,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     end = preferred[0].endAt;
                 }
                 if (!(start && end)) {
-                    // Provisional window: tomorrow + duration
+                    
                     const provisional = new Date(Date.now() + 86400000);
                     provisional.setMinutes(0, 0, 0);
                     start = provisional.toISOString();
@@ -765,7 +765,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const photos = normalizePhotoUrls(photoUrls);
             const manageToken = newManageToken();
             let depositCents = isRequest ? 0 : Number(eventType.deposit_cents) || 0;
-            // Dental & aesthetics: charge the price-list item chosen on the start page
+            
             if (!isRequest && isDentistsOrg(org) && bookMenuItems.length) {
                 const itemId = String(answers.priceListItemId || '').trim();
                 const selectedLabel = String(answers.selectedService || answers.enquiryType || '').trim();

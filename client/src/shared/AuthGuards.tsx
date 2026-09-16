@@ -2,7 +2,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { getToken, isSalesAgent } from '../features/auth/auth';
 import { getAdminToken } from '../features/admin/adminApi';
 
-/** Protects app routes — redirects to login when no session token. */
+
 export function RequireAuth({ children }: { children: React.ReactNode }) {
     const location = useLocation();
     const token = getToken();
@@ -21,7 +21,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
 }
 
-/** Protects sales / telecaller portal routes. */
+
 export function RequireSales({ children }: { children: React.ReactNode }) {
     const location = useLocation();
     const token = getToken();
@@ -40,7 +40,7 @@ export function RequireSales({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
 }
 
-/** Protects admin routes — unauthenticated admins go to the shared login page. */
+
 export function RequireAdmin({ children }: { children: React.ReactNode }) {
     const location = useLocation();
     const token = getAdminToken();

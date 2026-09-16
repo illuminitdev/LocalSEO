@@ -67,7 +67,7 @@ async function mergeGbpFromMapsHit(audit: any, hit: DataForSeoMapsItem) {
     const asData = await imageUrlToDataUrl(hit.mainImage);
     photoUrls = asData ? [asData] : [hit.mainImage];
   }
-  // Report UI prefers data:image URLs
+  
   photoUrls = (
     await Promise.all(photoUrls.map(async (u) => (await imageUrlToDataUrl(u)) || u))
   ).filter((u) => String(u || '').startsWith('data:image/'));
@@ -106,9 +106,9 @@ async function mergeGbpFromMapsHit(audit: any, hit: DataForSeoMapsItem) {
   };
 }
 
-/**
- * DataForSEO Maps: local pack rank + (when missed by Places search) real GBP NAP/photos.
- */
+
+
+
 async function enrichFromDataForSeo(audit: any) {
   if (!requireDataForSeoConfigured()) return;
 
@@ -137,7 +137,7 @@ async function enrichFromDataForSeo(audit: any) {
     });
   }
 
-  // Dedicated brand search so we can fill GBP when Places text search missed the listing
+  
   let brandItems: DataForSeoMapsItem[] = [];
   if (brandQuery) {
     brandItems = await fetchMapsLocalPack({
@@ -221,7 +221,7 @@ export const main: SQSHandler = async (event: SQSEvent) => {
 
       const lhMetrics = lighthouse && !(lighthouse as { skipped?: boolean }).skipped ? lighthouse : null;
 
-      // Full Audit: DataForSEO Maps rank + GBP NAP/photos (Places Get by place_id when available)
+      
       try {
         await enrichFromDataForSeo(audit);
       } catch (rankErr) {
@@ -294,7 +294,7 @@ export const main: SQSHandler = async (event: SQSEvent) => {
             geoFixes: audit.aiReport?.geoFixes || decks.geoFixes
           };
         } catch {
-          // ignore
+          
         }
       }
 

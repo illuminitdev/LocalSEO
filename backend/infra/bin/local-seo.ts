@@ -6,11 +6,11 @@ import * as cdk from 'aws-cdk-lib';
 import { LocalSeoApiStack } from '../lib/local-seo-api-stack';
 import { AuditWorkerStack } from '../lib/audit-worker-stack';
 
-/** Load backend/.env so deploy can inject Gemini/Places/Stripe/Google OAuth keys without committing them.
- *  Paid Gemini: GEMINI_API_KEY_PROD (-c stage=prod only).
- *  Dev Gemini: GEMINI_API_KEY (LocalSeoApi-dev only).
- *  Stripe test: STRIPE_SECRET_KEY / PUBLISHABLE / WEBHOOK_SECRET → stage=dev only.
- *  Stripe live: STRIPE_*_PROD → stage=prod only. Never commit secrets. */
+
+
+
+
+
 function loadBackendEnv() {
   const envPath = path.join(__dirname, '..', '..', '.env');
   if (!fs.existsSync(envPath)) return;
@@ -27,7 +27,7 @@ function loadBackendEnv() {
     ) {
       value = value.slice(1, -1);
     }
-    // Prefer backend/.env on deploy so rotated keys (e.g. Gemini) always win over stale shell env.
+    
     process.env[key] = value;
   }
 }
@@ -51,7 +51,7 @@ new LocalSeoApiStack(app, `LocalSeoApi-${stage}`, {
   description: `Local SEO (LocalPulse) API — ${stage}`,
 });
 
-/** Full Audit Docker worker — only when explicitly requested (requires Docker Desktop). */
+
 const deployAuditWorker =
   app.node.tryGetContext('deployAuditWorker') === 'true' ||
   app.node.tryGetContext('deployAuditWorker') === true;

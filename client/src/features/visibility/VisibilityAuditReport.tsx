@@ -81,7 +81,7 @@ export default function VisibilityAuditReport() {
             handleDownloadPdf().catch(() => undefined);
         }, 500);
         return () => window.clearTimeout(t);
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- run once when opened with ?download=1
+        
     }, [report, searchParams]);
 
     if (!report) {
@@ -165,7 +165,7 @@ export default function VisibilityAuditReport() {
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         } catch {
-            /* ignore */
+            
         }
     };
 

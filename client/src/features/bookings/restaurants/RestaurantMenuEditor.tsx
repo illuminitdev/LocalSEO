@@ -15,9 +15,9 @@ type MenuItem = {
 type Props = {
     org: any;
     onOrgUpdated?: (org: any) => void;
-    /** restaurant = food menu; priceList = dental/aesthetics enquiry catalog */
+    
     variant?: 'restaurant' | 'priceList';
-    /** all = form+list; form = add/upload only; list = items with edit/delete */
+    
     sections?: 'all' | 'form' | 'list';
 };
 

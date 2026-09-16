@@ -1,14 +1,14 @@
-/**
- * Server-side proxy to ZappSites Full Audit / ops audit APIs.
- * Keeps AUDIT_OPS_SECRET off the browser.
- */
+
+
+
+
 
 const PROD_API = 'https://dvj0p5k5d0.execute-api.us-east-1.amazonaws.com';
 
 export function zappSitesApiBase(): string {
     const fromEnv = String(process.env.ZAPP_SITES_API_BASE || '').trim().replace(/\/$/, '');
     if (fromEnv) return fromEnv;
-    // Phase 1: deep audits + worker live on ZappSites prod API
+    
     return PROD_API;
 }
 
@@ -84,7 +84,7 @@ export async function proxyZappSitesOps(
     };
 }
 
-/** Public PDF endpoint (no ops secret) — for published reports. */
+
 export async function proxyZappSitesPdf(auditId: string): Promise<ProxyResult> {
     const url = reportPdfUrl(auditId);
     const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/pdf' } });

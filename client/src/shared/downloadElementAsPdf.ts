@@ -16,10 +16,10 @@ const COLOR_PROPS = [
     'stroke'
 ] as const;
 
-/**
- * Inline computed RGB/RGBA colors onto the clone so PDF capture never reads
- * Tailwind v4 `oklch()` / `oklab()` values from stylesheets.
- */
+
+
+
+
 function inlineComputedColors(sourceRoot: HTMLElement, cloneRoot: HTMLElement) {
     const sourceNodes = [sourceRoot, ...Array.from(sourceRoot.querySelectorAll<HTMLElement>('*'))];
     const cloneNodes = [cloneRoot, ...Array.from(cloneRoot.querySelectorAll<HTMLElement>('*'))];
@@ -41,7 +41,7 @@ function inlineComputedColors(sourceRoot: HTMLElement, cloneRoot: HTMLElement) {
                 );
             }
         }
-        // Browsers usually resolve oklch → rgb in getComputedStyle; prefer those.
+        
         dst.style.color = computed.color;
         dst.style.backgroundColor = computed.backgroundColor;
         dst.style.borderTopColor = computed.borderTopColor;
@@ -51,7 +51,7 @@ function inlineComputedColors(sourceRoot: HTMLElement, cloneRoot: HTMLElement) {
     }
 }
 
-/** Capture an element to a multi-page A4 PDF, hiding `.pdf-hide` nodes during capture. */
+
 export async function downloadElementAsPdf(elementId: string, filename: string) {
     const el = document.getElementById(elementId);
     if (!el) throw new Error('Report content not found');

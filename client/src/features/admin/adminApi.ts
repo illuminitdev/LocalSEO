@@ -65,7 +65,7 @@ export async function adminDelete(path: string) {
     return res.json();
 }
 
-/* CRM Types & Helpers */
+
 
 export type SalesAgent = {
     id: string;
@@ -191,7 +191,7 @@ export async function createLeadActivity(leadId: string, data: {
     return res.activity;
 }
 
-/* Full Audit (deep / fullcrawl via ZappSites BFF) */
+
 
 export type FullAuditListItem = {
     id: string;
@@ -233,7 +233,7 @@ export async function deleteFullAudit(id: string) {
     return adminDelete(`/api/admin/full-audits/${encodeURIComponent(id)}`);
 }
 
-/** Email the company contact on the audit with the PDF report + score pitch. */
+
 export async function shareFullAuditEmail(id: string): Promise<{
     success: boolean;
     to: string;
@@ -243,10 +243,10 @@ export async function shareFullAuditEmail(id: string): Promise<{
     return adminPost(`/api/admin/full-audits/${encodeURIComponent(id)}/share-email`, {});
 }
 
-/**
- * Download PDF via Local SEO admin BFF (same-origin to API_BASE with admin auth).
- * Stays on the admin page — does not open/expose the ZappSites AWS PDF URL.
- */
+
+
+
+
 export async function downloadFullAuditPdf(id: string, filenameHint?: string) {
     const path = `/api/admin/full-audits/${encodeURIComponent(id)}/pdf`;
     const res = await fetch(`${API_BASE}${path}`, { headers: { ...adminAuthHeaders() } });

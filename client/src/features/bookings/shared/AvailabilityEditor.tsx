@@ -51,7 +51,7 @@ export type AvailabilitySavePayload = {
 
 type Props = {
     initialDateRules: DateRuleInput[];
-    /** Legacy recurring rules — ignored in UI; cleared on save so hours no longer repeat forever. */
+    
     initialWeeklyRules?: WeeklyRuleInput[];
     settings: AvailabilitySettings;
     onSettingsChange: (settings: AvailabilitySettings) => void;
@@ -66,7 +66,7 @@ function toDateKey(d: Date): string {
     return `${y}-${m}-${day}`;
 }
 
-/** Sunday–Saturday week containing `dateStr` (matches calendar grid). */
+
 function weekDatesFor(dateStr: string): string[] {
     const d = new Date(`${dateStr}T12:00:00`);
     if (Number.isNaN(d.getTime())) return [];
@@ -81,7 +81,7 @@ function weekDatesFor(dateStr: string): string[] {
     return out;
 }
 
-/** Today + future days in a Sun–Sat week (past days are never locked). */
+
 function remainingWeekDates(week: string[]): string[] {
     const today = todayStr();
     return week.filter((d) => d >= today);
@@ -221,7 +221,7 @@ export default function AvailabilityEditor({
         [dateSlots]
     );
 
-    /** Apply hours only to today + future days; strip open hours from past days in that week. */
+    
     const applySlotsToWeek = (week: string[], slots: DateSlot[], closed: Set<string>) => {
         const today = todayStr();
         setDateSlots((prev) => {
@@ -314,7 +314,7 @@ export default function AvailabilityEditor({
             n.delete(date);
             return n;
         });
-        // Restore this day from the rest of the week's hours if any
+        
         const week = weekDatesFor(date);
         const restored = slotsForWeek(dateSlots, week.filter((d) => d !== date));
         if (restored.length) {
@@ -382,7 +382,7 @@ export default function AvailabilityEditor({
 
         await onSave({
             settings,
-            // Clear forever-recurring weekly template — availability is week-specific date rules only
+            
             weeklyRules: [],
             dateRules: mapToDateRules(finalSlots, closedDates)
         });

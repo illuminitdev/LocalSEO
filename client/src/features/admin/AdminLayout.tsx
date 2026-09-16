@@ -76,7 +76,7 @@ export default function AdminLayout() {
         try {
             const n = Number(localStorage.getItem('lp.sidebarWidth.admin'));
             if (Number.isFinite(n)) return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(n)));
-        } catch { /* ignore */ }
+        } catch {  }
         return SIDEBAR_DEFAULT;
     });
     const [resizing, setResizing] = useState(false);
@@ -103,7 +103,7 @@ export default function AdminLayout() {
     useEffect(() => {
         try {
             localStorage.setItem('lp.sidebarWidth.admin', String(sidebarWidth));
-        } catch { /* ignore */ }
+        } catch {  }
     }, [sidebarWidth]);
 
     useEffect(() => {

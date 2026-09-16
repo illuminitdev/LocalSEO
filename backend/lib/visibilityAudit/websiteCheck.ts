@@ -21,9 +21,9 @@ function normalizeUrl(raw: string): string | null {
     }
 }
 
-/**
- * Light reachability check only — no deep crawl / Lighthouse.
- */
+
+
+
 export async function checkWebsite(rawUrl?: string | null): Promise<WebsiteCheckResult> {
     const normalized = normalizeUrl(rawUrl || '');
     if (!normalized) {
@@ -50,7 +50,7 @@ export async function checkWebsite(rawUrl?: string | null): Promise<WebsiteCheck
             headers: { 'User-Agent': 'LocalPulseVisibilityAudit/1.0' }
         }).catch(() => null);
 
-        // Some hosts reject HEAD — retry GET
+        
         if (!res || res.status === 405 || res.status === 501) {
             res = await fetch(normalized, {
                 method: 'GET',
