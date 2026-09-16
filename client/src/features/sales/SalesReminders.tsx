@@ -159,14 +159,17 @@ export default function SalesReminders() {
         setConfirmModalTask({ task, isCompleting });
     };
 
-    const handleConfirmToggleStatus = async (chosenStatus?: CrmTaskStatus) => {
+    const handleConfirmToggleStatus = async (chosenStatus?: CrmTaskStatus, statusNotes?: string) => {
         if (!confirmModalTask) return;
         const { task, isCompleting } = confirmModalTask;
         setModalLoading(true);
         setError('');
         try {
             const nextStatus: SalesTaskStatus = chosenStatus || (isCompleting ? 'completed' : 'pending');
-            await updateSalesTask(task.id, { status: nextStatus });
+            await updateSalesTask(task.id, {
+                status: nextStatus,
+                notes: statusNotes !== undefined ? statusNotes : undefined
+            });
             await loadData();
             setSuccessToast(
                 nextStatus === 'completed'
@@ -676,6 +679,7 @@ export default function SalesReminders() {
                     leadName={confirmModalTask.task.leadBusinessName}
                     priority={confirmModalTask.task.priority}
                     currentStatus={confirmModalTask.task.status}
+                    initialNotes={confirmModalTask.task.notes || ''}
                     isCompleting={confirmModalTask.isCompleting}
                     loading={modalLoading}
                     onConfirm={handleConfirmToggleStatus}

@@ -2,12 +2,10 @@ import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
     CheckCircle2,
-    Check,
     Clock,
     Phone,
     RefreshCw,
     Search,
-    Calendar,
     AlertCircle,
     ChevronRight,
     CheckSquare,
@@ -16,7 +14,11 @@ import {
     ArrowUpRight,
     X,
     Shield,
-    User
+    User,
+    Check,
+    RotateCcw,
+    XCircle,
+    FileText
 } from 'lucide-react';
 import TaskCompletionModal, { type CrmTaskStatus } from '../../shared/TaskCompletionModal';
 import {
@@ -25,20 +27,14 @@ import {
     type SalesTaskStatus,
     type SalesTaskType,
     type SalesSummaryMetrics,
+    type SalesUnifiedLead,
     fetchSalesTasks,
     updateSalesTask,
-    fetchSalesSummary
+    fetchSalesSummary,
+    fetchSalesLeads,
+    fetchSalesIndustries
 } from './salesApi';
-import { apiGet, cn } from '../../shared/utils';
-
-type SalesLead = {
-    id: string;
-    name: string;
-    phone: string;
-    email: string;
-    status: string;
-    nextFollowUpAt?: string | null;
-};
+import { cn } from '../../shared/utils';
 
 const TASK_TYPE_CONFIG: Record<SalesTaskType, { label: string; icon: string; bg: string; text: string }> = {
     prepare_audit: { label: 'Prepare Audit', icon: '📊', bg: 'bg-indigo-50 border-indigo-200', text: 'text-indigo-700' },
@@ -90,7 +86,9 @@ function formatDueDate(dueStr?: string | null) {
 export default function SalesQueue() {
     const [activeTab, setActiveTab] = useState<'tasks' | 'leads'>('tasks');
     const [tasks, setTasks] = useState<SalesLeadTask[]>([]);
-    const [leads, setLeads] = useState<SalesLead[]>([]);
+    const [leads, setLeads] = useState<SalesUnifiedLead[]>([]);
+    const [industries, setIndustries] = useState<Array<{ name: string; count: number }>>([]);
+    const [selectedLeadIndustry, setSelectedLeadIndustry] = useState<string>('all');
     const [summary, setSummary] = useState<SalesSummaryMetrics>({
         pendingTasksCount: 0,
         dueTodayTasksCount: 0,
@@ -119,7 +117,7 @@ export default function SalesQueue() {
         setLoading(true);
         setError('');
         try {
-            const [taskList, summaryData, leadsRes] = await Promise.all([
+            const [taskList, summaryData, leadsRes, indRes] = await Promise.all([
                 fetchSalesTasks({
                     status: statusFilter !== 'all' ? statusFilter : undefined,
                     priority: priorityFilter !== 'all' ? priorityFilter : undefined,
@@ -134,18 +132,22 @@ export default function SalesQueue() {
                     completedTasksCount: 0,
                     leadsCount: 0
                 })),
-                apiGet('/api/sales/leads').catch(() => ({ leads: [] }))
+                fetchSalesLeads({
+                    industry: selectedLeadIndustry !== 'all' ? selectedLeadIndustry : undefined
+                }).catch(() => []),
+                fetchSalesIndustries().catch(() => [])
             ]);
 
             setTasks(taskList);
             setSummary(summaryData);
-            setLeads(leadsRes.leads || []);
+            setLeads(leadsRes);
+            setIndustries(indRes);
         } catch (err: any) {
             setError(err.message || 'Failed to load work queue');
         } finally {
             setLoading(false);
         }
-    }, [statusFilter, priorityFilter, typeFilter, creatorFilter, dueTodayOnly]);
+    }, [statusFilter, priorityFilter, typeFilter, creatorFilter, dueTodayOnly, selectedLeadIndustry]);
 
     useEffect(() => {
         loadData();
@@ -158,14 +160,17 @@ export default function SalesQueue() {
         setConfirmModalTask({ task, isCompleting });
     };
 
-    const handleConfirmToggleStatus = async (chosenStatus?: CrmTaskStatus) => {
+    const handleConfirmToggleStatus = async (chosenStatus?: CrmTaskStatus, statusNotes?: string) => {
         if (!confirmModalTask) return;
         const { task, isCompleting } = confirmModalTask;
         setModalLoading(true);
         setError('');
         try {
             const nextStatus: SalesTaskStatus = chosenStatus || (isCompleting ? 'completed' : 'pending');
-            await updateSalesTask(task.id, { status: nextStatus });
+            await updateSalesTask(task.id, {
+                status: nextStatus,
+                notes: statusNotes !== undefined ? statusNotes : undefined
+            });
             await loadData();
             setSuccessToast(
                 nextStatus === 'completed'
@@ -199,50 +204,61 @@ export default function SalesQueue() {
 
     return (
         <div className="space-y-6 max-w-6xl mx-auto pb-12 animate-in fade-in duration-300">
-            {}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-xs">
+            {/* Quick Metrics Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold uppercase tracking-wider text-[#64748B]">Pending Tasks</span>
-                        <div className="w-8 h-8 rounded-xl bg-amber-50 text-[#F59E0B] flex items-center justify-center">
-                            <ListTodo className="w-4 h-4" />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[#64748B]">Pending</span>
+                        <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+                            <ListTodo className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-2">{summary.pendingTasksCount}</p>
-                    <p className="text-[11px] text-[#94A3B8] mt-0.5">Assigned by admin & self</p>
+                    <p className="text-2xl font-black text-[#0F172A] mt-1.5">{summary.pendingTasksCount}</p>
+                    <p className="text-[10px] text-[#94A3B8] mt-0.5">Not started</p>
                 </div>
 
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-xs">
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold uppercase tracking-wider text-[#64748B]">Due Today</span>
-                        <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
-                            <Clock className="w-4 h-4" />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800">In Progress</span>
+                        <div className="w-7 h-7 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                            <Clock className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-2">{summary.dueTodayTasksCount}</p>
-                    <p className="text-[11px] text-rose-600 font-semibold mt-0.5">Requires action today</p>
+                    <p className="text-2xl font-black text-amber-950 mt-1.5">{summary.inProgressTasksCount ?? 0}</p>
+                    <p className="text-[10px] text-amber-700 font-medium mt-0.5">Work started</p>
                 </div>
 
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-xs">
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold uppercase tracking-wider text-[#64748B]">Calls Logged Today</span>
-                        <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                            <Phone className="w-4 h-4" />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Completed</span>
+                        <div className="w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                            <CheckSquare className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-2">{summary.callsTodayCount}</p>
-                    <p className="text-[11px] text-[#94A3B8] mt-0.5">CRM activities logged</p>
+                    <p className="text-2xl font-black text-emerald-950 mt-1.5">{summary.completedTasksCount}</p>
+                    <p className="text-[10px] text-emerald-700 font-medium mt-0.5">Finished items</p>
                 </div>
 
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-xs">
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold uppercase tracking-wider text-[#64748B]">Completed Tasks</span>
-                        <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                            <CheckSquare className="w-4 h-4" />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-blue-800">Calls Today</span>
+                        <div className="w-7 h-7 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                            <Phone className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-2">{summary.completedTasksCount}</p>
-                    <p className="text-[11px] text-[#94A3B8] mt-0.5">Finished work items</p>
+                    <p className="text-2xl font-black text-blue-950 mt-1.5">{summary.callsTodayCount}</p>
+                    <p className="text-[10px] text-blue-700 font-medium mt-0.5">Calls logged</p>
+                </div>
+
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
+                    <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-rose-800">Due Today</span>
+                        <div className="w-7 h-7 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                            <Clock className="w-3.5 h-3.5" />
+                        </div>
+                    </div>
+                    <p className="text-2xl font-black text-rose-950 mt-1.5">{summary.dueTodayTasksCount}</p>
+                    <p className="text-[10px] text-rose-600 font-semibold mt-0.5">Action needed</p>
                 </div>
             </div>
 
@@ -315,15 +331,15 @@ export default function SalesQueue() {
                     </button>
                 </div>
 
-                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2">
                     <button
                         type="button"
                         disabled={loading}
                         onClick={() => loadData()}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-white px-3.5 py-2 text-xs font-bold text-[#475569] hover:bg-[#F8FAFC] disabled:opacity-50 transition-colors shadow-2xs"
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-bold text-[#475569] hover:bg-[#F8FAFC] disabled:opacity-50 transition-colors shadow-2xs"
                     >
                         <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
-                        Refresh
+                        <span>Refresh</span>
                     </button>
                 </div>
             </div>
@@ -454,59 +470,57 @@ export default function SalesQueue() {
                                                             <span>{typeConf.label}</span>
                                                         </span>
 
-                                                        {task.createdByRole === 'admin' ? (
-                                                            <span className="inline-flex items-center gap-1 rounded-md border border-purple-200 bg-purple-50 text-purple-700 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-                                                                <Shield className="w-3 h-3 text-purple-600" />
-                                                                Assigned by Admin
-                                                            </span>
-                                                        ) : (
-                                                            <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-100 text-slate-700 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-                                                                <User className="w-3 h-3 text-slate-500" />
-                                                                Self Created
-                                                            </span>
-                                                        )}
-
                                                         <span className={cn(
-                                                            'inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+                                                            'inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
                                                             prioConf.bg,
                                                             prioConf.text
                                                         )}>
                                                             <span className={cn('w-1.5 h-1.5 rounded-full', prioConf.dot)} />
-                                                            {prioConf.label}
+                                                            <span>{prioConf.label}</span>
                                                         </span>
 
                                                         {dueBadge && (
-                                                            <span className={cn(
-                                                                'inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px]',
-                                                                dueBadge.style
-                                                            )}>
-                                                                <Calendar className="w-3 h-3 shrink-0" />
-                                                                {dueBadge.text}
+                                                            <span className={cn('inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px]', dueBadge.style)}>
+                                                                <Clock className="w-3 h-3" />
+                                                                <span>{dueBadge.text}</span>
+                                                            </span>
+                                                        )}
+
+                                                        {task.createdByRole === 'admin' ? (
+                                                            <span className="inline-flex items-center gap-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                                <Shield className="w-2.5 h-2.5 text-purple-600" />
+                                                                Admin Assigned
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                                <User className="w-2.5 h-2.5 text-slate-500" />
+                                                                Self Task
                                                             </span>
                                                         )}
                                                     </div>
 
-                                                    <Link
-                                                        to={`/sales/leads/${encodeURIComponent(task.leadId)}`}
-                                                        className={cn(
-                                                            'text-sm font-bold hover:text-[#D97706] transition-colors block truncate',
-                                                            isDone ? 'text-emerald-950 font-bold' : 'text-[#0F172A]'
-                                                        )}
-                                                    >
+                                                    <h3 className={cn('text-sm font-black tracking-tight', isDone ? 'text-emerald-950 line-through' : 'text-[#0F172A]')}>
                                                         {task.title}
-                                                    </Link>
+                                                    </h3>
 
                                                     {task.notes && (
-                                                        <p className={cn("text-xs mt-1 line-clamp-2 leading-relaxed", isDone ? "text-emerald-800/70" : "text-[#64748B]")}>
-                                                            {task.notes}
-                                                        </p>
+                                                        <div className={cn(
+                                                            "mt-2 p-2.5 rounded-xl text-xs leading-relaxed border flex items-start gap-2",
+                                                            isDone
+                                                                ? "bg-emerald-100/50 text-emerald-950 border-emerald-200"
+                                                                : task.status === 'in_progress'
+                                                                ? "bg-amber-50/80 text-amber-950 border-amber-200/80"
+                                                                : "bg-slate-50 text-slate-700 border-slate-200/80"
+                                                        )}>
+                                                            <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                                                            <p className="whitespace-pre-wrap flex-1">{task.notes}</p>
+                                                        </div>
                                                     )}
                                                 </div>
 
-                                                {}
-                                                <div className="shrink-0 flex items-center gap-2">
+                                                <div className="flex items-center gap-2 shrink-0">
                                                     <span className={cn(
-                                                        "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border",
+                                                        "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg border shadow-2xs",
                                                         task.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300" :
                                                         task.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300" :
                                                         task.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200" :
@@ -514,7 +528,8 @@ export default function SalesQueue() {
                                                     )}>
                                                         {task.status === 'completed' && <Check className="w-3 h-3 text-emerald-600" />}
                                                         {task.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600" />}
-                                                        {task.status === 'cancelled' && <X className="w-3 h-3 text-rose-600" />}
+                                                        {task.status === 'cancelled' && <XCircle className="w-3 h-3 text-rose-600" />}
+                                                        {task.status === 'pending' && <RotateCcw className="w-3 h-3 text-slate-500" />}
                                                         <span className="capitalize">{task.status.replace('_', ' ')}</span>
                                                     </span>
 
@@ -586,12 +601,54 @@ export default function SalesQueue() {
             {}
             {activeTab === 'leads' && (
                 <div className="space-y-4">
+                    {/* Industry Category Filter Pills */}
+                    {industries.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
+                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mr-1">Industry:</span>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedLeadIndustry('all')}
+                                className={cn(
+                                    'px-3 py-1 rounded-xl text-xs font-bold transition-all',
+                                    selectedLeadIndustry === 'all'
+                                        ? 'bg-[#0F172A] text-white shadow-xs'
+                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                )}
+                            >
+                                All Industries
+                            </button>
+                            {industries.map((ind) => (
+                                <button
+                                    key={ind.name}
+                                    type="button"
+                                    onClick={() => setSelectedLeadIndustry(ind.name)}
+                                    className={cn(
+                                        'px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5',
+                                        selectedLeadIndustry === ind.name
+                                            ? 'bg-indigo-600 text-white shadow-xs'
+                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    )}
+                                >
+                                    <span>{ind.name}</span>
+                                    <span className={cn(
+                                        "text-[10px] px-1.5 py-0.2 rounded-full font-bold",
+                                        selectedLeadIndustry === ind.name ? "bg-white/20 text-white" : "bg-white text-slate-500"
+                                    )}>
+                                        {ind.count}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
                     <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
                         {!leads.length ? (
-                            <div className="p-12 text-center text-[#64748B]">
-                                <Users className="w-8 h-8 text-[#CBD5E1] mx-auto mb-2" />
-                                <p className="text-sm font-bold text-[#0F172A]">No leads in pipeline</p>
-                                <p className="text-xs mt-1">Your manager will assign growth audit leads from Admin CRM.</p>
+                            <div className="p-12 text-center text-[#64748B] space-y-3">
+                                <Users className="w-8 h-8 text-[#CBD5E1] mx-auto mb-1" />
+                                <p className="text-sm font-bold text-[#0F172A]">No assigned leads yet</p>
+                                <p className="text-xs text-slate-500">
+                                    When leads are assigned to you by the admin, they will appear here in your pipeline.
+                                </p>
                             </div>
                         ) : (
                             <ul className="divide-y divide-[#F1F5F9]">
@@ -599,37 +656,70 @@ export default function SalesQueue() {
                                     <li key={lead.id}>
                                         <Link
                                             to={`/sales/leads/${encodeURIComponent(lead.id)}`}
-                                            className="flex items-center gap-3.5 px-5 py-4 hover:bg-[#F8FAFC] group transition-colors"
+                                            className="flex flex-wrap items-center justify-between gap-4 px-5 py-4 hover:bg-[#F8FAFC] group transition-colors"
                                         >
-                                            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-[#FFFBEB] to-[#FEF3C7] text-[#D97706] border border-[#FED7AA] flex items-center justify-center shrink-0 shadow-2xs font-bold text-sm">
-                                                {lead.name ? lead.name.charAt(0).toUpperCase() : 'L'}
-                                            </div>
-                                            <div className="min-w-0 flex-1">
-                                                <div className="flex items-center gap-2">
-                                                    <p className="text-sm font-bold text-[#0F172A] truncate group-hover:text-[#D97706] transition-colors">
-                                                        {lead.name || 'Unnamed Lead'}
-                                                    </p>
-                                                    <span className="shrink-0 rounded-md bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#475569]">
-                                                        {STATUS_LABEL[lead.status] || lead.status}
-                                                    </span>
+                                            <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                                                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-[#FFFBEB] to-[#FEF3C7] text-[#D97706] border border-[#FED7AA] flex items-center justify-center shrink-0 shadow-2xs font-bold text-sm">
+                                                    {lead.businessName || lead.name ? (lead.businessName || lead.name || 'L').charAt(0).toUpperCase() : 'L'}
                                                 </div>
-                                                <p className="text-xs text-[#64748B] truncate mt-0.5">
-                                                    {lead.phone || 'No phone'}
-                                                    {lead.email ? ` · ${lead.email}` : ''}
-                                                </p>
-                                                {lead.nextFollowUpAt && (
-                                                    <p className="text-[11px] text-amber-700 font-medium mt-1 flex items-center gap-1">
-                                                        <Clock className="w-3 h-3" />
-                                                        Follow up: {new Date(lead.nextFollowUpAt).toLocaleString(undefined, {
-                                                            month: 'short',
-                                                            day: 'numeric',
-                                                            hour: '2-digit',
-                                                            minute: '2-digit'
-                                                        })}
-                                                    </p>
-                                                )}
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <p className="text-sm font-bold text-[#0F172A] truncate group-hover:text-indigo-600 transition-colors">
+                                                            {lead.businessName || lead.name || 'Unnamed Lead'}
+                                                        </p>
+                                                        {lead.industry && (
+                                                            <span className="shrink-0 rounded-md bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                                                                {lead.industry}
+                                                            </span>
+                                                        )}
+                                                        {lead.opportunityLevel && (
+                                                            <span className={cn(
+                                                                "shrink-0 rounded-md px-2 py-0.5 text-[10px] font-black uppercase tracking-wider",
+                                                                lead.opportunityLevel === 'high'
+                                                                    ? "bg-emerald-100 text-emerald-800"
+                                                                    : lead.opportunityLevel === 'low'
+                                                                      ? "bg-slate-100 text-slate-600"
+                                                                      : "bg-amber-100 text-amber-800"
+                                                            )}>
+                                                                {lead.opportunityLevel} Opp
+                                                            </span>
+                                                        )}
+                                                        <span className="shrink-0 rounded-md bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#475569]">
+                                                            {STATUS_LABEL[lead.status || ''] || lead.status || 'New'}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-3 text-xs text-[#64748B] flex-wrap mt-1">
+                                                        {lead.phone && (
+                                                            <span className="font-semibold text-slate-800 font-mono">
+                                                                📞 {lead.phone}
+                                                            </span>
+                                                        )}
+                                                        {lead.address && (
+                                                            <span className="truncate max-w-xs text-slate-500">
+                                                                📍 {lead.address}
+                                                            </span>
+                                                        )}
+                                                        {lead.website && (
+                                                            <span className="text-indigo-600 truncate max-w-xs">
+                                                                🌐 {lead.website.replace(/^https?:\/\/(www\.)?/, '')}
+                                                            </span>
+                                                        )}
+                                                    </div>
+
+                                                    {lead.leadOpportunity && (
+                                                        <p className="text-[11px] text-emerald-800 font-medium mt-1 bg-emerald-50/60 px-2 py-0.5 rounded-md border border-emerald-100 inline-block">
+                                                            💡 {lead.leadOpportunity}
+                                                        </p>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <ChevronRight className="w-4 h-4 text-[#CBD5E1] group-hover:text-[#0F172A] group-hover:translate-x-0.5 transition-all shrink-0" />
+
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <span className="text-xs font-bold text-indigo-600 group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
+                                                    View Lead CRM <ChevronRight className="w-3.5 h-3.5" />
+                                                </span>
+                                            </div>
                                         </Link>
                                     </li>
                                 ))}
@@ -648,6 +738,7 @@ export default function SalesQueue() {
                 leadName={confirmModalTask?.task.leadBusinessName}
                 priority={confirmModalTask?.task.priority}
                 currentStatus={confirmModalTask?.task.status}
+                initialNotes={confirmModalTask?.task.notes || ''}
                 isCompleting={confirmModalTask?.isCompleting ?? true}
                 loading={modalLoading}
             />
