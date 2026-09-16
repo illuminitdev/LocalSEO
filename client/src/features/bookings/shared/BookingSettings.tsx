@@ -110,9 +110,10 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         bufferMinutes: 15
     });
     const [org, setOrg] = useState<any>(null);
-    const industryId =
-        normalizeBookingIndustryId(org?.booking_industry_id) ||
-        (org?.trade_type ? getBookingPreset(org.trade_type).id : null);
+    const fromTrade = org?.trade_type ? getBookingPreset(org.trade_type).id : null;
+    const fromCol = normalizeBookingIndustryId(org?.booking_industry_id);
+    
+    const industryId = fromTrade === 'dentists' ? 'dentists' : fromCol || fromTrade;
     const isRestaurant = industryId === 'restaurants';
     const isDentists = industryId === 'dentists';
     const hasCatalogTab = isRestaurant || isDentists;
@@ -512,7 +513,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                             ...(isRestaurant
                                 ? [['menu', 'Menu', Utensils] as const]
                                 : isDentists
-                                  ? [['menu', 'Price list', ListOrdered] as const]
+                                  ? [['menu', 'Treatments', ListOrdered] as const]
                                   : []),
                             ['availability', 'Availability', Calendar],
                             ['integrations', 'Integrations', CreditCard],

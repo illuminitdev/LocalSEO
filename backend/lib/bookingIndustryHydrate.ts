@@ -137,7 +137,10 @@ function industryIdFromTradeTypeLabel(tradeType: string | null | undefined): Boo
     const byName = bookingIndustryPresets.find(
         (p) => p.name.toLowerCase() === lower || p.shortName.toLowerCase() === lower
     );
-    return byName ? byName.id : null;
+    if (byName) return byName.id;
+    
+    const inferred = getBookingPreset(raw).id;
+    return normalizeBookingIndustryId(inferred);
 }
 
 

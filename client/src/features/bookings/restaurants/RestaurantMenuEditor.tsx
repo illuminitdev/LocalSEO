@@ -148,7 +148,17 @@ export default function RestaurantMenuEditor({
             const data = await apiGet('/api/host/menu-items');
             setItems(data.items || []);
         } catch (e: any) {
-            setError(e.message || 'Could not load menu');
+            const raw = String(e.message || '');
+            if (
+                isPriceList &&
+                /restaurant|food order|menu and food/i.test(raw)
+            ) {
+                setError(
+                    'Could not load treatments for this clinic. Confirm industry is Dental & Aesthetics, then refresh. If it still fails, redeploy the API.'
+                );
+            } else {
+                setError(raw || (isPriceList ? 'Could not load treatments' : 'Could not load menu'));
+            }
         } finally {
             setLoading(false);
         }
@@ -204,7 +214,7 @@ export default function RestaurantMenuEditor({
     };
 
     const removeItem = async (id: string) => {
-        if (!confirm(isPriceList ? 'Delete this price list item?' : 'Delete this menu item?')) return;
+        if (!confirm(isPriceList ? 'Delete this treatment?' : 'Delete this menu item?')) return;
         try {
             await apiDelete(`/api/host/menu-items/${id}`);
             if (editingId === id) setEditingId(null);
@@ -323,17 +333,17 @@ export default function RestaurantMenuEditor({
     };
 
     if (loading) {
-        return <p className="text-sm text-[#64748B]">Loading {isPriceList ? 'price list' : 'menu'}…</p>;
+        return <p className="text-sm text-[#64748B]">Loading {isPriceList ? 'treatments' : 'menu'}…</p>;
     }
 
     const listBlock = showList && (
         <div className={cn(showForm ? 'space-y-2' : 'space-y-4')}>
             {!showForm && (
                 <div>
-                    <h2 className="font-bold text-[#0F172A]">{isPriceList ? 'Price list items' : 'Menu items'}</h2>
+                    <h2 className="font-bold text-[#0F172A]">{isPriceList ? 'Treatments' : 'Menu items'}</h2>
                     <p className="text-sm text-[#64748B] mt-1">
                         {isPriceList
-                            ? 'Treatments guests pick on the booking start page. Add more under the Price list tab.'
+                            ? 'Treatments guests pick on the booking start page. Add more under the Treatments tab.'
                             : 'Items guests can order.'}
                     </p>
                 </div>
@@ -342,8 +352,8 @@ export default function RestaurantMenuEditor({
                 <p className="text-sm text-[#64748B] border border-dashed border-[#E2E8F0] rounded-xl px-4 py-6 text-center">
                     {isPriceList
                         ? showForm
-                            ? 'No price list items yet. Upload a spreadsheet or add one above.'
-                            : 'No price list items yet — add them under the Price list tab.'
+                            ? 'No treatments yet. Upload a spreadsheet or add one above.'
+                            : 'No treatments yet — add them under the Treatments tab.'
                         : 'No menu items yet. Upload a spreadsheet or add one above.'}
                 </p>
             )}
@@ -567,10 +577,10 @@ export default function RestaurantMenuEditor({
             {showForm && (
                 <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
                     <div>
-                        <h2 className="font-bold text-[#0F172A]">{isPriceList ? 'Price list' : 'Food menu'}</h2>
+                        <h2 className="font-bold text-[#0F172A]">{isPriceList ? 'Treatments' : 'Food menu'}</h2>
                         <p className="text-sm text-[#64748B] mt-1">
                             {isPriceList
-                                ? 'Add treatments and prices (manual or CSV / Excel). They appear on Event types and on the guest booking start page.'
+                                ? 'Add treatments and prices (manual or CSV / Excel). They appear when guests choose Treatments on the booking page.'
                                 : 'Guests see these items when they choose Order food. Add manually or upload CSV / Excel.'}
                         </p>
                     </div>

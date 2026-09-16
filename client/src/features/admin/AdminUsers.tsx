@@ -15,6 +15,7 @@ import { adminDelete, adminGet, adminPost } from './adminApi';
 import { PLANS } from '../../shared/planCatalog';
 import {
     bookingIndustrySelectOptions,
+    bookingIndustryLabel,
     isBookingPlanId
 } from '../bookings/shared/bookingIndustryPresets';
 import { cn } from '../../shared/utils';
@@ -24,9 +25,16 @@ type AdminUser = {
     userId: string | null;
     email: string;
     name: string;
+    phone?: string | null;
     createdAt: string;
     platformRole?: 'customer' | 'sales_agent';
-    organization: { id: string; name: string; tradeType: string } | null;
+    organization: {
+        id: string;
+        name: string;
+        tradeType: string;
+        bookingIndustryId?: string | null;
+    } | null;
+    serviceLabel?: string | null;
     subscription: {
         planName: string;
         status: string;
@@ -73,6 +81,14 @@ function roleLabel(user: AdminUser) {
     return 'User';
 }
 
+function serviceOf(user: AdminUser) {
+    if (user.serviceLabel) return user.serviceLabel;
+    const id = user.organization?.bookingIndustryId;
+    if (id) return bookingIndustryLabel(id) || id;
+    const trade = String(user.organization?.tradeType || '').trim();
+    return trade || null;
+}
+
 export default function AdminUsers() {
     const [users, setUsers] = useState<AdminUser[]>([]);
     const [error, setError] = useState('');
@@ -117,11 +133,14 @@ export default function AdminUsers() {
             if (roleFilter === 'sales_agent' && role !== 'sales_agent') return false;
             if (roleFilter === 'invite' && role !== 'invite') return false;
             if (!q) return true;
+            const service = serviceOf(u) || '';
             return (
                 u.email.toLowerCase().includes(q) ||
                 (u.name || '').toLowerCase().includes(q) ||
+                (u.phone || '').toLowerCase().includes(q) ||
                 (u.organization?.name || '').toLowerCase().includes(q) ||
                 (u.subscription?.planName || '').toLowerCase().includes(q) ||
+                service.toLowerCase().includes(q) ||
                 roleLabel(u).toLowerCase().includes(q)
             );
         });
@@ -383,16 +402,26 @@ export default function AdminUsers() {
                                                     ))}
                                             </div>
                                             <p className="text-xs text-[#64748B] truncate mt-0.5">{user.email}</p>
+                                            {user.phone && (
+                                                <p className="text-xs text-[#94A3B8] truncate mt-0.5">{user.phone}</p>
+                                            )}
                                             {role !== 'sales_agent' && (
-                                                <p className="text-xs text-[#334155] mt-1.5">
-                                                    {user.subscription?.planName || 'No plan'}
-                                                    {user.subscription?.priceLabel
-                                                        ? ` · ${user.subscription.priceLabel}`
-                                                        : ''}
-                                                    {user.subscription?.periodEnd
-                                                        ? ` · ends ${fmtDate(user.subscription.periodEnd)}`
-                                                        : ''}
-                                                </p>
+                                                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[#334155]">
+                                                    <p>
+                                                        <span className="text-[#94A3B8]">Plan:</span>{' '}
+                                                        {user.subscription?.planName || 'No plan'}
+                                                        {user.subscription?.priceLabel
+                                                            ? ` · ${user.subscription.priceLabel}`
+                                                            : ''}
+                                                        {user.subscription?.periodEnd
+                                                            ? ` · ends ${fmtDate(user.subscription.periodEnd)}`
+                                                            : ''}
+                                                    </p>
+                                                    <p>
+                                                        <span className="text-[#94A3B8]">Service:</span>{' '}
+                                                        {serviceOf(user) || '—'}
+                                                    </p>
+                                                </div>
                                             )}
                                         </div>
                                         <ChevronRight className="w-5 h-5 text-[#CBD5E1] group-hover:text-[#F59E0B] shrink-0 hidden sm:block" />
