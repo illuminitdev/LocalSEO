@@ -858,7 +858,14 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 sets.push(`${col} = $${i++}`);
                 vals.push(value);
             }
-            if (!sets.length && industryRaw == null) return res.status(400).json({ error: 'No fields' });
+            if (!sets.length && industryRaw == null) {
+                const keys = Object.keys(body);
+                return res.status(400).json({
+                    error: keys.length
+                        ? `Unsupported fields: ${keys.join(', ')}. Redeploy the API if you are saving brand colors.`
+                        : 'No fields'
+                });
+            }
             if (!sets.length) {
                 const { rows } = await query('SELECT * FROM organizations WHERE id = $1', [(req as any).orgId]);
                 return res.json(rows[0]);
