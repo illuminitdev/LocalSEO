@@ -356,48 +356,79 @@ export default function SalonBookingFlow({
         );
     }
 
+    const whenStep = step === 'when';
+
     return (
         <div
-            className="min-h-screen py-6 px-4"
+            className={cn('min-h-screen px-4', whenStep ? 'py-3' : 'py-6')}
             style={{
                 ...orgBrandStyle(host),
                 background:
                     'linear-gradient(180deg, color-mix(in srgb, var(--brand-primary) 10%, #F8FAFC) 0%, #F8FAFC 40%, #F1F5F9 100%)'
             }}
         >
-            <div className={cn('mx-auto space-y-4', step === 'when' ? 'max-w-5xl' : 'max-w-lg')}>
+            <div className={cn('mx-auto', whenStep ? 'max-w-4xl space-y-2' : 'max-w-lg space-y-4')}>
                 <div
-                    className="text-white px-5 py-5 rounded-[1.75rem] shadow-[0_16px_40px_-28px_rgba(15,23,42,0.55)]"
+                    className={cn(
+                        'text-white rounded-[1.75rem] shadow-[0_16px_40px_-28px_rgba(15,23,42,0.55)]',
+                        whenStep ? 'px-4 py-3' : 'px-5 py-5'
+                    )}
                     style={{ background: 'var(--brand-secondary)' }}
                 >
-                    <div className="flex items-center gap-4">
+                    <div className={cn('flex items-center', whenStep ? 'gap-3' : 'gap-4')}>
                         {brand.logoUrl ? (
                             <img
                                 src={brand.logoUrl}
                                 alt={host.name}
                                 className="shrink-0 object-contain object-left rounded-xl bg-white p-2"
-                                style={{ height: 56, width: 'auto', maxWidth: 200, minWidth: 100 }}
+                                style={{
+                                    height: whenStep ? 40 : 56,
+                                    width: 'auto',
+                                    maxWidth: whenStep ? 140 : 200,
+                                    minWidth: whenStep ? 72 : 100
+                                }}
                             />
                         ) : (
-                            <div className="h-14 w-14 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
-                                <Scissors className="w-6 h-6" style={{ color: 'var(--brand-primary)' }} />
+                            <div
+                                className={cn(
+                                    'rounded-xl bg-white/10 flex items-center justify-center shrink-0',
+                                    whenStep ? 'h-10 w-10' : 'h-14 w-14'
+                                )}
+                            >
+                                <Scissors
+                                    className={whenStep ? 'w-5 h-5' : 'w-6 h-6'}
+                                    style={{ color: 'var(--brand-primary)' }}
+                                />
                             </div>
                         )}
                         <div className="min-w-0 flex-1">
-                            <p
-                                className="text-[10px] font-black uppercase tracking-widest"
-                                style={{ color: 'var(--brand-primary)' }}
-                            >
-                                Book an appointment
-                            </p>
-                            <h1 className="text-2xl font-black mt-1 tracking-tight">{host.name}</h1>
-                            <p className="text-sm text-white/70 mt-1">
-                                Pick a service, stylist, and time — deposits secure your slot.
-                            </p>
-                            {(host.phone || host.serviceArea) && (
-                                <p className="text-xs text-white/55 mt-2">
-                                    {[host.phone, host.serviceArea].filter(Boolean).join(' · ')}
+                            {!whenStep && (
+                                <p
+                                    className="text-[10px] font-black uppercase tracking-widest"
+                                    style={{ color: 'var(--brand-primary)' }}
+                                >
+                                    Book an appointment
                                 </p>
+                            )}
+                            <h1
+                                className={cn(
+                                    'font-black tracking-tight',
+                                    whenStep ? 'text-lg' : 'text-2xl mt-1'
+                                )}
+                            >
+                                {host.name}
+                            </h1>
+                            {!whenStep && (
+                                <>
+                                    <p className="text-sm text-white/70 mt-1">
+                                        Pick a service, stylist, and time — deposits secure your slot.
+                                    </p>
+                                    {(host.phone || host.serviceArea) && (
+                                        <p className="text-xs text-white/55 mt-2">
+                                            {[host.phone, host.serviceArea].filter(Boolean).join(' · ')}
+                                        </p>
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>
@@ -430,8 +461,13 @@ export default function SalonBookingFlow({
                     </p>
                 )}
 
-                <div className="bg-white rounded-[1.5rem] border border-[#E2E8F0] p-5 shadow-sm space-y-4">
-                    {step !== 'category' && (
+                <div
+                    className={cn(
+                        'bg-white rounded-[1.5rem] border border-[#E2E8F0] shadow-sm',
+                        whenStep ? 'overflow-hidden' : 'p-5 space-y-4'
+                    )}
+                >
+                    {step !== 'category' && step !== 'when' && (
                         <button
                             type="button"
                             onClick={goBack}
@@ -579,22 +615,27 @@ export default function SalonBookingFlow({
                     )}
 
                     {step === 'when' && service && (
-                        <div className="-mx-5 -mb-5 -mt-1">
-                            <div className="px-4 pb-2">
-                                <h2 className="font-black text-base text-[#0F172A]">Pick a date & time</h2>
-                                <p className="text-xs text-[#64748B] mt-0.5">
+                        <div>
+                            <div className="px-5 pt-4 pb-3 border-b border-[#F1F5F9] flex items-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={goBack}
+                                    className="inline-flex items-center gap-1 text-xs font-bold text-[#64748B] shrink-0"
+                                >
+                                    <ArrowLeft className="w-3.5 h-3.5" /> Back
+                                </button>
+                                <p className="text-sm font-bold text-[#0F172A] truncate min-w-0">
                                     {service.name}
                                     {stylist ? ` · ${stylist}` : ''}
                                 </p>
                             </div>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-[#E2E8F0] border-t border-[#E2E8F0]">
-                                <div className="p-3 sm:p-4">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <h3 className="font-bold text-[#0F172A] flex items-center gap-1.5 text-xs">
-                                            <Calendar className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary)' }} />
-                                            Pick a date
-                                        </h3>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-[#E2E8F0]">
+                                <div className="p-5">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h2 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
+                                            <Calendar className="w-4 h-4 text-[var(--brand-primary)]" /> Pick a date
+                                        </h2>
                                         <div className="flex gap-1">
                                             <button
                                                 type="button"
@@ -604,9 +645,9 @@ export default function SalonBookingFlow({
                                                         return { year: d.getFullYear(), month: d.getMonth() };
                                                     })
                                                 }
-                                                className="p-1 rounded-md border border-[#E2E8F0]"
+                                                className="p-1.5 rounded-lg border border-[#E2E8F0]"
                                             >
-                                                <ChevronLeft className="w-3.5 h-3.5" />
+                                                <ChevronLeft className="w-4 h-4" />
                                             </button>
                                             <button
                                                 type="button"
@@ -616,27 +657,27 @@ export default function SalonBookingFlow({
                                                         return { year: d.getFullYear(), month: d.getMonth() };
                                                     })
                                                 }
-                                                className="p-1 rounded-md border border-[#E2E8F0]"
+                                                className="p-1.5 rounded-lg border border-[#E2E8F0]"
                                             >
-                                                <ChevronRight className="w-3.5 h-3.5" />
+                                                <ChevronRight className="w-4 h-4" />
                                             </button>
                                         </div>
                                     </div>
-                                    <p className="text-xs font-bold text-[#64748B] mb-1.5">
+                                    <p className="text-sm font-bold text-[#64748B] mb-3">
                                         {new Date(month.year, month.month, 1).toLocaleString('en-GB', {
                                             month: 'long',
                                             year: 'numeric'
                                         })}
                                     </p>
-                                    <div className="grid grid-cols-7 gap-0.5 text-center text-[9px] font-bold text-[#64748B] mb-0.5">
+                                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-[#64748B] mb-1">
                                         {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
                                             <div key={d}>{d}</div>
                                         ))}
                                     </div>
-                                    <div className="grid grid-cols-7 gap-0.5">
+                                    <div className="grid grid-cols-7 gap-1">
                                         {days.map((d, i) => {
                                             if (!d.inMonth || !d.date) {
-                                                return <div key={`pad-${i}`} className="h-7" />;
+                                                return <div key={`pad-${i}`} />;
                                             }
                                             const selectable =
                                                 isDateSelectable(d.date, maxDaysAhead) && d.date >= todayStr();
@@ -652,12 +693,12 @@ export default function SalonBookingFlow({
                                                         setError('');
                                                     }}
                                                     className={cn(
-                                                        'h-7 rounded-md text-[11px] font-bold transition',
+                                                        'aspect-square rounded-lg text-sm font-bold transition',
                                                         selectable
-                                                            ? 'hover:bg-[var(--brand-primary)] hover:text-[var(--brand-secondary)] border border-[#E2E8F0] bg-[#F8FAFC]'
+                                                            ? 'hover:bg-[var(--brand-secondary)] hover:text-white border border-[#E2E8F0] bg-[#F8FAFC]'
                                                             : 'text-[#CBD5E1] cursor-not-allowed',
                                                         selectedDate === d.date &&
-                                                            'bg-[var(--brand-primary)] text-[var(--brand-secondary)]',
+                                                            'bg-[var(--brand-secondary)] text-white',
                                                         isPast && !selectable && 'opacity-40'
                                                     )}
                                                 >
@@ -668,9 +709,9 @@ export default function SalonBookingFlow({
                                     </div>
                                 </div>
 
-                                <div className="p-3 sm:p-4">
-                                    <h3 className="font-bold text-[#0F172A] flex items-center gap-1.5 text-xs mb-2">
-                                        <Clock className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary)' }} />
+                                <div className="p-5">
+                                    <h2 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm mb-4">
+                                        <Clock className="w-4 h-4 text-[var(--brand-primary)]" />
                                         {selectedDate
                                             ? new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-GB', {
                                                   weekday: 'long',
@@ -678,17 +719,17 @@ export default function SalonBookingFlow({
                                                   month: 'short'
                                               })
                                             : 'Select a date first'}
-                                    </h3>
+                                    </h2>
                                     {!selectedDate && (
-                                        <p className="text-xs text-[#64748B] py-4 text-center">
+                                        <p className="text-sm text-[#64748B] py-8 text-center">
                                             Choose any date on the calendar.
                                         </p>
                                     )}
                                     {selectedDate && loadingSlots && (
-                                        <p className="text-xs text-[#64748B] py-4 text-center">Loading times…</p>
+                                        <p className="text-sm text-[#64748B] py-8 text-center">Loading times…</p>
                                     )}
                                     {selectedDate && !loadingSlots && !hasAvailabilityRules && (
-                                        <p className="text-xs text-[#64748B] py-4 text-center">
+                                        <p className="text-sm text-[#64748B] py-8 text-center">
                                             No booking times set yet — the business hasn&apos;t configured their
                                             availability.
                                         </p>
@@ -697,11 +738,11 @@ export default function SalonBookingFlow({
                                         !loadingSlots &&
                                         hasAvailabilityRules &&
                                         daySlots.length === 0 && (
-                                            <p className="text-xs text-[#64748B] py-4 text-center">
+                                            <p className="text-sm text-[#64748B] py-8 text-center">
                                                 No times available on this day — try another date.
                                             </p>
                                         )}
-                                    <div className="grid grid-cols-2 gap-1.5">
+                                    <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
                                         {daySlots.map((slot) => (
                                             <button
                                                 key={slot.startAt}
@@ -711,24 +752,23 @@ export default function SalonBookingFlow({
                                                     setError('');
                                                 }}
                                                 className={cn(
-                                                    'py-1.5 px-1 rounded-lg border text-[11px] font-bold transition',
+                                                    'py-2.5 rounded-xl border text-sm font-bold transition',
                                                     selectedSlot?.startAt === slot.startAt
-                                                        ? 'bg-[var(--brand-primary)] text-[var(--brand-secondary)] border-[var(--brand-primary)]'
-                                                        : 'border-[#E2E8F0] hover:border-[color-mix(in_srgb,var(--brand-primary)_40%,transparent)]'
+                                                        ? 'bg-[var(--brand-secondary)] text-white border-[var(--brand-secondary)]'
+                                                        : 'border-[#E2E8F0] hover:border-[color-mix(in_srgb,var(--brand-secondary)_40%,transparent)]'
                                                 )}
                                             >
-                                                {slot.label ||
-                                                    new Date(slot.startAt).toLocaleTimeString('en-GB', {
-                                                        hour: '2-digit',
-                                                        minute: '2-digit'
-                                                    })}
+                                                {new Date(slot.startAt).toLocaleTimeString('en-GB', {
+                                                    hour: '2-digit',
+                                                    minute: '2-digit'
+                                                })}
                                             </button>
                                         ))}
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="border-t border-[#E2E8F0] p-3 sm:p-4 bg-[#FAFBFC]">
+                            <div className="border-t border-[#E2E8F0] p-5 bg-[#FAFBFC]">
                                 <button
                                     type="button"
                                     disabled={!selectedSlot}
@@ -740,7 +780,7 @@ export default function SalonBookingFlow({
                                         setError('');
                                         setStep('details');
                                     }}
-                                    className="w-full py-2.5 rounded-xl font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2 text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
+                                    className="w-full py-3 rounded-xl font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2 text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
                                 >
                                     Continue <ArrowRight className="w-4 h-4" />
                                 </button>
