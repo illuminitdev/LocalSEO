@@ -85,6 +85,22 @@ function typeLabel(type?: string | null) {
     return TYPE_LABELS[type] || type;
 }
 
+function getDistinctSourceSubtext(type?: string | null, source?: string | null): string | null {
+    if (!source) return null;
+    const cleanSource = source.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanType = (type || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanLabel = typeLabel(type).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    if (!cleanSource || cleanSource === cleanType || cleanSource === cleanLabel) {
+        return null;
+    }
+    // Also suppress generic labels that replicate the type
+    if (cleanSource.includes('growthquick') || cleanSource.includes('excelimport') || cleanSource.includes('checkout') || cleanSource.includes('manual')) {
+        return null;
+    }
+    return source;
+}
+
 function statusBadge(status?: string | null) {
     const raw = String(status || '').trim();
     const s = raw.toLowerCase().replace(/-/g, '_');
@@ -507,10 +523,10 @@ export default function AdminGrowthAuditLeads() {
                                                                 Audit
                                                             </span>
                                                         </div>
-                                                        {lead.source && lead.source !== lead.type ? (
+                                                        {getDistinctSourceSubtext(lead.type, lead.source) ? (
                                                             <div
                                                                 className="text-[10px] font-medium text-[#94A3B8] truncate mt-0.5"
-                                                                title={lead.source}
+                                                                title={lead.source || undefined}
                                                             >
                                                                 {lead.source}
                                                             </div>
@@ -665,10 +681,10 @@ export default function AdminGrowthAuditLeads() {
                                                                 </span>
                                                             )}
                                                         </div>
-                                                        {lead.source && lead.source !== lead.type ? (
+                                                        {getDistinctSourceSubtext(lead.type, lead.source) ? (
                                                             <div
                                                                 className="text-[10px] font-medium text-[#94A3B8] truncate max-w-[120px] mt-0.5"
-                                                                title={lead.source}
+                                                                title={lead.source || undefined}
                                                             >
                                                                 {lead.source}
                                                             </div>
