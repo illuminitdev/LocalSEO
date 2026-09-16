@@ -8,7 +8,7 @@ export function newPortalToken() {
     return randomBytes(24).toString('hex');
 }
 
-/** Issue or refresh a long-lived portal magic link for a client. */
+
 export async function ensureClientPortalToken(orgId: string, clientId: string) {
     const { rows: existing } = await query(
         `SELECT * FROM client_portal_tokens

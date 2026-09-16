@@ -162,7 +162,7 @@ export default function AdminFullAuditNew() {
                             return;
                         }
                     } catch {
-                        // keep polling
+                        
                     }
                 }
             }

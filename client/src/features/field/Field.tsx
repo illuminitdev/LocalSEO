@@ -124,7 +124,7 @@ function FieldJobDetail() {
 
     useEffect(() => {
         load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        
     }, [bookingId]);
 
     if (!booking && !error) {

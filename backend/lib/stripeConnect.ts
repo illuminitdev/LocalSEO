@@ -4,7 +4,7 @@ function frontendOrigin() {
     return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
 }
 
-/** Application fee in cents from deposit; `STRIPE_PLATFORM_FEE_BPS` (default 500 = 5%). */
+
 export function applicationFeeAmount(depositCents: number): number {
     const raw = parseInt(process.env.STRIPE_PLATFORM_FEE_BPS || '500', 10);
     const bps = Number.isFinite(raw) && raw >= 0 ? raw : 500;

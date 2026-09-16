@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-/**
- * Seed an active subscription for an organisation.
- * Usage: npm run seed:subscription -- --orgSlug=demo --planId=local-presence
- */
+
+
+
+
 import dotenv from 'dotenv';
 dotenv.config({ override: true });
 import { migrate, query } from '../lib/db';

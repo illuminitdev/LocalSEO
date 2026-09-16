@@ -59,7 +59,7 @@ export default function SalesLeadDetail() {
         loadLead();
     }, [loadLead]);
 
-    // Confirmation Modal State
+    
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask } | null>(null);
     const [modalLoading, setModalLoading] = useState(false);
 
@@ -117,7 +117,7 @@ export default function SalesLeadDetail() {
 
     return (
         <div className="space-y-6 max-w-5xl mx-auto pb-16 animate-in fade-in duration-300">
-            {/* Top Back Nav */}
+            {}
             <div className="flex items-center justify-between">
                 <Link
                     to="/sales"
@@ -140,7 +140,7 @@ export default function SalesLeadDetail() {
                 )}
             </div>
 
-            {/* Notification Messages */}
+            {}
             {error && (
                 <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
@@ -154,7 +154,7 @@ export default function SalesLeadDetail() {
                 </div>
             )}
 
-            {/* Lead Context Header Card */}
+            {}
             <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-xs">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0">
@@ -174,7 +174,7 @@ export default function SalesLeadDetail() {
                         <p className="text-xs text-[#64748B]">CRM Lead Profile & Activity History</p>
                     </div>
 
-                    {/* Quick Action Dialing & Log Call Box */}
+                    {}
                     <div className="flex items-center gap-2 shrink-0 flex-wrap">
                         {lead.phone && (
                             <a
@@ -195,7 +195,7 @@ export default function SalesLeadDetail() {
                     </div>
                 </div>
 
-                {/* Contact Attributes Bar */}
+                {}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-5 pt-5 border-t border-[#F1F5F9]">
                     <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl flex items-center gap-2.5">
                         <Phone className="w-4 h-4 text-[#F59E0B] shrink-0" />
@@ -250,11 +250,11 @@ export default function SalesLeadDetail() {
                 </div>
             </div>
 
-            {/* Two-Column CRM Workspace: Left = Tasks for this Lead, Right = Unified CRM Activity Timeline */}
+            {}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                {/* Left Column: Tasks */}
+                {}
                 <div className="lg:col-span-6 space-y-6">
-                    {/* Tasks Section */}
+                    {}
                     <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs">
                         <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2">
@@ -273,7 +273,7 @@ export default function SalesLeadDetail() {
                             </Link>
                         </div>
 
-                        {/* Task List */}
+                        {}
                         {!tasks.length ? (
                             <p className="text-xs text-[#94A3B8] text-center py-4">No tasks assigned for this lead yet.</p>
                         ) : (
@@ -313,7 +313,7 @@ export default function SalesLeadDetail() {
                                                 )}
                                             </div>
 
-                                            {/* Status Badge + Update Status Button */}
+                                            {}
                                             <div className="shrink-0 flex items-center gap-2">
                                                 <span className={cn(
                                                     "inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md border",
@@ -345,7 +345,7 @@ export default function SalesLeadDetail() {
                     </div>
                 </div>
 
-                {/* Right Column: Unified CRM Activity Timeline */}
+                {}
                 <div className="lg:col-span-6 space-y-6">
                     <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs">
                         <div className="flex items-center justify-between gap-2 mb-4 pb-3 border-b border-[#F1F5F9]">
@@ -376,7 +376,7 @@ export default function SalesLeadDetail() {
 
                                     return (
                                         <div key={act.id} className="relative pl-4">
-                                            {/* Dot */}
+                                            {}
                                             <span
                                                 className={cn(
                                                     'absolute -left-4 top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white',
@@ -435,7 +435,7 @@ export default function SalesLeadDetail() {
                 </div>
             </div>
 
-            {/* Task Completion Modal */}
+            {}
             <TaskCompletionModal
                 isOpen={!!confirmModalTask}
                 onClose={() => setConfirmModalTask(null)}

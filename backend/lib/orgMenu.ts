@@ -13,7 +13,7 @@ export function isRestaurantOrg(org: any): boolean {
     return resolveOrgIndustryId(org) === 'restaurants';
 }
 
-/** Orgs that manage a catalog in org_menu_items (restaurant food menu or dental price list). */
+
 export function isCatalogOrg(org: any): boolean {
     const id = resolveOrgIndustryId(org);
     return id === 'restaurants' || id === 'dentists';
@@ -46,8 +46,8 @@ export async function loadOrgForMenu(orgId: string) {
         err.status = 404;
         throw err;
     }
-    // Price list / menu catalog is allowed for dentists + restaurants (and harmless for others).
-    // Do NOT use assertRestaurantOrg here — that blocked Dental & Aesthetics.
+    
+    
     const resolved = resolveOrgIndustryId(rows[0]);
     if (resolved && !normalizeBookingIndustryId(rows[0].booking_industry_id)) {
         try {
@@ -57,7 +57,7 @@ export async function loadOrgForMenu(orgId: string) {
             ]);
             rows[0].booking_industry_id = resolved;
         } catch {
-            /* column may be missing on older DBs */
+            
         }
     }
     return rows[0];
@@ -241,7 +241,7 @@ export function publicMenuItem(row: any) {
     };
 }
 
-/** Label shown in Enquiry Type dropdown (name + price). */
+
 export function catalogEnquiryOptionLabel(item: { name: string; priceCents?: number; category?: string }) {
     const pounds = ((Number(item.priceCents) || 0) / 100).toFixed(2).replace(/\.00$/, '');
     const pricePart = `£${pounds}`;

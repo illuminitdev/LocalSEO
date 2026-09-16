@@ -1,6 +1,6 @@
-/**
- * Optional Lighthouse runner. Returns null metrics if Chrome is unavailable.
- */
+
+
+
 
 export async function runLighthouse(url) {
   try {

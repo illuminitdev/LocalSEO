@@ -55,7 +55,7 @@ export default function SalesLayout() {
         try {
             const n = Number(localStorage.getItem('lp.sidebarWidth.sales'));
             if (Number.isFinite(n)) return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(n)));
-        } catch { /* ignore */ }
+        } catch {  }
         return SIDEBAR_DEFAULT;
     });
     const [resizing, setResizing] = useState(false);
@@ -95,7 +95,7 @@ export default function SalesLayout() {
     useEffect(() => {
         try {
             localStorage.setItem('lp.sidebarWidth.sales', String(sidebarWidth));
-        } catch { /* ignore */ }
+        } catch {  }
     }, [sidebarWidth]);
 
     useEffect(() => {

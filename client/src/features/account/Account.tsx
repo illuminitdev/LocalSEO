@@ -112,7 +112,7 @@ export default function Account() {
             const hash = window.location.hash.replace(/^#/, '');
             if (hash && ACCOUNT_NAV.some((n) => n.id === hash)) return hash;
         } catch {
-            /* ignore */
+            
         }
         return 'profile';
     });
@@ -122,7 +122,7 @@ export default function Account() {
         try {
             window.history.replaceState(null, '', `#${id}`);
         } catch {
-            /* ignore */
+            
         }
     };
 
@@ -248,7 +248,7 @@ export default function Account() {
             })
             .catch((err: Error) => {
                 const msg = err.message || 'Could not load account';
-                // Stale session or unreachable API — send back to login instead of a broken Account page
+                
                 if (
                     msg === 'Failed to fetch' ||
                     /unauthorized|invalid token|jwt|401/i.test(msg)
@@ -289,7 +289,7 @@ export default function Account() {
             setDisplayName(data.user?.name || displayName);
             setAvatarUrl(data.user?.avatarUrl || avatarUrl);
 
-            // Phone is stored on the organization (shown under Personal information)
+            
             const updated = await apiPatch('/api/host/organization', { phone: org.phone || '' });
             setOrg((o) => ({
                 ...o,

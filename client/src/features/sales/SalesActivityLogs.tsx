@@ -40,14 +40,14 @@ export default function SalesActivityLogs() {
     const [error, setError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
 
-    // Inline Log Call Form state
+    
     const [selectedLeadId, setSelectedLeadId] = useState<string>(queryLeadId);
     const [disposition, setDisposition] = useState<string>('connected');
     const [callNotes, setCallNotes] = useState('');
     const [nextFollowUp, setNextFollowUp] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
-    // Filters for Timeline
+    
     const [selectedDispositionFilter, setSelectedDispositionFilter] = useState<string>('all');
     const [searchQuery, setSearchQuery] = useState('');
 
@@ -65,7 +65,7 @@ export default function SalesActivityLogs() {
             setActivities(activityList);
             let fetchedLeads: any[] = leadsRes.leads || [];
 
-            // If queryLeadId was provided in URL and is not in list, fetch its CRM profile specifically
+            
             if (queryLeadId && !fetchedLeads.some((l) => l.id === queryLeadId)) {
                 try {
                     const crmData = await fetchSalesLeadCrm(queryLeadId);
@@ -80,12 +80,12 @@ export default function SalesActivityLogs() {
                             ...fetchedLeads
                         ];
                     }
-                } catch { /* ignore fallback */ }
+                } catch {  }
             }
 
             setLeads(fetchedLeads);
 
-            // Maintain or select target lead
+            
             if (queryLeadId) {
                 setSelectedLeadId(queryLeadId);
             } else if (!selectedLeadId && fetchedLeads.length > 0) {
@@ -102,7 +102,7 @@ export default function SalesActivityLogs() {
         loadData();
     }, [loadData]);
 
-    // Handle Inline Log Call Submission
+    
     const handleLogCall = async (e: FormEvent) => {
         e.preventDefault();
         if (!selectedLeadId) {
@@ -151,7 +151,7 @@ export default function SalesActivityLogs() {
 
     return (
         <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-in fade-in duration-300">
-            {/* Header Banner */}
+            {}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-r from-[#0F172A] via-[#1E293B] to-[#334155] text-white p-6 rounded-3xl shadow-sm">
                 <div>
                     <div className="flex items-center gap-2.5">
@@ -180,7 +180,7 @@ export default function SalesActivityLogs() {
                 </div>
             </div>
 
-            {/* Notifications */}
+            {}
             {error && (
                 <div className="p-4 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-2xl">
                     {error}
@@ -193,9 +193,9 @@ export default function SalesActivityLogs() {
                 </div>
             )}
 
-            {/* 2-Column Layout: Left = Log Call & Activity Form Card, Right = Call Logs Feed */}
+            {}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                {/* Left Column: Log Call & Activity Card */}
+                {}
                 <div className="lg:col-span-5 bg-white border border-[#E2E8F0] rounded-3xl p-6 shadow-sm sticky top-6">
                     <div className="flex items-center gap-2.5 pb-4 mb-4 border-b border-[#F1F5F9]">
                         <div className="w-8 h-8 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-[#F59E0B]">
@@ -205,7 +205,7 @@ export default function SalesActivityLogs() {
                     </div>
 
                     <form onSubmit={handleLogCall} className="space-y-4">
-                        {/* Lead Selection */}
+                        {}
                         <div>
                             <label className="block text-[10px] font-extrabold uppercase tracking-wider text-[#94A3B8] mb-1.5">
                                 Target Lead *
@@ -266,7 +266,7 @@ export default function SalesActivityLogs() {
                             )}
                         </div>
 
-                        {/* Call Disposition */}
+                        {}
                         <div>
                             <label className="block text-[10px] font-extrabold uppercase tracking-wider text-[#94A3B8] mb-1.5">
                                 Call Disposition
@@ -290,7 +290,7 @@ export default function SalesActivityLogs() {
                             </div>
                         </div>
 
-                        {/* Notes */}
+                        {}
                         <div>
                             <label className="block text-[10px] font-extrabold uppercase tracking-wider text-[#94A3B8] mb-1.5">
                                 Call Notes & Discussion Summary *
@@ -305,7 +305,7 @@ export default function SalesActivityLogs() {
                             />
                         </div>
 
-                        {/* Schedule Next Follow-Up */}
+                        {}
                         <div>
                             <label className="block text-[10px] font-extrabold uppercase tracking-wider text-[#94A3B8] mb-1.5">
                                 Schedule Next Follow-Up (Optional)
@@ -321,7 +321,7 @@ export default function SalesActivityLogs() {
                             </p>
                         </div>
 
-                        {/* Submit Button */}
+                        {}
                         <button
                             type="submit"
                             disabled={submitting || !selectedLeadId || !callNotes.trim()}
@@ -333,9 +333,9 @@ export default function SalesActivityLogs() {
                     </form>
                 </div>
 
-                {/* Right Column: Activities Timeline & History */}
+                {}
                 <div className="lg:col-span-7 space-y-4">
-                    {/* Filters Bar */}
+                    {}
                     <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
                         <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[260px]">
                             <div className="relative flex-1 min-w-[180px]">
@@ -364,7 +364,7 @@ export default function SalesActivityLogs() {
                         </div>
                     </div>
 
-                    {/* Timeline List */}
+                    {}
                     <div className="bg-white border border-[#E2E8F0] rounded-3xl p-6 shadow-sm overflow-hidden">
                         <div className="flex items-center justify-between mb-4 pb-3 border-b border-[#F1F5F9]">
                             <div className="flex items-center gap-2">

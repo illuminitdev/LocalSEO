@@ -3,7 +3,7 @@ import type { RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 
-/** Allowed browser origins for CORS (comma-separated CORS_ORIGINS / CLIENT_ORIGIN). */
+
 function resolveCorsOrigins(): string[] | true {
     const raw = [
         process.env.CORS_ORIGINS || '',
@@ -34,7 +34,7 @@ function corsOptions(): CorsOptions {
     }
     return {
         origin(origin, callback) {
-            // Non-browser clients (curl, server-to-server, mobile native) send no Origin
+            
             if (!origin) return callback(null, true);
             if (allowed.includes(origin)) return callback(null, true);
             return callback(null, false);
@@ -48,7 +48,7 @@ function corsOptions(): CorsOptions {
 
 function securityHeaders(): RequestHandler {
     return helmet({
-        contentSecurityPolicy: false, // API-only; SPA hosts its own CSP
+        contentSecurityPolicy: false, 
         crossOriginEmbedderPolicy: false,
         crossOriginResourcePolicy: { policy: 'cross-origin' },
         referrerPolicy: { policy: 'no-referrer' },
@@ -58,20 +58,20 @@ function securityHeaders(): RequestHandler {
     });
 }
 
-/** Global soft limit — API Gateway throttling is the primary control on AWS. */
+
 function globalRateLimit() {
     return rateLimit({
         windowMs: 60 * 1000,
         max: Number(process.env.RATE_LIMIT_GLOBAL_MAX || 180),
         standardHeaders: true,
         legacyHeaders: false,
-        // Lambda / API Gateway multi-IP X-Forwarded-For trips default validations
+        
         validate: false,
         message: { error: 'Too many requests. Please try again shortly.' }
     });
 }
 
-/** Stricter limit on login / register / password reset / admin login. */
+
 function authRateLimit() {
     return rateLimit({
         windowMs: 15 * 60 * 1000,
@@ -83,7 +83,7 @@ function authRateLimit() {
     });
 }
 
-/** If API Gateway / serverless left body as a raw JSON string, parse it. */
+
 function parseJsonBodyFallback(): RequestHandler {
     return (req, _res, next) => {
         if (typeof req.body === 'string') {
@@ -94,7 +94,7 @@ function parseJsonBodyFallback(): RequestHandler {
                 try {
                     req.body = JSON.parse(raw);
                 } catch {
-                    /* leave string; route will 400 */
+                    
                 }
             }
         } else if (Buffer.isBuffer(req.body)) {

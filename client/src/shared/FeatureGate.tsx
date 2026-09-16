@@ -9,7 +9,7 @@ type Props = {
     children: ReactNode;
 };
 
-/** Hide unauthorized modules — redirect instead of showing upgrade/lock UI. */
+
 export default function FeatureGate({ feature, features, children }: Props) {
     const { loading, hasFeature, hasAllFeatures } = useEntitlements();
 

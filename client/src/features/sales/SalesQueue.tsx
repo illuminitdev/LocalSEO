@@ -103,11 +103,11 @@ export default function SalesQueue() {
     const [error, setError] = useState('');
     const [successToast, setSuccessToast] = useState<string | null>(null);
 
-    // Confirmation Modal State
+    
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask; isCompleting: boolean } | null>(null);
     const [modalLoading, setModalLoading] = useState(false);
 
-    // Task filters
+    
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [priorityFilter, setPriorityFilter] = useState<string>('all');
     const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -199,7 +199,7 @@ export default function SalesQueue() {
 
     return (
         <div className="space-y-6 max-w-6xl mx-auto pb-12 animate-in fade-in duration-300">
-            {/* Quick Metrics Bar */}
+            {}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-xs">
                     <div className="flex items-center justify-between">
@@ -246,7 +246,7 @@ export default function SalesQueue() {
                 </div>
             </div>
 
-            {/* Success Notification */}
+            {}
             {successToast && (
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 flex items-center justify-between gap-3 text-sm text-emerald-800 animate-in fade-in slide-in-from-top-2 duration-200">
                     <div className="flex items-center gap-3">
@@ -263,7 +263,7 @@ export default function SalesQueue() {
                 </div>
             )}
 
-            {/* Error Message */}
+            {}
             {error && (
                 <div className="rounded-2xl border border-red-200 bg-red-50 p-4 flex items-center gap-3 text-sm text-red-700">
                     <AlertCircle className="w-5 h-5 shrink-0 text-red-600" />
@@ -271,7 +271,7 @@ export default function SalesQueue() {
                 </div>
             )}
 
-            {/* Main Tabs Navigation */}
+            {}
             <div className="flex items-center justify-between border-b border-[#E2E8F0] pb-3 gap-4 flex-wrap">
                 <div className="flex items-center gap-2">
                     <button
@@ -328,10 +328,10 @@ export default function SalesQueue() {
                 </div>
             </div>
 
-            {/* Content: Assigned Tasks Tab */}
+            {}
             {activeTab === 'tasks' && (
                 <div className="space-y-4">
-                    {/* Filters Bar */}
+                    {}
                     <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
                         <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
                             <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -406,7 +406,7 @@ export default function SalesQueue() {
                         </button>
                     </div>
 
-                    {/* Task List */}
+                    {}
                     <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
                         {loading && !tasks.length ? (
                             <div className="p-12 text-center text-[#64748B]">
@@ -442,7 +442,7 @@ export default function SalesQueue() {
                                             )}
                                         >
                                             <div className="flex items-start justify-between gap-3">
-                                                {/* Main Task Info */}
+                                                {}
                                                 <div className="min-w-0 flex-1">
                                                     <div className="flex flex-wrap items-center gap-2 mb-1.5">
                                                         <span className={cn(
@@ -503,7 +503,7 @@ export default function SalesQueue() {
                                                     )}
                                                 </div>
 
-                                                {/* Status Badge + Update Status Button */}
+                                                {}
                                                 <div className="shrink-0 flex items-center gap-2">
                                                     <span className={cn(
                                                         "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border",
@@ -529,7 +529,7 @@ export default function SalesQueue() {
                                                 </div>
                                             </div>
 
-                                            {/* Lead Context Bar */}
+                                            {}
                                             <div className="mt-2.5 pt-2 border-t border-[#F1F5F9] flex flex-wrap items-center justify-between gap-2 text-xs text-[#64748B]">
                                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                                                     <span className="font-bold text-[#0F172A]">
@@ -583,7 +583,7 @@ export default function SalesQueue() {
                 </div>
             )}
 
-            {/* Content: My Leads & Pipeline Tab */}
+            {}
             {activeTab === 'leads' && (
                 <div className="space-y-4">
                     <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
@@ -639,7 +639,7 @@ export default function SalesQueue() {
                 </div>
             )}
 
-            {/* Task Completion Modal */}
+            {}
             <TaskCompletionModal
                 isOpen={!!confirmModalTask}
                 onClose={() => setConfirmModalTask(null)}

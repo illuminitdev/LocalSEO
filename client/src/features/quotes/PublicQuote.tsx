@@ -29,7 +29,7 @@ export default function PublicQuote() {
 
     useEffect(() => {
         load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        
     }, [token]);
 
     useEffect(() => {
@@ -37,7 +37,7 @@ export default function PublicQuote() {
             setInfo('Payment received — refreshing quote…');
             load().then(() => setInfo('Quote approved and deposit paid. Thank you!'));
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        
     }, [searchParams, token]);
 
     const approve = async () => {

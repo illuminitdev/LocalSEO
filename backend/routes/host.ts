@@ -349,7 +349,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const forceNew = Boolean(createNew);
             let orgIdForUpdate: string | null = forceNew ? null : (req as any).orgId || null;
 
-            // If current org already has a completed booking service, adding another must create new.
+            
             if (orgIdForUpdate && !forceNew) {
                 const { rows: existing } = await query(
                     `SELECT trade_type,
@@ -393,7 +393,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         try {
             const userId = (req as any).user?.id;
             if (!userId) {
-                // Dev slug-only auth: return current org if any
+                
                 if (!(req as any).orgId) return res.json({ organizations: [] });
                 const data = await loadDashboard((req as any).orgId);
                 const org = data?.organization;
@@ -488,7 +488,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    /** Leave booking board only — keeps settings, Stripe, bookings, and event types. */
+    
     router.post('/logout', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) {
@@ -509,7 +509,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    /** Re-enter booking board with existing saved data (after booking logout). */
+    
     router.post('/resume', async (req: Request, res: Response) => {
         try {
             const userId = (req as any).user?.id;
@@ -568,7 +568,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    /** @deprecated Prefer /logout — no longer deletes org data. */
+    
     router.post('/reset', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) {
@@ -968,7 +968,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 ]
             );
             const client = rows[0];
-            // Address on PATCH no longer overwrites first property — use property endpoints
+            
             const { rows: props } = await query(
                 `SELECT * FROM client_properties WHERE client_id = $1 ORDER BY created_at ASC`,
                 [client.id]
@@ -1050,7 +1050,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Media ---
+    
     router.post('/media/presign', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
@@ -1067,7 +1067,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Field ---
+    
     router.get('/field/jobs', async (req: Request, res: Response) => {
         try {
             const jobs = await listFieldJobs((req as any).orgId, (req as any).user);
@@ -1134,7 +1134,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Inbox / SMS ---
+    
     router.get('/inbox', async (req: Request, res: Response) => {
         try {
             const threads = await listThreads((req as any).orgId);
@@ -1173,7 +1173,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Team ---
+    
     router.get('/team', async (req: Request, res: Response) => {
         try {
             const members = await listTeamMembers((req as any).orgId);
@@ -1212,7 +1212,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Costing ---
+    
     router.get('/bookings/:id/costing', async (req: Request, res: Response) => {
         try {
             const data = await jobProfitSummary((req as any).orgId, String(req.params.id));
@@ -1283,7 +1283,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Marketing ---
+    
     router.patch('/marketing/site', async (req: Request, res: Response) => {
         try {
             const org = await updateSiteContent((req as any).orgId, req.body || {});
@@ -1664,7 +1664,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             );
             const updated = (await query('SELECT * FROM bookings WHERE id = $1', [booking.id])).rows[0];
 
-            // Return immediately so the UI does not hang / fail while Stripe invoice APIs run
+            
             res.json({ booking: updated, invoicePending: Boolean(stripeClient) });
 
             fireZapierEvent((req as any).orgId, 'booking.completed', {

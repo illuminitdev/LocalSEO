@@ -1,8 +1,8 @@
-/**
- * Booking industry presets — keep in sync with
- * zappsites/frontend/src/data/bookingDemosData.js and
- * client/src/features/bookings/bookingIndustryPresets.ts
- */
+
+
+
+
+
 
 export const BOOKING_INDUSTRY_IDS = [
     'plumbing',
@@ -629,7 +629,7 @@ export function getBookingPreset(industryId: string | null | undefined): Booking
     if (idLower.includes('garden') || idLower.includes('landscap') || idLower.includes('lawn')) {
         return bookingIndustryPresets[6];
     }
-    // Dental & Aesthetics before salon/aesthetic — trade_type "Dental & Aesthetics" contains both words
+    
     if (
         idLower.includes('dentist') ||
         idLower.includes('dental') ||

@@ -6,7 +6,7 @@ type Props = {
     title: string;
 };
 
-/** Simple legal / static page shell matching auth look. */
+
 export function LegalPage({ title, children }: Props) {
     return (
         <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A]">

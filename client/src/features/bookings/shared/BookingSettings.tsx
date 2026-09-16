@@ -72,7 +72,7 @@ function poundsToCents(value: string) {
     return Math.round(n * 100);
 }
 
-/** Allows £0 (e.g. free consultation slots). Returns null if invalid. */
+
 function poundsToCentsAllowZero(value: string): number | null {
     const trimmed = String(value || '').trim();
     if (!trimmed) return null;

@@ -20,7 +20,7 @@ interface TaskCompletionModalProps {
     priority?: string | null;
     assignedTo?: string | null;
     currentStatus?: CrmTaskStatus | string;
-    isCompleting?: boolean; // backwards compatibility fallback
+    isCompleting?: boolean; 
     loading?: boolean;
 }
 
@@ -47,7 +47,7 @@ export default function TaskCompletionModal({
                 className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-md w-full p-6 relative animate-in zoom-in-95 duration-150 space-y-5"
                 onClick={(e) => e.stopPropagation()}
             >
-                {/* Close Button */}
+                {}
                 <button
                     type="button"
                     onClick={onClose}
@@ -57,7 +57,7 @@ export default function TaskCompletionModal({
                     <X className="w-5 h-5" />
                 </button>
 
-                {/* Header Title */}
+                {}
                 <div>
                     <h3 className="text-lg font-bold text-slate-900">
                         Update Task Status
@@ -67,7 +67,7 @@ export default function TaskCompletionModal({
                     </p>
                 </div>
 
-                {/* Task Preview Card */}
+                {}
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                         <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
@@ -111,14 +111,14 @@ export default function TaskCompletionModal({
                     </div>
                 </div>
 
-                {/* 4 Status Choice Buttons */}
+                {}
                 <div className="space-y-2 pt-1">
                     <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
                         Choose New Status:
                     </label>
 
                     <div className="grid grid-cols-2 gap-2">
-                        {/* Completed */}
+                        {}
                         <button
                             type="button"
                             onClick={() => handleSelectStatus('completed')}
@@ -142,7 +142,7 @@ export default function TaskCompletionModal({
                             </div>
                         </button>
 
-                        {/* In Progress */}
+                        {}
                         <button
                             type="button"
                             onClick={() => handleSelectStatus('in_progress')}
@@ -166,7 +166,7 @@ export default function TaskCompletionModal({
                             </div>
                         </button>
 
-                        {/* Pending */}
+                        {}
                         <button
                             type="button"
                             onClick={() => handleSelectStatus('pending')}
@@ -190,7 +190,7 @@ export default function TaskCompletionModal({
                             </div>
                         </button>
 
-                        {/* Cancelled */}
+                        {}
                         <button
                             type="button"
                             onClick={() => handleSelectStatus('cancelled')}
@@ -216,7 +216,7 @@ export default function TaskCompletionModal({
                     </div>
                 </div>
 
-                {/* Footer Cancel */}
+                {}
                 <div className="flex items-center justify-end pt-2">
                     <button
                         type="button"

@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { KeyRound } from 'lucide-react';
 import { getMustChangePassword } from '../auth/auth';
 
-/** Soft mandatory notice — does not block dashboard or other services. */
+
 export default function MustChangePasswordBanner() {
     const location = useLocation();
     const [show, setShow] = useState(() => getMustChangePassword());

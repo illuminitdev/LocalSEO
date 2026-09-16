@@ -1,8 +1,8 @@
-/**
- * Booking industry presets — keep in sync with
- * zappsites/frontend/src/data/bookingDemosData.js and
- * client/src/features/bookings/shared/bookingIndustryPresets.ts
- */
+
+
+
+
+
 
 export const BOOKING_INDUSTRY_IDS = [
     'plumbing',
@@ -690,7 +690,7 @@ export function bookingIndustryLabel(id: string | null | undefined): string | nu
     return preset?.name || id;
 }
 
-/** Checkout / payment picker labels — same rooted list as booking demos. */
+
 export function bookingIndustrySelectOptions(): { id: BookingIndustryId; label: string }[] {
     return bookingIndustryPresets.map((p) => ({ id: p.id, label: p.shortName }));
 }
@@ -718,7 +718,7 @@ export function getBookingPreset(industryId: string | null | undefined): Booking
     if (idLower.includes('garden') || idLower.includes('landscap') || idLower.includes('lawn')) {
         return bookingIndustryPresets[6];
     }
-    // Dental & Aesthetics before salon/aesthetic — trade_type "Dental & Aesthetics" contains both words
+    
     if (
         idLower.includes('dentist') ||
         idLower.includes('dental') ||

@@ -24,7 +24,7 @@ function saveReport(reportData: any, businessName: string, reportDate: string) {
             JSON.stringify({ reportData, businessName, reportDate, savedAt: new Date().toISOString() })
         );
     } catch {
-        /* ignore */
+        
     }
 }
 

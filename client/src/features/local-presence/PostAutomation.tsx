@@ -84,9 +84,9 @@ export default function PostAutomation() {
             {error && <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>}
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                {/* Workspace Column */}
+                {}
                 <div className="lg:col-span-7 space-y-6">
-                    {/* Settings Card */}
+                    {}
                     <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-sm">
                         <h2 className="text-lg font-semibold mb-6 flex items-center gap-2">
                             <Tag className="w-5 h-5 text-[#F59E0B]" /> Post Parameters
@@ -151,7 +151,7 @@ export default function PostAutomation() {
                         </div>
                     </div>
 
-                    {/* Save draft card */}
+                    {}
                     <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-sm">
                         <h2 className="text-lg font-semibold mb-6 flex items-center gap-2">
                             <Calendar className="w-5 h-5 text-[#D97706]" /> Save draft
@@ -197,7 +197,7 @@ export default function PostAutomation() {
                     </div>
                 </div>
 
-                {/* Preview Column */}
+                {}
                 <div className="lg:col-span-5 relative">
                     <div>
                         <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -205,7 +205,7 @@ export default function PostAutomation() {
                         </h2>
 
                         <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-md overflow-hidden flex flex-col">
-                            {/* Image Gen Area */}
+                            {}
                             <div className="relative h-64 bg-[#F1F5F9] flex flex-col items-center justify-center border-b border-[#E2E8F0] p-4 text-center">
                                 {generatedImage ? (
                                     <img src={generatedImage} alt="Generated" className="w-full h-full object-cover absolute inset-0" />
@@ -225,7 +225,7 @@ export default function PostAutomation() {
                                 )}
                             </div>
 
-                            {/* Text Area */}
+                            {}
                             <div className="p-5">
                                 <div className="flex items-center gap-3 mb-3">
                                     <div className="w-10 h-10 rounded-full bg-[#0F172A] text-white flex items-center justify-center font-bold">
@@ -259,7 +259,7 @@ export default function PostAutomation() {
                                 )}
                             </div>
 
-                            {/* Preview CTA */}
+                            {}
                             <div className="p-4 bg-[#F8FAFC] border-t border-[#E2E8F0]">
                                 <div className="w-full py-2 bg-white border border-[#0F172A] text-[#0F172A] font-bold text-center rounded-lg text-sm">
                                     {ctaValue}

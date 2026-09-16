@@ -57,7 +57,7 @@ function saveGapAnalysis(data: any) {
     try {
         sessionStorage.setItem(GAP_STORAGE_KEY, JSON.stringify(data));
     } catch {
-        /* ignore */
+        
     }
 }
 
@@ -65,7 +65,7 @@ function clearGapAnalysis() {
     try {
         sessionStorage.removeItem(GAP_STORAGE_KEY);
     } catch {
-        /* ignore */
+        
     }
 }
 
@@ -84,7 +84,7 @@ function saveTrackedKeywordsLocal(list: TrackedKeyword[]) {
     try {
         sessionStorage.setItem(KEYWORDS_STORAGE_KEY, JSON.stringify(list));
     } catch {
-        /* ignore */
+        
     }
 }
 
@@ -219,13 +219,13 @@ export default function RankTracker() {
                 }
                 setHasAuditReport(Boolean(loadVisibilityAuditReport()));
             } catch {
-                /* business may be gated — form still works manually */
+                
             }
         })();
         return () => {
             cancelled = true;
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once from profile/stats
+        
     }, []);
 
     useEffect(() => {
@@ -234,7 +234,7 @@ export default function RankTracker() {
         }
     }, [searchParams]);
 
-    // If we restored a grid but still have no coords, geocode from the profile address.
+    
     useEffect(() => {
         if (!gridData.length) return;
         if (typeof lat === 'number' && typeof lng === 'number') return;

@@ -1,12 +1,12 @@
-// @ts-nocheck
-/**
- * Map crawl (+ optional lighthouse) results onto checklist Pass/Fail.
- */
+
+
+
+
 
 function setCheck(checksById, id, status, evidence = '', notes = '') {
   const c = checksById.get(id);
   if (!c) return;
-  // Do not overwrite operator-edited values if already pass/fail and source is operator
+  
   if (c.source === 'operator' && (c.status === 'pass' || c.status === 'fail') && c.notes) {
     return;
   }
@@ -66,7 +66,7 @@ export function applyWebsiteChecks(
     return checks;
   }
 
-  // §3 Basic
+  
   setCheck(byId, 'web_basic_1', 'pass', `Fetched ${crawl.finalUrl} (${crawl.pageCount} pages)`);
   {
     const r = passFail(crawl.https, 'HTTPS enabled', 'Site is not on HTTPS');
@@ -124,7 +124,7 @@ export function applyWebsiteChecks(
     setCheck(byId, 'web_basic_10', emergency ? 'pass' : 'fail', emergency ? 'Emergency language found' : 'No emergency CTA language');
   }
 
-  // Homepage clarity
+  
   setCheck(
     byId,
     'web_home_1',
@@ -161,7 +161,7 @@ export function applyWebsiteChecks(
     `Title: ${home.title || '(empty)'}`
   );
 
-  // Service pages
+  
   for (const c of checks) {
     if (c.section !== 'service_pages') continue;
     const terms = c.matchTerms || [c.label.replace(/ page$/i, '').toLowerCase()];
@@ -169,7 +169,7 @@ export function applyWebsiteChecks(
     setCheck(byId, c.id, found ? 'pass' : 'fail', found ? `Matched: ${terms.join(', ')}` : `No page/signal for: ${terms.join(', ')}`);
   }
 
-  // Location pages
+  
   for (const c of checks) {
     if (!String(c.id).startsWith('loc_') || String(c.id).startsWith('loc_qual_')) continue;
     const terms = c.matchTerms || [];
@@ -204,7 +204,7 @@ export function applyWebsiteChecks(
     `Internal pages discovered: ${crawl.pageCount}`
   );
 
-  // On-page
+  
   setCheck(byId, 'onpage_1', home.title ? 'pass' : 'fail', home.title || 'Missing title');
   setCheck(
     byId,
@@ -237,7 +237,7 @@ export function applyWebsiteChecks(
   );
   setCheck(byId, 'onpage_11', home.hasCta ? 'pass' : 'fail', 'Strong CTA');
 
-  // AI questions
+  
   for (const c of checks) {
     if (!String(c.id).startsWith('ai_q_')) continue;
     const ok = questionAnswered(corpus, c.question || c.label);
@@ -256,7 +256,7 @@ export function applyWebsiteChecks(
     'FAQ / structured answers'
   );
 
-  // Technical
+  
   if (lighthouse?.performance != null) {
     setCheck(
       byId,
@@ -303,7 +303,7 @@ export function applyWebsiteChecks(
   }
   setCheck(byId, 'tech_12', home.hasSchema || crawl.pages.some((p) => p.hasSchema) ? 'pass' : 'fail', 'Schema / JSON-LD scan');
 
-  // Extended AEO / GEO crawl checks
+  
   setCheck(
     byId,
     'aeo_1',
@@ -356,7 +356,7 @@ export function applyWebsiteChecks(
     'Entity / about / authority language'
   );
 
-  // NAP consistency vs claimed / GBP when available
+  
   const digits = (s) => String(s || '').replace(/\D/g, '');
   const claimedPhone = digits(context.phone || '');
   const gbpPhone = digits(context.gbpLookup?.phone || '');
@@ -399,7 +399,7 @@ export function applyWebsiteChecks(
     setCheck(byId, 'nap_2', 'unknown', 'No address provided for NAP compare');
   }
 
-  // tech_13–15 aliases for GEO schema depth (if present in checklist)
+  
   setCheck(
     byId,
     'tech_13',
@@ -419,7 +419,7 @@ export function applyWebsiteChecks(
     crawl.llmsTxtFound ? 'llms.txt found' : 'llms.txt missing'
   );
 
-  // Conversion
+  
   setCheck(byId, 'conv_1', byId.get('web_basic_6')?.status === 'pass' ? 'pass' : 'fail', 'Phone visibility');
   setCheck(byId, 'conv_2', home.telLinks.length > 0 ? 'pass' : 'fail', 'tel: links');
   setCheck(byId, 'conv_3', byId.get('web_basic_10')?.status === 'pass' ? 'pass' : 'fail', 'Emergency CTA');
@@ -459,7 +459,7 @@ export function applyWebsiteChecks(
   );
   setCheck(byId, 'conv_13', byId.get('conv_10')?.status === 'pass' ? 'pass' : 'fail', 'Accreditations');
 
-  // Prospect-side competitor gap crawl fields
+  
   for (const c of checks) {
     if (c.section !== 'competitor_gap' || c.source !== 'crawl') continue;
     if (c.label.includes('Website — Prospect')) {

@@ -1,4 +1,4 @@
-/** Keep in sync with backend/lib/planCatalog.js */
+
 
 export const FEATURE_KEYS = ['bookings', 'local_presence', 'local_growth', 'reporting'] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

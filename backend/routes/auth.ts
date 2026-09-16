@@ -40,7 +40,7 @@ function hashResetToken(token: string) {
     return createHash('sha256').update(token).digest('hex');
 }
 
-/** ZappSites portal_invites.password_hash = SHA-256 hex of temp password */
+
 function hashInvitePassword(password: string) {
     return createHash('sha256').update(password).digest('hex');
 }
@@ -128,7 +128,7 @@ async function claimPortalInvite(email: string, password: string) {
         [org.id, email, invite.stripe_subscription_id || null]
     );
 
-    // Booking plans: invite column → Payment API (live Stripe) → local Stripe key.
+    
     if (isBookingPlanId(String(invite.plan_id || ''))) {
         let industryId = normalizeBookingIndustryId(invite.booking_industry_id);
         if (!industryId) {
@@ -268,7 +268,7 @@ router.post('/login', async (req: Request, res: Response) => {
         });
     } catch (err: any) {
         console.error('Login error:', err);
-        // Shared RDS without ZappSites 011 yet — treat as invalid credentials
+        
         if (err?.message && /portal_invites|does not exist/i.test(err.message)) {
             return res.status(401).json({
                 error: 'Invalid email or password.',

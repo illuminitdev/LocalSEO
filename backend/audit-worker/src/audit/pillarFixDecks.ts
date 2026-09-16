@@ -1,6 +1,6 @@
-/**
- * Deterministic Local SEO NAP / brand inconsistency cards from GBP + crawl + business inputs.
- */
+
+
+
 export function buildLocalSeoInconsistencies(audit) {
   const b = audit?.business || {};
   const g = audit?.gbpLookup || {};

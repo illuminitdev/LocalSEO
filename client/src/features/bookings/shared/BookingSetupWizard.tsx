@@ -40,7 +40,7 @@ type Props = {
     linkedBusiness?: LinkedBusiness;
     busy: boolean;
     error: string;
-    /** Industry from ZappSites checkout / org hydrate — required to lock setup */
+    
     initialIndustryId?: string | null;
     onRefreshIndustry?: () => void;
     onComplete: (form: SetupForm) => Promise<void>;
@@ -85,7 +85,7 @@ export default function BookingSetupWizard({
     onComplete
 }: Props) {
     const { features, entitlementsDisabled } = useEntitlements();
-    /** SEO profile CTA only when they have booking + other (non-booking) plan features */
+    
     const hasNonBookingFeatures =
         entitlementsDisabled ||
         features.some((f) => f === 'local_presence' || f === 'local_growth' || f === 'reporting');
@@ -97,7 +97,7 @@ export default function BookingSetupWizard({
     const [path, setPath] = useState<'choose' | 'manual' | 'from-profile'>(
         hasSavedBusiness ? 'choose' : 'manual'
     );
-    // 0 = locked industry + Next, 1 = details, 2 = deposit
+    
     const [step, setStep] = useState(0);
     const [form, setForm] = useState<SetupForm>(() => baseForm(checkoutIndustryId || null));
 
@@ -236,7 +236,7 @@ export default function BookingSetupWizard({
                                 ))}
                             </div>
 
-                            {/* Single locked industry — never a multi-industry grid */}
+                            {}
                             <div className="rounded-2xl border-2 border-[#F59E0B] bg-[#FFFBEB] p-4">
                                 <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-[#D97706]">
                                     <Lock className="w-3.5 h-3.5" /> Locked from payment

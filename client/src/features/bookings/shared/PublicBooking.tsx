@@ -637,7 +637,7 @@ export function CustomerBookingFlow({
                         {stepIndicator(step)}
                     </div>
 
-                    {/* Step 1: Schedule */}
+                    {}
                     {step === 'schedule' && (
                         <div>
                             <div className="px-5 pt-4 flex flex-wrap gap-2">
@@ -813,7 +813,7 @@ export function CustomerBookingFlow({
                         </div>
                     )}
 
-                    {/* Step 2: Details */}
+                    {}
                     {step === 'details' && (selectedSlot || intakeMode === 'request') && (
                         <div className="p-5 space-y-4">
                             <div className="rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 text-sm">
@@ -988,7 +988,7 @@ export function CustomerBookingFlow({
                         </div>
                     )}
 
-                    {/* Step 3: Payment */}
+                    {}
                     {step === 'payment' && selectedSlot && (
                         <div className="p-5 space-y-4">
                             <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">

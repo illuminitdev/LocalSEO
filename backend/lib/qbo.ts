@@ -98,7 +98,7 @@ export async function disconnectQbo(orgId: string) {
     );
 }
 
-/** Push a minimal sales receipt / journal note for a paid invoice. Best-effort stub. */
+
 export async function pushPaidInvoiceToQbo(orgId: string, invoice: any, booking?: any) {
     try {
         const { rows } = await query(

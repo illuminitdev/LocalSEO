@@ -1,10 +1,10 @@
 import { query } from './db';
 
-/** Owners/admins can act on any job; techs only on assigned jobs. */
+
 export function assertFieldAccess(user: { id?: string; role?: string } | null | undefined, booking: any) {
     const role = String(user?.role || '').toLowerCase();
     if (!user?.id) {
-        // Dev slug-only host without JWT — allow
+        
         if (!role) return;
         throw Object.assign(new Error('Login required for field actions'), { status: 401 });
     }
@@ -13,7 +13,7 @@ export function assertFieldAccess(user: { id?: string; role?: string } | null | 
         if (booking.assigned_user_id && String(booking.assigned_user_id) === String(user.id)) return;
         throw Object.assign(new Error('You can only update jobs assigned to you'), { status: 403 });
     }
-    // Unknown role: treat like tech if assigned
+    
     if (booking.assigned_user_id && String(booking.assigned_user_id) === String(user.id)) return;
     if (role === 'owner' || role === 'admin') return;
     throw Object.assign(new Error('Not allowed to update this job'), { status: 403 });

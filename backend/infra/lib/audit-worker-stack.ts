@@ -12,7 +12,7 @@ import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export type AuditWorkerStage = 'dev' | 'prod';
 
-/** Same shared ZappSites VPC / RDS / SG IDs as LocalSeoApiStack. */
+
 const STAGE_CONFIG: Record<
   AuditWorkerStage,
   {
@@ -41,14 +41,14 @@ const STAGE_CONFIG: Record<
 
 export interface AuditWorkerStackProps extends cdk.StackProps {
   stage: AuditWorkerStage;
-  /** Always true for handoff — attach to API-owned queue; never create a parallel empty queue. */
+  
   reuseExistingQueue?: boolean;
 }
 
-/**
- * Updates existing CloudFormation stack `ZappsitesAuditWorker-{stage}`.
- * Reuses SQS `zappsites-{stage}-audit-jobs` and shared RDS audits / audit_jobs.
- */
+
+
+
+
 export class AuditWorkerStack extends cdk.Stack {
   readonly auditQueue: sqs.IQueue;
 
@@ -69,7 +69,7 @@ export class AuditWorkerStack extends cdk.Stack {
         queueUrl,
       });
     } else {
-      // Greenfield only — do not use for prod handoff.
+      
       const deadLetterQueue = new sqs.Queue(this, 'AuditDlq', {
         queueName: `zappsites-${stage}-audit-dlq`,
         retentionPeriod: cdk.Duration.days(14),
@@ -150,7 +150,7 @@ export class AuditWorkerStack extends cdk.Stack {
       'GeminiSecret',
       `Zappsites/${stage}/GEMINI_API_KEY`
     );
-    // Places: prefer deploy-time GOOGLE_PLACES_API_KEY (demo key) when set; else stage secret
+    
     const placesFromEnv = String(process.env.GOOGLE_PLACES_API_KEY || '').trim();
     const placesSecret = placesFromEnv
       ? null
@@ -160,7 +160,7 @@ export class AuditWorkerStack extends cdk.Stack {
           `Zappsites/${stage}/GOOGLE_PLACES_API_KEY`
         );
 
-    // Paid DataForSEO — Full Audit local-pack (prod secrets; env fallback for local synth)
+    
     const dataForSeoLogin =
       stage === 'prod'
         ? secretsmanager.Secret.fromSecretNameV2(
@@ -203,11 +203,11 @@ export class AuditWorkerStack extends cdk.Stack {
       workerLambda.addEnvironment('DATAFORSEO_LOGIN', process.env.DATAFORSEO_LOGIN);
       workerLambda.addEnvironment('DATAFORSEO_PASSWORD', process.env.DATAFORSEO_PASSWORD);
     }
-    /**
-     * When reusing the API-owned queue, do NOT create/update an EventSourceMapping in this stack.
-     * Prod already has an Enabled mapping on zappsites-{stage}-audit-jobs; CFN previously tracked a
-     * stale UUID and UPDATE 404'd. Leaving the live mapping outside CFN avoids duplicate consumers.
-     */
+    
+
+
+
+
     if (!reuseExistingQueue) {
       workerLambda.addEventSource(
         new lambdaEventSources.SqsEventSource(this.auditQueue, {

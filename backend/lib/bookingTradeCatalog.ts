@@ -1,6 +1,6 @@
-/**
- * Per-industry booking board templates — seeded from bookingIndustryPresets.
- */
+
+
+
 
 import {
     getBookingPreset,
@@ -15,7 +15,7 @@ export type TradeEventTypeTemplate = {
     durationMinutes: number;
     sortOrder: number;
     kind: 'standard' | 'emergency';
-    /** When true, seed with deposit_cents / total_cents = 0 */
+    
     freeDeposit?: boolean;
 };
 
@@ -89,9 +89,9 @@ const GENERIC: TradeBookingCatalogEntry = {
     ]
 };
 
-/**
- * Resolve catalog from booking industry id and/or trade_type label.
- */
+
+
+
 export function getTradeBookingCatalog(
     tradeType: string | null | undefined,
     bookingIndustryId?: string | null

@@ -23,7 +23,7 @@ function scrubFalsePhoneClaims(text) {
     .trim();
 }
 
-/** Drop AI claims that contradict measured crawl / NAP / check facts before publish. */
+
 function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards, localRank }) {
   const out = { ...parsed };
   if (phoneVisibleOnCrawl) {
@@ -60,7 +60,7 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
       };
     }
   }
-  // Always force measured NAP cards
+  
   if (Array.isArray(napCards) && napCards.length) {
     out.localSeoFixes = {
       ...(out.localSeoFixes || {}),
@@ -68,7 +68,7 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
     };
   }
 
-  // Force Maps / competitor names from measured localRank only (no invented clinics)
+  
   const measuredMaps = (Array.isArray(localRank?.topResults) ? localRank.topResults : [])
     .filter((r) => r?.name && !r.isProspect)
     .slice(0, 3)
@@ -122,9 +122,9 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
   return out;
 }
 
-/**
- * Client-facing local presence report (GBP / NAP / reviews / Maps first).
- */
+
+
+
 export async function generateAiReport(audit) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -217,9 +217,9 @@ Include 4-6 findings and exactly 3 priorityFixes.`;
   throw new Error(lastError?.message || 'Gemini report generation failed');
 }
 
-/**
- * Deep crawl Local SEO / AEO / GEO report (PPT-style narrative).
- */
+
+
+
 export async function generateDeepAiReport(audit) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -394,7 +394,7 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
       const localSeoFixes = {
         ...fallbacks.localSeoFixes,
         ...(parsed.localSeoFixes || {}),
-        // Always keep measured NAP cards — AI must not invent phone/address mismatches
+        
         inconsistencies: napCards.length
           ? napCards
           : Array.isArray(parsed.localSeoFixes?.inconsistencies) &&

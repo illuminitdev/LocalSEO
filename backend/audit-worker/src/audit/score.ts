@@ -7,9 +7,9 @@ function statusWeight(status) {
   return null;
 }
 
-/**
- * Score a set of checks for a pillar: (passes / assessed) * 10, rounded.
- */
+
+
+
 export function scoreChecks(checks) {
   let sum = 0;
   let count = 0;
@@ -31,7 +31,7 @@ export function scoreChecks(checks) {
   };
 }
 
-/** Pass-rate as 0–100 for triad buckets. */
+
 export function scoreChecks100(checks) {
   let sum = 0;
   let count = 0;
@@ -75,11 +75,11 @@ function collectBySection(checks: any[] = []): Record<string, any[]> {
   return bySection;
 }
 
-/**
- * PPT-style triad: Local SEO 40% / AEO 30% / GEO 30% → overall /100.
- * Optional localRank caps GEO/AEO when the business is missing from the Maps pack
- * for the measured “near me / best service” query.
- */
+
+
+
+
+
 export function computeTriadScore(checks = [], context: { localRank?: any } = {}) {
   const bySection = collectBySection(checks);
   const id = (prefix) => checks.filter((c) => String(c.id).startsWith(prefix));
@@ -129,7 +129,7 @@ export function computeTriadScore(checks = [], context: { localRank?: any } = {}
 
   if (rank) {
     if (!inPack) {
-      // Not in the measured Maps pack → GEO cannot stay high from on-site checks alone
+      
       geo = { ...geo, score: Math.min(geo.score, 42) };
       aeo = { ...aeo, score: Math.min(aeo.score, 52) };
       visibilityNote =
@@ -197,10 +197,10 @@ export function computeTriadScore(checks = [], context: { localRank?: any } = {}
   };
 }
 
-/**
- * Compute Excel §13 style scores from checklist results, plus PPT triad for deep audits.
- * Pass `{ localRank }` so GEO/AEO reflect Maps pack presence for the measured local query.
- */
+
+
+
+
 export function computeScore(checks = [], context: { localRank?: any } = {}) {
   const bySection = collectBySection(checks);
 

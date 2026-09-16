@@ -157,7 +157,7 @@ export default function BookingPlots() {
                         (t < now && b.job_status !== 'requested' && b.job_status !== 'in_progress'))
                 );
             }
-            // upcoming: scheduled / confirmed future (not request-only unless already scheduled)
+            
             return (
                 !cancelled &&
                 t >= now &&
@@ -236,7 +236,7 @@ export default function BookingPlots() {
         setError('');
         try {
             const result = await apiPost(`/api/host/bookings/${id}/complete`, {});
-            // Update UI immediately from the complete response so a later refresh failure cannot undo success
+            
             if (result.booking) {
                 setData((prev: any) => {
                     if (!prev?.bookings) return prev;
@@ -251,14 +251,14 @@ export default function BookingPlots() {
             try {
                 await load();
             } catch {
-                // Job is already done — ignore dashboard refresh blips
+                
             }
         } catch (e: any) {
             setError(e.message === 'Failed to fetch' ? 'Could not reach server — make sure the backend is running on port 5000.' : e.message);
             try {
                 await load();
             } catch {
-                /* ignore */
+                
             }
         } finally {
             setBusy('');

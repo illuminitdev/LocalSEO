@@ -109,7 +109,7 @@ export default function Layout() {
         try {
             const n = Number(localStorage.getItem('lp.sidebarWidth.user'));
             if (Number.isFinite(n)) return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(n)));
-        } catch { /* ignore */ }
+        } catch {  }
         return SIDEBAR_DEFAULT;
     });
     const [resizing, setResizing] = useState(false);
@@ -123,7 +123,7 @@ export default function Layout() {
                 setAvatarUrl(data.user?.avatarUrl || data.user?.avatar_url || '');
             })
             .catch(() => {
-                /* ignore — sidebar still works */
+                
             });
     }, []);
 
@@ -148,7 +148,7 @@ export default function Layout() {
     useEffect(() => {
         try {
             localStorage.setItem('lp.sidebarWidth.user', String(sidebarWidth));
-        } catch { /* ignore */ }
+        } catch {  }
     }, [sidebarWidth]);
 
     useEffect(() => {
@@ -297,7 +297,7 @@ export default function Layout() {
 
     return (
         <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden" style={brandStyle}>
-            {/* Desktop sidebar */}
+            {}
             <aside
                 className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden print:hidden"
                 style={{ width: sidebarWidth }}
@@ -323,7 +323,7 @@ export default function Layout() {
                 </div>
             </aside>
 
-            {/* Mobile drawer */}
+            {}
             {navOpen && (
                 <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
                     <button

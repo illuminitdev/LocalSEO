@@ -50,7 +50,7 @@ import SalesActivityLogs from './features/sales/SalesActivityLogs';
 import SalesLeadDetail from './features/sales/SalesLeadDetail';
 import SalesAccount from './features/sales/SalesAccount';
 
-/** Old /booking/settings URL → /booking?panel=settings */
+
 function BookingSettingsRedirect() {
   const location = useLocation();
   const search = location.search.replace(/^\?/, '');
@@ -82,8 +82,8 @@ export default function App() {
           <Route path="/admin/services" element={<AdminServices />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
         </Route>
-        {/* Always show login on / and /login — do not auto-jump to last dashboard/admin.
-            Refresh on /dashboard or /admin still stays logged in via RequireAuth / RequireAdmin. */}
+        {
+}
         <Route path="/" element={<Login />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Navigate to="/" replace />} />
