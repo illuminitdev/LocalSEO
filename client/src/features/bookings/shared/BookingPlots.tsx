@@ -1,11 +1,11 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Calendar, CheckCircle2, Copy, ExternalLink, LogIn, Plus, Play, QrCode, Settings, User, Wrench } from 'lucide-react';
-import { apiGet, apiPost, formatCents, cn, restrictPhoneInput } from '../../shared/utils';
+import { apiGet, apiPost, formatCents, cn, restrictPhoneInput } from '../../../shared/utils';
 import { setBookingOrgSlug } from './bookingUtils';
 import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
 import BookingSettingsPanel from './BookingSettings';
-import FoodOrdersHostPanel from './FoodOrdersHostPanel';
+import FoodOrdersHostPanel from '../restaurants/FoodOrdersHostPanel';
 import { normalizeBookingIndustryId } from './bookingIndustryPresets';
 
 function intakeAnswersList(raw: unknown): { key: string; label: string; value: string }[] {
@@ -157,7 +157,7 @@ export default function BookingPlots() {
                         (t < now && b.job_status !== 'requested' && b.job_status !== 'in_progress'))
                 );
             }
-            // upcoming: scheduled / confirmed future (not request-only unless already scheduled)
+            
             return (
                 !cancelled &&
                 t >= now &&
@@ -236,7 +236,7 @@ export default function BookingPlots() {
         setError('');
         try {
             const result = await apiPost(`/api/host/bookings/${id}/complete`, {});
-            // Update UI immediately from the complete response so a later refresh failure cannot undo success
+            
             if (result.booking) {
                 setData((prev: any) => {
                     if (!prev?.bookings) return prev;
@@ -251,14 +251,14 @@ export default function BookingPlots() {
             try {
                 await load();
             } catch {
-                // Job is already done — ignore dashboard refresh blips
+                
             }
         } catch (e: any) {
             setError(e.message === 'Failed to fetch' ? 'Could not reach server — make sure the backend is running on port 5000.' : e.message);
             try {
                 await load();
             } catch {
-                /* ignore */
+                
             }
         } finally {
             setBusy('');
@@ -472,26 +472,32 @@ export default function BookingPlots() {
 
     return (
         <div className="w-full space-y-4">
-            <div className="bg-[#0F172A] rounded-2xl text-white px-4 py-4 lg:px-6 lg:py-5">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                    <div>
+            <div className="bg-[#0F172A] rounded-2xl text-white px-4 py-4 lg:px-6 lg:py-5 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
                         <p className="text-xs text-white/50 uppercase tracking-widest">Booking page</p>
                         <h1 className="font-black text-xl">{displayName}</h1>
                         <p className="text-sm text-white/60">{subtitle}{org?.service_area ? ` · ${org.service_area}` : ''}</p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={copyLink} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#111827] text-[#F59E0B] text-xs font-bold">
-                            <Copy className="w-3.5 h-3.5" /> {copied ? 'Copied!' : 'Copy link'}
+                    <div className="flex items-center gap-2 shrink-0">
+                        <button type="button" onClick={() => openSettings('profile')} className="p-2 rounded-xl bg-white/10" title="Profile">
+                            <User className="w-4 h-4" />
                         </button>
-                        <button type="button" onClick={openCustomerView} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#F59E0B] text-white text-xs font-bold">
-                            <ExternalLink className="w-3.5 h-3.5" /> Customer view
+                        <button type="button" onClick={() => openSettings()} className="p-2 rounded-xl bg-white/10" title="Settings">
+                            <Settings className="w-4 h-4" />
                         </button>
-                        <Link to={hostUrl} target="_blank" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 text-white text-xs font-bold" title="Open public page">
-                            Open link
-                        </Link>
-                        <button type="button" onClick={() => openSettings()} className="p-2 rounded-xl bg-white/10" title="Settings"><Settings className="w-4 h-4" /></button>
-                        <button type="button" onClick={() => openSettings('profile')} className="p-2 rounded-xl bg-white/10" title="Profile"><User className="w-4 h-4" /></button>
                     </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                    <button type="button" onClick={copyLink} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#111827] text-[#F59E0B] text-xs font-bold">
+                        <Copy className="w-3.5 h-3.5" /> {copied ? 'Copied!' : 'Copy link'}
+                    </button>
+                    <button type="button" onClick={openCustomerView} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#F59E0B] text-white text-xs font-bold">
+                        <ExternalLink className="w-3.5 h-3.5" /> Customer view
+                    </button>
+                    <Link to={hostUrl} target="_blank" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 text-white text-xs font-bold" title="Open public page">
+                        Open link
+                    </Link>
                 </div>
             </div>
 

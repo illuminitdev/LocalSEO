@@ -11,6 +11,11 @@
   --color-line: #E2E8F0;
 }
 
+:root {
+  --brand-primary: #F59E0B;
+  --brand-secondary: #0F172A;
+}
+
 html {
   overflow-x: clip;
   -webkit-text-size-adjust: 100%;
@@ -26,6 +31,23 @@ body {
 #root {
   min-height: 100dvh;
   min-width: 0;
+}
+
+/* Host app accents that follow org branding (set on :root by OrgBrandProvider) */
+.bg-brand {
+  background-color: var(--brand-primary);
+}
+.text-brand {
+  color: var(--brand-primary);
+}
+.border-brand {
+  border-color: var(--brand-primary);
+}
+.bg-brand-secondary {
+  background-color: var(--brand-secondary);
+}
+.text-brand-secondary {
+  color: var(--brand-secondary);
 }
 
 /* Notch / home-indicator safe areas on mobile */
@@ -72,3 +94,22 @@ button:disabled,
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath fill='%23ffffff' stroke='%230F172A' stroke-width='1.25' stroke-linejoin='round' d='M3 16l7-6v4h12v-4l7 6-7 6v-4H10v4z'/%3E%3C/svg%3E") 16 16, ew-resize;
 }
 
+/* Branding color inputs: force circular swatch (native color wells are square) */
+.brand-color-swatch {
+  -webkit-appearance: none;
+  appearance: none;
+  overflow: hidden;
+  border-radius: 9999px;
+}
+.brand-color-swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+  border-radius: 9999px;
+}
+.brand-color-swatch::-webkit-color-swatch {
+  border: none;
+  border-radius: 9999px;
+}
+.brand-color-swatch::-moz-color-swatch {
+  border: none;
+  border-radius: 9999px;
+}

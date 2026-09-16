@@ -30,7 +30,7 @@ export type VisibilityAuditInput = {
 const SCORE_NOTE =
     'Score is out of 100 across website reachability, GBP/Maps listing, NAP, reviews/replies, profile optimisation, and local “service near town” visibility. Deep website crawling is not required.';
 
-/** Keep under API Gateway ~30s limit (Lambda in VPC + Places + Gemini). */
+
 const AI_REPORT_BUDGET_MS = 10000;
 
 function extractCity(address: string, city?: string) {
@@ -156,7 +156,7 @@ export async function runVisibilityAudit(
     const biasLatHint = typeof raw.lat === 'number' ? raw.lat : null;
     const biasLngHint = typeof raw.lng === 'number' ? raw.lng : null;
 
-    // Run website + GBP + Top-10 in parallel (Top-10 uses connected lat/lng when present)
+    
     const [websiteCheck, gbp, topResults] = await Promise.all([
         checkWebsite(website),
         lookupGbp(raw, businessName, address, city),
@@ -200,7 +200,7 @@ export async function runVisibilityAudit(
         top5: []
     };
 
-    // If we had no lat hint, retry Top-10 once with GBP coords
+    
     let tops = topResults;
     if (
         requirePlacesConfigured() &&

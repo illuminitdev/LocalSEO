@@ -179,7 +179,7 @@ function auditListItem(a: AuditRecord) {
   };
 }
 
-/** Deep / full-crawl audits only (excludes public Growth / presence audits). */
+
 export function isDeepCrawlAudit(a: AuditRecord | ReturnType<typeof auditListItem>) {
   if (!a) return false;
   if ((a as AuditRecord).auditKind === 'deep') return true;
@@ -216,7 +216,7 @@ export async function listAudits(options: { deepOnly?: boolean } = {}) {
       const a = JSON.parse(raw) as AuditRecord;
       audits.push(auditListItem(a));
     } catch {
-      // skip corrupt
+      
     }
   }
   audits.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));

@@ -64,14 +64,14 @@ export default function SalesReminders() {
     const [error, setError] = useState('');
     const [successToast, setSuccessToast] = useState<string | null>(null);
 
-    // Filters
+    
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [priorityFilter, setPriorityFilter] = useState<string>('all');
     const [typeFilter, setTypeFilter] = useState<string>('all');
     const [dueTodayOnly, setDueTodayOnly] = useState(false);
 
-    // Creation Form State
+    
     const [formOpen, setFormOpen] = useState(true);
     const [taskType, setTaskType] = useState<SalesTaskType>('follow_up_call');
     const [title, setTitle] = useState('');
@@ -81,7 +81,7 @@ export default function SalesReminders() {
     const [notes, setNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
-    // Modal & Action states
+    
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask; isCompleting: boolean } | null>(null);
     const [modalLoading, setModalLoading] = useState(false);
     const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -114,12 +114,12 @@ export default function SalesReminders() {
         loadData();
     }, [loadData]);
 
-    // Handle create new self reminder
+    
     const handleCreateReminder = async (e: FormEvent) => {
         e.preventDefault();
         if (!title.trim()) return;
 
-        // If no lead is selected, default to the first lead if available, or allow custom
+        
         const targetLeadId = selectedLeadId || (leads[0]?.id || '');
         if (!targetLeadId) {
             setError('Please select or assign a lead for this reminder.');
@@ -151,7 +151,7 @@ export default function SalesReminders() {
         }
     };
 
-    // Modal Toggle Complete/Reopen
+    
     const handleOpenToggleModal = (task: SalesLeadTask, e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -189,7 +189,7 @@ export default function SalesReminders() {
         }
     };
 
-    // Delete Self Reminder
+    
     const handleDeleteReminder = async (taskId: string, e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -209,7 +209,7 @@ export default function SalesReminders() {
         }
     };
 
-    // Format Due Date helper
+    
     const formatDueDate = (due: string | null) => {
         if (!due) return null;
         const d = new Date(due);
@@ -232,7 +232,7 @@ export default function SalesReminders() {
         return { style, text };
     };
 
-    // Filter tasks by search query
+    
     const filteredTasks = tasks.filter((t) => {
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
@@ -246,7 +246,7 @@ export default function SalesReminders() {
 
     return (
         <div className="space-y-6 max-w-5xl mx-auto pb-16">
-            {/* Header & Stats Banner */}
+            {}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-r from-[#0F172A] to-[#1E293B] text-white p-6 rounded-3xl shadow-sm">
                 <div>
                     <div className="flex items-center gap-2.5">
@@ -284,7 +284,7 @@ export default function SalesReminders() {
                 </div>
             </div>
 
-            {/* Success Toast */}
+            {}
             {successToast && (
                 <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center justify-between text-xs text-emerald-900 font-bold shadow-xs animate-in fade-in">
                     <div className="flex items-center gap-2">
@@ -297,7 +297,7 @@ export default function SalesReminders() {
                 </div>
             )}
 
-            {/* Error Message */}
+            {}
             {error && (
                 <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between text-xs text-rose-800 font-bold shadow-xs">
                     <div className="flex items-center gap-2">
@@ -310,7 +310,7 @@ export default function SalesReminders() {
                 </div>
             )}
 
-            {/* Create Reminder Form Card */}
+            {}
             {formOpen && (
                 <form
                     onSubmit={handleCreateReminder}
@@ -326,7 +326,7 @@ export default function SalesReminders() {
                         </span>
                     </div>
 
-                    {/* Task Type Presets */}
+                    {}
                     <div>
                         <label className="block text-[11px] font-bold uppercase text-[#94A3B8] mb-2">
                             Reminder Type
@@ -355,7 +355,7 @@ export default function SalesReminders() {
                         </div>
                     </div>
 
-                    {/* Title & Notes */}
+                    {}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-[11px] font-bold uppercase text-[#94A3B8] mb-1">
@@ -446,9 +446,9 @@ export default function SalesReminders() {
                 </form>
             )}
 
-            {/* Reminders List & Filters */}
+            {}
             <div className="space-y-4">
-                {/* Filters Bar */}
+                {}
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
                     <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
                         <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -514,7 +514,7 @@ export default function SalesReminders() {
                     </button>
                 </div>
 
-                {/* Reminders List */}
+                {}
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
                     {loading && !tasks.length ? (
                         <div className="p-12 text-center text-[#64748B]">
@@ -550,7 +550,7 @@ export default function SalesReminders() {
                                         )}
                                     >
                                         <div className="flex items-start justify-between gap-3">
-                                            {/* Main Reminder Info */}
+                                            {}
                                             <div className="min-w-0 flex-1">
                                                 <div className="flex flex-wrap items-center gap-2 mb-1.5">
                                                     <span className={cn(
@@ -603,7 +603,7 @@ export default function SalesReminders() {
                                                     </p>
                                                 )}
 
-                                                {/* Associated Lead Link */}
+                                                {}
                                                 {task.leadId && (
                                                     <div className="mt-2.5 flex items-center gap-2 flex-wrap text-xs">
                                                         <Link
@@ -628,7 +628,7 @@ export default function SalesReminders() {
                                                 )}
                                             </div>
 
-                                            {/* Action Buttons: Status Badge + Update Status + Delete */}
+                                            {}
                                             <div className="flex items-center gap-2 shrink-0">
                                                 <span className={cn(
                                                     "inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md border",
@@ -671,7 +671,7 @@ export default function SalesReminders() {
                 </div>
             </div>
 
-            {/* Task Completion Modal */}
+            {}
             {confirmModalTask && (
                 <TaskCompletionModal
                     isOpen={!!confirmModalTask}

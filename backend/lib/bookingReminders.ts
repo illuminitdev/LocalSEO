@@ -89,7 +89,7 @@ export async function enqueueScheduledMessage({
     return rows[0];
 }
 
-/** After confirm / schedule: visit reminder N hours before start. */
+
 export async function scheduleVisitReminder(booking: any, org?: any) {
     const orgRow = org || (await loadOrgReminderSettings(booking.org_id));
     if (!orgRow?.reminders_enabled) return null;
@@ -226,7 +226,7 @@ export async function sendPortalLinkEmail({
     return sendMail({ to, subject, text, html });
 }
 
-/** Ensure portal token exists and optionally email the client hub link. */
+
 export async function issuePortalAccess(orgId: string, clientId: string, { emailClient = false } = {}) {
     const tokenRow = await ensureClientPortalToken(orgId, clientId);
     const link = portalUrl(tokenRow.token);

@@ -12,6 +12,12 @@ import {
     formatPrice,
     isValidPlanId
 } from '../lib/planCatalog';
+import {
+    isBookingPlanId,
+    normalizeBookingIndustryId,
+    bookingIndustryLabel
+} from '../lib/bookingIndustryPresets';
+import { setOrgBookingIndustry } from '../lib/bookingIndustryHydrate';
 import Stripe from 'stripe';
 import adminFullAuditsRouter from './adminFullAudits';
 import { createSalesLead, bulkImportSalesLeads, convertLeadToCustomer, ensureCrmTables } from '../lib/sales';
@@ -79,7 +85,7 @@ async function verifyAdminPassword(password: string) {
             return comparePassword(password, rows[0].password_hash);
         }
     } catch {
-        /* table may not exist until migrate */
+        
     }
     const { passwordHash, password: plain } = resolveAdminCredentials();
     if (passwordHash) return comparePassword(password, passwordHash);
@@ -88,13 +94,15 @@ async function verifyAdminPassword(password: string) {
 
 function mapRegisteredUser(row: any) {
     const features = row.plan_id ? getFeaturesForPlan(row.plan_id) : [];
+    const phone = String(row.phone || '').trim() || null;
+    const bookingIndustryId = row.booking_industry_id || null;
     return {
         kind: 'user' as const,
         userId: row.user_id,
         leadId: row.lead_id || null,
         email: row.email,
         name: row.user_name,
-        phone: row.phone || null,
+        phone,
         createdAt: row.user_created_at,
         convertedAt: row.converted_at || null,
         convertedByTelecaller: Boolean(row.converted_by_telecaller),
@@ -107,10 +115,14 @@ function mapRegisteredUser(row: any) {
                   name: row.org_name,
                   slug: row.org_slug,
                   tradeType: row.trade_type,
-                  bookingIndustryId: row.booking_industry_id || null,
+                  bookingIndustryId,
                   setupComplete: row.setup_complete
               }
             : null,
+        serviceLabel:
+            bookingIndustryLabel(bookingIndustryId) ||
+            String(row.trade_type || '').trim() ||
+            null,
         subscription: row.plan_id
             ? {
                   id: row.subscription_id,
@@ -208,15 +220,19 @@ function mapConvertedLeadUser(row: any) {
 
 function mapInviteUser(row: any) {
     const features = row.plan_id ? getFeaturesForPlan(row.plan_id) : [];
+    const phone = String(row.phone || '').trim() || null;
+    const bookingIndustryId = row.booking_industry_id || null;
     return {
         kind: 'invite' as const,
         userId: null,
         email: row.email,
         name: row.full_name || '',
+        phone,
         createdAt: row.invite_created_at,
         mustChangePassword: true,
         platformRole: 'customer' as const,
         organization: null,
+        serviceLabel: bookingIndustryLabel(bookingIndustryId) || null,
         subscription: row.plan_id
             ? {
                   id: row.subscription_id,
@@ -269,7 +285,7 @@ router.post('/login', async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Email and password are required.' });
         }
 
-        // Dev email only on STAGE=dev; prod email only on STAGE=prod
+        
         if (email !== adminEmail) {
             return res.status(401).json({
                 error: 'Invalid admin credentials for this environment.',
@@ -301,7 +317,7 @@ router.get('/me', requireAdmin, async (req: Request, res: Response) => {
         );
         passwordUpdatedAt = rows[0]?.updated_at || null;
     } catch {
-        /* ignore */
+        
     }
     res.json({
         admin: (req as any).admin,
@@ -415,6 +431,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                     u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
                     u.must_change_password, COALESCE(u.platform_role, 'customer') AS platform_role,
                     o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.booking_industry_id, o.setup_complete,
+                    COALESCE(NULLIF(TRIM(o.phone), ''), NULLIF(TRIM(pi.phone), '')) AS phone,
                     s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
                     s.stripe_subscription_id, s.stripe_customer_id, s.cancel_at_period_end,
@@ -439,7 +456,8 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
              )
              LEFT JOIN plans p ON p.id = s.plan_id
              LEFT JOIN LATERAL (
-                 SELECT * FROM portal_invites
+                 SELECT id, status, claimed_at, credentials_emailed_at, created_at, phone
+                 FROM portal_invites
                  WHERE LOWER(email) = LOWER(u.email)
                  ORDER BY created_at DESC
                  LIMIT 1
@@ -455,18 +473,18 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
              ORDER BY u.id, s.created_at DESC NULLS LAST`
         );
 
-        // Re-sort by join date for display
+        
         rows.sort(
             (a: any, b: any) =>
                 new Date(b.user_created_at).getTime() - new Date(a.user_created_at).getTime()
         );
 
-        // Also include paid invites not yet claimed as portal users
+        
         const inviteOnly = await query(
             `SELECT pi.id AS invite_id, pi.email, pi.full_name, pi.phone, pi.plan_id, pi.status,
                     pi.claimed_at, pi.credentials_emailed_at, pi.created_at AS invite_created_at,
                     pi.stripe_subscription_id, pi.stripe_customer_id, pi.stripe_session_id,
-                    pi.features AS invite_features,
+                    pi.features AS invite_features, pi.booking_industry_id,
                     p.name AS plan_name, p.price_cents, p.currency,
                     s.id AS subscription_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
@@ -518,6 +536,7 @@ router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Respon
             `SELECT u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
                     u.must_change_password, COALESCE(u.platform_role, 'customer') AS platform_role,
                     o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.booking_industry_id, o.setup_complete,
+                    COALESCE(NULLIF(TRIM(o.phone), ''), NULLIF(TRIM(pi.phone), '')) AS phone,
                     s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
                     s.stripe_subscription_id, s.stripe_customer_id, s.cancel_at_period_end,
@@ -539,7 +558,8 @@ router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Respon
              )
              LEFT JOIN plans p ON p.id = s.plan_id
              LEFT JOIN LATERAL (
-                 SELECT * FROM portal_invites
+                 SELECT id, status, claimed_at, credentials_emailed_at, created_at, phone
+                 FROM portal_invites
                  WHERE LOWER(email) = LOWER(u.email)
                  ORDER BY created_at DESC
                  LIMIT 1
@@ -564,6 +584,7 @@ router.get('/users/invite/:inviteId', requireAdmin, async (req: Request, res: Re
             `SELECT pi.id AS invite_id, pi.email, pi.full_name, pi.phone, pi.plan_id, pi.status,
                     pi.claimed_at, pi.credentials_emailed_at, pi.created_at AS invite_created_at,
                     pi.stripe_subscription_id, pi.stripe_customer_id, pi.stripe_session_id,
+                    pi.booking_industry_id,
                     p.name AS plan_name, p.price_cents, p.currency,
                     s.id AS subscription_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
@@ -984,6 +1005,9 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
             .toLowerCase();
         const businessName = String(req.body?.businessName || name || 'My business').trim();
         const planId = req.body?.planId ? String(req.body.planId).trim() : '';
+        const bookingIndustryId = normalizeBookingIndustryId(
+            req.body?.bookingIndustryId ?? req.body?.booking_industry_id
+        );
 
         if (!email || !name || !password || !role) {
             return res.status(400).json({ error: 'Name, email, password, and role are required.' });
@@ -996,6 +1020,18 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
         }
         if (role === 'customer' && planId && !isValidPlanId(planId)) {
             return res.status(400).json({ error: 'Invalid plan.' });
+        }
+        if (role === 'customer' && planId && isBookingPlanId(planId) && !bookingIndustryId) {
+            return res.status(400).json({
+                error: 'Select a service (industry) for booking plans (e.g. dentists, salons, restaurants).'
+            });
+        }
+        if (
+            role === 'customer' &&
+            (req.body?.bookingIndustryId || req.body?.booking_industry_id) &&
+            !bookingIndustryId
+        ) {
+            return res.status(400).json({ error: 'Invalid booking industry / services selection.' });
         }
 
         const existing = await query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email]);
@@ -1041,6 +1077,10 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
             'owner'
         ]);
 
+        if (bookingIndustryId) {
+            await setOrgBookingIndustry(org.id, bookingIndustryId, { syncTradeType: true });
+        }
+
         if (planId) {
             await upsertOrgSubscription(org.id, planId);
         }
@@ -1053,7 +1093,12 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
                 email: user.email,
                 name: user.name,
                 platformRole: user.platform_role,
-                organization: { id: org.id, name: org.name, slug: org.slug }
+                organization: {
+                    id: org.id,
+                    name: org.name,
+                    slug: org.slug,
+                    bookingIndustryId: bookingIndustryId || null
+                }
             }
         });
     } catch (err: any) {
@@ -1159,7 +1204,7 @@ router.patch('/organizations/:orgId/subscription', requireAdmin, async (req: Req
         const { rows: orgRows } = await query('SELECT id, name, slug FROM organizations WHERE id = $1', [orgId]);
         if (!orgRows.length) return res.status(404).json({ error: 'Organization not found' });
 
-        // Autopay-only update (keep current plan)
+        
         if (!planId && hasAutopay && autopayEnabled !== undefined) {
             const result = await setOrgAutopay(orgId, autopayEnabled, getStripeClient());
             return res.json({
@@ -1261,9 +1306,9 @@ router.get('/services', requireAdmin, (_req: Request, res: Response) => {
     });
 });
 
-/* =========================================================================
-   TELECALLER CRM & TASK ASSIGNMENT ENDPOINTS
-   ========================================================================= */
+
+
+
 
 /** Get list of sales agents / telecallers available for assignment */
 router.get('/crm/sales-agents', requireAdmin, async (_req: Request, res: Response) => {
@@ -1282,13 +1327,13 @@ router.get('/crm/sales-agents', requireAdmin, async (_req: Request, res: Respons
     }
 });
 
-/** Helper to extract lead details from submissions + audits or sales_leads for admin CRM */
+
 async function fetchAdminLeadMetadataMap(leadIds: string[]) {
     if (!leadIds.length) return new Map<string, any>();
     const map = new Map<string, any>();
     const origin = zappSitesOrigin();
 
-    // 1. Try growth audit submissions
+    
     try {
         const { rows: subRows } = await query(
             `SELECT s.id, s.created_at, s.email AS submission_email, s.payload,
@@ -1321,7 +1366,7 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
         }
     } catch {}
 
-    // 2. Try sales_leads for any remaining
+    
     const missing = leadIds.filter((id) => !map.has(id));
     if (missing.length) {
         try {
@@ -1349,7 +1394,7 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
     return map;
 }
 
-/** Get all CRM tasks with optional filters */
+
 router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1383,7 +1428,7 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
             params.push(taskType);
             where.push(`t.task_type = $${params.length}`);
         }
-        // Admin only sees tasks created by admin (exclude sales agent self-reminders)
+        
         where.push(`(t.created_by_role = 'admin' OR t.created_by_role IS NULL)`);
 
         const { rows } = await query(`
@@ -1446,7 +1491,7 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
     }
 });
 
-/** Create a new task for a lead */
+
 router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1504,7 +1549,7 @@ router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
 
         const task = rows[0];
 
-        // Add auto activity log
+        
         try {
             await query(`
                 INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
@@ -1519,7 +1564,7 @@ router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
     }
 });
 
-/** Update task details / status */
+
 router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1590,7 +1635,7 @@ router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response)
 
         const task = rows[0];
 
-        // If status changed, record activity log
+        
         if (status) {
             try {
                 await query(`
@@ -1607,13 +1652,13 @@ router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response)
     }
 });
 
-/** Delete a task */
+
 router.delete('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
         const taskId = req.params.id;
 
-        // Fetch task details before deleting so we can record an activity history event
+        
         const { rows: taskRows } = await query(
             `SELECT title, lead_id, assigned_to_user_id FROM lead_tasks WHERE id = $1`,
             [taskId]
@@ -1639,7 +1684,7 @@ router.delete('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response
     }
 });
 
-/** Get lead activities / call notes */
+
 router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1670,7 +1715,7 @@ router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, r
     }
 });
 
-/** Log an activity / call note for a lead */
+
 router.post('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1715,7 +1760,7 @@ router.post('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, 
     }
 });
 
-/** Clear all call logs & activity history */
+
 router.post('/crm/activities/clear', requireAdmin, async (_req: Request, res: Response) => {
     try {
         await ensureCrmTables();

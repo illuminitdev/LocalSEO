@@ -25,7 +25,7 @@ import {
     getBookingPreset,
     isBookingPlanId,
     bookingIndustryLabel
-} from '../bookings/bookingIndustryPresets';
+} from '../bookings/shared/bookingIndustryPresets';
 
 type ServiceModule = { id: string; name: string; enrolled: boolean };
 

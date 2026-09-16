@@ -36,6 +36,7 @@ import {
 } from '../lib/field';
 import { fireZapierEvent } from '../lib/zapier';
 import { createUploadPresign, isAllowedMediaUrl } from '../lib/media';
+import { isValidBrandHex, normalizeBrandHex } from '../lib/branding';
 import { newManageToken } from '../lib/authTokens';
 import {
     cancelRemindersForCancelledBooking,
@@ -90,6 +91,7 @@ import {
     deleteMenuItem,
     importMenuItems,
     listMenuItems,
+    loadOrgForFoodOrders,
     loadOrgForMenu,
     updateMenuItem
 } from '../lib/orgMenu';
@@ -347,7 +349,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const forceNew = Boolean(createNew);
             let orgIdForUpdate: string | null = forceNew ? null : (req as any).orgId || null;
 
-            // If current org already has a completed booking service, adding another must create new.
+            
             if (orgIdForUpdate && !forceNew) {
                 const { rows: existing } = await query(
                     `SELECT trade_type,
@@ -391,7 +393,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         try {
             const userId = (req as any).user?.id;
             if (!userId) {
-                // Dev slug-only auth: return current org if any
+                
                 if (!(req as any).orgId) return res.json({ organizations: [] });
                 const data = await loadDashboard((req as any).orgId);
                 const org = data?.organization;
@@ -486,7 +488,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    /** Leave booking board only — keeps settings, Stripe, bookings, and event types. */
+    
     router.post('/logout', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) {
@@ -507,7 +509,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    /** Re-enter booking board with existing saved data (after booking logout). */
+    
     router.post('/resume', async (req: Request, res: Response) => {
         try {
             const userId = (req as any).user?.id;
@@ -566,7 +568,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    /** @deprecated Prefer /logout — no longer deletes org data. */
+    
     router.post('/reset', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) {
@@ -688,7 +690,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
     router.get('/food-orders', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
-            await loadOrgForMenu((req as any).orgId);
+            await loadOrgForFoodOrders((req as any).orgId);
             const orders = await listFoodOrders((req as any).orgId, {
                 limit: Number(req.query.limit) || 50
             });
@@ -701,7 +703,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
     router.patch('/food-orders/:id', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
-            await loadOrgForMenu((req as any).orgId);
+            await loadOrgForFoodOrders((req as any).orgId);
             const order = await updateFoodOrderStatus(
                 (req as any).orgId,
                 String(req.params.id),
@@ -800,7 +802,10 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 'food_pickup_enabled',
                 'delivery_fee_cents',
                 'delivery_min_order_cents',
-                'delivery_notes'
+                'delivery_notes',
+                'logo_url',
+                'brand_primary',
+                'brand_secondary'
             ];
             const sets: string[] = [];
             const vals: any[] = [];
@@ -821,17 +826,46 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 foodPickupEnabled: 'food_pickup_enabled',
                 deliveryFeeCents: 'delivery_fee_cents',
                 deliveryMinOrderCents: 'delivery_min_order_cents',
-                deliveryNotes: 'delivery_notes'
+                deliveryNotes: 'delivery_notes',
+                logoUrl: 'logo_url',
+                brandPrimary: 'brand_primary',
+                brandSecondary: 'brand_secondary'
             };
             for (const [k, v] of Object.entries(body)) {
                 if (k === 'bookingIndustryId' || k === 'booking_industry_id') continue;
                 const col = map[k] || k;
-                if (allowed.includes(col)) {
-                    sets.push(`${col} = $${i++}`);
-                    vals.push(v);
+                if (!allowed.includes(col)) continue;
+
+                let value: any = v;
+                if (col === 'brand_primary' || col === 'brand_secondary') {
+                    if (v === null || v === '') {
+                        value = col === 'brand_primary' ? '#F59E0B' : '#0F172A';
+                    } else if (!isValidBrandHex(v)) {
+                        return res.status(400).json({
+                            error: `${col === 'brand_primary' ? 'Primary' : 'Secondary'} color must be a hex value like #F59E0B`
+                        });
+                    } else {
+                        value = normalizeBrandHex(v);
+                    }
                 }
+                if (col === 'logo_url') {
+                    value = v == null ? null : String(v).trim() || null;
+                    if (value && !isAllowedMediaUrl(value) && !String(value).startsWith('https://')) {
+                        return res.status(400).json({ error: 'Logo URL must be a valid https URL' });
+                    }
+                }
+
+                sets.push(`${col} = $${i++}`);
+                vals.push(value);
             }
-            if (!sets.length && industryRaw == null) return res.status(400).json({ error: 'No fields' });
+            if (!sets.length && industryRaw == null) {
+                const keys = Object.keys(body);
+                return res.status(400).json({
+                    error: keys.length
+                        ? `Unsupported fields: ${keys.join(', ')}. Redeploy the API if you are saving brand colors.`
+                        : 'No fields'
+                });
+            }
             if (!sets.length) {
                 const { rows } = await query('SELECT * FROM organizations WHERE id = $1', [(req as any).orgId]);
                 return res.json(rows[0]);
@@ -941,7 +975,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 ]
             );
             const client = rows[0];
-            // Address on PATCH no longer overwrites first property — use property endpoints
+            
             const { rows: props } = await query(
                 `SELECT * FROM client_properties WHERE client_id = $1 ORDER BY created_at ASC`,
                 [client.id]
@@ -1023,11 +1057,14 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Media ---
+    
     router.post('/media/presign', async (req: Request, res: Response) => {
         try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            const kindRaw = String(req.body?.kind || 'job').toLowerCase();
+            const kind = kindRaw === 'logo' ? 'logo' : 'job';
             const data = await createUploadPresign({
-                kind: 'job',
+                kind,
                 contentType: String(req.body?.contentType || 'image/jpeg'),
                 orgId: (req as any).orgId
             });
@@ -1037,7 +1074,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Field ---
+    
     router.get('/field/jobs', async (req: Request, res: Response) => {
         try {
             const jobs = await listFieldJobs((req as any).orgId, (req as any).user);
@@ -1104,7 +1141,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Inbox / SMS ---
+    
     router.get('/inbox', async (req: Request, res: Response) => {
         try {
             const threads = await listThreads((req as any).orgId);
@@ -1143,7 +1180,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Team ---
+    
     router.get('/team', async (req: Request, res: Response) => {
         try {
             const members = await listTeamMembers((req as any).orgId);
@@ -1182,7 +1219,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Costing ---
+    
     router.get('/bookings/:id/costing', async (req: Request, res: Response) => {
         try {
             const data = await jobProfitSummary((req as any).orgId, String(req.params.id));
@@ -1253,7 +1290,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
-    // --- Marketing ---
+    
     router.patch('/marketing/site', async (req: Request, res: Response) => {
         try {
             const org = await updateSiteContent((req as any).orgId, req.body || {});
@@ -1634,7 +1671,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             );
             const updated = (await query('SELECT * FROM bookings WHERE id = $1', [booking.id])).rows[0];
 
-            // Return immediately so the UI does not hang / fail while Stripe invoice APIs run
+            
             res.json({ booking: updated, invoicePending: Boolean(stripeClient) });
 
             fireZapierEvent((req as any).orgId, 'booking.completed', {

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 function resolveDefaultDataDir() {
-    // Source: backend/lib → backend/data; compiled: dist/lib → backend/data
+    
     if (fs.existsSync(path.join(__dirname, '..', '..', 'package.json'))) {
         return path.join(__dirname, '..', '..', 'data');
     }

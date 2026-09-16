@@ -12,7 +12,7 @@ function frontendOrigin() {
 }
 
 export async function listTeamMembers(orgId: string) {
-    // memberships PK is (user_id, org_id) — no surrogate id / created_at columns
+    
     const { rows } = await query(
         `SELECT m.user_id AS membership_id, m.user_id, m.role, COALESCE(m.active, TRUE) AS active,
                 u.name, u.email, COALESCE(u.avatar_url, '') AS avatar_url
@@ -112,7 +112,7 @@ export async function acceptOrgInvite(token: string, userId: string) {
     return { orgId: invite.org_id, role: invite.role };
 }
 
-/** membershipId is the member's user_id (memberships has no separate id column). */
+
 export async function updateMemberRole(orgId: string, membershipId: string, role: string, active?: boolean) {
     const allowed = ['owner', 'admin', 'dispatcher', 'tech'];
     if (!allowed.includes(role)) throw Object.assign(new Error('Invalid role'), { status: 400 });

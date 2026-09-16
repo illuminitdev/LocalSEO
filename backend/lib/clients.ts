@@ -12,7 +12,7 @@ export type ClientUpsertInput = {
     notes?: string;
 };
 
-/** Match existing property by id or address; otherwise insert a new property (never overwrite unrelated addresses). */
+
 async function resolveProperty(
     clientId: string,
     address: string,
@@ -59,7 +59,7 @@ async function resolveProperty(
     return rows[0];
 }
 
-/** Find or create client by org + email; attach/create property without clobbering other addresses. */
+
 export async function upsertClientWithProperty(input: ClientUpsertInput) {
     const email = String(input.email || '')
         .trim()
@@ -261,7 +261,7 @@ export async function findDuplicateEmail(orgId: string, email: string, excludeCl
     return rows[0] || null;
 }
 
-/** Merge mergeClientId into keepClientId (same org). Moves related rows then deletes the duplicate. */
+
 export async function mergeClients(orgId: string, keepClientId: string, mergeClientId: string) {
     if (!keepClientId || !mergeClientId) {
         throw Object.assign(new Error('keepClientId and mergeClientId are required'), { status: 400 });
@@ -300,7 +300,7 @@ export async function mergeClients(orgId: string, keepClientId: string, mergeCli
         `UPDATE clients SET referred_by_client_id = $1 WHERE referred_by_client_id = $2 AND org_id = $3`,
         [keepClientId, mergeClientId, orgId]
     );
-    // Avoid unique (org_id, customer_phone) conflicts: drop merge threads that collide, else reassign
+    
     await query(
         `DELETE FROM message_threads m
          WHERE m.client_id = $2 AND m.org_id = $3

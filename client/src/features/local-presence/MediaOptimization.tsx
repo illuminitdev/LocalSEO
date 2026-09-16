@@ -60,7 +60,7 @@ export default function MediaOptimization() {
             {error && <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>}
 
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-                {/* Sidebar Nav */}
+                {}
                 <div className="lg:col-span-1 space-y-2">
                     <h3 className="font-semibold text-gray-400 uppercase tracking-wider text-xs mb-4 ml-2">Categories</h3>
                     {categories.map(cat => {
@@ -87,7 +87,7 @@ export default function MediaOptimization() {
                     })}
                 </div>
 
-                {/* Media Gallery */}
+                {}
                 <div className="lg:col-span-3">
                     <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-sm min-h-[500px]">
                         <div className="flex justify-between items-center mb-6 pb-4 border-b border-[#E2E8F0]">

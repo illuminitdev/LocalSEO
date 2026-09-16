@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Calendar, FileText, Plus, ShieldCheck } from 'lucide-react';
-import { apiGet, apiPost, cn, formatCents } from '../../shared/utils';
+import { apiGet, apiPost, cn, formatCents } from '../../../shared/utils';
+import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
 
 export default function ClientPortal() {
     const { token } = useParams();
@@ -34,7 +35,7 @@ export default function ClientPortal() {
 
     useEffect(() => {
         load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        
     }, [token]);
 
     const upcoming = useMemo(() => {
@@ -102,17 +103,37 @@ export default function ClientPortal() {
 
     const org = data.organization;
     const client = data.client;
+    const brand = resolveOrgBrand(org);
 
     return (
-        <div className="min-h-screen bg-[#F8FAFC] py-8 px-4">
+        <div className="min-h-screen bg-[#F8FAFC] py-8 px-4" style={orgBrandStyle(org)}>
             <div className="max-w-3xl mx-auto space-y-4">
-                <div className="bg-[#0F172A] text-white rounded-2xl px-5 py-5">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-[#F59E0B]">Client hub</p>
-                    <h1 className="text-2xl font-black mt-1">{org.name}</h1>
-                    <p className="text-sm text-white/70 mt-1">
-                        Signed in as <strong className="text-white">{client.name}</strong>
-                        {client.email ? ` · ${client.email}` : ''}
-                    </p>
+                <div
+                    className="text-white rounded-2xl px-5 py-5"
+                    style={{ background: 'var(--brand-secondary)' }}
+                >
+                    <div className="flex items-start gap-3">
+                        {brand.logoUrl ? (
+                            <img
+                                src={brand.logoUrl}
+                                alt=""
+                                className="h-12 w-12 rounded-xl object-contain bg-white/10 p-1.5 shrink-0"
+                            />
+                        ) : null}
+                        <div className="min-w-0">
+                            <p
+                                className="text-[10px] font-black uppercase tracking-widest"
+                                style={{ color: 'var(--brand-primary)' }}
+                            >
+                                Client hub
+                            </p>
+                            <h1 className="text-2xl font-black mt-1">{org.name}</h1>
+                            <p className="text-sm text-white/70 mt-1">
+                                Signed in as <strong className="text-white">{client.name}</strong>
+                                {client.email ? ` · ${client.email}` : ''}
+                            </p>
+                        </div>
+                    </div>
                 </div>
 
                 {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
@@ -122,7 +143,7 @@ export default function ClientPortal() {
                     <button
                         type="button"
                         onClick={() => setShowRequest((v) => !v)}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-[#F59E0B] text-[#0F172A] px-4 py-2.5 text-sm font-bold"
+                        className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-bold text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
                     >
                         <Plus className="w-4 h-4" /> New work request
                     </button>
@@ -184,7 +205,7 @@ export default function ClientPortal() {
                         <button
                             type="submit"
                             disabled={busy}
-                            className="rounded-xl bg-[#0F172A] text-white px-4 py-2 text-sm font-bold disabled:opacity-50"
+                            className="rounded-xl bg-[var(--brand-secondary)] text-white px-4 py-2 text-sm font-bold disabled:opacity-50"
                         >
                             {busy ? 'Sending…' : 'Submit request'}
                         </button>
@@ -210,7 +231,7 @@ export default function ClientPortal() {
                                         href={inv.stripe_hosted_url}
                                         target="_blank"
                                         rel="noreferrer"
-                                        className="rounded-lg bg-[#F59E0B] text-[#0F172A] px-3 py-1.5 text-xs font-bold"
+                                        className="rounded-lg bg-[var(--brand-primary)] text-[var(--brand-secondary)] px-3 py-1.5 text-xs font-bold"
                                     >
                                         Pay now
                                     </a>
@@ -242,7 +263,7 @@ export default function ClientPortal() {
                                     {b.manage_token && (
                                         <Link
                                             to={`/book/manage/${b.manage_token}`}
-                                            className="text-[11px] font-bold text-[#F59E0B]"
+                                            className="text-[11px] font-bold text-[var(--brand-primary)]"
                                         >
                                             Manage booking
                                         </Link>

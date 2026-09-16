@@ -2,7 +2,7 @@ import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 
 import { authHeaders, getToken } from '../features/auth/auth';
-import { bookingOrgHeaders } from '../features/bookings/bookingUtils';
+import { bookingOrgHeaders } from '../features/bookings/shared/bookingUtils';
 
 import { API_BASE } from './apiConfig';
 
@@ -12,12 +12,12 @@ export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
 }
 
-/** Keep only digits, max 11 (UK mobile). Input stops accepting more once limit is reached. */
+
 export function restrictPhoneInput(value: string, maxDigits = 11): string {
     return value.replace(/\D/g, '').slice(0, maxDigits);
 }
 
-/** Email or phone: emails pass through; phone-shaped input is capped at 11 UK digits. */
+
 export function restrictEmailOrPhoneInput(value: string, maxDigits = 11): string {
     if (/[a-zA-Z@]/.test(value)) return value;
     return restrictPhoneInput(value, maxDigits);
@@ -111,21 +111,21 @@ export async function apiDelete(path: string, token?: string | null) {
     return res.json();
 }
 
-/** Best-effort activity feed — plans without `reporting` skip silently. */
+
 export async function logDashboardActivity(payload: object) {
     try {
         await apiPost('/api/dashboard/activity', payload);
     } catch {
-        /* optional for plans without reporting */
+        
     }
 }
 
-/** Best-effort KPI update — plans without `reporting` skip silently. */
+
 export async function updateDashboardStats(payload: object) {
     try {
         await apiPost('/api/dashboard/update-stats', payload);
     } catch {
-        /* optional for plans without reporting */
+        
     }
 }
 

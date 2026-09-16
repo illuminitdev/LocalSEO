@@ -13,7 +13,7 @@ const LABELS: Record<string, string> = {
     general: "You're fixing a gap from the Visibility Audit."
 };
 
-/** One-line banner when arriving from Visibility Audit “Ready to fix”. */
+
 export default function VisibilityFixBanner() {
     const [params, setParams] = useSearchParams();
     const [dismissed, setDismissed] = useState(false);

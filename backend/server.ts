@@ -55,7 +55,7 @@ if (requirePlacesConfigured()) {
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Behind API Gateway / proxies — needed for accurate rate-limit client IP
+
 app.set('trust proxy', 1);
 
 app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), createStripeWebhookHandler(stripeClient));
@@ -63,13 +63,13 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), crea
 app.use(securityHeaders());
 app.use(cors(corsOptions()));
 app.use(globalRateLimit());
-// JSON body — also accept text/plain so API Gateway odd Content-Types still parse
+
 app.use(
     express.json({
         limit: process.env.JSON_BODY_LIMIT || '1mb',
         type: (req) => {
             const ct = String(req.headers['content-type'] || '').toLowerCase();
-            // Empty Content-Type still try JSON (common behind some proxies)
+            
             return !ct || ct.includes('json') || ct.includes('text/plain');
         }
     })
@@ -530,7 +530,7 @@ function isGeminiQuotaError(err: any) {
     );
 }
 
-/** Deterministic gap analysis when Gemini is down / quota-exhausted (no googleSearch grounding). */
+
 function fallbackGapAnalysis(business: any, keyword: string, liveCompetitors: any[] = []) {
     const rating = Number(business.rating) || 0;
     const reviews = Number(business.reviewsCount) || 0;
@@ -706,7 +706,7 @@ app.get('/api/status', (_req, res) => {
     });
 });
 
-/** Free Local Visibility Audit — feature only (no plan gate / no DB persistence in v1). */
+
 app.post('/api/visibility-audit', requireAuth, hydrateOrgFromDb, async (req, res) => {
     const started = Date.now();
     try {
@@ -758,7 +758,7 @@ app.post('/api/business/connect', requireAuth, hydrateOrgFromDb, requireFeature(
         reviews: Array.isArray(incoming.reviews) ? incoming.reviews : []
     };
 
-    // Auto-fill map coords from address when the user didn't pick a Places listing.
+    
     const hasCoords =
         typeof connectedBusiness.lat === 'number' &&
         typeof connectedBusiness.lng === 'number' &&
@@ -795,7 +795,7 @@ app.post('/api/places/search', requireAuth, requireFeature('local_presence'), as
     const { query } = req.body;
     if (!query) return res.status(400).json({ error: 'Query is required' });
 
-    // Prefer real Google Places when configured
+    
     if (requirePlacesConfigured()) {
         try {
             const place = await searchBusiness(String(query).trim());
@@ -805,7 +805,7 @@ app.post('/api/places/search', requireAuth, requireFeature('local_presence'), as
             return res.json(place);
         } catch (err: any) {
             console.error('Places API search error:', err);
-            // Fall through to Gemini if available
+            
             if (!aiClient) {
                 return res.status(502).json({
                     error: `Google Places failed: ${errMessage(err)}. Check the key has Places API enabled.`
@@ -979,7 +979,7 @@ app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('
     const bodyKeyword = String(req.body?.keyword || '').trim();
     const keyword = bodyKeyword || `${connectedBusiness.category || 'local business'} near me`;
 
-    // Ensure map center exists — geocode address if profile has no lat/lng yet.
+    
     const hasCoords =
         typeof connectedBusiness.lat === 'number' &&
         typeof connectedBusiness.lng === 'number' &&
@@ -1039,7 +1039,7 @@ app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('
     };
 
     const withCompetitors = (data: any) => {
-        // Always use live same-service Places results so Gemini cannot invent unrelated POIs.
+        
         data.competitors = [
             {
                 name: `${connectedBusiness.name} (You)`,
@@ -1071,8 +1071,8 @@ app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('
         return data;
     };
 
-    // Never use Gemini googleSearch here — grounding quota is separate and often 429 on free/test keys.
-    // Places supplies competitors; plain generateContent still works when grounding does not.
+    
+    
     if (!aiClient) {
         const data = withMeta(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
         applyGridStats(data);
@@ -1167,7 +1167,7 @@ app.post('/api/ai/media-generate', requireAuth, hydrateOrgFromDb, requireFeature
             );
             if (generatedAlt) altText = generatedAlt.replace(/^"|"$/g, '');
         } catch {
-            /* keep simple alt */
+            
         }
 
         dashboardState.photoCount += 1;
@@ -1269,7 +1269,7 @@ Return JSON only:
         });
     } catch (err: any) {
         console.error('Strategy report error (serving fallback):', errMessage(err));
-        // Never 503 the SPA — API Gateway cuts at ~30s; return usable report instead
+        
         res.json(fallback);
     }
 });
@@ -1305,7 +1305,7 @@ app.post('/api/dashboard/update-stats', requireAuth, hydrateOrgFromDb, requireFe
 });
 
 
-// --- Calendly-style booking (Postgres) ---
+
 
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
@@ -1328,7 +1328,7 @@ app.post('/api/ops/process-booking-reminders', async (req, res) => {
     }
 });
 
-// Legacy booking API shim — redirects clients to new endpoints
+
 app.get('/api/booking', (_req, res) => {
     res.status(410).json({ error: 'Booking API moved. Use /api/auth/me and /api/host/dashboard. Register or login first.' });
 });

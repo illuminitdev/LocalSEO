@@ -29,7 +29,7 @@ function sendProxyJson(res: Response, result: Awaited<ReturnType<typeof proxyZap
     return res.status(result.status || 502).json({ success: false, error: 'Unexpected upstream response' });
 }
 
-/** History — deep / fullcrawl audits only */
+
 router.get('/full-audits', requireAdmin, async (_req: Request, res: Response) => {
     try {
         const result = await proxyZappSitesOps('GET', '/api/ops/audits?kind=deep');
@@ -47,7 +47,7 @@ router.get('/full-audits', requireAdmin, async (_req: Request, res: Response) =>
     }
 });
 
-/** Start full crawl (queued job or inline complete) */
+
 router.post('/full-audits/fullcrawl', requireAdmin, async (req: Request, res: Response) => {
     try {
         const result = await proxyZappSitesOps('POST', '/api/ops/audits/fullcrawl', req.body || {});
@@ -74,7 +74,7 @@ router.post('/full-audits/fullcrawl', requireAdmin, async (req: Request, res: Re
     }
 });
 
-/** Poll crawl job */
+
 router.get('/full-audits/jobs/:jobId', requireAdmin, async (req: Request, res: Response) => {
     try {
         const jobId = encodeURIComponent(String(req.params.jobId || ''));
@@ -99,7 +99,7 @@ router.get('/full-audits/jobs/:jobId', requireAdmin, async (req: Request, res: R
     }
 });
 
-/** Download print-quality PDF (streams ZappSites public PDF for published audits) */
+
 router.get('/full-audits/:id/pdf', requireAdmin, async (req: Request, res: Response) => {
     try {
         const id = String(req.params.id || '').trim();
@@ -126,10 +126,10 @@ router.get('/full-audits/:id/pdf', requireAdmin, async (req: Request, res: Respo
     }
 });
 
-/**
- * Email the company contact on the audit with the report PDF + score pitch (SES).
- * To address comes from the audit record only (business.email / email).
- */
+
+
+
+
 router.post('/full-audits/:id/share-email', requireAdmin, async (req: Request, res: Response) => {
     try {
         const id = String(req.params.id || '').trim();
@@ -235,7 +235,7 @@ router.post('/full-audits/:id/share-email', requireAdmin, async (req: Request, r
     }
 });
 
-/** Load one audit (ops detail) */
+
 router.get('/full-audits/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
         const id = encodeURIComponent(String(req.params.id || ''));
@@ -261,7 +261,7 @@ router.get('/full-audits/:id', requireAdmin, async (req: Request, res: Response)
     }
 });
 
-/** Delete deep audit */
+
 router.delete('/full-audits/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
         const id = encodeURIComponent(String(req.params.id || ''));

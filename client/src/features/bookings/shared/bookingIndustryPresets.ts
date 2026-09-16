@@ -1,8 +1,8 @@
-/**
- * Booking industry presets — keep in sync with
- * zappsites/frontend/src/data/bookingDemosData.js and
- * client/src/features/bookings/bookingIndustryPresets.ts
- */
+
+
+
+
+
 
 export const BOOKING_INDUSTRY_IDS = [
     'plumbing',
@@ -214,7 +214,7 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
     {
         id: 'valeting',
         name: 'Mobile Car Valeters & Detailers',
-        shortName: 'Car Valeting',
+        shortName: 'Mobile car valeters & Detailers',
         icon: 'Car',
         eyebrow: 'MOBILE VALETING BOOKING FLOW DEMO',
         demoTitle: 'How Mobile Valeters Keep Calendar Full 24/7',
@@ -265,7 +265,7 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
     {
         id: 'pressure-washing',
         name: 'Pressure Washing & Exterior',
-        shortName: 'Pressure Wash',
+        shortName: 'Pressure washing',
         icon: 'Droplets',
         eyebrow: 'PRESSURE WASHING BOOKING FLOW DEMO',
         demoTitle: 'How Exterior Cleaners Get Instant Photo Estimates',
@@ -361,7 +361,7 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
     {
         id: 'gardeners',
         name: 'Gardeners & Landscapers',
-        shortName: 'Gardeners',
+        shortName: 'Gardeners & Landscapers',
         icon: 'Trees',
         eyebrow: 'GARDEN & LANDSCAPING BOOKING FLOW DEMO',
         demoTitle: 'How Gardeners Keep Seasonal Schedule Filled 24/7',
@@ -593,7 +593,7 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
     {
         id: 'small-business',
         name: 'Small Businesses',
-        shortName: 'Small Biz',
+        shortName: 'Small Businesses',
         icon: 'Store',
         eyebrow: 'SMALL BUSINESS BOOKING FLOW DEMO',
         demoTitle: 'How Local Businesses Turn Visitors Into Bookings 24/7',
@@ -628,20 +628,25 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
     },
     {
         id: 'dentists',
-        name: 'Dentists & Dental Practices',
+        name: 'Dental & Aesthetics',
         shortName: 'Dentists',
         icon: 'Smile',
-        eyebrow: 'DENTAL PRACTICE BOOKING FLOW DEMO',
-        demoTitle: 'How Dental Practices Fill Chair Time 24/7',
-        confirmationTitle: 'Dental Appointment Confirmed!',
-        tagline: 'Book new patient exams, emergency toothache visits, and whitening consults.',
-        defaultService: 'New Patient Exam & Clean (£65)',
+        eyebrow: 'DENTAL & AESTHETICS BOOKING FLOW DEMO',
+        demoTitle: 'How Dental & Aesthetics Clinics Fill Appointment Books 24/7',
+        confirmationTitle: 'Appointment Confirmed!',
+        tagline: 'Book free consultations, dental check-ups, injectables, and skin treatments online.',
+        defaultService: 'Free Consultation (£0)',
         services: [
-            'New Patient Exam & Clean (£65)',
-            'Emergency Toothache Call-Out (£95)',
-            'Teeth Whitening Consultation (Free)',
-            'Filling / Restoration Quote',
-            'Invisalign / Orthodontic Assessment (£50 Deposit)'
+            'Free Consultation (£0)',
+            'Adult Routine Check-up (£55)',
+            'Comprehensive New Patient Exam (£120)',
+            'Scale & Polish (from £90)',
+            'Botox 1 Area (£180)',
+            'Botox 3 Areas (£270)',
+            'Lip Filler (from £250)',
+            'Profhilo Session (£300)',
+            'At-Home Teeth Whitening (£350)',
+            'Laser Skin Rejuvenation (from £150)'
         ],
         timeSlots: ['09:00 AM', '11:00 AM', '02:00 PM', '04:30 PM'],
         customFields: [
@@ -649,29 +654,18 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
                 id: 'patientType',
                 label: 'Patient Status *',
                 type: 'select',
-                options: ['New Patient', 'Existing Patient', 'Emergency / Urgent']
-            },
-            {
-                id: 'treatmentFocus',
-                label: 'Treatment Interest *',
-                type: 'select',
-                options: [
-                    'Check-up & Hygiene',
-                    'Fillings / Restorations',
-                    'Whitening / Cosmetic',
-                    'Orthodontics / Invisalign',
-                    'Pain Relief / Emergency'
-                ]
+                options: ['New Patient', 'Existing Patient', 'Consultation only']
             }
         ],
-        uploadPrompt: 'Upload a photo of teeth, smile concern or problem area',
-        notesPlaceholder: 'E.g. Sensitivity on upper left, prefer morning appointments.',
-        summaryBullet: 'Chair time reserved with patient intake and reminder SMS queued.',
+        uploadPrompt: 'Upload a smile photo or area of concern (optional)',
+        notesPlaceholder:
+            'E.g. Interested in lip filler and a check-up, prefer mornings, any medical notes.',
+        summaryBullet: 'Appointment reserved with intake captured and reminder SMS queued.',
         setupPlaceholders: {
-            name: 'e.g. Dr Sara Khan',
-            businessName: 'e.g. Khan Dental Practice',
-            contact: 'e.g. 0113 000 0000 or reception@khandental.co.uk',
-            serviceArea: 'e.g. Leeds city centre'
+            name: 'e.g. Dr Carmen',
+            businessName: 'e.g. Dr Carmen Aesthetics',
+            contact: 'e.g. 07826 769219 or hello@drcarmenaesthetics.com',
+            serviceArea: 'e.g. Basingstoke'
         }
     }
 ];
@@ -694,6 +688,11 @@ export function bookingIndustryLabel(id: string | null | undefined): string | nu
     if (!id) return null;
     const preset = bookingIndustryPresets.find((p) => p.id === id);
     return preset?.name || id;
+}
+
+
+export function bookingIndustrySelectOptions(): { id: BookingIndustryId; label: string }[] {
+    return bookingIndustryPresets.map((p) => ({ id: p.id, label: p.shortName }));
 }
 
 export function getBookingPreset(industryId: string | null | undefined): BookingIndustryPreset {
@@ -719,11 +718,21 @@ export function getBookingPreset(industryId: string | null | undefined): Booking
     if (idLower.includes('garden') || idLower.includes('landscap') || idLower.includes('lawn')) {
         return bookingIndustryPresets[6];
     }
+    
+    if (
+        idLower.includes('dentist') ||
+        idLower.includes('dental') ||
+        idLower.includes('teeth') ||
+        idLower.includes('orthodont') ||
+        (idLower.includes('carmen') && idLower.includes('aesthetic'))
+    ) {
+        return bookingIndustryPresets[12];
+    }
     if (
         idLower.includes('salon') ||
         idLower.includes('beauty') ||
         idLower.includes('hair') ||
-        idLower.includes('aesthetic')
+        (idLower.includes('aesthetic') && !idLower.includes('dental'))
     ) {
         return bookingIndustryPresets[7];
     }
@@ -747,14 +756,6 @@ export function getBookingPreset(industryId: string | null | undefined): Booking
         return bookingIndustryPresets[10];
     }
     if (idLower.includes('small') || idLower.includes('biz')) return bookingIndustryPresets[11];
-    if (
-        idLower.includes('dentist') ||
-        idLower.includes('dental') ||
-        idLower.includes('teeth') ||
-        idLower.includes('orthodont')
-    ) {
-        return bookingIndustryPresets[12];
-    }
 
     const found = bookingIndustryPresets.find((p) => p.id === idLower);
     return found || bookingIndustryPresets[0];

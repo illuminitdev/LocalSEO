@@ -54,7 +54,7 @@ function extractJsonLdBlocks(html) {
       const parsed = JSON.parse(raw);
       blocks.push(parsed);
     } catch {
-      // ignore invalid JSON-LD
+      
     }
   });
   return blocks;
@@ -182,9 +182,9 @@ function extractPage(html, pageUrl) {
   };
 }
 
-/**
- * Crawl homepage + a limited set of same-origin internal links.
- */
+
+
+
 export async function crawlWebsite(websiteUrl, { maxPages = 12 } = {}) {
   const start = normalizeUrl(websiteUrl);
   const origin = start.origin;
@@ -211,7 +211,7 @@ export async function crawlWebsite(websiteUrl, { maxPages = 12 } = {}) {
       const sm = await fetchText(`${origin}${path}`, 8000);
       if (sm.ok && /<urlset|<sitemapindex/i.test(sm.text)) sitemapFound = true;
     } catch {
-      // ignore
+      
     }
   }
 
@@ -263,7 +263,7 @@ export async function crawlWebsite(websiteUrl, { maxPages = 12 } = {}) {
   const allHrefs = pages.flatMap((p) => p.links.map((l) => l.href.toLowerCase()));
   const allLinkText = pages.flatMap((p) => p.links.map((l) => l.text.toLowerCase()));
 
-  // Sample up to 8 internal links for broken-link probe
+  
   const sampleLinks = [...new Set(allHrefs.filter((h) => h.startsWith(origin.toLowerCase())))].slice(0, 8);
   const broken = [];
   for (const href of sampleLinks) {

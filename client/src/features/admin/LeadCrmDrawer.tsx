@@ -134,7 +134,7 @@ export default function LeadCrmDrawer({
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    // Task Creation Form State
+    
     const [taskType, setTaskType] = useState<TaskType>('prepare_audit');
     const [taskTitle, setTaskTitle] = useState('');
     const [taskNotes, setTaskNotes] = useState('');
@@ -143,10 +143,10 @@ export default function LeadCrmDrawer({
     const [taskDueDate, setTaskDueDate] = useState<string>('');
     const [submittingTask, setSubmittingTask] = useState(false);
 
-    // Action Toast
+    
     const [successToast, setSuccessToast] = useState<string | null>(null);
 
-    // Deleting task state
+    
     const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
 
     const loadLeadData = useCallback(async () => {
@@ -196,7 +196,7 @@ export default function LeadCrmDrawer({
                 notes: taskNotes.trim() || undefined
             });
 
-            // Reset form
+            
             setTaskTitle('');
             setTaskNotes('');
             setTaskDueDate('');
@@ -361,7 +361,7 @@ export default function LeadCrmDrawer({
                     </div>
                 </div>
 
-                {/* Tabs */}
+                {}
                 <div className="flex border-b border-slate-200 bg-white px-6 shrink-0">
                     <button
                         onClick={() => setActiveTab('tasks')}
@@ -426,7 +426,7 @@ export default function LeadCrmDrawer({
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     {activeTab === 'tasks' ? (
                         <>
-                            {/* Create Task Form */}
+                            {}
                             <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-4 space-y-4">
                                 <div className="flex items-center justify-between">
                                     <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
@@ -435,7 +435,7 @@ export default function LeadCrmDrawer({
                                     </h3>
                                 </div>
 
-                                {/* Preset Action Pills */}
+                                {}
                                 <div className="flex flex-wrap gap-1.5">
                                     {TASK_PRESETS.map((preset) => (
                                         <button
@@ -544,7 +544,7 @@ export default function LeadCrmDrawer({
                                 </form>
                             </div>
 
-                            {/* Task List */}
+                            {}
                             <div className="space-y-3">
                                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
                                     Lead Tasks ({tasks.length})
@@ -583,7 +583,7 @@ export default function LeadCrmDrawer({
                                                                 {task.title}
                                                             </span>
 
-                                                            {/* Priority Badge */}
+                                                            {}
                                                             <span className={cn(
                                                                 "text-[10px] font-bold uppercase px-2 py-0.5 rounded-md",
                                                                 task.priority === 'urgent' ? "bg-rose-100 text-rose-800" :

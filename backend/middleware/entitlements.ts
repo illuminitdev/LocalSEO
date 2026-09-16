@@ -31,7 +31,7 @@ function emptyEntitlements() {
     };
 }
 
-/** Dedupe join rows (one per feature) into unique subscriptions, preserving created_at DESC order. */
+
 function dedupeActiveSubscriptions(rows: any[]) {
     const seen = new Set<string>();
     const list: ReturnType<typeof emptyEntitlements>['activeSubscriptions'] = [];
@@ -58,11 +58,11 @@ function periodStillValid(periodEnd: any) {
     return new Date(periodEnd).getTime() > Date.now();
 }
 
-/**
- * Load active plan features from shared ZappSites tables.
- * Matches by org_id (post-claim) OR customer_email (pre-claim / email link).
- * Expired periods (past current_period_end) yield no features and are marked canceled.
- */
+
+
+
+
+
 async function loadOrgEntitlements(orgId: any, email?: any) {
     if (!orgId && !email) {
         return emptyEntitlements();
@@ -93,7 +93,7 @@ async function loadOrgEntitlements(orgId: any, email?: any) {
     const validRows = rows.filter((r) => periodStillValid(r.current_period_end));
 
     if (!validRows.length) {
-        // Latest row expired — mark that one canceled and return empty features
+        
         const expired = rows[0];
         await query(
             `UPDATE subscriptions
@@ -116,8 +116,8 @@ async function loadOrgEntitlements(orgId: any, email?: any) {
         };
     }
 
-    // Primary plan = latest by created_at (already ORDER BY created_at DESC)
-    // Features = union across all active non-expired stacked plans
+    
+    
     const primary = validRows[0];
     for (const r of validRows) {
         if (r.feature_key) featureSet.add(r.feature_key);

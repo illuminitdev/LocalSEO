@@ -96,7 +96,7 @@ export default function TaskCompletionModal({
                 className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-100 max-w-md w-full p-4 sm:p-5 relative animate-in zoom-in-95 duration-150 space-y-3.5 max-h-[92vh] overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
             >
-                {/* Close Button */}
+                {}
                 <button
                     type="button"
                     onClick={onClose}
@@ -193,7 +193,7 @@ export default function TaskCompletionModal({
                             </div>
                         </button>
 
-                        {/* In Progress */}
+                        {}
                         <button
                             type="button"
                             onClick={() => setSelectedStatus('in_progress')}
@@ -217,7 +217,7 @@ export default function TaskCompletionModal({
                             </div>
                         </button>
 
-                        {/* Pending */}
+                        {}
                         <button
                             type="button"
                             onClick={() => setSelectedStatus('pending')}
@@ -241,7 +241,7 @@ export default function TaskCompletionModal({
                             </div>
                         </button>
 
-                        {/* Cancelled */}
+                        {}
                         <button
                             type="button"
                             onClick={() => setSelectedStatus('cancelled')}

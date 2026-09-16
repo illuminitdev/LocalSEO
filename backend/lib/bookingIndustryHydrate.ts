@@ -22,11 +22,11 @@ function paymentApiBase(): string {
         .trim()
         .replace(/\/$/, '');
     if (fromEnv) return fromEnv;
-    // Prod/live ZappSites payment API (same account as booking checkout)
+    
     return 'https://gq94idnsj0.execute-api.us-east-1.amazonaws.com';
 }
 
-/** Read booking_industry_id from a Stripe subscription's metadata. */
+
 export async function industryIdFromStripeSubscription(
     stripeSubscriptionId: string | null | undefined
 ): Promise<BookingIndustryId | null> {
@@ -43,7 +43,7 @@ export async function industryIdFromStripeSubscription(
     }
 }
 
-/** Read booking_industry_id via ZappSites Payment API (uses live Stripe there). */
+
 export async function industryIdFromPaymentCheckoutSession(
     stripeSessionId: string | null | undefined
 ): Promise<BookingIndustryId | null> {
@@ -137,12 +137,15 @@ function industryIdFromTradeTypeLabel(tradeType: string | null | undefined): Boo
     const byName = bookingIndustryPresets.find(
         (p) => p.name.toLowerCase() === lower || p.shortName.toLowerCase() === lower
     );
-    return byName ? byName.id : null;
+    if (byName) return byName.id;
+    
+    const inferred = getBookingPreset(raw).id;
+    return normalizeBookingIndustryId(inferred);
 }
 
-/**
- * If org has no industry yet, recover from invite / Payment API / Stripe and persist.
- */
+
+
+
 export async function hydrateOrgBookingIndustry(orgId: string): Promise<BookingIndustryId | null> {
     if (!orgId) return null;
 
@@ -165,7 +168,7 @@ export async function hydrateOrgBookingIndustry(orgId: string): Promise<BookingI
     let industryId: BookingIndustryId | null = null;
     let sourceInviteId: string | undefined;
 
-    // 1) Invite column written at ZappSites checkout
+    
     for (const inv of invites) {
         const id = normalizeBookingIndustryId(inv.booking_industry_id);
         if (id) {
@@ -175,7 +178,7 @@ export async function hydrateOrgBookingIndustry(orgId: string): Promise<BookingI
         }
     }
 
-    // 2) ZappSites Payment API (live Stripe) via checkout session on invite
+    
     if (!industryId) {
         for (const inv of invites) {
             if (!inv.stripe_session_id) continue;
@@ -188,7 +191,7 @@ export async function hydrateOrgBookingIndustry(orgId: string): Promise<BookingI
         }
     }
 
-    // 3) Local Stripe key (often wrong stage/account — last resort)
+    
     if (!industryId) {
         for (const inv of invites) {
             if (!inv.stripe_subscription_id) continue;
@@ -201,7 +204,7 @@ export async function hydrateOrgBookingIndustry(orgId: string): Promise<BookingI
         }
     }
 
-    // 4) Active booking subscription rows (org / email)
+    
     if (!industryId) {
         const emails = await orgEmails(orgId);
         const { rows: byOrg } = await query(
@@ -234,7 +237,7 @@ export async function hydrateOrgBookingIndustry(orgId: string): Promise<BookingI
         }
     }
 
-    // 5) Exact trade_type label match only (never guess plumbing)
+    
     if (!industryId) {
         industryId = industryIdFromTradeTypeLabel(org.trade_type);
     }

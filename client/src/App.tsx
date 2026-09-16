@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import Layout from './shared/Layout';
 import { RequireAuth, RequireAdmin, RequireSales } from './shared/AuthGuards';
 import FeatureGate from './shared/FeatureGate';
+import { OrgBrandProvider } from './shared/OrgBrandContext';
 import Dashboard from './features/dashboard/Dashboard';
 import ProfileAudit from './features/local-presence/ProfileAudit';
 import PostAutomation from './features/local-presence/PostAutomation';
@@ -11,10 +12,10 @@ import VisibilityAuditReport from './features/visibility/VisibilityAuditReport';
 import MediaOptimization from './features/local-presence/MediaOptimization';
 import ReportGenerator from './features/report/ReportGenerator';
 import Citations from './features/local-presence/Citations';
-import BookingPlots from './features/bookings/BookingPlots';
-import PublicBookHost, { PublicBookEvent, BookSuccess, BookManage } from './features/bookings/PublicBooking';
-import { FoodOrderTrack, FoodOrderSuccess } from './features/bookings/FoodOrderTrack';
-import ClientPortal from './features/bookings/ClientPortal';
+import BookingPlots from './features/bookings/shared/BookingPlots';
+import PublicBookHost, { PublicBookEvent, BookSuccess, BookManage } from './features/bookings/shared/PublicBooking';
+import { FoodOrderTrack, FoodOrderSuccess } from './features/bookings/restaurants/FoodOrderTrack';
+import ClientPortal from './features/bookings/shared/ClientPortal';
 import { ClientsListPage, ClientDetailPage } from './features/clients/Clients';
 import { QuotesListPage, QuoteNewPage, QuoteDetailPage } from './features/quotes/Quotes';
 import PublicQuote from './features/quotes/PublicQuote';
@@ -50,7 +51,7 @@ import SalesActivityLogs from './features/sales/SalesActivityLogs';
 import SalesLeadDetail from './features/sales/SalesLeadDetail';
 import SalesAccount from './features/sales/SalesAccount';
 
-/** Old /booking/settings URL → /booking?panel=settings */
+
 function BookingSettingsRedirect() {
   const location = useLocation();
   const search = location.search.replace(/^\?/, '');
@@ -83,8 +84,8 @@ export default function App() {
           <Route path="/admin/services" element={<AdminServices />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
         </Route>
-        {/* Always show login on / and /login — do not auto-jump to last dashboard/admin.
-            Refresh on /dashboard or /admin still stays logged in via RequireAuth / RequireAdmin. */}
+        {
+}
         <Route path="/" element={<Login />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Navigate to="/" replace />} />
@@ -121,7 +122,9 @@ export default function App() {
         <Route
           element={
             <RequireAuth>
-              <Layout />
+              <OrgBrandProvider>
+                <Layout />
+              </OrgBrandProvider>
             </RequireAuth>
           }
         >

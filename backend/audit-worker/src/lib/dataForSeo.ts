@@ -1,7 +1,7 @@
-/**
- * DataForSEO Google Maps SERP — Full Audit local-pack / Maps rankings (admin worker).
- * Docs: POST https://api.dataforseo.com/v3/serp/google/maps/live/advanced
- */
+
+
+
+
 
 export type DataForSeoMapsItem = {
   position: number;
@@ -68,7 +68,7 @@ function normalizeItem(raw: any, index: number): DataForSeoMapsItem | null {
   };
 }
 
-/** Live Google Maps local pack. Returns [] on soft failure. */
+
 export async function fetchMapsLocalPack(opts: {
   keyword: string;
   lat?: number | null;
@@ -104,7 +104,7 @@ export async function fetchMapsLocalPack(opts: {
   } else if (opts.locationName && String(opts.locationName).trim()) {
     task.location_name = String(opts.locationName).trim();
   } else {
-    task.location_code = 2826; // United Kingdom
+    task.location_code = 2826; 
   }
 
   const controller = new AbortController();
@@ -157,7 +157,7 @@ export async function fetchMapsLocalPack(opts: {
   }
 }
 
-/** Build Full Audit gbpLookup.localRank shape from DataForSEO Maps results. */
+
 function normName(s: string) {
   return String(s || '')
     .toLowerCase()
@@ -181,7 +181,7 @@ function hostOf(u: string) {
   }
 }
 
-/** Pick the Maps SERP row that is this business (name / phone / website / placeId). */
+
 export function findMatchingMapsItem(
   items: DataForSeoMapsItem[],
   business: {

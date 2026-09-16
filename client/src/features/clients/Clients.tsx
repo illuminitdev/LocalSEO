@@ -57,7 +57,7 @@ function ClientsList() {
 
     useEffect(() => {
         load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        
     }, []);
 
     const createClient = async (e: React.FormEvent) => {
@@ -316,7 +316,7 @@ function ClientDetail() {
 
     useEffect(() => {
         load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        
     }, [id]);
 
     const save = async (e: React.FormEvent) => {
@@ -338,7 +338,7 @@ function ClientDetail() {
     const invoices = useMemo(() => {
         const fromApi = data?.invoices || [];
         if (fromApi.length) return fromApi;
-        // Fallback: invoice fields joined on bookings (older rows / pending Stripe)
+        
         return (data?.bookings || [])
             .filter((b: any) => b.invoice_status || b.invoice_url || b.invoice_amount_cents)
             .map((b: any) => ({

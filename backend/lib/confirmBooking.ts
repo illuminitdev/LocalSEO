@@ -21,7 +21,7 @@ async function getHostUserId(orgId: any) {
     return rows[0]?.user_id || null;
 }
 
-/** Mark booking confirmed after successful Stripe payment (or free/sim); sync calendar & send emails once. */
+
 async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntentId }: any) {
     const { rows } = await query(
         `SELECT b.*, e.name AS event_name,

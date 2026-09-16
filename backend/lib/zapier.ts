@@ -23,7 +23,7 @@ function signBody(secret: string, body: string) {
     return createHmac('sha256', secret).update(body).digest('hex');
 }
 
-/** Fire-and-forget Zapier webhook. Never throws to callers. */
+
 export async function fireZapierEvent(orgId: string, event: ZapierEvent, payload: Record<string, unknown>) {
     try {
         const cfg = await loadZapierConfig(orgId);

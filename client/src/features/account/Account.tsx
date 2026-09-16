@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Building2,
-    LogOut,
     MapPin,
     Search,
     Shield,
@@ -14,17 +13,35 @@ import {
     Mail,
     Phone,
     Key,
-    Settings
+    Settings,
+    Image as ImageIcon
 } from 'lucide-react';
-import { apiGet, apiPatch, apiPost } from '../../shared/utils';
+import { apiGet, apiPatch, apiPost, cn } from '../../shared/utils';
 import { clearToken, setMustChangePassword } from '../auth/auth';
 import GroundingModal from '../dashboard/GroundingModal';
 import PlacesMap from '../../shared/PlacesMap';
 import { useEntitlements } from '../../shared/EntitlementsContext';
 import { FEATURE_LABELS, PLANS, type FeatureKey } from '../../shared/planCatalog';
+import {
+    DEFAULT_BRAND_PRIMARY,
+    DEFAULT_BRAND_SECONDARY,
+    isValidBrandHex,
+    normalizeBrandHex,
+    orgBrandStyle
+} from '../../shared/orgBrand';
+import { useOrgBrand } from '../../shared/OrgBrandContext';
 
 const fieldClass =
-    'mt-1.5 w-full rounded-xl border border-[#E2E8F0]/80 bg-white/90 px-3.5 py-2.5 text-sm text-[#0F172A] placeholder:text-[#94A3B8] shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25 transition-shadow';
+    'mt-1.5 w-full rounded-xl border border-[#E2E8F0]/80 bg-white/90 px-3.5 py-2.5 text-sm text-[#0F172A] placeholder:text-[#94A3B8] shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] focus:outline-none focus:border-[var(--brand-primary)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--brand-primary)_25%,transparent)] transition-shadow';
+
+const ACCOUNT_NAV = [
+    { id: 'profile', label: 'Profile', icon: UserRound },
+    { id: 'plan', label: 'Plan', icon: CreditCard },
+    { id: 'password', label: 'Account security', icon: Shield },
+    { id: 'branding', label: 'Branding', icon: ImageIcon },
+    { id: 'business', label: 'Business', icon: Building2 },
+    { id: 'location', label: 'Location', icon: MapPin }
+] as const;
 
 type OrgForm = {
     name: string;
@@ -53,10 +70,18 @@ function SectionCard({
             id={id}
             className="relative rounded-2xl overflow-hidden border border-[#E2E8F0]/90 bg-white shadow-[0_10px_40px_-18px_rgba(15,23,42,0.28)]"
         >
-            <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#F59E0B] via-[#FBBF24] to-[#FED7AA]" />
+            <div
+                className="absolute left-0 top-0 bottom-0 w-1"
+                style={{
+                    background: 'linear-gradient(to bottom, var(--brand-primary), color-mix(in srgb, var(--brand-primary) 55%, white))'
+                }}
+            />
             <div className="pl-1">
-                <div className="px-6 py-5 border-b border-[#F1F5F9] bg-gradient-to-br from-[#FFFBEB] via-white to-[#F8FAFC] flex items-start gap-3.5">
-                    <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white flex items-center justify-center shrink-0 shadow-[0_8px_16px_-6px_rgba(217,119,6,0.55)]">
+                <div className="px-6 py-5 border-b border-[#F1F5F9] bg-gradient-to-br from-white via-white to-[#F8FAFC] flex items-start gap-3.5">
+                    <div
+                        className="h-10 w-10 rounded-2xl text-white flex items-center justify-center shrink-0 shadow-[0_8px_16px_-6px_rgba(15,23,42,0.35)]"
+                        style={{ background: 'var(--brand-primary)' }}
+                    >
                         <Icon className="w-4 h-4" strokeWidth={2} />
                     </div>
                     <div className="min-w-0 pt-0.5">
@@ -79,6 +104,25 @@ export default function Account() {
     const [business, setBusiness] = useState<any>(null);
     const [mustChangePassword, setMustChange] = useState(forcePassword);
     const [editingOrg, setEditingOrg] = useState(false);
+    const [activeSection, setActiveSection] = useState<string>(() => {
+        if (forcePassword) return 'password';
+        try {
+            const hash = window.location.hash.replace(/^#/, '');
+            if (hash && ACCOUNT_NAV.some((n) => n.id === hash)) return hash;
+        } catch {
+            
+        }
+        return 'profile';
+    });
+
+    const selectSection = (id: string) => {
+        setActiveSection(id);
+        try {
+            window.history.replaceState(null, '', `#${id}`);
+        } catch {
+            
+        }
+    };
 
     const [displayName, setDisplayName] = useState('');
     const [email, setEmail] = useState('');
@@ -102,6 +146,14 @@ export default function Account() {
     const [orgErr, setOrgErr] = useState('');
     const [orgBusy, setOrgBusy] = useState(false);
 
+    const [logoUrl, setLogoUrl] = useState('');
+    const [brandPrimary, setBrandPrimary] = useState(DEFAULT_BRAND_PRIMARY);
+    const [brandSecondary, setBrandSecondary] = useState(DEFAULT_BRAND_SECONDARY);
+    const [brandMsg, setBrandMsg] = useState('');
+    const [brandErr, setBrandErr] = useState('');
+    const [brandBusy, setBrandBusy] = useState(false);
+    const [logoBusy, setLogoBusy] = useState(false);
+
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -121,6 +173,7 @@ export default function Account() {
         entitlementsDisabled,
         hasFeature
     } = useEntitlements();
+    const { applyBrand } = useOrgBrand();
     const [simBusy, setSimBusy] = useState(false);
     const showSimulate = entitlementsDisabled;
     const hasLocalPresence = hasFeature('local_presence');
@@ -183,10 +236,17 @@ export default function Account() {
                     tradeType: o.trade_type || '',
                     serviceArea: o.service_area || ''
                 });
+                setLogoUrl(o.logo_url || o.logoUrl || '');
+                setBrandPrimary(
+                    normalizeBrandHex(o.brand_primary || o.brandPrimary || '', DEFAULT_BRAND_PRIMARY)
+                );
+                setBrandSecondary(
+                    normalizeBrandHex(o.brand_secondary || o.brandSecondary || '', DEFAULT_BRAND_SECONDARY)
+                );
             })
             .catch((err: Error) => {
                 const msg = err.message || 'Could not load account';
-                // Stale session or unreachable API — send back to login instead of a broken Account page
+                
                 if (
                     msg === 'Failed to fetch' ||
                     /unauthorized|invalid token|jwt|401/i.test(msg)
@@ -205,12 +265,14 @@ export default function Account() {
     }, [hasLocalPresence]);
 
     useEffect(() => {
-        if (window.location.hash !== '#password') return;
-        const t = window.setTimeout(() => {
-            document.getElementById('password')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 100);
-        return () => window.clearTimeout(t);
-    }, []);
+        if (forcePassword) selectSection('password');
+    }, [forcePassword]);
+
+    const visibleNav = ACCOUNT_NAV.filter((item) => item.id !== 'location' || hasLocalPresence);
+
+    useEffect(() => {
+        if (activeSection === 'location' && !hasLocalPresence) selectSection('profile');
+    }, [activeSection, hasLocalPresence]);
 
     const saveProfile = async (e: FormEvent) => {
         e.preventDefault();
@@ -225,7 +287,7 @@ export default function Account() {
             setDisplayName(data.user?.name || displayName);
             setAvatarUrl(data.user?.avatarUrl || avatarUrl);
 
-            // Phone is stored on the organization (shown under Personal information)
+            
             const updated = await apiPatch('/api/host/organization', { phone: org.phone || '' });
             setOrg((o) => ({
                 ...o,
@@ -291,6 +353,116 @@ export default function Account() {
         }
     };
 
+    const uploadLogo = async (file: File) => {
+        setLogoBusy(true);
+        setBrandErr('');
+        setBrandMsg('');
+        try {
+            if (file.size > 5 * 1024 * 1024) throw new Error('Logo must be under 5MB');
+            const presign = await apiPost('/api/host/media/presign', {
+                kind: 'logo',
+                contentType: file.type || 'image/jpeg'
+            });
+            const put = await fetch(presign.uploadUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': file.type || 'image/jpeg' },
+                body: file
+            });
+            if (!put.ok) throw new Error('Upload to storage failed');
+            const updated = await apiPatch('/api/host/organization', { logoUrl: presign.publicUrl });
+            setLogoUrl(updated.logo_url || presign.publicUrl);
+            applyBrand({
+                logoUrl: updated.logo_url || presign.publicUrl,
+                brandPrimary,
+                brandSecondary
+            });
+            setBrandMsg('Logo updated.');
+        } catch (err: any) {
+            setBrandErr(err.message || 'Upload failed (set MEDIA_BUCKET for S3)');
+        } finally {
+            setLogoBusy(false);
+        }
+    };
+
+    const clearLogo = async () => {
+        setLogoBusy(true);
+        setBrandErr('');
+        setBrandMsg('');
+        try {
+            await apiPatch('/api/host/organization', { logoUrl: '' });
+            setLogoUrl('');
+            applyBrand({ logoUrl: '', brandPrimary, brandSecondary });
+            setBrandMsg('Logo removed.');
+        } catch (err: any) {
+            setBrandErr(err.message || 'Could not remove logo');
+        } finally {
+            setLogoBusy(false);
+        }
+    };
+
+    const saveBranding = async (e: FormEvent) => {
+        e.preventDefault();
+        if (!isValidBrandHex(brandPrimary) || !isValidBrandHex(brandSecondary)) {
+            setBrandErr('Colors must be hex values like #F59E0B');
+            return;
+        }
+        setBrandBusy(true);
+        setBrandMsg('');
+        setBrandErr('');
+        try {
+            const updated = await apiPatch('/api/host/organization', {
+                brandPrimary: normalizeBrandHex(brandPrimary, DEFAULT_BRAND_PRIMARY),
+                brandSecondary: normalizeBrandHex(brandSecondary, DEFAULT_BRAND_SECONDARY)
+            });
+            setBrandPrimary(
+                normalizeBrandHex(updated.brand_primary || brandPrimary, DEFAULT_BRAND_PRIMARY)
+            );
+            setBrandSecondary(
+                normalizeBrandHex(updated.brand_secondary || brandSecondary, DEFAULT_BRAND_SECONDARY)
+            );
+            applyBrand({
+                logoUrl,
+                brandPrimary: updated.brand_primary || brandPrimary,
+                brandSecondary: updated.brand_secondary || brandSecondary
+            });
+            setBrandMsg('Brand colors saved — sidebar and workspace updated.');
+        } catch (err: any) {
+            setBrandErr(err.message);
+        } finally {
+            setBrandBusy(false);
+        }
+    };
+
+    const resetBranding = async () => {
+        setBrandBusy(true);
+        setBrandMsg('');
+        setBrandErr('');
+        try {
+            const updated = await apiPatch('/api/host/organization', {
+                logoUrl: '',
+                brandPrimary: DEFAULT_BRAND_PRIMARY,
+                brandSecondary: DEFAULT_BRAND_SECONDARY
+            });
+            setLogoUrl(updated.logo_url || '');
+            setBrandPrimary(
+                normalizeBrandHex(updated.brand_primary || '', DEFAULT_BRAND_PRIMARY)
+            );
+            setBrandSecondary(
+                normalizeBrandHex(updated.brand_secondary || '', DEFAULT_BRAND_SECONDARY)
+            );
+            applyBrand({
+                logoUrl: updated.logo_url || '',
+                brandPrimary: updated.brand_primary || DEFAULT_BRAND_PRIMARY,
+                brandSecondary: updated.brand_secondary || DEFAULT_BRAND_SECONDARY
+            });
+            setBrandMsg('Branding reset to LocalPulse defaults.');
+        } catch (err: any) {
+            setBrandErr(err.message || 'Could not reset branding');
+        } finally {
+            setBrandBusy(false);
+        }
+    };
+
     const savePassword = async (e: FormEvent) => {
         e.preventDefault();
         if (newPassword !== confirmPassword) {
@@ -318,11 +490,6 @@ export default function Account() {
         }
     };
 
-    const logout = () => {
-        clearToken();
-        navigate('/', { replace: true });
-    };
-
     const handleSimulatePlan = async (nextPlanId: string) => {
         setSimBusy(true);
         try {
@@ -334,29 +501,62 @@ export default function Account() {
 
     return (
         <div className="max-w-4xl mx-auto pb-12 animate-in fade-in duration-500">
-            <div className="mb-8 flex items-start gap-4">
-                <div className="h-12 w-12 rounded-2xl bg-[#0F172A] text-white flex items-center justify-center shrink-0 shadow-md">
+            <div className="mb-6 flex items-start gap-4">
+                <div
+                    className="h-12 w-12 rounded-2xl text-white flex items-center justify-center shrink-0 shadow-md"
+                    style={{ background: 'var(--brand-secondary)' }}
+                >
                     <Settings className="w-5 h-5" strokeWidth={2} />
                 </div>
                 <div>
                     <h1 className="text-3xl font-black tracking-tight text-[#0F172A]">Settings</h1>
-                    <p className="mt-1 text-sm text-[#64748B]">Manage your account profile and security.</p>
+                    <p className="mt-1 text-sm text-[#64748B]">Manage your account profile, branding, and security.</p>
                 </div>
             </div>
 
             {mustChangePassword && (
-                <p className="mb-6 text-sm text-amber-950 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl px-4 py-3 shadow-sm">
-                    Please change your temporary password when you can — use Account Security below.
+                <p className="mb-5 text-sm text-amber-950 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl px-4 py-3 shadow-sm">
+                    Please change your temporary password when you can — open Account security.
                 </p>
             )}
 
             {loadError && (
-                <p className="mb-6 text-sm text-red-700 bg-red-50 border border-red-100 rounded-2xl px-4 py-3">{loadError}</p>
+                <p className="mb-5 text-sm text-red-700 bg-red-50 border border-red-100 rounded-2xl px-4 py-3">{loadError}</p>
             )}
 
-            <div className="space-y-7">
-                {/* Profile card — photo on top/left, personal info beside */}
-                <section className="rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_10px_40px_-18px_rgba(15,23,42,0.2)] overflow-hidden">
+            <nav
+                className="mb-6 flex flex-wrap gap-1 rounded-2xl border border-[#E2E8F0]/90 bg-[#F1F5F9]/70 p-1.5 backdrop-blur-sm"
+                aria-label="Account sections"
+            >
+                {visibleNav.map((item) => {
+                    const Icon = item.icon;
+                    const active = activeSection === item.id;
+                    return (
+                        <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => selectSection(item.id)}
+                            className={cn(
+                                'inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all min-h-[40px]',
+                                active
+                                    ? 'text-white shadow-[0_8px_18px_-10px_rgba(15,23,42,0.55)]'
+                                    : 'text-[#64748B] hover:text-[#0F172A] hover:bg-white/80'
+                            )}
+                            style={active ? { background: 'var(--brand-primary)' } : undefined}
+                        >
+                            <Icon className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+                            <span className="whitespace-nowrap">{item.label}</span>
+                        </button>
+                    );
+                })}
+            </nav>
+
+            <div className="min-w-0">
+                {activeSection === 'profile' && (
+                <section
+                    id="profile"
+                    className="rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_10px_40px_-18px_rgba(15,23,42,0.2)] overflow-hidden"
+                >
                     <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr]">
                         <div className="p-6 border-b lg:border-b-0 lg:border-r border-[#E2E8F0] bg-[#F8FAFC]/80 flex flex-col">
                             <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#94A3B8] flex items-center gap-1.5 mb-5">
@@ -370,7 +570,10 @@ export default function Account() {
                                         className="h-20 w-20 rounded-full object-cover border-2 border-white shadow-md shrink-0"
                                     />
                                 ) : (
-                                    <div className="h-20 w-20 rounded-full bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white flex items-center justify-center text-2xl font-black shadow-md shrink-0">
+                                    <div
+                                        className="h-20 w-20 rounded-full text-white flex items-center justify-center text-2xl font-black shadow-md shrink-0"
+                                        style={{ background: 'var(--brand-primary)' }}
+                                    >
                                         {(displayName || email || 'U').charAt(0).toUpperCase()}
                                     </div>
                                 )}
@@ -494,8 +697,11 @@ export default function Account() {
                         </div>
                     </div>
                 </section>
+                )}
 
+                {activeSection === 'plan' && (
                 <SectionCard
+                    id="plan"
                     icon={CreditCard}
                     title={showStackedList ? 'Your plans' : 'Your plan'}
                     subtitle={
@@ -570,7 +776,10 @@ export default function Account() {
                                             key={f}
                                             className="text-sm text-[#334155] flex items-center gap-2.5 rounded-xl border border-[#E2E8F0] bg-white px-3.5 py-2.5 shadow-[0_4px_12px_-8px_rgba(15,23,42,0.35)]"
                                         >
-                                            <span className="w-2 h-2 rounded-full bg-gradient-to-br from-[#F59E0B] to-[#D97706] shrink-0 shadow-sm" />
+                                            <span
+                                                className="w-2 h-2 rounded-full shrink-0 shadow-sm"
+                                                style={{ background: 'var(--brand-primary)' }}
+                                            />
                                             {FEATURE_LABELS[f]}
                                         </li>
                                     ))}
@@ -607,7 +816,9 @@ export default function Account() {
                         </div>
                     )}
                 </SectionCard>
+                )}
 
+                {activeSection === 'password' && (
                 <SectionCard
                     icon={Shield}
                     title="Account Security"
@@ -691,10 +902,184 @@ export default function Account() {
                         </form>
                     )}
                 </SectionCard>
+                )}
 
+                {activeSection === 'branding' && (
+                <div
+                    id="branding"
+                    className="rounded-2xl border border-[#E2E8F0] bg-white p-5 sm:p-6 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.35)]"
+                    style={orgBrandStyle({ brandPrimary, brandSecondary })}
+                >
+                    <div className="mb-6">
+                        <h2 className="text-base font-black text-[#0F172A]">Branding</h2>
+                        <p className="text-xs text-[#64748B] mt-1">
+                            Logo and colors for sidebar, booking page, and client hub.
+                        </p>
+                    </div>
+
+                    {brandErr && <p className="mb-3 text-sm text-red-700">{brandErr}</p>}
+                    {brandMsg && <p className="mb-3 text-sm text-emerald-700">{brandMsg}</p>}
+
+                    <form onSubmit={saveBranding} className="space-y-6">
+                        <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]/80 p-4">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-3">
+                                Logo
+                            </p>
+                            <div className="flex items-center gap-4">
+                                <div className="h-16 w-16 rounded-xl border border-[#E2E8F0] bg-white overflow-hidden flex items-center justify-center shrink-0">
+                                    {logoUrl ? (
+                                        <img
+                                            src={logoUrl}
+                                            alt="Business logo"
+                                            className="h-12 w-12 object-contain"
+                                        />
+                                    ) : (
+                                        <ImageIcon className="w-5 h-5 text-[#CBD5E1]" />
+                                    )}
+                                </div>
+                                <div className="flex flex-wrap gap-2 min-w-0">
+                                    <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:bg-[#F1F5F9] cursor-pointer">
+                                        <Camera className="w-3.5 h-3.5" />
+                                        {logoBusy ? 'Uploading…' : logoUrl ? 'Change logo' : 'Upload logo'}
+                                        <input
+                                            type="file"
+                                            accept="image/jpeg,image/png,image/webp,image/gif"
+                                            className="hidden"
+                                            disabled={logoBusy}
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                e.target.value = '';
+                                                if (file) void uploadLogo(file);
+                                            }}
+                                        />
+                                    </label>
+                                    {logoUrl && (
+                                        <button
+                                            type="button"
+                                            disabled={logoBusy}
+                                            onClick={() => void clearLogo()}
+                                            className="px-3 py-2 rounded-xl border border-[#E2E8F0] bg-white text-xs font-bold text-[#64748B] hover:bg-[#F1F5F9] disabled:opacity-50"
+                                        >
+                                            Remove
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]/80 p-4">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-3">
+                                Colors
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg">
+                                <label className="block text-xs font-bold text-[#64748B]">
+                                    Primary
+                                    <div className="mt-1.5 flex items-center gap-2">
+                                        <span className="inline-flex h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[#E2E8F0] bg-white shadow-sm transition hover:shadow-md hover:ring-2 hover:ring-[color-mix(in_srgb,var(--brand-primary)_35%,transparent)] hover:ring-offset-2">
+                                            <input
+                                                type="color"
+                                                value={normalizeBrandHex(brandPrimary, DEFAULT_BRAND_PRIMARY)}
+                                                onChange={(e) => setBrandPrimary(e.target.value.toUpperCase())}
+                                                className="brand-color-swatch h-full w-full cursor-pointer border-0 bg-transparent p-0"
+                                            />
+                                        </span>
+                                        <input
+                                            type="text"
+                                            value={brandPrimary}
+                                            onChange={(e) => setBrandPrimary(e.target.value)}
+                                            className="w-28 rounded-xl border border-[#E2E8F0] bg-white px-2.5 py-2 text-sm font-mono text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)]"
+                                            placeholder="#F59E0B"
+                                            maxLength={7}
+                                        />
+                                    </div>
+                                </label>
+                                <label className="block text-xs font-bold text-[#64748B]">
+                                    Secondary
+                                    <div className="mt-1.5 flex items-center gap-2">
+                                        <span className="inline-flex h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[#E2E8F0] bg-white shadow-sm transition hover:shadow-md hover:ring-2 hover:ring-[color-mix(in_srgb,var(--brand-primary)_35%,transparent)] hover:ring-offset-2">
+                                            <input
+                                                type="color"
+                                                value={normalizeBrandHex(brandSecondary, DEFAULT_BRAND_SECONDARY)}
+                                                onChange={(e) => setBrandSecondary(e.target.value.toUpperCase())}
+                                                className="brand-color-swatch h-full w-full cursor-pointer border-0 bg-transparent p-0"
+                                            />
+                                        </span>
+                                        <input
+                                            type="text"
+                                            value={brandSecondary}
+                                            onChange={(e) => setBrandSecondary(e.target.value)}
+                                            className="w-28 rounded-xl border border-[#E2E8F0] bg-white px-2.5 py-2 text-sm font-mono text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)]"
+                                            placeholder="#0F172A"
+                                            maxLength={7}
+                                        />
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-2">
+                                Preview
+                            </p>
+                            <div
+                                className="rounded-xl px-4 py-3.5 text-white flex items-center gap-3"
+                                style={{ background: 'var(--brand-secondary)' }}
+                            >
+                                {logoUrl ? (
+                                    <img
+                                        src={logoUrl}
+                                        alt=""
+                                        className="h-8 w-8 rounded-lg object-contain bg-white/10 p-0.5 shrink-0"
+                                    />
+                                ) : null}
+                                <div className="min-w-0 flex-1">
+                                    <p
+                                        className="text-[10px] font-bold uppercase tracking-widest"
+                                        style={{ color: 'var(--brand-primary)' }}
+                                    >
+                                        Preview
+                                    </p>
+                                    <p className="text-sm font-black truncate">{org.name || 'Your business'}</p>
+                                </div>
+                                <span
+                                    className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold"
+                                    style={{
+                                        background: 'var(--brand-primary)',
+                                        color: 'var(--brand-secondary)'
+                                    }}
+                                >
+                                    Book now
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 pt-1">
+                            <button
+                                type="submit"
+                                disabled={brandBusy || logoBusy}
+                                className="px-4 py-2.5 rounded-xl text-white text-sm font-bold disabled:opacity-55"
+                                style={{ background: 'var(--brand-primary)' }}
+                            >
+                                {brandBusy ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                                type="button"
+                                disabled={brandBusy || logoBusy}
+                                onClick={() => void resetBranding()}
+                                className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B] hover:bg-[#F8FAFC] disabled:opacity-55"
+                            >
+                                Reset
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                )}
+
+                {activeSection === 'business' && (
                 <SectionCard
+                    id="business"
                     icon={Building2}
-                    title="Workspace business"
+                    title="Business"
                     subtitle="Trading name and contact used for bookings and your workspace."
                 >
                     {orgErr && <p className="mb-3 text-sm text-red-700">{orgErr}</p>}
@@ -729,7 +1114,8 @@ export default function Account() {
                             <button
                                 type="button"
                                 onClick={() => setEditingOrg(true)}
-                                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#F59E0B] text-white text-sm font-bold hover:bg-[#D97706]"
+                                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-sm font-bold"
+                                style={{ background: 'var(--brand-primary)' }}
                             >
                                 Add business details
                             </button>
@@ -802,7 +1188,8 @@ export default function Account() {
                                 <button
                                     type="submit"
                                     disabled={orgBusy}
-                                    className="px-5 py-2.5 rounded-xl bg-[#F59E0B] text-white text-sm font-bold hover:bg-[#D97706] disabled:opacity-55"
+                                    className="px-5 py-2.5 rounded-xl text-white text-sm font-bold disabled:opacity-55"
+                                    style={{ background: 'var(--brand-primary)' }}
                                 >
                                     {orgBusy ? 'Saving…' : 'Save business'}
                                 </button>
@@ -821,8 +1208,11 @@ export default function Account() {
                         </form>
                     )}
                 </SectionCard>
+                )}
 
+                {activeSection === 'location' && hasLocalPresence && (
                 <SectionCard
+                    id="location"
                     icon={MapPin}
                     title="Listing location"
                     subtitle="Connect your Google Business Profile for rankings, reviews, and listing tools."
@@ -870,7 +1260,8 @@ export default function Account() {
                                 <button
                                     type="button"
                                     onClick={() => setLocationOpen(true)}
-                                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#F59E0B] text-white text-sm font-bold hover:bg-[#D97706]"
+                                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-sm font-bold"
+                                    style={{ background: 'var(--brand-primary)' }}
                                 >
                                     <Search className="w-4 h-4" />
                                     {business?.connected ? 'Change location' : 'Add location'}
@@ -879,21 +1270,7 @@ export default function Account() {
                         )}
                     </div>
                 </SectionCard>
-
-                <section className="relative overflow-hidden rounded-2xl border border-red-100 bg-gradient-to-br from-white to-red-50/40 p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-[0_10px_30px_-18px_rgba(127,29,29,0.35)]">
-                    <div>
-                        <h2 className="text-base font-black text-[#0F172A]">Sign out</h2>
-                        <p className="text-xs text-[#64748B] mt-0.5">End your session on this device.</p>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={logout}
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 bg-white text-sm font-bold text-red-700 hover:bg-red-50 transition-colors shadow-sm"
-                    >
-                        <LogOut className="w-4 h-4" strokeWidth={1.75} />
-                        Log out
-                    </button>
-                </section>
+                )}
             </div>
 
             {hasLocalPresence && (

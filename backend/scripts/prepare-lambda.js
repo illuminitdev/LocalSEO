@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-/**
- * Builds a slim Lambda package under backend/.lambda-dist (no Docker).
- * Contents: dist/, migrations/, package.json, production node_modules.
- */
+
+
+
+
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');

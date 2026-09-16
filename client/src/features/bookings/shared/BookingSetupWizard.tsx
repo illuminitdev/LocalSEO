@@ -9,7 +9,8 @@ import {
     User,
     Wallet
 } from 'lucide-react';
-import { restrictEmailOrPhoneInput } from '../../shared/utils';
+import { useEntitlements } from '../../../shared/EntitlementsContext';
+import { restrictEmailOrPhoneInput } from '../../../shared/utils';
 import { getBookingPreset, type BookingIndustryId } from './bookingIndustryPresets';
 
 export type SetupForm = {
@@ -39,7 +40,7 @@ type Props = {
     linkedBusiness?: LinkedBusiness;
     busy: boolean;
     error: string;
-    /** Industry from ZappSites checkout / org hydrate — required to lock setup */
+    
     initialIndustryId?: string | null;
     onRefreshIndustry?: () => void;
     onComplete: (form: SetupForm) => Promise<void>;
@@ -83,6 +84,12 @@ export default function BookingSetupWizard({
     onRefreshIndustry,
     onComplete
 }: Props) {
+    const { features, entitlementsDisabled } = useEntitlements();
+    
+    const hasNonBookingFeatures =
+        entitlementsDisabled ||
+        features.some((f) => f === 'local_presence' || f === 'local_growth' || f === 'reporting');
+
     const hasSavedBusiness = Boolean(linked && linkedBusiness?.name?.trim());
     const checkoutIndustryId = String(initialIndustryId || '').trim();
     const hasCheckoutIndustry = Boolean(checkoutIndustryId);
@@ -90,7 +97,7 @@ export default function BookingSetupWizard({
     const [path, setPath] = useState<'choose' | 'manual' | 'from-profile'>(
         hasSavedBusiness ? 'choose' : 'manual'
     );
-    // 0 = locked industry + Next, 1 = details, 2 = deposit
+    
     const [step, setStep] = useState(0);
     const [form, setForm] = useState<SetupForm>(() => baseForm(checkoutIndustryId || null));
 
@@ -229,7 +236,7 @@ export default function BookingSetupWizard({
                                 ))}
                             </div>
 
-                            {/* Single locked industry — never a multi-industry grid */}
+                            {}
                             <div className="rounded-2xl border-2 border-[#F59E0B] bg-[#FFFBEB] p-4">
                                 <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-[#D97706]">
                                     <Lock className="w-3.5 h-3.5" /> Locked from payment
@@ -278,7 +285,10 @@ export default function BookingSetupWizard({
                                 </div>
                             )}
 
-                            {path === 'manual' && !hasSavedBusiness && onDetailsStep && (
+                            {path === 'manual' &&
+                                !hasSavedBusiness &&
+                                onDetailsStep &&
+                                hasNonBookingFeatures && (
                                 <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-sm text-[#64748B]">
                                     No business profile saved yet — enter booking details below. You can also{' '}
                                     <Link to="/profile" className="font-semibold text-[#0F172A] underline">

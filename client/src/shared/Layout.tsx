@@ -28,6 +28,7 @@ import { clearToken } from '../features/auth/auth';
 import { hasRouteAccess, routeRequiresFeatures } from './planCatalog';
 import { useEntitlements } from './EntitlementsContext';
 import MustChangePasswordBanner from '../features/account/MustChangePasswordBanner';
+import { useOrgBrand } from './OrgBrandContext';
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 380;
@@ -99,6 +100,7 @@ export default function Layout() {
     const searchParams = new URLSearchParams(location.search);
     const bookingPanel = searchParams.get('panel');
     const { features, loading, entitlementsDisabled } = useEntitlements();
+    const { logoUrl: orgLogoUrl, brandStyle } = useOrgBrand();
     const [userName, setUserName] = useState('');
     const [userEmail, setUserEmail] = useState('');
     const [avatarUrl, setAvatarUrl] = useState('');
@@ -107,7 +109,7 @@ export default function Layout() {
         try {
             const n = Number(localStorage.getItem('lp.sidebarWidth.user'));
             if (Number.isFinite(n)) return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(n)));
-        } catch { /* ignore */ }
+        } catch {  }
         return SIDEBAR_DEFAULT;
     });
     const [resizing, setResizing] = useState(false);
@@ -121,7 +123,7 @@ export default function Layout() {
                 setAvatarUrl(data.user?.avatarUrl || data.user?.avatar_url || '');
             })
             .catch(() => {
-                /* ignore — sidebar still works */
+                
             });
     }, []);
 
@@ -146,7 +148,7 @@ export default function Layout() {
     useEffect(() => {
         try {
             localStorage.setItem('lp.sidebarWidth.user', String(sidebarWidth));
-        } catch { /* ignore */ }
+        } catch {  }
     }, [sidebarWidth]);
 
     useEffect(() => {
@@ -205,18 +207,32 @@ export default function Layout() {
 
     const initials = (userName || userEmail || 'U').charAt(0).toUpperCase();
 
+    
+    const logoScale = sidebarWidth / SIDEBAR_DEFAULT;
+    const logoHeight = Math.round(Math.min(48, Math.max(28, 36 * logoScale)));
+    const logoWidth = Math.round(Math.min(220, Math.max(100, (sidebarWidth - 48) * 0.85)));
+
     const sidebar = (
         <>
             <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2 border-b-2 border-[#E2E8F0]">
-                <img
-                    src="/localseo.png"
-                    alt="Local SEO"
-                    className="h-9 w-auto max-w-[180px] object-contain object-left min-w-0 flex-1"
-                    style={{ maxHeight: '36px', maxWidth: '160px', objectFit: 'contain' }}
-                />
+                {orgLogoUrl ? (
+                    <img
+                        src={orgLogoUrl}
+                        alt="Business logo"
+                        className="shrink-0 object-contain object-left"
+                        style={{ height: logoHeight, width: logoWidth, maxWidth: '100%' }}
+                    />
+                ) : (
+                    <img
+                        src="/localseo.png"
+                        alt="Local SEO"
+                        className="shrink-0 object-contain object-left"
+                        style={{ height: logoHeight, width: logoWidth, maxWidth: '100%' }}
+                    />
+                )}
                 <button
                     type="button"
-                    className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9]"
+                    className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9] shrink-0"
                     aria-label="Close menu"
                     onClick={() => setNavOpen(false)}
                 >
@@ -241,7 +257,7 @@ export default function Layout() {
                                         cn(
                                             'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors min-h-[44px]',
                                             isNavActive(item)
-                                                ? 'bg-[#F59E0B] text-white font-semibold'
+                                                ? 'text-white font-semibold bg-[var(--brand-primary)]'
                                                 : 'text-[#334155] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
                                         )
                                     }
@@ -260,7 +276,10 @@ export default function Layout() {
                     {avatarUrl ? (
                         <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
                     ) : (
-                        <div className="w-9 h-9 rounded-full bg-[#FFF7ED] text-[#D97706] flex items-center justify-center text-sm font-bold shrink-0">
+                        <div
+                            className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0 text-[var(--brand-primary)]"
+                            style={{ background: 'color-mix(in srgb, var(--brand-primary) 14%, white)' }}
+                        >
                             {initials}
                         </div>
                     )}
@@ -282,8 +301,8 @@ export default function Layout() {
     );
 
     return (
-        <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden">
-            {/* Desktop sidebar */}
+        <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden" style={brandStyle}>
+            {}
             <aside
                 className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden print:hidden"
                 style={{ width: sidebarWidth }}
@@ -301,11 +320,15 @@ export default function Layout() {
                     }}
                     className="absolute inset-y-0 right-0 z-20 w-1.5 translate-x-1/2 cursor-sidebar-resize touch-none"
                 >
-                    <span className={`pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 ${resizing ? 'bg-[#F59E0B]' : 'bg-transparent hover:bg-[#CBD5E1]'}`} />
+                    <span
+                        className={`pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 ${
+                            resizing ? 'bg-[var(--brand-primary)]' : 'bg-transparent hover:bg-[#CBD5E1]'
+                        }`}
+                    />
                 </div>
             </aside>
 
-            {/* Mobile drawer */}
+            {}
             {navOpen && (
                 <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
                     <button
@@ -332,12 +355,19 @@ export default function Layout() {
                         <Menu className="w-5 h-5" />
                     </button>
                     <div className="min-w-0 flex-1">
-                        <img
-                            src="/localseo.png"
-                            alt="Local SEO"
-                            className="h-7 w-auto max-w-[140px] object-contain object-left"
-                            style={{ maxHeight: '28px', maxWidth: '140px', objectFit: 'contain' }}
-                        />
+                        {orgLogoUrl ? (
+                            <img
+                                src={orgLogoUrl}
+                                alt="Business logo"
+                                className="h-7 w-[140px] object-contain object-left"
+                            />
+                        ) : (
+                            <img
+                                src="/localseo.png"
+                                alt="Local SEO"
+                                className="h-7 w-[140px] object-contain object-left"
+                            />
+                        )}
                     </div>
                 </header>
                 <main className="flex-1 overflow-auto overscroll-contain p-4 sm:p-5 lg:p-6">

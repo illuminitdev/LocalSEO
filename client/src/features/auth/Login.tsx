@@ -1,12 +1,14 @@
 ﻿import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, ArrowRight } from 'lucide-react';
 import { API_BASE, apiPost } from '../../shared/utils';
 import { resolveMarketingUrl } from '../../shared/apiConfig';
 import { clearToken, setMustChangePassword, setPlatformRole, setToken } from './auth';
 import { clearAdminToken, setAdminToken } from '../admin/adminApi';
 import { useEntitlements } from '../../shared/EntitlementsContext';
-import AuthShell, { AuthFieldWrap, authFieldClass } from './AuthShell';
+import AuthShell from './AuthShell';
+
+
 
 async function tryAdminLogin(email: string, password: string) {
     const res = await fetch(`${API_BASE}/api/admin/login`, {
@@ -20,6 +22,15 @@ async function tryAdminLogin(email: string, password: string) {
     }
     return data;
 }
+
+
+
+const fieldWrap =
+    'mt-1.5 flex items-center gap-3 rounded-[11px] border border-[#E2E8F0] bg-white px-3.5 transition-colors focus-within:border-[#FF6A00] focus-within:ring-1 focus-within:ring-[#FF6A00]/25';
+const fieldInput =
+    'flex-1 min-w-0 bg-transparent text-[13.5px] text-[#101828] placeholder:text-[#94A3B8] focus:outline-none py-[13px]';
+
+
 
 export default function Login() {
     const navigate = useNavigate();
@@ -69,22 +80,20 @@ export default function Login() {
                 }
                 const safeNext =
                     next &&
-                    next.startsWith('/') &&
-                    next !== '/' &&
-                    next !== '/login' &&
-                    !next.startsWith('/admin') &&
-                    !next.startsWith('/sales')
+                        next.startsWith('/') &&
+                        next !== '/' &&
+                        next !== '/login' &&
+                        !next.startsWith('/admin') &&
+                        !next.startsWith('/sales')
                         ? next
                         : '/dashboard';
                 navigate(safeNext, { replace: true });
                 return;
             } catch (customerErr: any) {
                 const msg = String(customerErr?.message || '');
-                // Don't try admin if body never arrived / validation failed
                 if (/required/i.test(msg)) throw customerErr;
             }
 
-            // Same form: if user auth missed, try stage-locked admin credentials
             try {
                 const adminData = await tryAdminLogin(payload.email, payload.password);
                 clearToken();
@@ -94,7 +103,6 @@ export default function Login() {
                 navigate(next && next.startsWith('/admin') ? next : '/admin', { replace: true });
                 return;
             } catch {
-                // Never surface admin-only copy on the shared login page
                 throw new Error('Invalid email or password.');
             }
         } catch (err: any) {
@@ -105,81 +113,106 @@ export default function Login() {
     };
 
     return (
-        <AuthShell title="Welcome back" subtitle="Sign in to your account.">
-            {/* Uncontrolled inputs ΓÇö browser autofill writes DOM values React controlled state often misses */}
-            <form onSubmit={submit} className="space-y-4" autoComplete="on">
+        <AuthShell title="Welcome back" subtitle="Sign in to your ZappSites account.">
+            <form onSubmit={submit} className="space-y-5" autoComplete="on">
                 {error && (
-                    <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>
+                    <p className="text-[13px] rounded-[10px] px-3.5 py-2.5" style={{ color: '#991B1B', background: '#FEF2F2', border: '1px solid #FECACA' }}>
+                        {error}
+                    </p>
                 )}
-                <label className="block text-sm font-medium text-[#334155]">
-                    Email
-                    <AuthFieldWrap>
+
+                {}
+                <div>
+                    <label className="block text-[13px] font-medium" style={{ color: '#344054' }}>
+                        Email
+                    </label>
+                    <div className={fieldWrap}>
+                        <Mail className="w-[18px] h-[18px] shrink-0" style={{ color: '#94A3B8' }} strokeWidth={1.75} />
                         <input
                             name="email"
                             type="email"
                             required
                             autoComplete="username"
                             defaultValue=""
-                            className={authFieldClass}
+                            className={fieldInput}
                             placeholder="you@business.com"
                         />
-                    </AuthFieldWrap>
-                </label>
+                    </div>
+                </div>
+
+                {}
                 <div>
                     <div className="flex items-center justify-between gap-3">
-                        <label className="text-sm font-medium text-[#334155]">Password</label>
+                        <label className="text-[13px] font-medium" style={{ color: '#344054' }}>Password</label>
                         <Link
                             to="/forgot-password"
-                            className="text-xs font-medium text-[#64748B] hover:text-[#0F172A] hover:underline"
+                            className="text-[12px] font-semibold hover:underline"
+                            style={{ color: '#FF6A00' }}
                         >
                             Forgot password?
                         </Link>
                     </div>
-                    <AuthFieldWrap>
-                        <div className="relative mt-1.5">
-                            <input
-                                name="password"
-                                type={showPassword ? 'text' : 'password'}
-                                required
-                                autoComplete="current-password"
-                                defaultValue=""
-                                className={`${authFieldClass} mt-0 pr-11`}
-                                placeholder="Your password"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => setShowPassword((v) => !v)}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#0F172A] p-0.5"
-                                aria-label={showPassword ? 'Hide password' : 'Show password'}
-                            >
-                                {showPassword ? (
-                                    <EyeOff className="w-4 h-4" strokeWidth={1.75} />
-                                ) : (
-                                    <Eye className="w-4 h-4" strokeWidth={1.75} />
-                                )}
-                            </button>
-                        </div>
-                    </AuthFieldWrap>
+                    <div className={fieldWrap}>
+                        <Lock className="w-[18px] h-[18px] shrink-0" style={{ color: '#94A3B8' }} strokeWidth={1.75} />
+                        <input
+                            name="password"
+                            type={showPassword ? 'text' : 'password'}
+                            required
+                            autoComplete="current-password"
+                            defaultValue=""
+                            className={fieldInput}
+                            placeholder="Your password"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setShowPassword((v) => !v)}
+                            className="shrink-0 p-0.5 transition-colors"
+                            style={{ color: '#94A3B8' }}
+                            aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        >
+                            {showPassword ? (
+                                <EyeOff className="w-[18px] h-[18px]" strokeWidth={1.75} />
+                            ) : (
+                                <Eye className="w-[18px] h-[18px]" strokeWidth={1.75} />
+                            )}
+                        </button>
+                    </div>
                 </div>
+
+                {}
                 <button
                     type="submit"
                     disabled={busy}
-                    className="w-full py-3 rounded-lg bg-[#0F172A] text-white text-sm font-semibold hover:bg-[#1E293B] disabled:opacity-55"
+                    className="w-full flex items-center justify-center gap-2 rounded-full text-[13.5px] font-semibold text-white disabled:opacity-50 transition-colors mt-2"
+                    style={{
+                        background: busy ? '#FF6A00' : '#FF6A00',
+                        height: 48,
+                    }}
+                    onMouseEnter={(e) => { if (!busy) (e.currentTarget.style.background = '#E55D00'); }}
+                    onMouseLeave={(e) => { (e.currentTarget.style.background = '#FF6A00'); }}
                 >
                     {busy ? 'Signing in...' : 'Sign in'}
+                    {!busy && <ArrowRight className="w-4 h-4" strokeWidth={2.25} />}
                 </button>
             </form>
-            <p className="text-sm text-[#64748B] mt-6 text-center leading-relaxed">
-                Need a plan?{' '}
-                <a
-                    href={resolveMarketingUrl()}
-                    className="font-semibold text-[#0F172A] hover:underline"
-                    target="_blank"
-                    rel="noreferrer"
-                >
-                    Get started
-                </a>
-            </p>
+
+            {}
+            <div className="flex items-center gap-4 mt-6">
+                <div className="flex-1 h-px" style={{ background: '#E2E8F0' }} />
+                <p className="text-[13px] text-center" style={{ color: '#64748B' }}>
+                    Need a plan?{' '}
+                    <a
+                        href={resolveMarketingUrl()}
+                        className="font-semibold hover:underline"
+                        style={{ color: '#FF6A00' }}
+                        target="_blank"
+                        rel="noreferrer"
+                    >
+                        Get started
+                    </a>
+                </p>
+                <div className="flex-1 h-px" style={{ background: '#E2E8F0' }} />
+            </div>
         </AuthShell>
     );
 }

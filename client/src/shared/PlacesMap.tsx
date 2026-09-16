@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-/** Demo Maps JS key — used only when VITE_STAGE is not prod and no env key is set (local/staging testing). */
+
 const DEV_DEMO_MAPS_JS_KEY = 'AIzaSyDKn-KGL7tIv0kJpDZOjAjeP_1rQ484CSY';
 
 function resolveMapsJsKey() {
@@ -9,7 +9,7 @@ function resolveMapsJsKey() {
         (import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined)?.trim() ||
         '';
     if (fromEnv) return fromEnv;
-    // Local Vite (`npm run dev`) or non-prod stage only — never for VITE_STAGE=prod
+    
     if (import.meta.env.DEV) return DEV_DEMO_MAPS_JS_KEY;
     const stage = String(import.meta.env.VITE_STAGE || '').toLowerCase();
     if (stage === 'dev' || stage === 'staging') return DEV_DEMO_MAPS_JS_KEY;
@@ -54,7 +54,7 @@ export type MapMarker = {
     label?: string;
     title?: string;
     highlight?: boolean;
-    /** Pin fill color (hex). Defaults to amber when highlight, else slate. */
+    
     color?: string;
 };
 
@@ -66,12 +66,12 @@ type PlacesMapProps = {
     height?: number;
     markers?: MapMarker[];
     zoom?: number;
-    /** When Maps JS key or points missing, show this instead of rendering nothing */
+    
     showPlaceholder?: boolean;
     placeholder?: string;
 };
 
-/** Embedded Google Map — needs VITE_GOOGLE_MAPS_JS_KEY + at least one lat/lng. */
+
 export default function PlacesMap({
     lat,
     lng,
@@ -185,7 +185,7 @@ export function mapsJsConfigured() {
     return Boolean(MAPS_JS_KEY);
 }
 
-/** Geocode an address with the Maps JS Geocoder (needs Geocoding enabled on the key). */
+
 export async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
     const query = String(address || '').trim();
     if (!MAPS_JS_KEY || !query) return null;
@@ -210,7 +210,7 @@ export async function geocodeAddress(address: string): Promise<{ lat: number; ln
     }
 }
 
-/** Place a 3×3 rank grid around a center point (radius ≈ miles to mid-edge pins). */
+
 export function geoGridMarkers(
     centerLat: number,
     centerLng: number,

@@ -15,6 +15,11 @@ import {
 import { adminDelete, adminGet, adminPost, fetchSalesAgents, type SalesAgent } from './adminApi';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { PLANS } from '../../shared/planCatalog';
+import {
+    bookingIndustrySelectOptions,
+    bookingIndustryLabel,
+    isBookingPlanId
+} from '../bookings/shared/bookingIndustryPresets';
 import { cn } from '../../shared/utils';
 
 type AdminUser = {
@@ -29,7 +34,13 @@ type AdminUser = {
     convertedByTelecaller?: boolean;
     telecallerName?: string | null;
     platformRole?: 'customer' | 'sales_agent';
-    organization: { id: string; name: string; tradeType: string } | null;
+    organization: {
+        id: string;
+        name: string;
+        tradeType: string;
+        bookingIndustryId?: string | null;
+    } | null;
+    serviceLabel?: string | null;
     subscription: {
         planName: string;
         status: string;
@@ -78,6 +89,14 @@ function roleLabel(user: AdminUser) {
     return 'User';
 }
 
+function serviceOf(user: AdminUser) {
+    if (user.serviceLabel) return user.serviceLabel;
+    const id = user.organization?.bookingIndustryId;
+    if (id) return bookingIndustryLabel(id) || id;
+    const trade = String(user.organization?.tradeType || '').trim();
+    return trade || null;
+}
+
 export default function AdminUsers() {
     const [users, setUsers] = useState<AdminUser[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
@@ -96,7 +115,8 @@ export default function AdminUsers() {
         password: '',
         role: '' as '' | 'customer' | 'sales_agent',
         businessName: '',
-        planId: ''
+        planId: '',
+        bookingIndustryId: ''
     });
 
     const load = () => {
@@ -126,6 +146,7 @@ export default function AdminUsers() {
             if (roleFilter === 'converted_lead' && role !== 'converted_lead') return false;
             if (roleFilter === 'invite' && role !== 'invite') return false;
             if (!q) return true;
+            const service = serviceOf(u) || '';
             return (
                 u.email.toLowerCase().includes(q) ||
                 (u.name || '').toLowerCase().includes(q) ||
@@ -133,6 +154,7 @@ export default function AdminUsers() {
                 (u.telecallerName || '').toLowerCase().includes(q) ||
                 (u.organization?.name || '').toLowerCase().includes(q) ||
                 (u.subscription?.planName || '').toLowerCase().includes(q) ||
+                service.toLowerCase().includes(q) ||
                 roleLabel(u).toLowerCase().includes(q)
             );
         });
@@ -156,11 +178,27 @@ export default function AdminUsers() {
     const rangeStart = filtered.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
     const rangeEnd = Math.min(safePage * PAGE_SIZE, filtered.length);
     const resetForm = () => {
-        setForm({ name: '', email: '', password: '', role: '', businessName: '', planId: '' });
+        setForm({
+            name: '',
+            email: '',
+            password: '',
+            role: '',
+            businessName: '',
+            planId: '',
+            bookingIndustryId: ''
+        });
     };
+
+    const servicesRequired = form.role === 'customer' && isBookingPlanId(form.planId);
+    const industryOptions = bookingIndustrySelectOptions();
+    const selectedIndustryLabel = industryOptions.find((p) => p.id === form.bookingIndustryId)?.label;
 
     const handleAddUser = async (e: FormEvent) => {
         e.preventDefault();
+        if (servicesRequired && !form.bookingIndustryId) {
+            setError('Select a service (industry) for booking plans.');
+            return;
+        }
         setAddBusy(true);
         setError('');
         setMsg('');
@@ -171,7 +209,11 @@ export default function AdminUsers() {
                 password: form.password,
                 role: form.role,
                 businessName: form.businessName.trim() || undefined,
-                planId: form.role === 'customer' && form.planId ? form.planId : undefined
+                planId: form.role === 'customer' && form.planId ? form.planId : undefined,
+                bookingIndustryId:
+                    form.role === 'customer' && form.bookingIndustryId
+                        ? form.bookingIndustryId
+                        : undefined
             });
             setMsg('User created.');
             setAddOpen(false);
@@ -543,7 +585,9 @@ export default function AdminUsers() {
                                             ...f,
                                             role,
                                             planId: role === 'sales_agent' ? '' : f.planId,
-                                            businessName: role === 'sales_agent' ? '' : f.businessName
+                                            businessName: role === 'sales_agent' ? '' : f.businessName,
+                                            bookingIndustryId:
+                                                role === 'sales_agent' ? '' : f.bookingIndustryId
                                         }));
                                     }}
                                     className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
@@ -569,7 +613,9 @@ export default function AdminUsers() {
                                         Plan (optional)
                                         <select
                                             value={form.planId}
-                                            onChange={(e) => setForm((f) => ({ ...f, planId: e.target.value }))}
+                                            onChange={(e) =>
+                                                setForm((f) => ({ ...f, planId: e.target.value }))
+                                            }
                                             className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
                                         >
                                             <option value="">No plan</option>
@@ -580,6 +626,38 @@ export default function AdminUsers() {
                                             ))}
                                         </select>
                                     </label>
+                                    <label className="block text-xs font-semibold text-[#475569]">
+                                        Services / industry
+                                        {servicesRequired ? ' *' : ' (optional)'}
+                                        <select
+                                            required={servicesRequired}
+                                            value={form.bookingIndustryId}
+                                            onChange={(e) =>
+                                                setForm((f) => ({
+                                                    ...f,
+                                                    bookingIndustryId: e.target.value
+                                                }))
+                                            }
+                                            className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                        >
+                                            <option value="">Select services</option>
+                                            {industryOptions.map((p) => (
+                                                <option key={p.id} value={p.id}>
+                                                    {p.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                    {form.bookingIndustryId && (
+                                        <p className="text-[11px] text-[#64748B] -mt-1">
+                                            Same industry as checkout — booking demo and default treatments
+                                            follow{' '}
+                                            <span className="font-semibold text-[#0F172A]">
+                                                {selectedIndustryLabel}
+                                            </span>
+                                            .
+                                        </p>
+                                    )}
                                 </>
                             )}
                             <div className="flex justify-end gap-2 pt-2">

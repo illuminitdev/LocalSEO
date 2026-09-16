@@ -1,7 +1,7 @@
-/**
- * Google Places helpers (Places API New, with legacy fallback).
- * Set GOOGLE_PLACES_API_KEY in backend/.env
- */
+
+
+
+
 
 function placesKey() {
     return process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
@@ -79,7 +79,7 @@ function normalizeNewPlace(place: any) {
         reviews: mapReviewsNew(place.reviews || []),
         photoCount,
         hasPhotos: photoCount > 0,
-        // Places public API does not expose GBP posts / services list reliably
+        
         hasServices: false,
         hasPosts: false,
         hasDescription: Boolean(place.editorialSummary?.text),
@@ -189,7 +189,7 @@ async function searchPlacesLegacy(query: string) {
     const detailsRes = await fetch(detailsUrl);
     const detailsData = await detailsRes.json();
     if (detailsData.status !== 'OK') {
-        // Fall back to text-search row only
+        
         return [
             {
                 placeId: top.place_id,
@@ -245,10 +245,10 @@ async function getPlaceDetailsNew(placeId: string) {
     return normalizeNewPlace(data);
 }
 
-/**
- * Top-N local text search for "{service} near {town}" style queries.
- * Uses locationBias ~20km when lat/lng provided.
- */
+
+
+
+
 async function searchLocalTop({
     query,
     lat,
@@ -334,7 +334,7 @@ async function searchLocalTop({
         console.warn('[googlePlaces] searchLocalTop New API failed:', err.message);
     }
 
-    // Legacy text search fallback
+    
     const url = new URL('https://maps.googleapis.com/maps/api/place/textsearch/json');
     url.searchParams.set('query', query);
     url.searchParams.set('key', key);
@@ -364,7 +364,7 @@ async function searchLocalTop({
     }));
 }
 
-/** Tokens used to soft-match Places types to the business category / keyword. */
+
 function categoryFamilyTokens(categoryOrKeyword = '') {
     const raw = String(categoryOrKeyword || '')
         .toLowerCase()
@@ -408,10 +408,10 @@ function placeMatchesFamily(types: string[] = [], family: Set<string>) {
     return false;
 }
 
-/**
- * Same-service competitors via Places Text Search (not popularity Nearby).
- * Prefer the ranking keyword; soft-filter to the business category family when possible.
- */
+
+
+
+
 async function nearbyCompetitors({
     lat,
     lng,
@@ -496,10 +496,10 @@ async function getBusinessByPlaceId(placeId: string) {
     return null;
 }
 
-/**
- * Best matching business for a free-text query.
- * Tries Places API (New), then legacy Text Search + Details.
- */
+
+
+
+
 async function searchBusiness(query: string) {
     if (!requirePlacesConfigured()) {
         const err = new Error('GOOGLE_PLACES_API_KEY is missing. Add it to backend/.env and restart.');
@@ -512,7 +512,7 @@ async function searchBusiness(query: string) {
         const results = await searchPlacesNew(query);
         if (results.length) {
             let best = results[0];
-            // SearchText sometimes omits reviews — hydrate from Place Details
+            
             if ((!best.reviews || !best.reviews.length) && best.placeId) {
                 const detailed = await getPlaceDetailsNew(best.placeId);
                 if (detailed) best = { ...best, ...detailed, reviews: detailed.reviews?.length ? detailed.reviews : best.reviews };
@@ -533,10 +533,10 @@ async function searchBusiness(query: string) {
     }
 }
 
-/**
- * Resolve lat/lng from a free-text address (Geocoding API).
- * Used when the user saves a business profile without picking a Places listing.
- */
+
+
+
+
 async function geocodeAddress(address: string): Promise<{ lat: number; lng: number; formattedAddress?: string } | null> {
     const key = placesKey();
     const query = String(address || '').trim();

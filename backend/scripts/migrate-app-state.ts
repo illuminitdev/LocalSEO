@@ -1,7 +1,7 @@
-/**
- * One-time migration from backend/data/app-state.json to Postgres.
- * Run: node scripts/migrate-app-state.js (requires DATABASE_URL + existing user/org)
- */
+
+
+
+
 import dotenv from 'dotenv';
 dotenv.config({ override: true });
 import * as fs from 'fs';

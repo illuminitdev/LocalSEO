@@ -67,7 +67,7 @@ async function attachUserFromToken(req: any, token: string) {
         return true;
     }
 
-    // Fallback for sales_agent or users without an organization
+    
     const { rows: uRows } = await query(
         `SELECT id, email, name, must_change_password, avatar_url, platform_role
          FROM users
@@ -112,7 +112,7 @@ async function attachOrgBySlug(req: any, slug: string) {
     return true;
 }
 
-/** Host routes: JWT, or X-Booking-Org slug from browser after setup wizard. */
+
 async function requireHost(req: any, res: any, next: any) {
     try {
         const header = req.headers.authorization || '';
@@ -156,7 +156,7 @@ async function requireAuth(req: any, res: any, next: any) {
     }
 }
 
-/** Sales / telecaller portal — JWT user with platform_role = sales_agent (no org required). */
+
 async function requireSalesAgent(req: any, res: any, next: any) {
     try {
         const header = req.headers.authorization || '';

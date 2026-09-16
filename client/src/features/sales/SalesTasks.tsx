@@ -48,14 +48,14 @@ export default function SalesTasks() {
     const [error, setError] = useState('');
     const [successToast, setSuccessToast] = useState<string | null>(null);
 
-    // Filters
+    
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [priorityFilter, setPriorityFilter] = useState<string>('all');
     const [typeFilter, setTypeFilter] = useState<string>('all');
     const [dueTodayOnly, setDueTodayOnly] = useState(false);
 
-    // Modal state
+    
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask; isCompleting: boolean } | null>(null);
     const [modalLoading, setModalLoading] = useState(false);
 
@@ -161,7 +161,7 @@ export default function SalesTasks() {
 
     return (
         <div className="space-y-6 max-w-6xl mx-auto pb-16 animate-in fade-in duration-300">
-            {/* Header & Stats Banner */}
+            {}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-r from-[#0F172A] via-[#1E293B] to-[#334155] text-white p-6 rounded-3xl shadow-sm">
                 <div>
                     <div className="flex items-center gap-2.5">
@@ -303,7 +303,7 @@ export default function SalesTasks() {
                 </button>
             </div>
 
-            {/* Success Toast */}
+            {}
             {successToast && (
                 <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center justify-between text-xs text-emerald-900 font-bold shadow-xs animate-in fade-in">
                     <div className="flex items-center gap-2">
@@ -316,7 +316,7 @@ export default function SalesTasks() {
                 </div>
             )}
 
-            {/* Error Message */}
+            {}
             {error && (
                 <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between text-xs text-rose-800 font-bold shadow-xs">
                     <div className="flex items-center gap-2">
@@ -329,7 +329,7 @@ export default function SalesTasks() {
                 </div>
             )}
 
-            {/* Filters Bar */}
+            {}
             <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
                 <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
                     <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -395,7 +395,7 @@ export default function SalesTasks() {
                 </button>
             </div>
 
-            {/* Task List */}
+            {}
             <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
                 {loading && !tasks.length ? (
                     <div className="p-12 text-center text-[#64748B]">
@@ -431,7 +431,7 @@ export default function SalesTasks() {
                                     )}
                                 >
                                     <div className="flex items-start justify-between gap-3">
-                                        {/* Main Task Info */}
+                                        {}
                                         <div className="min-w-0 flex-1">
                                             <div className="flex flex-wrap items-center gap-2 mb-1.5">
                                                 <span className={cn(
@@ -488,7 +488,7 @@ export default function SalesTasks() {
                                             )}
                                         </div>
 
-                                        {/* Status Badge + Update Status Button */}
+                                        {}
                                         <div className="shrink-0 flex items-center gap-2">
                                             <span className={cn(
                                                 "inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-semibold rounded-md border",
@@ -514,7 +514,7 @@ export default function SalesTasks() {
                                         </div>
                                     </div>
 
-                                        {/* Lead Link */}
+                                        {}
                                         <div className="mt-2.5 flex items-center gap-2 flex-wrap text-xs">
                                             <Link
                                                 to={`/sales/leads/${encodeURIComponent(task.leadId)}`}
@@ -542,7 +542,7 @@ export default function SalesTasks() {
                 )}
             </div>
 
-            {/* Task Completion Modal */}
+            {}
             {confirmModalTask && (
                 <TaskCompletionModal
                     isOpen={!!confirmModalTask}

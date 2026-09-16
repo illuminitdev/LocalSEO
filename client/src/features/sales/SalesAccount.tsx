@@ -187,7 +187,7 @@ export default function SalesAccount() {
 
     return (
         <div className="max-w-4xl mx-auto pb-12 animate-in fade-in duration-500">
-            {/* Temporary Password Mandatory Banner */}
+            {}
             {mustChange && (
                 <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 mb-6 flex flex-wrap items-center justify-between gap-3 shadow-sm">
                     <div className="flex items-center gap-2.5">
@@ -214,7 +214,7 @@ export default function SalesAccount() {
                 </div>
             )}
 
-            {/* Header */}
+            {}
             <div className="mb-8 flex items-start gap-4">
                 <div className="h-12 w-12 rounded-2xl bg-[#0F172A] text-white flex items-center justify-center shrink-0 shadow-md">
                     <Settings className="w-5 h-5" strokeWidth={2} />
@@ -225,7 +225,7 @@ export default function SalesAccount() {
                 </div>
             </div>
 
-            {/* Alerts */}
+            {}
             {error && (
                 <p className="mb-6 text-sm text-red-700 bg-red-50 border border-red-100 rounded-2xl px-4 py-3 shadow-xs">
                     {error}
@@ -238,7 +238,7 @@ export default function SalesAccount() {
             )}
 
             <div className="space-y-7">
-                {/* Profile Card */}
+                {}
                 <section className="rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_10px_40px_-18px_rgba(15,23,42,0.2)] overflow-hidden">
                     <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr]">
                         <div className="p-6 border-b lg:border-b-0 lg:border-r border-[#E2E8F0] bg-[#F8FAFC]/80 flex flex-col">
@@ -377,7 +377,7 @@ export default function SalesAccount() {
                     </div>
                 </section>
 
-                {/* Plan Card */}
+                {}
                 <SectionCard
                     icon={CreditCard}
                     title="Your plan"
@@ -388,7 +388,7 @@ export default function SalesAccount() {
                     </p>
                 </SectionCard>
 
-                {/* Account Security Card */}
+                {}
                 <SectionCard
                     icon={Shield}
                     title="Account Security"
@@ -478,7 +478,7 @@ export default function SalesAccount() {
                     )}
                 </SectionCard>
 
-                {/* Workspace Business Card */}
+                {}
                 <SectionCard
                     icon={Building2}
                     title="Workspace business"
@@ -498,7 +498,7 @@ export default function SalesAccount() {
                     </div>
                 </SectionCard>
 
-                {/* Listing Location Card */}
+                {}
                 <SectionCard
                     icon={MapPin}
                     title="Listing location"
@@ -512,7 +512,7 @@ export default function SalesAccount() {
                     </div>
                 </SectionCard>
 
-                {/* Sign Out Card */}
+                {}
                 <section className="relative overflow-hidden rounded-2xl border border-red-100 bg-gradient-to-br from-white to-red-50/40 p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-[0_10px_30px_-18px_rgba(127,29,29,0.35)]">
                     <div>
                         <h2 className="text-base font-black text-[#0F172A]">Sign out</h2>
