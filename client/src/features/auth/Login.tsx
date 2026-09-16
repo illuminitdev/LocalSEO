@@ -69,11 +69,11 @@ export default function Login() {
                 }
                 const safeNext =
                     next &&
-                    next.startsWith('/') &&
-                    next !== '/' &&
-                    next !== '/login' &&
-                    !next.startsWith('/admin') &&
-                    !next.startsWith('/sales')
+                        next.startsWith('/') &&
+                        next !== '/' &&
+                        next !== '/login' &&
+                        !next.startsWith('/admin') &&
+                        !next.startsWith('/sales')
                         ? next
                         : '/dashboard';
                 navigate(safeNext, { replace: true });
