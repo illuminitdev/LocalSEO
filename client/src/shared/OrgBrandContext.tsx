@@ -30,7 +30,7 @@ export type OrgBrandState = {
 
 const OrgBrandContext = createContext<OrgBrandState | null>(null);
 
-function readBrand(org: any): Required<OrgBrand> {
+function readBrand(org: any): { logoUrl: string; brandPrimary: string; brandSecondary: string } {
     return {
         logoUrl: String(org?.logo_url || org?.logoUrl || '').trim(),
         brandPrimary: normalizeBrandHex(
