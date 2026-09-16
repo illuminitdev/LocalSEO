@@ -20,6 +20,7 @@ import {
 import { setOrgBookingIndustry } from '../lib/bookingIndustryHydrate';
 import Stripe from 'stripe';
 import adminFullAuditsRouter from './adminFullAudits';
+import { createSalesLead, bulkImportSalesLeads, convertLeadToCustomer, ensureCrmTables } from '../lib/sales';
 
 const router = Router();
 router.use(adminFullAuditsRouter);
@@ -98,10 +99,14 @@ function mapRegisteredUser(row: any) {
     return {
         kind: 'user' as const,
         userId: row.user_id,
+        leadId: row.lead_id || null,
         email: row.email,
         name: row.user_name,
         phone,
         createdAt: row.user_created_at,
+        convertedAt: row.converted_at || null,
+        convertedByTelecaller: Boolean(row.converted_by_telecaller),
+        telecallerName: row.telecaller_name || null,
         mustChangePassword: Boolean(row.must_change_password),
         platformRole: row.platform_role === 'sales_agent' ? 'sales_agent' : 'customer',
         organization: row.org_id
@@ -163,6 +168,52 @@ function mapRegisteredUser(row: any) {
                 name: 'ZappSites Website',
                 enrolled: row.plan_id === 'website-essential'
             }
+        ]
+    };
+}
+
+function mapConvertedLeadUser(row: any) {
+    return {
+        kind: 'converted_lead' as const,
+        userId: null,
+        leadId: row.lead_id,
+        email: row.lead_email || '—',
+        name: row.lead_name || 'Converted Customer',
+        phone: row.lead_phone || null,
+        createdAt: row.converted_at || row.lead_created_at,
+        convertedAt: row.converted_at || null,
+        convertedByTelecaller: true,
+        telecallerName: row.assigned_agent_name || 'Telecaller',
+        mustChangePassword: false,
+        platformRole: 'customer' as const,
+        organization: row.lead_name
+            ? {
+                  id: row.lead_id,
+                  name: row.lead_name,
+                  tradeType: row.industry || 'General'
+              }
+            : null,
+        subscription: {
+            id: null,
+            planId: null,
+            planName: 'Converted by Telecaller',
+            status: 'converted',
+            priceLabel: null,
+            periodStart: null,
+            periodEnd: null,
+            daysLeft: null,
+            paidAt: row.converted_at || null,
+            stripeSubscriptionId: null,
+            stripeCustomerId: null,
+            cancelAtPeriodEnd: false,
+            autopayEnabled: false
+        },
+        invite: null,
+        invoices: { count: 0, totalCents: 0, totalLabel: '£0.00' },
+        features: ['bookings', 'local_presence'],
+        services: [],
+        products: [
+            { id: 'local_seo', name: 'Local SEO Portal', enrolled: true }
         ]
     };
 }
@@ -374,6 +425,7 @@ router.get('/overview', requireAdmin, async (_req: Request, res: Response) => {
 
 router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
     try {
+        await ensureCrmTables().catch(() => {});
         const { rows } = await query(
             `SELECT DISTINCT ON (u.id)
                     u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
@@ -386,6 +438,9 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                     p.name AS plan_name, p.price_cents, p.currency,
                     pi.id AS invite_id, pi.status AS invite_status, pi.claimed_at, pi.credentials_emailed_at,
                     pi.created_at AS invite_created_at,
+                    sl.id AS lead_id, sl.converted_at, sl.phone,
+                    CASE WHEN (sl.is_customer = TRUE OR sl.status = 'converted') THEN TRUE ELSE FALSE END AS converted_by_telecaller,
+                    u_agent.name AS telecaller_name,
                     (SELECT COUNT(*)::int FROM invoices inv
                        JOIN bookings b ON b.id = inv.booking_id
                        WHERE b.org_id = o.id) AS invoice_count,
@@ -407,6 +462,14 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                  ORDER BY created_at DESC
                  LIMIT 1
              ) pi ON TRUE
+             LEFT JOIN LATERAL (
+                 SELECT * FROM sales_leads
+                  WHERE (is_customer = TRUE OR status = 'converted')
+                    AND LOWER(email) = LOWER(u.email)
+                 ORDER BY converted_at DESC NULLS LAST, created_at DESC
+                 LIMIT 1
+             ) sl ON TRUE
+             LEFT JOIN users u_agent ON u_agent.id = sl.assigned_to
              ORDER BY u.id, s.created_at DESC NULLS LAST`
         );
 
@@ -436,13 +499,27 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
              ORDER BY pi.created_at DESC`
         ).catch(() => ({ rows: [] as any[] }));
 
-        const users = rows.map(mapRegisteredUser);
+        // Also include leads converted by telecallers that are not yet registered users or pending invites
+        const convertedLeadsOnly = await query(
+            `SELECT l.id AS lead_id, l.name AS lead_name, l.email AS lead_email, l.phone AS lead_phone,
+                    l.industry, l.address, l.website, l.status AS lead_status, l.is_customer,
+                    l.converted_at, l.created_at AS lead_created_at, l.assigned_to,
+                    u_agent.name AS assigned_agent_name, u_agent.email AS assigned_agent_email
+             FROM sales_leads l
+             LEFT JOIN users u_agent ON u_agent.id = l.assigned_to
+             WHERE (l.is_customer = TRUE OR l.status = 'converted')
+               AND NOT EXISTS (SELECT 1 FROM users u WHERE (l.email IS NOT NULL AND l.email <> '' AND LOWER(u.email) = LOWER(l.email)))
+               AND NOT EXISTS (SELECT 1 FROM portal_invites pi WHERE (l.email IS NOT NULL AND l.email <> '' AND LOWER(pi.email) = LOWER(l.email)))
+             ORDER BY l.converted_at DESC NULLS LAST, l.created_at DESC`
+        ).catch(() => ({ rows: [] as any[] }));
 
+        const users = rows.map(mapRegisteredUser);
         const pendingInvites = inviteOnly.rows.map(mapInviteUser);
+        const convertedLeads = convertedLeadsOnly.rows.map(mapConvertedLeadUser);
 
         res.json({
             stage: resolveAdminCredentials().stage,
-            users: [...pendingInvites, ...users],
+            users: [...convertedLeads, ...pendingInvites, ...users],
             featureLabels: FEATURE_LABELS,
             plans: PLANS
         });
@@ -614,6 +691,7 @@ function mapAdminLead(row: any, origin: string) {
         id: row.id,
         createdAt: row.created_at,
         type,
+        sourceCategory: 'growth_audit' as const,
         status,
         name,
         businessName:
@@ -637,9 +715,47 @@ function mapAdminLead(row: any, origin: string) {
     };
 }
 
+function mapSalesLeadToAdminLead(row: any) {
+    const isExcel = row.source === 'excel_import' || String(row.source || '').toLowerCase().includes('excel');
+    return {
+        id: row.id,
+        createdAt: row.created_at,
+        type: isExcel ? 'excel_import' : 'added_lead',
+        sourceCategory: 'added' as const,
+        status: row.status || 'new',
+        name: row.contact_name || row.name || null,
+        businessName: row.company_name || row.name || null,
+        service: row.industry || null,
+        serviceLabel: row.industry || null,
+        industry: row.industry || null,
+        address: String(row.address || '').trim() || null,
+        city: String(row.city || '').trim() || null,
+        website: String(row.website || '').trim() || null,
+        email: row.email ? String(row.email).trim().toLowerCase() : null,
+        phone: String(row.phone || '').trim() || null,
+        scoreTotal: null,
+        sharePath: null,
+        reportUrl: null,
+        source: isExcel ? 'Excel Import' : (row.source || 'Added Lead'),
+        auditId: null,
+        pageUrl: null,
+        planId: null,
+        otpVerified: true,
+        opportunityLevel: row.opportunity_level || null,
+        leadOpportunity: row.lead_opportunity || null,
+        gbpObservation: row.gbp_observation || null,
+        aiVisibilityObservation: row.ai_visibility_observation || null,
+        isCustomer: Boolean(row.is_customer),
+        convertedAt: row.converted_at || null,
+        notes: row.notes || null,
+        assignedTo: row.assigned_to || null
+    };
+}
 
+/** Read-only list of marketing and CRM leads. */
 router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Response) => {
     try {
+        await ensureCrmTables().catch(() => {});
         const q = String(req.query.q || '').trim();
         const hasContact = String(req.query.hasContact || 'any').trim().toLowerCase();
         const contactFilter =
@@ -683,7 +799,10 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
             )`);
         }
 
-        const { rows } = await query(
+        const origin = zappSitesOrigin();
+
+        // 1. Submissions query
+        const submissionsPromise = query(
             `SELECT s.id, s.type, s.created_at, s.email AS submission_email, s.payload,
                     a.id AS audit_id, a.data AS audit_data
              FROM submissions s
@@ -692,12 +811,176 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
              ORDER BY s.created_at DESC
              LIMIT 500`,
             params
+        )
+            .then((res) => res.rows.map((row) => mapAdminLead(row, origin)))
+            .catch((err) => {
+                console.warn('Submissions query error in growth-audit-leads:', err?.message || err);
+                return [];
+            });
+
+        // 2. Added CRM sales leads query
+        const salesParams: any[] = [];
+        const salesWhere: string[] = ['1=1'];
+
+        if (contactFilter === 'email') {
+            salesWhere.push(`NULLIF(TRIM(l.email), '') IS NOT NULL`);
+        } else if (contactFilter === 'phone') {
+            salesWhere.push(`NULLIF(TRIM(l.phone), '') IS NOT NULL`);
+        } else if (contactFilter === 'both') {
+            salesWhere.push(`NULLIF(TRIM(l.email), '') IS NOT NULL AND NULLIF(TRIM(l.phone), '') IS NOT NULL`);
+        }
+
+        if (q) {
+            salesParams.push(`%${q.toLowerCase()}%`);
+            const sp = `$${salesParams.length}`;
+            salesWhere.push(`(
+                LOWER(COALESCE(l.name, '')) LIKE ${sp}
+                OR LOWER(COALESCE(l.email, '')) LIKE ${sp}
+                OR LOWER(COALESCE(l.phone, '')) LIKE ${sp}
+                OR LOWER(COALESCE(l.address, '')) LIKE ${sp}
+                OR LOWER(COALESCE(l.website, '')) LIKE ${sp}
+                OR LOWER(COALESCE(l.industry, '')) LIKE ${sp}
+            )`);
+        }
+
+        const salesLeadsPromise = query(
+            `SELECT l.*
+             FROM sales_leads l
+             WHERE ${salesWhere.join(' AND ')}
+             ORDER BY l.created_at DESC
+             LIMIT 500`,
+            salesParams
+        )
+            .then((res) => res.rows.map(mapSalesLeadToAdminLead))
+            .catch((err) => {
+                console.warn('Sales leads query error in growth-audit-leads:', err?.message || err);
+                return [];
+            });
+
+        const [submissionLeads, addedLeads] = await Promise.all([
+            submissionsPromise,
+            salesLeadsPromise
+        ]);
+
+        const allLeads = [...addedLeads, ...submissionLeads].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         );
 
-        const origin = zappSitesOrigin();
+        // Fetch latest sales agent activities / call notes and sales_leads status for each lead
+        const leadIds = allLeads.map((l) => String(l.id)).filter(Boolean);
+        const emails = allLeads
+            .map((l) => String(l.email || '').trim().toLowerCase())
+            .filter(Boolean);
+
+        if (leadIds.length > 0 || emails.length > 0) {
+            try {
+                const [actResult, salesLeadStatusResult, taskResult] = await Promise.all([
+                    query(
+                        `SELECT DISTINCT ON (lead_id) 
+                            lead_id, activity_type, disposition, note, author_name, created_at
+                         FROM lead_activities
+                         WHERE lead_id = ANY($1::text[])
+                         ORDER BY lead_id, created_at DESC`,
+                        [leadIds]
+                    ).catch(() => ({ rows: [] })),
+                    query(
+                        `SELECT sl.id, sl.email, sl.status, sl.notes,
+                                u.name AS assigned_agent_name
+                         FROM sales_leads sl
+                         LEFT JOIN users u ON u.id = sl.assigned_to
+                         WHERE sl.id::text = ANY($1::text[]) OR LOWER(sl.email) = ANY($2::text[])`,
+                        [leadIds, emails]
+                    ).catch(() => ({ rows: [] })),
+                    query(
+                        `SELECT DISTINCT ON (t.lead_id)
+                            t.lead_id, t.status AS task_status, t.notes AS task_notes, t.title AS task_title,
+                            u.name AS task_agent_name
+                         FROM lead_tasks t
+                         LEFT JOIN users u ON u.id = t.assigned_to_user_id
+                         WHERE t.lead_id = ANY($1::text[])
+                         ORDER BY t.lead_id, t.updated_at DESC`,
+                        [leadIds]
+                    ).catch(() => ({ rows: [] }))
+                ]);
+
+                const actMap = new Map<string, any>();
+                for (const act of actResult.rows) {
+                    actMap.set(String(act.lead_id), {
+                        type: act.activity_type,
+                        disposition: act.disposition,
+                        note: act.note,
+                        authorName: act.author_name,
+                        createdAt: act.created_at
+                    });
+                }
+
+                const statusMap = new Map<string, { status: string; notes: string | null; agentName: string | null }>();
+                for (const sl of salesLeadStatusResult.rows) {
+                    const entry = { status: sl.status, notes: sl.notes || null, agentName: sl.assigned_agent_name || null };
+                    if (sl.id) statusMap.set(String(sl.id), entry);
+                    if (sl.email) statusMap.set(String(sl.email).toLowerCase(), entry);
+                }
+
+                const taskMap = new Map<string, { status: string; notes: string | null; title: string | null; agentName: string | null }>();
+                for (const t of taskResult.rows) {
+                    taskMap.set(String(t.lead_id), {
+                        status: t.task_status,
+                        notes: t.task_notes || null,
+                        title: t.task_title || null,
+                        agentName: t.task_agent_name || null
+                    });
+                }
+
+                for (const lead of allLeads) {
+                    const leadIdStr = String(lead.id);
+                    const emailStr = String(lead.email || '').toLowerCase();
+
+                    // 1. Attach latest activity log
+                    const latest = actMap.get(leadIdStr);
+                    if (latest) {
+                        (lead as any).latestActivity = latest;
+                        if (latest.disposition && (!lead.status || lead.status === 'new' || lead.status === 'otp_pending')) {
+                            lead.status = latest.disposition;
+                        }
+                    }
+
+                    // 2. Direct sales_leads data always wins — authoritative agent update
+                    const slData = statusMap.get(leadIdStr) || (emailStr && statusMap.get(emailStr));
+                    if (slData) {
+                        if (slData.status && slData.status !== 'new') {
+                            lead.status = slData.status;
+                        }
+                        if (slData.notes) {
+                            (lead as any).salesNotes = slData.notes;
+                        }
+                        if (slData.agentName) {
+                            (lead as any).assignedAgentName = slData.agentName;
+                        }
+                    }
+
+                    // 3. Lead tasks data — fallback/complement for notes, agent name, and active status
+                    const taskData = taskMap.get(leadIdStr);
+                    if (taskData) {
+                        if (!(lead as any).salesNotes && taskData.notes) {
+                            (lead as any).salesNotes = taskData.notes;
+                        }
+                        if (!(lead as any).assignedAgentName && taskData.agentName) {
+                            (lead as any).assignedAgentName = taskData.agentName;
+                        }
+                        // If lead is still marked new but has an in_progress task, show in_progress
+                        if ((!lead.status || lead.status === 'new') && taskData.status === 'in_progress') {
+                            lead.status = 'in_progress';
+                        }
+                    }
+                }
+            } catch (actErr) {
+                console.warn('Could not attach lead activities to admin leads:', actErr);
+            }
+        }
+
         res.json({
             stage: resolveAdminCredentials().stage,
-            leads: rows.map((row) => mapAdminLead(row, origin))
+            leads: allLeads
         });
     } catch (err: any) {
         console.error('Admin growth-audit-leads error:', err);
@@ -891,6 +1174,20 @@ router.delete('/users/invite/:inviteId', requireAdmin, async (req: Request, res:
     }
 });
 
+router.delete('/users/converted-lead/:leadId', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = req.params.leadId;
+        await query(`DELETE FROM lead_activities WHERE lead_id = $1`, [leadId]).catch(() => {});
+        await query(`DELETE FROM lead_tasks WHERE lead_id = $1`, [leadId]).catch(() => {});
+        await query(`DELETE FROM sales_leads WHERE id = $1`, [leadId]);
+        res.json({ success: true, deletedLeadId: leadId });
+    } catch (err: any) {
+        console.error('Admin delete converted lead error:', err);
+        res.status(500).json({ error: err.message || 'Could not delete converted lead' });
+    }
+});
+
 router.patch('/organizations/:orgId/subscription', requireAdmin, async (req: Request, res: Response) => {
     try {
         const orgId = req.params.orgId;
@@ -1013,55 +1310,7 @@ router.get('/services', requireAdmin, (_req: Request, res: Response) => {
 
 
 
-let crmTablesChecked = false;
-async function ensureCrmTables() {
-    if (crmTablesChecked) return;
-    try {
-        await query(`
-            CREATE TABLE IF NOT EXISTS lead_tasks (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                lead_id TEXT NOT NULL,
-                assigned_to_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-                task_type TEXT NOT NULL DEFAULT 'follow_up_call' CHECK (task_type IN ('prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom')),
-                title TEXT NOT NULL,
-                notes TEXT NOT NULL DEFAULT '',
-                priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
-                status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed', 'cancelled')),
-                due_date TIMESTAMPTZ,
-                completed_at TIMESTAMPTZ,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-
-            ALTER TABLE lead_tasks ADD COLUMN IF NOT EXISTS created_by_role TEXT DEFAULT 'admin';
-            ALTER TABLE lead_tasks ADD COLUMN IF NOT EXISTS created_by_name TEXT DEFAULT 'Admin';
-
-            CREATE INDEX IF NOT EXISTS idx_lead_tasks_lead_id ON lead_tasks(lead_id);
-            CREATE INDEX IF NOT EXISTS idx_lead_tasks_assigned_to ON lead_tasks(assigned_to_user_id);
-            CREATE INDEX IF NOT EXISTS idx_lead_tasks_status ON lead_tasks(status);
-            CREATE INDEX IF NOT EXISTS idx_lead_tasks_due_date ON lead_tasks(due_date);
-
-            CREATE TABLE IF NOT EXISTS lead_activities (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                lead_id TEXT NOT NULL,
-                user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-                author_name TEXT NOT NULL DEFAULT 'Admin',
-                activity_type TEXT NOT NULL DEFAULT 'call_log' CHECK (activity_type IN ('call_log', 'status_change', 'task_event', 'note')),
-                disposition TEXT CHECK (disposition IN ('connected', 'voicemail', 'callback_requested', 'not_interested', 'converted', 'other')),
-                note TEXT NOT NULL DEFAULT '',
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_lead_activities_lead_id ON lead_activities(lead_id);
-            CREATE INDEX IF NOT EXISTS idx_lead_activities_created_at ON lead_activities(created_at DESC);
-        `);
-        crmTablesChecked = true;
-    } catch (err) {
-        console.warn('ensureCrmTables warning:', err);
-    }
-}
-
-
+/** Get list of sales agents / telecallers available for assignment */
 router.get('/crm/sales-agents', requireAdmin, async (_req: Request, res: Response) => {
     try {
         await ensureCrmTables();
@@ -1523,5 +1772,378 @@ router.post('/crm/activities/clear', requireAdmin, async (_req: Request, res: Re
     }
 });
 
+/** Admin: List all CRM leads (sales_leads) */
+router.get('/crm/leads', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const industry = String(req.query.industry || '').trim();
+        const status = String(req.query.status || '').trim();
+        const opportunityLevel = String(req.query.opportunityLevel || '').trim();
+        const q = String(req.query.q || '').trim();
+        const isCustomer = req.query.isCustomer === 'true' ? true : req.query.isCustomer === 'false' ? false : undefined;
+
+        const params: any[] = [];
+        const where: string[] = [];
+
+        if (isCustomer !== undefined) {
+            params.push(isCustomer);
+            where.push(`l.is_customer = $${params.length}`);
+        } else {
+            where.push(`l.is_customer = FALSE`);
+        }
+
+        if (industry && industry !== 'all') {
+            params.push(industry.toLowerCase());
+            where.push(`LOWER(l.industry) = $${params.length}`);
+        }
+
+        if (status && status !== 'all') {
+            params.push(status);
+            where.push(`l.status = $${params.length}`);
+        }
+
+        if (opportunityLevel && opportunityLevel !== 'all') {
+            params.push(opportunityLevel.toLowerCase());
+            where.push(`LOWER(l.opportunity_level) = $${params.length}`);
+        }
+
+        if (q) {
+            params.push(`%${q.toLowerCase()}%`);
+            const p = `$${params.length}`;
+            where.push(`(
+                LOWER(l.name) LIKE ${p}
+                OR LOWER(l.phone) LIKE ${p}
+                OR LOWER(l.email) LIKE ${p}
+                OR LOWER(l.address) LIKE ${p}
+                OR LOWER(l.website) LIKE ${p}
+            )`);
+        }
+
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        const { rows } = await query(`
+            SELECT 
+                l.id,
+                l.name,
+                l.name AS "businessName",
+                l.phone,
+                l.email,
+                l.notes,
+                l.status,
+                l.source,
+                l.industry,
+                l.address,
+                l.website,
+                l.gbp_observation AS "gbpObservation",
+                l.ai_visibility_observation AS "aiVisibilityObservation",
+                l.lead_opportunity AS "leadOpportunity",
+                l.opportunity_level AS "opportunityLevel",
+                l.is_customer AS "isCustomer",
+                l.converted_at AS "convertedAt",
+                l.assigned_to AS "assignedTo",
+                l.next_follow_up_at AS "nextFollowUpAt",
+                l.created_at AS "createdAt",
+                l.updated_at AS "updatedAt",
+                u.name AS "assignedAgentName",
+                u.email AS "assignedAgentEmail"
+            FROM sales_leads l
+            LEFT JOIN users u ON u.id = l.assigned_to
+            ${whereSql}
+            ORDER BY l.created_at DESC
+            LIMIT 1000
+        `, params);
+
+        res.json({ leads: rows });
+    } catch (err: any) {
+        console.error('Admin get CRM leads error:', err);
+        res.status(500).json({ error: err.message || 'Failed to fetch leads' });
+    }
+});
+
+/** Admin: Create single lead manually */
+router.post('/crm/leads', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const {
+            name,
+            businessName,
+            phone,
+            email,
+            notes,
+            conclusion,
+            status = 'new',
+            source = 'admin_manual',
+            industry = '',
+            address = '',
+            website = '',
+            gbpObservation = '',
+            aiVisibilityObservation = '',
+            leadOpportunity = '',
+            opportunityLevel = 'medium',
+            assignedTo,
+            nextFollowUpAt
+        } = req.body || {};
+
+        const leadName = String(businessName || name || '').trim();
+        if (!leadName) {
+            return res.status(400).json({ error: 'Business name is required.' });
+        }
+
+        const lead = await createSalesLead({
+            name: leadName,
+            phone: phone ? String(phone).trim() : '',
+            email: email ? String(email).trim().toLowerCase() : '',
+            notes: (notes || conclusion) ? String(notes || conclusion).trim() : '',
+            status,
+            source,
+            industry,
+            address,
+            website,
+            gbpObservation,
+            aiVisibilityObservation,
+            leadOpportunity,
+            opportunityLevel,
+            assignedTo: assignedTo || null,
+            nextFollowUpAt,
+            createdByAdmin: true
+        });
+
+        res.status(201).json({ lead });
+    } catch (err: any) {
+        console.error('Admin create lead error:', err);
+        res.status(500).json({ error: err.message || 'Failed to create lead' });
+    }
+});
+
+/** Admin: Bulk Import Leads (Excel / CSV) */
+router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const { leads } = req.body || {};
+
+        if (!Array.isArray(leads) || !leads.length) {
+            return res.status(400).json({ error: 'No leads provided for import.' });
+        }
+
+        const normalizedLeads = leads.map((item: any) => {
+            let rawConclusion =
+                item.notes ??
+                item.conclusion ??
+                item['My Conclusion'] ??
+                item['My Conclusions'] ??
+                item['My Concluision'] ??
+                item['My Concluisions'] ??
+                item['myConclusion'] ??
+                item['myConclusions'] ??
+                item['Conclusion'] ??
+                item['Conclusions'] ??
+                item['Concluision'] ??
+                item['Concluisions'] ??
+                item['Takeaways'] ??
+                item['Takeaway'] ??
+                item['Remarks'] ??
+                item['Summary'] ??
+                item['Notes'] ??
+                '';
+
+            if (!rawConclusion && typeof item === 'object' && item !== null) {
+                for (const [k, v] of Object.entries(item)) {
+                    const cleanKey = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    if (cleanKey.includes('concl') || cleanKey.includes('takeaway') || cleanKey.includes('verdict')) {
+                        if (v && String(v).trim()) {
+                            rawConclusion = String(v).trim();
+                            break;
+                        }
+                    }
+                }
+            }
+
+            return {
+                name: String(item.businessName || item.name || item['Business name'] || item['Business Name'] || item['Company Name'] || '').trim(),
+                phone: String(item.phone || item.businessPhone || item['Business Phone'] || item['Phone'] || '').trim(),
+                email: String(item.email || item['Email'] || '').trim().toLowerCase(),
+                industry: String(item.industry || item.category || item.sheetName || item['Industry'] || item['Business'] || '').trim(),
+                address: String(item.address || item.townPostcode || item['Town postcode'] || item['Town Postcode'] || item['Address'] || '').trim(),
+                website: String(item.website || item.websiteUrl || item['Website URL'] || item['Website'] || '').trim(),
+                gbpObservation: String(item.gbpObservation || item['My Observation GBP'] || item['GBP Observation'] || '').trim(),
+                aiVisibilityObservation: String(item.aiVisibilityObservation || item['My Observation AI Visibility'] || item['AI Visibility'] || '').trim(),
+                leadOpportunity: String(item.leadOpportunity || item['Lead Opportunity'] || item['Opportunity'] || '').trim(),
+                opportunityLevel: String(item.opportunityLevel || '').toLowerCase() || 'medium',
+                status: String(item.status || 'new').trim().toLowerCase() === 'converted' ? 'converted' : 'new',
+                notes: String(rawConclusion).trim(),
+                assignedTo: item.assignedTo || null
+            };
+        });
+
+        const result = await bulkImportSalesLeads(normalizedLeads, true);
+        res.json(result);
+    } catch (err: any) {
+        console.error('Admin bulk import error:', err);
+        res.status(500).json({ error: err.message || 'Failed to import leads' });
+    }
+});
+
+/** Admin: Convert Lead to Customer */
+router.patch('/crm/leads/:id/convert', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = String(req.params.id);
+        const { note = '' } = req.body || {};
+
+        const lead = await convertLeadToCustomer(leadId);
+
+        try {
+            await query(`
+                INSERT INTO lead_activities (lead_id, author_name, activity_type, disposition, note)
+                VALUES ($1, 'Admin', 'call_log', 'converted', $2)
+            `, [leadId, note ? `Converted lead to Customer by Admin. Note: ${note}` : 'Converted lead to Customer by Admin']);
+        } catch {}
+
+        res.json({ success: true, lead });
+    } catch (err: any) {
+        console.error('Admin convert lead error:', err);
+        res.status(err.status || 500).json({ error: err.message || 'Failed to convert lead to customer' });
+    }
+});
+
+/** Admin: Get Converted Customers */
+router.get('/crm/customers', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const q = String(req.query.q || '').trim();
+        const industry = String(req.query.industry || '').trim();
+
+        const params: any[] = [];
+        const where: string[] = ['l.is_customer = TRUE'];
+
+        if (industry && industry !== 'all') {
+            params.push(industry.toLowerCase());
+            where.push(`LOWER(l.industry) = $${params.length}`);
+        }
+
+        if (q) {
+            params.push(`%${q.toLowerCase()}%`);
+            const p = `$${params.length}`;
+            where.push(`(
+                LOWER(l.name) LIKE ${p}
+                OR LOWER(l.phone) LIKE ${p}
+                OR LOWER(l.email) LIKE ${p}
+                OR LOWER(l.address) LIKE ${p}
+                OR LOWER(l.website) LIKE ${p}
+            )`);
+        }
+
+        const { rows } = await query(`
+            SELECT 
+                l.id,
+                l.name,
+                l.name AS "businessName",
+                l.phone,
+                l.email,
+                l.notes,
+                l.status,
+                l.source,
+                l.industry,
+                l.address,
+                l.website,
+                l.gbp_observation AS "gbpObservation",
+                l.ai_visibility_observation AS "aiVisibilityObservation",
+                l.lead_opportunity AS "leadOpportunity",
+                l.opportunity_level AS "opportunityLevel",
+                l.is_customer AS "isCustomer",
+                l.converted_at AS "convertedAt",
+                l.assigned_to AS "assignedTo",
+                l.created_at AS "createdAt",
+                l.updated_at AS "updatedAt",
+                u.name AS "assignedAgentName",
+                u.email AS "assignedAgentEmail"
+            FROM sales_leads l
+            LEFT JOIN users u ON u.id = l.assigned_to
+            WHERE ${where.join(' AND ')}
+            ORDER BY l.converted_at DESC NULLS LAST, l.updated_at DESC
+        `, params);
+
+        res.json({ customers: rows });
+    } catch (err: any) {
+        console.error('Admin get customers error:', err);
+        res.status(500).json({ error: err.message || 'Failed to load customers' });
+    }
+});
+
+/** Admin: Get Distinct Industries with counts */
+router.get('/crm/industries', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const { rows } = await query(`
+            SELECT 
+                COALESCE(NULLIF(TRIM(industry), ''), 'General') AS name,
+                COUNT(*)::int AS count
+            FROM sales_leads
+            GROUP BY COALESCE(NULLIF(TRIM(industry), ''), 'General')
+            ORDER BY count DESC
+        `);
+        res.json({ industries: rows });
+    } catch (err: any) {
+        console.error('Admin get industries error:', err);
+        res.status(500).json({ error: err.message || 'Failed to load industries' });
+    }
+});
+
+/** Admin: Delete all leads uploaded from Excel / bulk imports */
+router.delete('/crm/leads/excel', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+
+        // 1. Delete tasks for excel leads
+        await query(`
+            DELETE FROM lead_tasks
+            WHERE lead_id IN (
+                SELECT id::text FROM sales_leads WHERE source = 'excel_import' OR source ILIKE '%excel%'
+            )
+        `).catch(() => {});
+
+        // 2. Delete activities for excel leads
+        await query(`
+            DELETE FROM lead_activities
+            WHERE lead_id IN (
+                SELECT id::text FROM sales_leads WHERE source = 'excel_import' OR source ILIKE '%excel%'
+            )
+        `).catch(() => {});
+
+        // 3. Delete sales leads
+        const { rows } = await query(`
+            DELETE FROM sales_leads
+            WHERE source = 'excel_import' OR source ILIKE '%excel%'
+            RETURNING id
+        `);
+
+        res.json({ success: true, count: rows.length, message: `Successfully deleted ${rows.length} excel leads.` });
+    } catch (err: any) {
+        console.error('Admin delete excel leads error:', err);
+        res.status(500).json({ error: err.message || 'Failed to delete excel leads' });
+    }
+});
+
+/** Admin: Delete a single sales lead */
+router.delete('/crm/leads/:id', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = String(req.params.id);
+
+        await query(`DELETE FROM lead_tasks WHERE lead_id = $1`, [leadId]).catch(() => {});
+        await query(`DELETE FROM lead_activities WHERE lead_id = $1`, [leadId]).catch(() => {});
+        const { rows } = await query(`DELETE FROM sales_leads WHERE id = $1 RETURNING id`, [leadId]);
+
+        if (!rows.length) {
+            return res.status(404).json({ error: 'Lead not found.' });
+        }
+
+        res.json({ success: true, id: leadId });
+    } catch (err: any) {
+        console.error('Admin delete lead error:', err);
+        res.status(500).json({ error: err.message || 'Failed to delete lead' });
+    }
+});
+
 export default router;
+
 

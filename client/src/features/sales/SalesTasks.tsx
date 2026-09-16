@@ -90,14 +90,17 @@ export default function SalesTasks() {
         setConfirmModalTask({ task, isCompleting });
     };
 
-    const handleConfirmToggleStatus = async (chosenStatus?: CrmTaskStatus) => {
+    const handleConfirmToggleStatus = async (chosenStatus?: CrmTaskStatus, statusNotes?: string) => {
         if (!confirmModalTask) return;
         const { task, isCompleting } = confirmModalTask;
         setModalLoading(true);
         setError('');
         try {
             const nextStatus: SalesTaskStatus = chosenStatus || (isCompleting ? 'completed' : 'pending');
-            await updateSalesTask(task.id, { status: nextStatus });
+            await updateSalesTask(task.id, {
+                status: nextStatus,
+                notes: statusNotes !== undefined ? statusNotes : undefined
+            });
             await loadData();
             setSuccessToast(
                 nextStatus === 'completed'
@@ -152,7 +155,9 @@ export default function SalesTasks() {
     });
 
     const pendingCount = tasks.filter((t) => t.status === 'pending').length;
+    const inProgressCount = tasks.filter((t) => t.status === 'in_progress').length;
     const completedCount = tasks.filter((t) => t.status === 'completed').length;
+    const dueTodayCount = tasks.filter((t) => t.dueDate && t.status !== 'completed' && t.dueDate.startsWith(new Date().toISOString().slice(0, 10))).length;
 
     return (
         <div className="space-y-6 max-w-6xl mx-auto pb-16 animate-in fade-in duration-300">
@@ -185,53 +190,117 @@ export default function SalesTasks() {
                 </div>
             </div>
 
-            {}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-xs">
+            {/* Quick Stats Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {/* Pending */}
+                <button
+                    type="button"
+                    onClick={() => {
+                        setStatusFilter(statusFilter === 'pending' ? 'all' : 'pending');
+                        setDueTodayOnly(false);
+                    }}
+                    className={cn(
+                        "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-slate-300",
+                        statusFilter === 'pending' && !dueTodayOnly ? "border-slate-800 ring-2 ring-slate-800/20 bg-slate-50/50" : "border-[#E2E8F0]"
+                    )}
+                >
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold uppercase tracking-wider text-[#64748B]">Pending</span>
-                        <div className="w-8 h-8 rounded-xl bg-amber-50 text-[#F59E0B] flex items-center justify-center">
-                            <ListTodo className="w-4 h-4" />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[#64748B]">Pending</span>
+                        <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+                            <ListTodo className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-2">{pendingCount}</p>
-                    <p className="text-[11px] text-[#94A3B8] mt-0.5">Assigned by admin</p>
-                </div>
+                    <p className="text-2xl font-black text-[#0F172A] mt-1.5">{pendingCount}</p>
+                    <p className="text-[10px] text-[#94A3B8] mt-0.5">Not started</p>
+                </button>
 
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-xs">
+                {/* In Progress */}
+                <button
+                    type="button"
+                    onClick={() => {
+                        setStatusFilter(statusFilter === 'in_progress' ? 'all' : 'in_progress');
+                        setDueTodayOnly(false);
+                    }}
+                    className={cn(
+                        "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-amber-300",
+                        statusFilter === 'in_progress' && !dueTodayOnly ? "border-amber-500 ring-2 ring-amber-500/20 bg-amber-50/30" : "border-[#E2E8F0]"
+                    )}
+                >
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold uppercase tracking-wider text-[#64748B]">Completed</span>
-                        <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                            <CheckSquare className="w-4 h-4" />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800">In Progress</span>
+                        <div className="w-7 h-7 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                            <Clock className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-2">{completedCount}</p>
-                    <p className="text-[11px] text-[#94A3B8] mt-0.5">Finished items</p>
-                </div>
+                    <p className="text-2xl font-black text-amber-950 mt-1.5">{inProgressCount}</p>
+                    <p className="text-[10px] text-amber-700 font-medium mt-0.5">Work started</p>
+                </button>
 
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-xs">
+                {/* Completed */}
+                <button
+                    type="button"
+                    onClick={() => {
+                        setStatusFilter(statusFilter === 'completed' ? 'all' : 'completed');
+                        setDueTodayOnly(false);
+                    }}
+                    className={cn(
+                        "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-emerald-300",
+                        statusFilter === 'completed' && !dueTodayOnly ? "border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/30" : "border-[#E2E8F0]"
+                    )}
+                >
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold uppercase tracking-wider text-[#64748B]">Total Assigned</span>
-                        <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
-                            <Shield className="w-4 h-4" />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Completed</span>
+                        <div className="w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                            <CheckSquare className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-2">{tasks.length}</p>
-                    <p className="text-[11px] text-[#94A3B8] mt-0.5">From admin team</p>
-                </div>
+                    <p className="text-2xl font-black text-emerald-950 mt-1.5">{completedCount}</p>
+                    <p className="text-[10px] text-emerald-700 font-medium mt-0.5">Finished items</p>
+                </button>
 
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-xs">
+                {/* Total Assigned */}
+                <button
+                    type="button"
+                    onClick={() => {
+                        setStatusFilter('all');
+                        setDueTodayOnly(false);
+                    }}
+                    className={cn(
+                        "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-purple-300",
+                        statusFilter === 'all' && !dueTodayOnly ? "border-purple-500 ring-2 ring-purple-500/20 bg-purple-50/30" : "border-[#E2E8F0]"
+                    )}
+                >
                     <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold uppercase tracking-wider text-[#64748B]">Due Today</span>
-                        <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
-                            <Clock className="w-4 h-4" />
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-purple-800">Total Assigned</span>
+                        <div className="w-7 h-7 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                            <Shield className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-2">
-                        {tasks.filter((t) => t.dueDate && t.status === 'pending' && t.dueDate.startsWith(new Date().toISOString().slice(0, 10))).length}
-                    </p>
-                    <p className="text-[11px] text-rose-600 font-semibold mt-0.5">Requires prompt action</p>
-                </div>
+                    <p className="text-2xl font-black text-[#0F172A] mt-1.5">{tasks.length}</p>
+                    <p className="text-[10px] text-[#94A3B8] mt-0.5">From admin team</p>
+                </button>
+
+                {/* Due Today */}
+                <button
+                    type="button"
+                    onClick={() => {
+                        setDueTodayOnly(!dueTodayOnly);
+                        if (!dueTodayOnly) setStatusFilter('all');
+                    }}
+                    className={cn(
+                        "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-rose-300",
+                        dueTodayOnly ? "border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/30" : "border-[#E2E8F0]"
+                    )}
+                >
+                    <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-rose-800">Due Today</span>
+                        <div className="w-7 h-7 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                            <Clock className="w-3.5 h-3.5" />
+                        </div>
+                    </div>
+                    <p className="text-2xl font-black text-rose-950 mt-1.5">{dueTodayCount}</p>
+                    <p className="text-[10px] text-rose-600 font-semibold mt-0.5">Requires action</p>
+                </button>
             </div>
 
             {}
@@ -481,6 +550,7 @@ export default function SalesTasks() {
                     leadName={confirmModalTask.task.leadBusinessName}
                     priority={confirmModalTask.task.priority}
                     currentStatus={confirmModalTask.task.status}
+                    initialNotes={confirmModalTask.task.notes || ''}
                     isCompleting={confirmModalTask.isCompleting}
                     loading={modalLoading}
                     onConfirm={handleConfirmToggleStatus}
