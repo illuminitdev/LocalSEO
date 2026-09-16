@@ -218,15 +218,15 @@ export function CustomerBookingFlow({
             .replace(/\s*\((?:from\s*)?£[\d.,]+\)\s*$/i, '')
             .trim() || String(name || '');
 
-    const eventPriceDisplay = (et: EventType) => {
+    const eventPriceDisplay = (et: EventType): { cents: number; label: 'Price' | 'Deposit' } => {
         const total = Number(et.totalCents);
         if (Number.isFinite(total) && total > 0) {
-            return { cents: total, label: 'Price' as const };
+            return { cents: total, label: 'Price' };
         }
         const deposit = Number(et.depositCents) || 0;
         return {
             cents: deposit,
-            label: (deposit > 0 ? 'Deposit' : 'Price') as const
+            label: deposit > 0 ? 'Deposit' : 'Price'
         };
     };
 
