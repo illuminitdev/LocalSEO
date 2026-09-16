@@ -7,6 +7,7 @@ function resolveOrgIndustryId(org: any): string | null {
     const fromTrade = trade ? getBookingPreset(trade).id : null;
     
     if (fromTrade === 'dentists') return 'dentists';
+    if (fromTrade === 'salons') return 'salons';
     if (fromCol) return fromCol;
     return fromTrade;
 }
@@ -22,6 +23,10 @@ export function isCatalogOrg(org: any): boolean {
 
 export function isDentistsOrg(org: any): boolean {
     return resolveOrgIndustryId(org) === 'dentists';
+}
+
+export function isSalonsOrg(org: any): boolean {
+    return resolveOrgIndustryId(org) === 'salons';
 }
 
 export function assertRestaurantOrg(org: { booking_industry_id?: string | null; trade_type?: string | null }) {

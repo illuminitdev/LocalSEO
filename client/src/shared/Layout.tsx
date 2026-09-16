@@ -209,12 +209,12 @@ export default function Layout() {
 
     
     const logoScale = sidebarWidth / SIDEBAR_DEFAULT;
-    const logoHeight = Math.round(Math.min(48, Math.max(28, 36 * logoScale)));
-    const logoWidth = Math.round(Math.min(220, Math.max(100, (sidebarWidth - 48) * 0.85)));
+    const logoHeight = Math.round(Math.min(64, Math.max(40, 52 * logoScale)));
+    const logoWidth = Math.round(Math.min(240, Math.max(120, (sidebarWidth - 40) * 0.9)));
 
     const sidebar = (
         <>
-            <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2 border-b-2 border-[#E2E8F0]">
+            <div className="px-5 pt-5 pb-5 shrink-0 flex items-start justify-between gap-2 border-b-2 border-[#E2E8F0]">
                 {orgLogoUrl ? (
                     <img
                         src={orgLogoUrl}
@@ -359,13 +359,13 @@ export default function Layout() {
                             <img
                                 src={orgLogoUrl}
                                 alt="Business logo"
-                                className="h-7 w-[140px] object-contain object-left"
+                                className="h-10 w-[180px] object-contain object-left"
                             />
                         ) : (
                             <img
                                 src="/localseo.png"
                                 alt="Local SEO"
-                                className="h-7 w-[140px] object-contain object-left"
+                                className="h-10 w-[180px] object-contain object-left"
                             />
                         )}
                     </div>

@@ -30,7 +30,7 @@ import {
 } from '../lib/quotes';
 import { getPublicSite } from '../lib/marketing';
 import { applyReferralCode } from '../lib/marketing';
-import { getBookingPreset, normalizeBookingIndustryId } from '../lib/bookingIndustryPresets';
+import { getBookingPreset, normalizeBookingIndustryId, resolveSalonServiceCategory } from '../lib/bookingIndustryPresets';
 import { createUploadPresign, mediaConfigured } from '../lib/media';
 import { orgBrandingFields } from '../lib/branding';
 import {
@@ -38,6 +38,7 @@ import {
     isCatalogOrg,
     isDentistsOrg,
     isRestaurantOrg,
+    isSalonsOrg,
     listMenuItems,
     publicMenuItem
 } from '../lib/orgMenu';
@@ -86,6 +87,7 @@ function industryPayload(org: any, menuItems: any[] = []) {
         shortName: preset.shortName,
         defaultService: preset.defaultService,
         services: preset.services,
+        categorizedServices: preset.categorizedServices || [],
         timeSlots: preset.timeSlots,
         customFields,
         uploadPrompt: preset.uploadPrompt,
@@ -538,10 +540,16 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         try {
             const org = await loadOrg(req.params.hostSlug);
             if (!org) return res.status(404).json({ error: 'Business not found' });
-            const { rows: eventTypes } = await query(
-                'SELECT id, slug, name, description, duration_minutes, deposit_cents, total_cents FROM event_types WHERE org_id = $1 AND active = TRUE ORDER BY sort_order',
+            const { rows: eventTypeRows } = await query(
+                'SELECT id, slug, name, description, duration_minutes, deposit_cents, total_cents, category FROM event_types WHERE org_id = $1 AND active = TRUE ORDER BY sort_order',
                 [org.id]
             );
+            const eventTypes = isSalonsOrg(org)
+                ? eventTypeRows.map((et: any) => ({
+                      ...et,
+                      category: resolveSalonServiceCategory(et.name, et.category)
+                  }))
+                : eventTypeRows;
             let menuItems: any[] = [];
             if (isCatalogOrg(org)) {
                 const rows = await listMenuItems(org.id, { activeOnly: true });
@@ -629,7 +637,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     description: eventType.description,
                     durationMinutes: eventType.duration_minutes,
                     depositCents: eventType.deposit_cents,
-                    totalCents: eventType.total_cents
+                    totalCents: eventType.total_cents,
+                    category: eventType.category || ''
                 },
                 industry: industryPayload(org, menuItems),
                 menuItems,
@@ -698,8 +707,14 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             } = req.body || {};
 
             const isRequest = intakeType === 'request';
-            if (!customerName?.trim() || !email?.trim() || !phone?.trim() || !address?.trim()) {
-                return res.status(400).json({ error: 'Name, email, phone, and address are required' });
+            const salonVisit = isSalonsOrg(org);
+            const resolvedAddress = String(address || '').trim() || (salonVisit ? org.service_area || 'Salon visit' : '');
+            if (!customerName?.trim() || !email?.trim() || !phone?.trim() || (!salonVisit && !resolvedAddress)) {
+                return res.status(400).json({
+                    error: salonVisit
+                        ? 'Name, email, and phone are required'
+                        : 'Name, email, phone, and address are required'
+                });
             }
 
             let bookMenuItems: any[] = [];
@@ -758,7 +773,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 name: customerName,
                 email,
                 phone,
-                address,
+                address: resolvedAddress,
                 status: isRequest ? 'lead' : 'active'
             });
 
@@ -835,7 +850,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     customerName,
                     email.toLowerCase(),
                     phone,
-                    address,
+                    resolvedAddress,
                     bookingDescription,
                     start,
                     end,

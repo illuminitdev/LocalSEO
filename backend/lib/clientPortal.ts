@@ -33,7 +33,7 @@ export async function loadPortalByToken(token: string) {
         `SELECT t.*, c.name AS client_name, c.email AS client_email, c.phone AS client_phone,
                 c.status AS client_status, c.notes AS client_notes,
                 o.slug AS org_slug, o.name AS org_name, o.phone AS org_phone, o.email AS org_email,
-                o.host_name, o.trade_type, o.currency,
+                o.host_name, o.trade_type, o.currency, o.booking_industry_id,
                 o.logo_url, o.brand_primary, o.brand_secondary
          FROM client_portal_tokens t
          JOIN clients c ON c.id = t.client_id
@@ -90,6 +90,7 @@ export async function loadPortalByToken(token: string) {
             email: row.org_email,
             hostName: row.host_name,
             tradeType: row.trade_type,
+            bookingIndustryId: row.booking_industry_id || null,
             currency: row.currency || 'GBP',
             ...orgBrandingFields(row)
         },

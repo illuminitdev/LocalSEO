@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Calendar, FileText, Plus, ShieldCheck } from 'lucide-react';
 import { apiGet, apiPost, cn, formatCents } from '../../../shared/utils';
 import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
+import { normalizeBookingIndustryId } from './bookingIndustryPresets';
 
 export default function ClientPortal() {
     const { token } = useParams();
@@ -104,6 +105,9 @@ export default function ClientPortal() {
     const org = data.organization;
     const client = data.client;
     const brand = resolveOrgBrand(org);
+    const isSalons =
+        normalizeBookingIndustryId(org?.bookingIndustryId) === 'salons' ||
+        normalizeBookingIndustryId(org?.tradeType) === 'salons';
 
     return (
         <div className="min-h-screen bg-[#F8FAFC] py-8 px-4" style={orgBrandStyle(org)}>
@@ -125,7 +129,7 @@ export default function ClientPortal() {
                                 className="text-[10px] font-black uppercase tracking-widest"
                                 style={{ color: 'var(--brand-primary)' }}
                             >
-                                Client hub
+                                {isSalons ? 'Client appointments' : 'Client hub'}
                             </p>
                             <h1 className="text-2xl font-black mt-1">{org.name}</h1>
                             <p className="text-sm text-white/70 mt-1">
@@ -145,21 +149,24 @@ export default function ClientPortal() {
                         onClick={() => setShowRequest((v) => !v)}
                         className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-bold text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
                     >
-                        <Plus className="w-4 h-4" /> New work request
+                        <Plus className="w-4 h-4" />{' '}
+                        {isSalons ? 'Request an appointment' : 'New work request'}
                     </button>
                     {org.slug && (
                         <Link
                             to={`/book/${org.slug}`}
                             className="inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm font-bold text-[#0F172A]"
                         >
-                            Open booking page
+                            {isSalons ? 'Book again' : 'Open booking page'}
                         </Link>
                     )}
                 </div>
 
                 {showRequest && (
                     <form onSubmit={submitRequest} className="bg-white border border-[#E2E8F0] rounded-2xl p-4 space-y-3">
-                        <h2 className="font-bold text-[#0F172A]">Request a visit</h2>
+                        <h2 className="font-bold text-[#0F172A]">
+                            {isSalons ? 'Request an appointment' : 'Request a visit'}
+                        </h2>
                         <label className="block text-xs font-bold text-[#64748B]">
                             Service
                             <select
@@ -277,13 +284,17 @@ export default function ClientPortal() {
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4">
                     <h2 className="text-xs font-bold uppercase text-[#64748B] mb-3">History</h2>
                     {!history.length ? (
-                        <p className="text-sm text-[#64748B]">No past jobs yet.</p>
+                        <p className="text-sm text-[#64748B]">
+                            {isSalons ? 'No past appointments yet.' : 'No past jobs yet.'}
+                        </p>
                     ) : (
                         <ul className="space-y-2">
                             {history.slice(0, 20).map((b: any) => (
                                 <li key={b.id} className="rounded-xl border border-[#F1F5F9] px-3 py-2 text-sm">
                                     <div className="flex justify-between gap-2">
-                                        <span className="font-medium text-[#0F172A]">{b.event_name || 'Job'}</span>
+                                        <span className="font-medium text-[#0F172A]">
+                                            {b.event_name || (isSalons ? 'Appointment' : 'Job')}
+                                        </span>
                                         <span className={cn('text-[10px] font-bold uppercase', 'text-[#64748B]')}>
                                             {b.job_status || b.status}
                                         </span>

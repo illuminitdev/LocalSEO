@@ -20,8 +20,9 @@ import {
 } from 'lucide-react';
 import { API_BASE, apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../../shared/utils';
 import { monthDays, todayStr } from './bookingUtils';
-import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryPresets';
+import { getBookingPreset, normalizeBookingIndustryId, resolveSalonServiceCategory } from './bookingIndustryPresets';
 import FoodOrderFlow from '../restaurants/FoodOrderFlow';
+import SalonBookingFlow from '../salons/SalonBookingFlow';
 import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
 
 type Slot = { startAt: string; endAt: string; date: string; label: string };
@@ -1693,10 +1694,33 @@ export function PublicBookHost() {
         description: et.description,
         durationMinutes: et.duration_minutes,
         depositCents: et.deposit_cents,
-        totalCents: et.total_cents
+        totalCents: et.total_cents,
+        category: resolveSalonServiceCategory(et.name, et.category || '')
     }));
     const menuItems = data.menuItems || [];
     const hasMenu = menuItems.length > 0;
+    const isSalons = normalizeBookingIndustryId(data.bookingIndustryId) === 'salons';
+
+    if (isSalons) {
+        return (
+            <SalonBookingFlow
+                hostSlug={hostSlug!}
+                host={{
+                    name: data.name,
+                    tradeType: data.tradeType,
+                    phone: data.phone,
+                    email: data.email,
+                    serviceArea: data.serviceArea,
+                    logoUrl: data.logoUrl || data.logo_url || '',
+                    brandPrimary: data.brandPrimary || data.brand_primary,
+                    brandSecondary: data.brandSecondary || data.brand_secondary
+                }}
+                eventTypes={eventTypes}
+                industry={data.industry || getBookingPreset('salons')}
+                mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
+            />
+        );
+    }
 
     if (path === 'choose') {
         return (
