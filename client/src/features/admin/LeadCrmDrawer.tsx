@@ -14,6 +14,9 @@ import {
     Trash2,
     MessageSquare,
     AlertCircle,
+    MapPin,
+    FileText,
+    Eye,
     Sparkles
 } from 'lucide-react';
 import {
@@ -46,10 +49,25 @@ export type GrowthAuditLeadRef = {
     rating?: number | null;
     ratingTotal?: number | null;
     source?: string | null;
+    industry?: string | null;
+    gbpObservation?: string | null;
+    aiVisibilityObservation?: string | null;
+    leadOpportunity?: string | null;
+    opportunityLevel?: string | null;
+    isCustomer?: boolean | null;
+    convertedAt?: string | null;
     scoreTotal?: number | null;
     leadScoreTotal?: number | null;
     sharePath?: string | null;
     reportUrl?: string | null;
+    notes?: string | null;
+    latestActivity?: {
+        type: string;
+        disposition?: string;
+        note?: string;
+        authorName?: string;
+        createdAt: string;
+    } | null;
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -100,13 +118,15 @@ interface LeadCrmDrawerProps {
     salesAgents: SalesAgent[];
     onClose: () => void;
     onTaskUpdated?: () => void;
+    onViewDetails?: (lead: GrowthAuditLeadRef) => void;
 }
 
 export default function LeadCrmDrawer({
     lead,
     salesAgents,
     onClose,
-    onTaskUpdated
+    onTaskUpdated,
+    onViewDetails
 }: LeadCrmDrawerProps) {
     const [activeTab, setActiveTab] = useState<'tasks' | 'activities'>('tasks');
     const [tasks, setTasks] = useState<LeadTask[]>([]);
@@ -217,14 +237,19 @@ export default function LeadCrmDrawer({
 
     return (
         <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/40 backdrop-blur-sm flex justify-end transition-opacity">
-            <div className="w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-200">
-                {}
-                <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/80 flex items-start justify-between gap-4">
+            <div className="w-full max-w-2xl sm:max-w-3xl bg-white h-full shadow-2xl flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-200">
+                {/* Header */}
+                <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/90 flex items-start justify-between gap-4">
                     <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                             <h2 className="text-xl font-bold text-slate-900 truncate">
                                 {bizName}
                             </h2>
+                            {(lead.industry || lead.serviceLabel || lead.service) && (
+                                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                    {lead.industry || lead.serviceLabel || lead.service}
+                                </span>
+                            )}
                             {typeLabel && (
                                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-200 text-slate-700">
                                     {typeLabel}
@@ -252,14 +277,14 @@ export default function LeadCrmDrawer({
                             )}
                         </div>
 
-                        {}
-                        <div className="mt-2.5 flex items-center gap-4 text-xs text-slate-600 flex-wrap">
+                        {/* Quick Contact & Location Bar */}
+                        <div className="mt-2.5 flex items-center gap-2 text-xs text-slate-600 flex-wrap">
                             {lead.phone && (
                                 <a
                                     href={`tel:${cleanPhone}`}
-                                    className="inline-flex items-center gap-1.5 font-medium text-amber-700 hover:text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200/60"
+                                    className="inline-flex items-center gap-1.5 font-medium text-amber-800 hover:text-amber-900 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200/80 shadow-2xs"
                                 >
-                                    <Phone className="w-3.5 h-3.5" />
+                                    <Phone className="w-3.5 h-3.5 text-amber-600" />
                                     {lead.phone}
                                 </a>
                             )}
@@ -268,18 +293,18 @@ export default function LeadCrmDrawer({
                                     href={`https://wa.me/${cleanPhone.replace('+', '')}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 font-medium text-emerald-700 hover:text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/60"
+                                    className="inline-flex items-center gap-1.5 font-medium text-emerald-800 hover:text-emerald-900 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80 shadow-2xs"
                                 >
-                                    <MessageSquare className="w-3.5 h-3.5" />
+                                    <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
                                     WhatsApp
                                 </a>
                             )}
                             {lead.email && (
                                 <a
                                     href={`mailto:${lead.email}`}
-                                    className="inline-flex items-center gap-1.5 text-slate-600 hover:text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-200"
+                                    className="inline-flex items-center gap-1.5 text-slate-700 hover:text-indigo-600 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs"
                                 >
-                                    <Mail className="w-3.5 h-3.5" />
+                                    <Mail className="w-3.5 h-3.5 text-slate-400" />
                                     {lead.email}
                                 </a>
                             )}
@@ -288,18 +313,24 @@ export default function LeadCrmDrawer({
                                     href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 text-slate-600 hover:text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-200"
+                                    className="inline-flex items-center gap-1.5 font-medium text-indigo-600 hover:underline bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs"
                                 >
-                                    <Globe className="w-3.5 h-3.5" />
-                                    Website
+                                    <Globe className="w-3.5 h-3.5 text-indigo-400" />
+                                    {lead.website.replace(/^https?:\/\/(www\.)?/, '')}
                                 </a>
+                            )}
+                            {lead.address && (
+                                <span className="inline-flex items-center gap-1.5 text-slate-600 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs">
+                                    <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                                    {lead.address}
+                                </span>
                             )}
                             {lead.reportUrl && (
                                 <a
                                     href={lead.reportUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 font-medium text-blue-700 hover:text-blue-800 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200/60"
+                                    className="inline-flex items-center gap-1.5 font-medium text-blue-700 hover:text-blue-800 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200/60 shadow-2xs"
                                 >
                                     <ExternalLink className="w-3.5 h-3.5" />
                                     Audit Report
@@ -308,13 +339,26 @@ export default function LeadCrmDrawer({
                         </div>
                     </div>
 
-                    <button
-                        onClick={onClose}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors"
-                        aria-label="Close"
-                    >
-                        <X className="w-5 h-5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {onViewDetails && (
+                            <button
+                                type="button"
+                                onClick={() => onViewDetails(lead)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg transition-colors shadow-2xs"
+                                title="View full lead observations & details"
+                            >
+                                <Eye className="w-3.5 h-3.5 text-indigo-600" />
+                                <span>View Details</span>
+                            </button>
+                        )}
+                        <button
+                            onClick={onClose}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors"
+                            aria-label="Close"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
                 </div>
 
                 {}
@@ -378,7 +422,7 @@ export default function LeadCrmDrawer({
                     </div>
                 )}
 
-                {}
+                {/* Body Content - Full height scrollable */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     {activeTab === 'tasks' ? (
                         <>
@@ -552,9 +596,15 @@ export default function LeadCrmDrawer({
                                                         </div>
 
                                                         {task.notes && (
-                                                            <p className={cn("mt-1 text-xs line-clamp-2", isDone ? "text-emerald-800/70" : "text-slate-600")}>
-                                                                {task.notes}
-                                                            </p>
+                                                            <div className={cn(
+                                                                "mt-2 p-2.5 rounded-xl text-xs leading-relaxed border flex items-start gap-2",
+                                                                isDone
+                                                                    ? "bg-emerald-100/50 text-emerald-950 border-emerald-200"
+                                                                    : "bg-slate-50 text-slate-800 border-slate-200/80"
+                                                            )}>
+                                                                <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                                                                <p className="whitespace-pre-wrap flex-1">{task.notes}</p>
+                                                            </div>
                                                         )}
 
                                                         <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-500 flex-wrap">

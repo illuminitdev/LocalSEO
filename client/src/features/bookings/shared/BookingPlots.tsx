@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Calendar, CheckCircle2, Copy, ExternalLink, LogIn, Plus, Play, QrCode, Settings, User, Wrench } from 'lucide-react';
+import { Calendar, CheckCircle2, Copy, ExternalLink, LogIn, Plus, Play, QrCode, Scissors, Settings, User, Wrench } from 'lucide-react';
 import { apiGet, apiPost, formatCents, cn, restrictPhoneInput } from '../../../shared/utils';
 import { setBookingOrgSlug } from './bookingUtils';
 import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
@@ -10,13 +10,20 @@ import { normalizeBookingIndustryId } from './bookingIndustryPresets';
 
 function intakeAnswersList(raw: unknown): { key: string; label: string; value: string }[] {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const labelMap: Record<string, string> = {
+        practitionerPref: 'Stylist',
+        patchTest: 'Patch test',
+        priceListItemId: 'Treatment'
+    };
     return Object.entries(raw as Record<string, unknown>)
         .map(([key, value]) => ({
             key,
-            label: key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()),
+            label:
+                labelMap[key] ||
+                key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()),
             value: String(value ?? '').trim()
         }))
-        .filter((x) => x.value);
+        .filter((x) => x.value && x.key !== 'priceListItemId');
 }
 type BookingService = {
     id: string;
@@ -120,6 +127,7 @@ export default function BookingPlots() {
     const ready = Boolean(data?.ready);
     const org = data?.organization;
     const isRestaurant = normalizeBookingIndustryId(org?.booking_industry_id) === 'restaurants';
+    const isSalons = normalizeBookingIndustryId(org?.booking_industry_id) === 'salons';
     const eventTypes = data?.eventTypes || [];
     const bookings = data?.bookings || [];
     const displayServices: BookingService[] =
@@ -545,7 +553,7 @@ export default function BookingPlots() {
                             }}
                             className="ml-auto inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-[#0F172A] text-white"
                         >
-                            <Plus className="w-3.5 h-3.5" /> Add job
+                            <Plus className="w-3.5 h-3.5" /> {isSalons ? 'Add booking' : 'Add job'}
                         </button>
                         )}
                     </div>
@@ -558,7 +566,9 @@ export default function BookingPlots() {
                     {showManual && (
                         <form onSubmit={createManualBooking} className="p-4 border-b border-[#E2E8F0] bg-[#FAFBFC] space-y-3">
                             <div className="flex justify-between items-center">
-                                <h3 className="font-bold text-sm text-[#0F172A]">Manual booking / request</h3>
+                                <h3 className="font-bold text-sm text-[#0F172A]">
+                                    {isSalons ? 'Manual appointment' : 'Manual booking / request'}
+                                </h3>
                                 <button type="button" onClick={() => setShowManual(false)} className="text-xs font-bold text-[#64748B]">
                                     Close
                                 </button>
@@ -573,7 +583,7 @@ export default function BookingPlots() {
                                     <option value="">Select service</option>
                                     {eventTypes.map((et: any) => (
                                         <option key={et.id} value={et.id}>
-                                            {et.name}
+                                            {et.category ? `${et.category} · ${et.name}` : et.name}
                                         </option>
                                     ))}
                                 </select>
@@ -611,7 +621,7 @@ export default function BookingPlots() {
                                     className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
                                 />
                                 <input
-                                    placeholder="Address"
+                                    placeholder={isSalons ? 'Notes / location (optional)' : 'Address'}
                                     value={manualForm.address}
                                     onChange={(e) => setManualForm((f) => ({ ...f, address: e.target.value }))}
                                     className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
@@ -624,7 +634,7 @@ export default function BookingPlots() {
                                     className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm sm:col-span-2"
                                 />
                                 <input
-                                    placeholder="Job notes"
+                                    placeholder={isSalons ? 'Appointment notes' : 'Job notes'}
                                     value={manualForm.description}
                                     onChange={(e) => setManualForm((f) => ({ ...f, description: e.target.value }))}
                                     className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm sm:col-span-2"
@@ -643,10 +653,20 @@ export default function BookingPlots() {
                         {!filtered.length && (
                             <div className="border border-dashed border-[#E2E8F0] rounded-2xl p-10 text-center flex flex-col items-center justify-center min-h-[340px] bg-[#FAFBFC]">
                                 <div className="w-16 h-16 rounded-2xl bg-[#F59E0B]/25 flex items-center justify-center mb-4">
-                                    <Wrench className="w-8 h-8 text-[#0F172A]" />
+                                    {isSalons ? (
+                                        <Scissors className="w-8 h-8 text-[#0F172A]" />
+                                    ) : (
+                                        <Wrench className="w-8 h-8 text-[#0F172A]" />
+                                    )}
                                 </div>
-                                <h3 className="font-black text-lg text-[#0F172A]">No bookings yet</h3>
-                                <p className="text-sm text-[#64748B] mt-2 max-w-md">Share your link or open customer view to test a booking.</p>
+                                <h3 className="font-black text-lg text-[#0F172A]">
+                                    {isSalons ? 'No appointments yet' : 'No bookings yet'}
+                                </h3>
+                                <p className="text-sm text-[#64748B] mt-2 max-w-md">
+                                    {isSalons
+                                        ? 'Share your book link so clients can pick a service, stylist, and time.'
+                                        : 'Share your link or open customer view to test a booking.'}
+                                </p>
                                 <button type="button" onClick={openCustomerView} className="mt-5 px-5 py-3 rounded-xl bg-[#F59E0B] text-white text-sm font-bold inline-flex items-center gap-2">
                                     <ExternalLink className="w-4 h-4" /> Open customer view
                                 </button>
@@ -660,7 +680,11 @@ export default function BookingPlots() {
                                         <div className="flex justify-between gap-2 items-start">
                                             <div className="min-w-0">
                                                 <p className="font-bold text-[#0F172A] truncate">{b.customer_name}</p>
-                                                <p className="text-xs text-[#64748B]">{b.event_name}</p>
+                                                <p className="text-xs text-[#64748B]">
+                                                    {b.event_category
+                                                        ? `${b.event_category} · ${b.event_name}`
+                                                        : b.event_name}
+                                                </p>
                                                 {b.client_id && (
                                                     <Link
                                                         to={`/clients/${b.client_id}`}
@@ -678,9 +702,13 @@ export default function BookingPlots() {
                                             <Calendar className="w-3.5 h-3.5 text-[#F59E0B] shrink-0" />
                                             {new Date(b.start_at).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                                         </p>
-                                        <p className="text-xs text-[#64748B] line-clamp-2">{b.customer_address}</p>
+                                        {b.customer_address && (
+                                            <p className="text-xs text-[#64748B] line-clamp-2">{b.customer_address}</p>
+                                        )}
                                         {b.event_name && (
-                                            <p className="text-xs font-semibold text-[#0F172A]">Service: {b.event_name}</p>
+                                            <p className="text-xs font-semibold text-[#0F172A]">
+                                                {isSalons ? 'Service' : 'Service'}: {b.event_name}
+                                            </p>
                                         )}
                                         {intakeAnswersList(b.intake_answers).length > 0 && (
                                             <div className="text-xs text-[#64748B] bg-[#F8FAFC] rounded-lg px-2 py-1.5 space-y-0.5">
@@ -733,7 +761,8 @@ export default function BookingPlots() {
                                                         onClick={() => startJob(b.id)}
                                                         className="text-xs font-bold px-3 py-1.5 rounded-lg bg-orange-600 text-white flex items-center gap-1"
                                                     >
-                                                        <Play className="w-3 h-3" /> {busy === b.id ? '…' : 'Start job'}
+                                                        <Play className="w-3 h-3" />{' '}
+                                                        {busy === b.id ? '…' : isSalons ? 'Start' : 'Start job'}
                                                     </button>
                                                 )}
                                             {(b.status === 'confirmed' ||
@@ -744,7 +773,8 @@ export default function BookingPlots() {
                                                 b.job_status !== 'completed' &&
                                                 b.job_status !== 'invoiced' && (
                                                 <button type="button" disabled={busy === b.id} onClick={() => markJobDone(b.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-[#0F172A] text-white flex items-center gap-1">
-                                                    <CheckCircle2 className="w-3 h-3" /> {busy === b.id ? 'Saving…' : 'Mark as done'}
+                                                    <CheckCircle2 className="w-3 h-3" />{' '}
+                                                    {busy === b.id ? 'Saving…' : isSalons ? 'Complete' : 'Mark as done'}
                                                 </button>
                                             )}
                                             {b.invoice_url && (

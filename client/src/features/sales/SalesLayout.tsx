@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, LogOut, Menu, UserRound, X, Bell, CheckSquare, PhoneCall } from 'lucide-react';
+import { LayoutDashboard, LogOut, Menu, UserRound, X, Bell, CheckSquare, PhoneCall, Award } from 'lucide-react';
 import { apiGet, cn } from '../../shared/utils';
 import { clearToken } from '../auth/auth';
 
@@ -13,6 +13,7 @@ const NAV_GROUPS = [
         section: 'WORK & PIPELINE',
         items: [
             { name: 'Dashboard', to: '/sales', icon: LayoutDashboard, end: true },
+            { name: 'Customers', to: '/sales/customers', icon: Award, end: true },
             { name: 'Tasks', to: '/sales/tasks', icon: CheckSquare, end: true },
             { name: 'Self Reminders', to: '/sales/reminders', icon: Bell, end: true },
             { name: 'Call Logs', to: '/sales/calls', icon: PhoneCall, end: true }
@@ -25,6 +26,9 @@ const NAV_GROUPS = [
 ];
 
 function pageTitle(pathname: string) {
+    if (pathname.startsWith('/sales/customers')) {
+        return { title: 'Customers Directory', subtitle: 'View converted accounts, manage client relationships, and track active customers.' };
+    }
     if (pathname.startsWith('/sales/account')) {
         return { title: 'Settings', subtitle: 'Manage your account profile and security.' };
     }

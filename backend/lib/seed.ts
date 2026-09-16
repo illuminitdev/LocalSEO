@@ -29,8 +29,8 @@ async function seedDefaultEventTypes(
               ? emergencyDepositCents
               : standardDepositCents;
         await query(
-            `INSERT INTO event_types (org_id, slug, name, description, duration_minutes, deposit_cents, total_cents, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            `INSERT INTO event_types (org_id, slug, name, description, duration_minutes, deposit_cents, total_cents, sort_order, category)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [
                 orgId,
                 slug,
@@ -39,7 +39,8 @@ async function seedDefaultEventTypes(
                 t.durationMinutes,
                 depositCents,
                 depositCents,
-                t.sortOrder
+                t.sortOrder,
+                String(t.category || '').trim()
             ]
         );
     }
@@ -165,6 +166,7 @@ async function createBookingOrg({
 async function listUserBookingOrgs(userId: string) {
     const { rows } = await query(
         `SELECT o.id, o.slug, o.name, o.host_name, o.trade_type, o.service_area, o.setup_complete,
+                o.booking_industry_id,
                 EXISTS (
                     SELECT 1 FROM event_types et WHERE et.org_id = o.id LIMIT 1
                 ) AS has_events
@@ -176,7 +178,11 @@ async function listUserBookingOrgs(userId: string) {
     );
 
     return rows.map((o: any) => {
-        const hasBookingData = Boolean(String(o.trade_type || '').trim() && o.has_events);
+        const industryId = String(o.booking_industry_id || '').trim().toLowerCase();
+        const isSalons = industryId === 'salons';
+        const hasBookingData = Boolean(
+            String(o.trade_type || '').trim() && (isSalons || o.has_events)
+        );
         return {
             id: o.id,
             slug: o.slug,

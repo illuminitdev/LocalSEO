@@ -146,7 +146,7 @@ async function loadDashboard(orgId: any) {
         [orgId]
     );
     const { rows: bookings } = await query(
-        `SELECT b.*, e.name AS event_name, e.slug AS event_slug,
+        `SELECT b.*, e.name AS event_name, e.slug AS event_slug, e.category AS event_category,
                 i.status AS invoice_status, i.stripe_hosted_url AS invoice_url, i.amount_cents AS invoice_amount_cents,
                 c.name AS client_name, c.id AS linked_client_id
          FROM bookings b
@@ -197,8 +197,10 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 normalizeBookingIndustryId(org?.booking_industry_id) ||
                 normalizeBookingIndustryId(hydratedId);
             const industryPreset = industryId ? getBookingPreset(industryId) : null;
+            const isSalonsIndustry = industryId === 'salons';
             const hasBookingData = Boolean(
-                String(org?.trade_type || '').trim() && (data?.eventTypes || []).length > 0
+                String(org?.trade_type || '').trim() &&
+                    (isSalonsIndustry || (data?.eventTypes || []).length > 0)
             );
             const bookingReady = Boolean(org?.setup_complete && hasBookingData);
             if (!bookingReady) {
@@ -220,8 +222,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                         ? {
                               id: industryPreset.id,
                               name: industryPreset.name,
-                              services: industryPreset.services,
-                              defaultService: industryPreset.defaultService
+                              services: isSalonsIndustry ? [] : industryPreset.services,
+                              defaultService: isSalonsIndustry ? '' : industryPreset.defaultService
                           }
                         : null,
                     stripeConfigured: Boolean(stripeClient)
@@ -241,8 +243,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                     ? {
                           id: industryPreset.id,
                           name: industryPreset.name,
-                          services: industryPreset.services,
-                          defaultService: industryPreset.defaultService,
+                          services: isSalonsIndustry ? [] : industryPreset.services,
+                          defaultService: isSalonsIndustry ? '' : industryPreset.defaultService,
                           customFields: industryPreset.customFields,
                           uploadPrompt: industryPreset.uploadPrompt,
                           notesPlaceholder: industryPreset.notesPlaceholder,
@@ -398,8 +400,11 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 const data = await loadDashboard((req as any).orgId);
                 const org = data?.organization;
                 if (!org) return res.json({ organizations: [] });
+                const industryId = normalizeBookingIndustryId(org.booking_industry_id);
+                const isSalonsIndustry = industryId === 'salons';
                 const hasBookingData = Boolean(
-                    String(org.trade_type || '').trim() && (data?.eventTypes || []).length > 0
+                    String(org.trade_type || '').trim() &&
+                        (isSalonsIndustry || (data?.eventTypes || []).length > 0)
                 );
                 return res.json({
                     organizations: [
@@ -590,13 +595,24 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
     router.post('/event-types', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
-            const { name, description, durationMinutes, depositCents, totalCents, active } = req.body || {};
+            const { name, description, durationMinutes, depositCents, totalCents, active, category } =
+                req.body || {};
             if (!name) return res.status(400).json({ error: 'Name is required' });
             const slug = await uniqueEventSlug((req as any).orgId, name, query);
             const { rows } = await query(
-                `INSERT INTO event_types (org_id, slug, name, description, duration_minutes, deposit_cents, total_cents, active)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-                [(req as any).orgId, slug, name, description || '', Number(durationMinutes) || 60, Number(depositCents) || 4500, Number(totalCents) || Number(depositCents) || 4500, active !== false]
+                `INSERT INTO event_types (org_id, slug, name, description, duration_minutes, deposit_cents, total_cents, active, category)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+                [
+                    (req as any).orgId,
+                    slug,
+                    name,
+                    description || '',
+                    Number(durationMinutes) || 60,
+                    Number(depositCents) || 4500,
+                    Number(totalCents) || Number(depositCents) || 4500,
+                    active !== false,
+                    String(category || '').trim()
+                ]
             );
             res.status(201).json(rows[0]);
         } catch (err: any) {
@@ -606,7 +622,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
 
     router.patch('/event-types/:id', async (req: Request, res: Response) => {
         try {
-            const { name, description, durationMinutes, depositCents, totalCents, active } = req.body || {};
+            const { name, description, durationMinutes, depositCents, totalCents, active, category } =
+                req.body || {};
             const { rows } = await query(
                 `UPDATE event_types SET
                   name = COALESCE($1, name),
@@ -614,9 +631,20 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                   duration_minutes = COALESCE($3, duration_minutes),
                   deposit_cents = COALESCE($4, deposit_cents),
                   total_cents = COALESCE($5, total_cents),
-                  active = COALESCE($6, active)
-                 WHERE id = $7 AND org_id = $8 RETURNING *`,
-                [name, description, durationMinutes, depositCents, totalCents, active, req.params.id, (req as any).orgId]
+                  active = COALESCE($6, active),
+                  category = CASE WHEN $7::text IS NULL THEN category ELSE $7 END
+                 WHERE id = $8 AND org_id = $9 RETURNING *`,
+                [
+                    name,
+                    description,
+                    durationMinutes,
+                    depositCents,
+                    totalCents,
+                    active,
+                    category === undefined ? null : String(category || '').trim(),
+                    req.params.id,
+                    (req as any).orgId
+                ]
             );
             if (!rows.length) return res.status(404).json({ error: 'Event type not found' });
             res.json(rows[0]);

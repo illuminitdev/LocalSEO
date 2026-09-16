@@ -1,7 +1,6 @@
 
 
 
-
 import {
     getBookingPreset,
     slugifyServiceName,
@@ -15,7 +14,7 @@ export type TradeEventTypeTemplate = {
     durationMinutes: number;
     sortOrder: number;
     kind: 'standard' | 'emergency';
-    
+    category?: string;
     freeDeposit?: boolean;
 };
 
@@ -38,18 +37,45 @@ export function isFreeDepositService(name: string): boolean {
 }
 
 function catalogFromPreset(preset: BookingIndustryPreset): TradeBookingCatalogEntry {
-    const eventTypes: TradeEventTypeTemplate[] = preset.services.map((name, index) => {
-        const emergency = isEmergencyService(name);
+    
+    if (preset.id === 'salons') {
         return {
-            slugBase: slugifyServiceName(name),
-            name,
-            description: name,
-            durationMinutes: emergency ? 90 : 60,
-            sortOrder: index,
-            kind: emergency ? 'emergency' : 'standard',
-            freeDeposit: isFreeDepositService(name)
+            tradeType: preset.name,
+            bookingIndustryId: preset.id,
+            standardDeposit: 45,
+            emergencyDeposit: 60,
+            acceptingEmergencies: false,
+            emergencyNote: '',
+            eventTypes: []
         };
-    });
+    }
+
+    const categorized = preset.categorizedServices;
+    const eventTypes: TradeEventTypeTemplate[] =
+        categorized && categorized.length > 0
+            ? categorized.map((s, index) => ({
+                  slugBase: slugifyServiceName(s.name),
+                  name: s.name,
+                  description: s.name,
+                  durationMinutes: s.durationMinutes ?? (isEmergencyService(s.name) ? 90 : 60),
+                  sortOrder: index,
+                  kind: isEmergencyService(s.name) ? 'emergency' : 'standard',
+                  category: String(s.category || '').trim(),
+                  freeDeposit: isFreeDepositService(s.name)
+              }))
+            : preset.services.map((name, index) => {
+                  const emergency = isEmergencyService(name);
+                  return {
+                      slugBase: slugifyServiceName(name),
+                      name,
+                      description: name,
+                      durationMinutes: emergency ? 90 : 60,
+                      sortOrder: index,
+                      kind: emergency ? ('emergency' as const) : ('standard' as const),
+                      category: '',
+                      freeDeposit: isFreeDepositService(name)
+                  };
+              });
 
     return {
         tradeType: preset.name,
@@ -76,7 +102,8 @@ const GENERIC: TradeBookingCatalogEntry = {
             description: 'Regular scheduled appointment',
             durationMinutes: 60,
             sortOrder: 0,
-            kind: 'standard'
+            kind: 'standard',
+            category: ''
         },
         {
             slugBase: 'emergency-callout',
@@ -84,13 +111,11 @@ const GENERIC: TradeBookingCatalogEntry = {
             description: 'Urgent same-day service',
             durationMinutes: 90,
             sortOrder: 1,
-            kind: 'emergency'
+            kind: 'emergency',
+            category: ''
         }
     ]
 };
-
-
-
 
 export function getTradeBookingCatalog(
     tradeType: string | null | undefined,
