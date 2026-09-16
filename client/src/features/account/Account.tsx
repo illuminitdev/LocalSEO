@@ -975,12 +975,14 @@ export default function Account() {
                                 <label className="block text-xs font-bold text-[#64748B]">
                                     Primary
                                     <div className="mt-1.5 flex items-center gap-2">
-                                        <input
-                                            type="color"
-                                            value={normalizeBrandHex(brandPrimary, DEFAULT_BRAND_PRIMARY)}
-                                            onChange={(e) => setBrandPrimary(e.target.value.toUpperCase())}
-                                            className="h-9 w-9 shrink-0 rounded-lg border border-[#E2E8F0] bg-white cursor-pointer"
-                                        />
+                                        <span className="inline-flex h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[#E2E8F0] bg-white shadow-sm transition hover:shadow-md hover:ring-2 hover:ring-[color-mix(in_srgb,var(--brand-primary)_35%,transparent)] hover:ring-offset-2">
+                                            <input
+                                                type="color"
+                                                value={normalizeBrandHex(brandPrimary, DEFAULT_BRAND_PRIMARY)}
+                                                onChange={(e) => setBrandPrimary(e.target.value.toUpperCase())}
+                                                className="brand-color-swatch h-full w-full cursor-pointer border-0 bg-transparent p-0"
+                                            />
+                                        </span>
                                         <input
                                             type="text"
                                             value={brandPrimary}
@@ -994,12 +996,14 @@ export default function Account() {
                                 <label className="block text-xs font-bold text-[#64748B]">
                                     Secondary
                                     <div className="mt-1.5 flex items-center gap-2">
-                                        <input
-                                            type="color"
-                                            value={normalizeBrandHex(brandSecondary, DEFAULT_BRAND_SECONDARY)}
-                                            onChange={(e) => setBrandSecondary(e.target.value.toUpperCase())}
-                                            className="h-9 w-9 shrink-0 rounded-lg border border-[#E2E8F0] bg-white cursor-pointer"
-                                        />
+                                        <span className="inline-flex h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[#E2E8F0] bg-white shadow-sm transition hover:shadow-md hover:ring-2 hover:ring-[color-mix(in_srgb,var(--brand-primary)_35%,transparent)] hover:ring-offset-2">
+                                            <input
+                                                type="color"
+                                                value={normalizeBrandHex(brandSecondary, DEFAULT_BRAND_SECONDARY)}
+                                                onChange={(e) => setBrandSecondary(e.target.value.toUpperCase())}
+                                                className="brand-color-swatch h-full w-full cursor-pointer border-0 bg-transparent p-0"
+                                            />
+                                        </span>
                                         <input
                                             type="text"
                                             value={brandSecondary}
