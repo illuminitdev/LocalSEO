@@ -580,19 +580,19 @@ export default function SalonBookingFlow({
 
                     {step === 'when' && service && (
                         <div className="-mx-5 -mb-5 -mt-1">
-                            <div className="px-5 pb-3">
-                                <h2 className="font-black text-lg text-[#0F172A]">Pick a date & time</h2>
-                                <p className="text-sm text-[#64748B] mt-1">
+                            <div className="px-4 pb-2">
+                                <h2 className="font-black text-base text-[#0F172A]">Pick a date & time</h2>
+                                <p className="text-xs text-[#64748B] mt-0.5">
                                     {service.name}
                                     {stylist ? ` · ${stylist}` : ''}
                                 </p>
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-[#E2E8F0] border-t border-[#E2E8F0]">
-                                <div className="p-5">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
-                                            <Calendar className="w-4 h-4" style={{ color: 'var(--brand-primary)' }} />
+                                <div className="p-3 sm:p-4">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h3 className="font-bold text-[#0F172A] flex items-center gap-1.5 text-xs">
+                                            <Calendar className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary)' }} />
                                             Pick a date
                                         </h3>
                                         <div className="flex gap-1">
@@ -604,9 +604,9 @@ export default function SalonBookingFlow({
                                                         return { year: d.getFullYear(), month: d.getMonth() };
                                                     })
                                                 }
-                                                className="p-1.5 rounded-lg border border-[#E2E8F0]"
+                                                className="p-1 rounded-md border border-[#E2E8F0]"
                                             >
-                                                <ChevronLeft className="w-4 h-4" />
+                                                <ChevronLeft className="w-3.5 h-3.5" />
                                             </button>
                                             <button
                                                 type="button"
@@ -616,27 +616,27 @@ export default function SalonBookingFlow({
                                                         return { year: d.getFullYear(), month: d.getMonth() };
                                                     })
                                                 }
-                                                className="p-1.5 rounded-lg border border-[#E2E8F0]"
+                                                className="p-1 rounded-md border border-[#E2E8F0]"
                                             >
-                                                <ChevronRight className="w-4 h-4" />
+                                                <ChevronRight className="w-3.5 h-3.5" />
                                             </button>
                                         </div>
                                     </div>
-                                    <p className="text-sm font-bold text-[#64748B] mb-3">
+                                    <p className="text-xs font-bold text-[#64748B] mb-1.5">
                                         {new Date(month.year, month.month, 1).toLocaleString('en-GB', {
                                             month: 'long',
                                             year: 'numeric'
                                         })}
                                     </p>
-                                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-[#64748B] mb-1">
+                                    <div className="grid grid-cols-7 gap-0.5 text-center text-[9px] font-bold text-[#64748B] mb-0.5">
                                         {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
                                             <div key={d}>{d}</div>
                                         ))}
                                     </div>
-                                    <div className="grid grid-cols-7 gap-1">
+                                    <div className="grid grid-cols-7 gap-0.5">
                                         {days.map((d, i) => {
                                             if (!d.inMonth || !d.date) {
-                                                return <div key={`pad-${i}`} />;
+                                                return <div key={`pad-${i}`} className="h-7" />;
                                             }
                                             const selectable =
                                                 isDateSelectable(d.date, maxDaysAhead) && d.date >= todayStr();
@@ -652,7 +652,7 @@ export default function SalonBookingFlow({
                                                         setError('');
                                                     }}
                                                     className={cn(
-                                                        'aspect-square rounded-lg text-sm font-bold transition',
+                                                        'h-7 rounded-md text-[11px] font-bold transition',
                                                         selectable
                                                             ? 'hover:bg-[var(--brand-primary)] hover:text-[var(--brand-secondary)] border border-[#E2E8F0] bg-[#F8FAFC]'
                                                             : 'text-[#CBD5E1] cursor-not-allowed',
@@ -668,9 +668,9 @@ export default function SalonBookingFlow({
                                     </div>
                                 </div>
 
-                                <div className="p-5">
-                                    <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm mb-4">
-                                        <Clock className="w-4 h-4" style={{ color: 'var(--brand-primary)' }} />
+                                <div className="p-3 sm:p-4">
+                                    <h3 className="font-bold text-[#0F172A] flex items-center gap-1.5 text-xs mb-2">
+                                        <Clock className="w-3.5 h-3.5" style={{ color: 'var(--brand-primary)' }} />
                                         {selectedDate
                                             ? new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-GB', {
                                                   weekday: 'long',
@@ -680,15 +680,15 @@ export default function SalonBookingFlow({
                                             : 'Select a date first'}
                                     </h3>
                                     {!selectedDate && (
-                                        <p className="text-sm text-[#64748B] py-8 text-center">
+                                        <p className="text-xs text-[#64748B] py-4 text-center">
                                             Choose any date on the calendar.
                                         </p>
                                     )}
                                     {selectedDate && loadingSlots && (
-                                        <p className="text-sm text-[#64748B] py-8 text-center">Loading times…</p>
+                                        <p className="text-xs text-[#64748B] py-4 text-center">Loading times…</p>
                                     )}
                                     {selectedDate && !loadingSlots && !hasAvailabilityRules && (
-                                        <p className="text-sm text-[#64748B] py-8 text-center">
+                                        <p className="text-xs text-[#64748B] py-4 text-center">
                                             No booking times set yet — the business hasn&apos;t configured their
                                             availability.
                                         </p>
@@ -697,11 +697,11 @@ export default function SalonBookingFlow({
                                         !loadingSlots &&
                                         hasAvailabilityRules &&
                                         daySlots.length === 0 && (
-                                            <p className="text-sm text-[#64748B] py-8 text-center">
+                                            <p className="text-xs text-[#64748B] py-4 text-center">
                                                 No times available on this day — try another date.
                                             </p>
                                         )}
-                                    <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                                    <div className="grid grid-cols-2 gap-1.5">
                                         {daySlots.map((slot) => (
                                             <button
                                                 key={slot.startAt}
@@ -711,7 +711,7 @@ export default function SalonBookingFlow({
                                                     setError('');
                                                 }}
                                                 className={cn(
-                                                    'py-2.5 rounded-xl border text-sm font-bold transition',
+                                                    'py-1.5 px-1 rounded-lg border text-[11px] font-bold transition',
                                                     selectedSlot?.startAt === slot.startAt
                                                         ? 'bg-[var(--brand-primary)] text-[var(--brand-secondary)] border-[var(--brand-primary)]'
                                                         : 'border-[#E2E8F0] hover:border-[color-mix(in_srgb,var(--brand-primary)_40%,transparent)]'
@@ -728,7 +728,7 @@ export default function SalonBookingFlow({
                                 </div>
                             </div>
 
-                            <div className="border-t border-[#E2E8F0] p-5 bg-[#FAFBFC]">
+                            <div className="border-t border-[#E2E8F0] p-3 sm:p-4 bg-[#FAFBFC]">
                                 <button
                                     type="button"
                                     disabled={!selectedSlot}
@@ -740,7 +740,7 @@ export default function SalonBookingFlow({
                                         setError('');
                                         setStep('details');
                                     }}
-                                    className="w-full py-3.5 rounded-xl font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2 text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
+                                    className="w-full py-2.5 rounded-xl font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2 text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
                                 >
                                     Continue <ArrowRight className="w-4 h-4" />
                                 </button>
