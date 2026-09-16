@@ -723,7 +723,8 @@ export function getBookingPreset(industryId: string | null | undefined): Booking
         idLower.includes('dentist') ||
         idLower.includes('dental') ||
         idLower.includes('teeth') ||
-        idLower.includes('orthodont')
+        idLower.includes('orthodont') ||
+        (idLower.includes('carmen') && idLower.includes('aesthetic'))
     ) {
         return bookingIndustryPresets[12];
     }
@@ -731,7 +732,7 @@ export function getBookingPreset(industryId: string | null | undefined): Booking
         idLower.includes('salon') ||
         idLower.includes('beauty') ||
         idLower.includes('hair') ||
-        idLower.includes('aesthetic')
+        (idLower.includes('aesthetic') && !idLower.includes('dental'))
     ) {
         return bookingIndustryPresets[7];
     }

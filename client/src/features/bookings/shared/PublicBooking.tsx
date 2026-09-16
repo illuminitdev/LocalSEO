@@ -2,16 +2,20 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
     ArrowLeft,
+    ArrowRight,
     Calendar,
+    ChevronDown,
     ChevronLeft,
     ChevronRight,
     Clock,
     Download,
     Flame,
+    ListOrdered,
     Mail,
     MapPin,
     Phone,
     ShieldCheck,
+    Sparkles,
     User
 } from 'lucide-react';
 import { API_BASE, apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../../shared/utils';
@@ -92,7 +96,10 @@ function BrandHeader({
     const brand = resolveOrgBrand(host);
     return (
         <div
-            className={cn('text-white rounded-2xl px-5', compact ? 'py-4' : 'py-5')}
+            className={cn(
+                'text-white px-5 shadow-[0_16px_40px_-28px_rgba(15,23,42,0.55)]',
+                compact ? 'py-4 rounded-2xl' : 'py-5 rounded-[1.75rem]'
+            )}
             style={{ background: 'var(--brand-secondary)' }}
         >
             <div className="flex items-start gap-3">
@@ -113,7 +120,9 @@ function BrandHeader({
                     >
                         {title || host.tradeType || 'Book online'}
                     </p>
-                    <h1 className={cn('font-black mt-1', compact ? 'text-xl' : 'text-2xl')}>{host.name}</h1>
+                    <h1 className={cn('font-black mt-1 tracking-tight', compact ? 'text-xl' : 'text-2xl')}>
+                        {host.name}
+                    </h1>
                     {subtitle}
                 </div>
                 {children}
@@ -150,6 +159,11 @@ export function CustomerBookingFlow({
             (f) => f.id !== 'enquiryType'
         )
     };
+    const industryId =
+        normalizeBookingIndustryId(industryProp?.id) ||
+        normalizeBookingIndustryId(industry.id) ||
+        getBookingPreset(host.tradeType || '').id;
+    const isDentistsFlow = industryId === 'dentists';
     const [activeEventSlug, setActiveEventSlug] = useState(initialEventSlug || '');
     const [eventType, setEventType] = useState<EventType | null>(initialEventType || null);
     const [selectedCatalog, setSelectedCatalog] = useState<MenuItemPublic | null>(null);
@@ -181,6 +195,12 @@ export function CustomerBookingFlow({
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
     const [detailsTouched, setDetailsTouched] = useState(false);
     const [done, setDone] = useState(false);
+    const [priceListCategory, setPriceListCategory] = useState('All');
+    const [expandedPriceCategories, setExpandedPriceCategories] = useState<Set<string>>(new Set());
+    const [priceCategoriesInitialized, setPriceCategoriesInitialized] = useState(false);
+    const [dentalBrowsePath, setDentalBrowsePath] = useState<'choose' | 'appointments' | 'priceList'>(
+        'choose'
+    );
 
     const slotEventSlug =
         eventTypes.find((e) => /free\s*consultation/i.test(e.name))?.slug ||
@@ -193,16 +213,63 @@ export function CustomerBookingFlow({
         return cat ? `${cat}: ${m.name} (£${pounds})` : `${m.name} (£${pounds})`;
     };
 
+    const cleanEventName = (name: string) =>
+        String(name || '')
+            .replace(/\s*\((?:from\s*)?£[\d.,]+\)\s*$/i, '')
+            .trim() || String(name || '');
+
+    const eventPriceDisplay = (et: EventType) => {
+        const total = Number(et.totalCents);
+        if (Number.isFinite(total) && total > 0) {
+            return { cents: total, label: 'Price' as const };
+        }
+        const deposit = Number(et.depositCents) || 0;
+        return {
+            cents: deposit,
+            label: (deposit > 0 ? 'Deposit' : 'Price') as const
+        };
+    };
+
     const showServicePicker = !activeEventSlug && !initialEventSlug;
     const isEmergency = activeEventSlug.includes('emergency');
     const days = useMemo(() => monthDays(month.year, month.month), [month]);
 
+    const priceListByCategory = useMemo(() => {
+        const map = new Map<string, MenuItemPublic[]>();
+        for (const item of menuItems) {
+            const cat = String(item.category || '').trim() || 'Treatments';
+            if (!map.has(cat)) map.set(cat, []);
+            map.get(cat)!.push(item);
+        }
+        return [...map.entries()];
+    }, [menuItems]);
+
+    const priceListCategories = useMemo(
+        () => priceListByCategory.map(([cat]) => cat),
+        [priceListByCategory]
+    );
+
+    const visiblePriceListGroups = useMemo(() => {
+        if (priceListCategory === 'All') return priceListByCategory;
+        return priceListByCategory.filter(([cat]) => cat === priceListCategory);
+    }, [priceListByCategory, priceListCategory]);
+
+    useEffect(() => {
+        if (!isDentistsFlow || priceCategoriesInitialized || priceListCategories.length === 0) return;
+        setExpandedPriceCategories(new Set(priceListCategories));
+        setPriceCategoriesInitialized(true);
+    }, [isDentistsFlow, priceCategoriesInitialized, priceListCategories]);
+
     const serviceLabel = selectedCatalog
         ? catalogLabel(selectedCatalog)
-        : eventType?.name || 'Appointment';
+        : eventType
+          ? cleanEventName(eventType.name)
+          : 'Appointment';
     const chargeCents = selectedCatalog
         ? Number(selectedCatalog.priceCents) || 0
-        : Number(eventType?.depositCents) || 0;
+        : eventType
+          ? eventPriceDisplay(eventType).cents
+          : 0;
 
     const bookingIntakeAnswers = useMemo(() => {
         const base = { ...intakeAnswers };
@@ -296,6 +363,11 @@ export function CustomerBookingFlow({
         setStep('schedule');
         setSelectedDate('');
         setSelectedSlot(null);
+    };
+
+    const backToDentalChoose = () => {
+        setDentalBrowsePath('choose');
+        setError('');
     };
 
     const validateDetails = (): Record<string, string> => {
@@ -441,11 +513,45 @@ export function CustomerBookingFlow({
 
     const stepIndicator = (current: BookingStep) => {
         const steps: { key: BookingStep; label: string }[] = [
-            { key: 'schedule', label: 'Date & time' },
-            { key: 'details', label: 'Your details' },
-            { key: 'payment', label: 'Payment' }
+            { key: 'schedule', label: isDentistsFlow ? 'When' : 'Date & time' },
+            { key: 'details', label: isDentistsFlow ? 'About you' : 'Your details' },
+            { key: 'payment', label: isDentistsFlow ? 'Confirm' : 'Payment' }
         ];
         const idx = steps.findIndex((s) => s.key === current);
+        if (isDentistsFlow) {
+            return (
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                    {steps.map((s, i) => {
+                        const active = i === idx;
+                        const doneStep = i < idx;
+                        return (
+                            <div key={s.key} className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                                {i > 0 && <span className="text-[#CBD5E1] text-xs">›</span>}
+                                <span
+                                    className={cn(
+                                        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide',
+                                        active && 'text-white',
+                                        doneStep && !active && 'bg-[#F1F5F9] text-[#0F172A]',
+                                        !active && !doneStep && 'text-[#94A3B8]'
+                                    )}
+                                    style={active ? { background: 'var(--brand-secondary)' } : undefined}
+                                >
+                                    <span
+                                        className={cn(
+                                            'w-4 h-4 rounded-full text-[9px] flex items-center justify-center',
+                                            active ? 'bg-white/20' : 'bg-[#E2E8F0] text-[#64748B]'
+                                        )}
+                                    >
+                                        {i + 1}
+                                    </span>
+                                    {s.label}
+                                </span>
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        }
         return (
             <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#64748B]">
                 {steps.map((s, i) => (
@@ -462,120 +568,551 @@ export function CustomerBookingFlow({
 
     if (done) {
         return (
-            <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center text-center py-12 px-4">
-                <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mb-4">
-                    <ShieldCheck className="w-8 h-8 text-emerald-600" />
+            <div
+                className="min-h-screen flex flex-col items-center justify-center text-center py-12 px-4"
+                style={{
+                    ...orgBrandStyle(host),
+                    background: isDentistsFlow
+                        ? 'linear-gradient(180deg, color-mix(in srgb, var(--brand-primary) 12%, #F8FAFC) 0%, #F8FAFC 50%, #F1F5F9 100%)'
+                        : '#F8FAFC'
+                }}
+            >
+                <div
+                    className={cn(
+                        'w-full max-w-md mx-auto',
+                        isDentistsFlow &&
+                            'rounded-[1.75rem] border border-white/70 bg-white/95 shadow-[0_20px_50px_-28px_rgba(15,23,42,0.45)] p-8'
+                    )}
+                >
+                    <div
+                        className={cn(
+                            'w-16 h-16 rounded-full flex items-center justify-center mb-4 mx-auto',
+                            !isDentistsFlow && 'bg-emerald-100'
+                        )}
+                        style={
+                            isDentistsFlow
+                                ? {
+                                      background:
+                                          'color-mix(in srgb, var(--brand-primary) 22%, white)'
+                                  }
+                                : undefined
+                        }
+                    >
+                        <ShieldCheck
+                            className={cn('w-8 h-8', !isDentistsFlow && 'text-emerald-600')}
+                            style={isDentistsFlow ? { color: 'var(--brand-secondary)' } : undefined}
+                        />
+                    </div>
+                    <h2 className="text-xl font-black text-[#0F172A]">
+                        {intakeMode === 'request'
+                            ? isDentistsFlow
+                                ? 'Request sent'
+                                : 'Request submitted'
+                            : isDentistsFlow
+                              ? "You're booked"
+                              : 'Booking confirmed'}
+                    </h2>
+                    <p className="text-sm text-[#64748B] mt-2 max-w-sm mx-auto">
+                        {intakeMode === 'request'
+                            ? isDentistsFlow
+                                ? `The clinic will check your preferred time and get back to you.${email ? ` We’ll use ${email}.` : ''}`
+                                : `The business will review your preferred time and get back to you.${email ? ` We noted ${email}.` : ''}`
+                            : isDentistsFlow
+                              ? `${chargeCents > 0 ? `Deposit of ${formatCents(chargeCents)} recorded.` : 'Your visit is confirmed.'}${email ? ` Details sent to ${email}.` : ''}`
+                              : `Payment of ${formatCents(chargeCents)} recorded.${email ? ` Confirmation sent to ${email}.` : ''}`}
+                    </p>
                 </div>
-                <h2 className="text-xl font-black text-[#0F172A]">
-                    {intakeMode === 'request' ? 'Request submitted' : 'Booking confirmed'}
-                </h2>
-                <p className="text-sm text-[#64748B] mt-2 max-w-sm">
-                    {intakeMode === 'request'
-                        ? `The business will review your preferred time and get back to you.${email ? ` We noted ${email}.` : ''}`
-                        : `Payment of ${formatCents(chargeCents)} recorded.${email ? ` Confirmation sent to ${email}.` : ''}`}
-                </p>
             </div>
         );
     }
 
     if (showServicePicker) {
+        const sortedEvents = [...eventTypes].sort((a, b) => {
+            const aFree = /free\s*consultation/i.test(a.name) ? 0 : 1;
+            const bFree = /free\s*consultation/i.test(b.name) ? 0 : 1;
+            return aFree - bFree;
+        });
+
         return (
-            <div className="min-h-screen bg-[#F8FAFC] py-8 px-4" style={orgBrandStyle(host)}>
-                <div className="max-w-2xl mx-auto space-y-6">
+            <div
+                className="min-h-screen py-6 sm:py-10 px-4"
+                style={{
+                    ...orgBrandStyle(host),
+                    background:
+                        'linear-gradient(180deg, color-mix(in srgb, var(--brand-primary) 10%, #F8FAFC) 0%, #F8FAFC 42%, #F1F5F9 100%)'
+                }}
+            >
+                <div className="max-w-2xl mx-auto space-y-5">
                     <BrandHeader
                         host={host}
                         subtitle={
                             host.serviceArea ? (
-                                <p className="text-xs text-white/50 mt-2 flex items-center gap-1.5">
+                                <p className="text-xs text-white/60 mt-2 flex items-center gap-1.5">
                                     <MapPin className="w-3.5 h-3.5 shrink-0" /> {host.serviceArea}
                                 </p>
                             ) : null
                         }
                     />
-                    <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4 shadow-sm">
-                        <h2 className="font-bold text-lg text-[#0F172A]">What do you need?</h2>
-                        <p className="text-sm text-[#64748B]">
-                            Choose a service or treatment — then pick a date and time.
-                        </p>
-                        {error && <p className="text-sm text-red-600">{error}</p>}
-                        <div className="space-y-3">
-                            {eventTypes.map((et) => {
-                                const emergency = et.slug.includes('emergency');
-                                return (
+
+                    {isDentistsFlow ? (
+                        <div className="space-y-4">
+                            {dentalBrowsePath !== 'choose' && (
+                                <div className="flex items-center gap-2 text-xs font-bold text-[#64748B]">
                                     <button
-                                        key={`et-${et.slug}`}
                                         type="button"
-                                        onClick={() => pickService(et)}
-                                        className={cn(
-                                            'w-full text-left rounded-xl border p-4 transition',
-                                            emergency
-                                                ? 'border-red-200 hover:border-red-400 hover:bg-red-50/50'
-                                                : 'border-[#E2E8F0] hover:border-[var(--brand-primary)] hover:bg-[color-mix(in_srgb,var(--brand-primary)_5%,white)]'
+                                        onClick={backToDentalChoose}
+                                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/90 border border-[#E2E8F0] hover:border-[var(--brand-primary)] transition"
+                                    >
+                                        <ArrowLeft className="w-3.5 h-3.5" /> Start over
+                                    </button>
+                                    <span className="text-[#CBD5E1]">/</span>
+                                    <span style={{ color: 'var(--brand-secondary)' }}>
+                                        {dentalBrowsePath === 'appointments'
+                                            ? 'Book a time'
+                                            : 'Treatments'}
+                                    </span>
+                                </div>
+                            )}
+
+                            {error && (
+                                <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-2xl px-4 py-3">
+                                    {error}
+                                </p>
+                            )}
+
+                            {dentalBrowsePath === 'choose' && (
+                                <div className="rounded-[1.75rem] border border-white/70 bg-white/95 shadow-[0_20px_50px_-28px_rgba(15,23,42,0.45)] p-5 sm:p-7 space-y-6">
+                                    <div className="space-y-2">
+                                        <p
+                                            className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em]"
+                                            style={{ color: 'var(--brand-primary)' }}
+                                        >
+                                            <Sparkles className="w-3.5 h-3.5" /> Book online
+                                        </p>
+                                        <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-[#0F172A]">
+                                            How would you like to book?
+                                        </h2>
+                                        <p className="text-sm text-[#64748B] max-w-md">
+                                            Pick a visit time, or explore treatments first — whichever feels
+                                            easier.
+                                        </p>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setDentalBrowsePath('appointments')}
+                                            className="group text-left rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] p-5 sm:p-6 hover:border-[var(--brand-primary)] hover:bg-white hover:shadow-md transition"
+                                        >
+                                            <div className="flex items-start gap-4">
+                                                <div
+                                                    className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0"
+                                                    style={{
+                                                        background: 'var(--brand-secondary)',
+                                                        color: 'var(--brand-primary)'
+                                                    }}
+                                                >
+                                                    <Calendar className="w-5 h-5" />
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="font-black text-lg text-[#0F172A]">
+                                                        Book a time
+                                                    </p>
+                                                    <p className="text-sm text-[#64748B] mt-1">
+                                                        Free consultation, check-ups, and visit slots
+                                                        {eventTypes.length
+                                                            ? ` · ${eventTypes.length} options`
+                                                            : ''}
+                                                    </p>
+                                                </div>
+                                                <ArrowRight className="w-5 h-5 text-[#94A3B8] group-hover:text-[var(--brand-primary)] shrink-0 mt-1 transition" />
+                                            </div>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => setDentalBrowsePath('priceList')}
+                                            className="group text-left rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] p-5 sm:p-6 hover:border-[var(--brand-primary)] hover:bg-white hover:shadow-md transition"
+                                        >
+                                            <div className="flex items-start gap-4">
+                                                <div
+                                                    className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0"
+                                                    style={{
+                                                        background:
+                                                            'color-mix(in srgb, var(--brand-primary) 18%, white)',
+                                                        color: 'var(--brand-secondary)'
+                                                    }}
+                                                >
+                                                    <ListOrdered className="w-5 h-5" />
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="font-black text-lg text-[#0F172A]">
+                                                        Explore treatments
+                                                    </p>
+                                                    <p className="text-sm text-[#64748B] mt-1">
+                                                        Facial, dental, injectables and more with prices
+                                                        {menuItems.length
+                                                            ? ` · ${menuItems.length} treatments`
+                                                            : ''}
+                                                    </p>
+                                                </div>
+                                                <ArrowRight className="w-5 h-5 text-[#94A3B8] group-hover:text-[var(--brand-primary)] shrink-0 mt-1 transition" />
+                                            </div>
+                                        </button>
+                                    </div>
+
+                                    {(host.phone || host.email) && (
+                                        <p className="text-xs text-[#94A3B8] text-center pt-1">
+                                            Prefer to talk?{' '}
+                                            {host.phone ? (
+                                                <a
+                                                    href={`tel:${host.phone.replace(/\s/g, '')}`}
+                                                    className="font-bold underline"
+                                                    style={{ color: 'var(--brand-secondary)' }}
+                                                >
+                                                    Call {host.phone}
+                                                </a>
+                                            ) : (
+                                                <a
+                                                    href={`mailto:${host.email}`}
+                                                    className="font-bold underline"
+                                                    style={{ color: 'var(--brand-secondary)' }}
+                                                >
+                                                    Email us
+                                                </a>
+                                            )}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            {dentalBrowsePath === 'appointments' && (
+                                <div className="rounded-[1.75rem] border border-white/70 bg-white/95 shadow-[0_20px_50px_-28px_rgba(15,23,42,0.45)] overflow-hidden">
+                                    <div className="px-5 sm:px-6 pt-5 sm:pt-6 pb-4 border-b border-[#F1F5F9]">
+                                        <h2 className="text-xl font-black text-[#0F172A]">Book a time</h2>
+                                        <p className="text-sm text-[#64748B] mt-1">
+                                            Tap a visit — next you’ll choose date and time.
+                                        </p>
+                                    </div>
+                                    <div className="p-3 sm:p-4 space-y-2">
+                                        {sortedEvents.length === 0 && (
+                                            <p className="text-sm text-[#94A3B8] text-center py-10">
+                                                No visit times published yet.
+                                            </p>
                                         )}
+                                        {sortedEvents.map((et) => {
+                                            const price = eventPriceDisplay(et);
+                                            const isFree = /free\s*consultation/i.test(et.name);
+                                            return (
+                                                <button
+                                                    key={`slot-${et.slug}`}
+                                                    type="button"
+                                                    onClick={() => pickService(et)}
+                                                    className={cn(
+                                                        'w-full text-left rounded-2xl border p-4 transition group',
+                                                        isFree
+                                                            ? 'border-[color-mix(in_srgb,var(--brand-primary)_45%,#E2E8F0)] bg-[color-mix(in_srgb,var(--brand-primary)_8%,white)]'
+                                                            : 'border-[#E2E8F0] bg-white hover:border-[var(--brand-primary)] hover:bg-[#FCFDFE]'
+                                                    )}
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <p className="font-bold text-[#0F172A]">
+                                                                    {cleanEventName(et.name)}
+                                                                </p>
+                                                                {isFree && (
+                                                                    <span
+                                                                        className="text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full text-white"
+                                                                        style={{
+                                                                            background:
+                                                                                'var(--brand-primary)'
+                                                                        }}
+                                                                    >
+                                                                        Popular
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {et.description &&
+                                                                et.description !== et.name && (
+                                                                    <p className="text-sm text-[#64748B] mt-1 line-clamp-2">
+                                                                        {et.description}
+                                                                    </p>
+                                                                )}
+                                                            <p className="text-xs text-[#64748B] mt-2 inline-flex items-center gap-1">
+                                                                <Clock className="w-3.5 h-3.5" />{' '}
+                                                                {et.durationMinutes} min
+                                                            </p>
+                                                        </div>
+                                                        <div className="text-right shrink-0">
+                                                            <p
+                                                                className="text-lg font-black"
+                                                                style={{ color: 'var(--brand-primary)' }}
+                                                            >
+                                                                {formatCents(price.cents)}
+                                                            </p>
+                                                            <p className="text-[10px] font-bold uppercase text-[#94A3B8] mt-0.5">
+                                                                {price.label}
+                                                            </p>
+                                                        </div>
+                                                        <ArrowRight className="w-4 h-4 text-[#CBD5E1] group-hover:text-[var(--brand-primary)] shrink-0" />
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {dentalBrowsePath === 'priceList' && (
+                                <div className="rounded-[1.75rem] border border-white/70 bg-white/95 shadow-[0_20px_50px_-28px_rgba(15,23,42,0.45)] overflow-hidden">
+                                    <div className="px-5 sm:px-6 pt-5 sm:pt-6 pb-4 border-b border-[#F1F5F9] space-y-4">
+                                        <div>
+                                            <h2 className="text-xl font-black text-[#0F172A]">
+                                                Explore treatments
+                                            </h2>
+                                            <p className="text-sm text-[#64748B] mt-1">
+                                                Browse by type, then select what you want.
+                                            </p>
+                                        </div>
+                                        {priceListCategories.length > 1 && (
+                                            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                                                {['All', ...priceListCategories].map((cat) => {
+                                                    const active = priceListCategory === cat;
+                                                    return (
+                                                        <button
+                                                            key={cat}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setPriceListCategory(cat);
+                                                                if (cat !== 'All') {
+                                                                    setExpandedPriceCategories(
+                                                                        (prev) =>
+                                                                            new Set([...prev, cat])
+                                                                    );
+                                                                }
+                                                            }}
+                                                            className={cn(
+                                                                'shrink-0 px-3.5 py-2 rounded-full text-xs font-bold border transition',
+                                                                active
+                                                                    ? 'text-white border-transparent shadow-sm'
+                                                                    : 'bg-[#F8FAFC] border-[#E2E8F0] text-[#64748B]'
+                                                            )}
+                                                            style={
+                                                                active
+                                                                    ? {
+                                                                          background:
+                                                                              'var(--brand-secondary)'
+                                                                      }
+                                                                    : undefined
+                                                            }
+                                                        >
+                                                            {cat}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="p-3 sm:p-4 space-y-3">
+                                        {visiblePriceListGroups.map(([cat, items]) => {
+                                            const isOpen =
+                                                expandedPriceCategories.has(cat) ||
+                                                priceListCategory === cat ||
+                                                priceListCategories.length <= 2;
+                                            const minCents = Math.min(
+                                                ...items.map((i) => Number(i.priceCents) || 0)
+                                            );
+                                            return (
+                                                <div
+                                                    key={cat}
+                                                    className="rounded-2xl border border-[#E2E8F0] overflow-hidden bg-white"
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setExpandedPriceCategories((prev) => {
+                                                                const next = new Set(prev);
+                                                                if (next.has(cat)) next.delete(cat);
+                                                                else next.add(cat);
+                                                                return next;
+                                                            })
+                                                        }
+                                                        className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left bg-[#F8FAFC]"
+                                                    >
+                                                        <div>
+                                                            <p className="font-bold text-[#0F172A]">{cat}</p>
+                                                            <p className="text-xs text-[#64748B] mt-0.5">
+                                                                from {formatCents(minCents)} · {items.length}{' '}
+                                                                option{items.length === 1 ? '' : 's'}
+                                                            </p>
+                                                        </div>
+                                                        <ChevronDown
+                                                            className={cn(
+                                                                'w-4 h-4 text-[#94A3B8] transition',
+                                                                isOpen && 'rotate-180'
+                                                            )}
+                                                        />
+                                                    </button>
+                                                    {isOpen && (
+                                                        <div className="divide-y divide-[#F1F5F9]">
+                                                            {items.map((item) => (
+                                                                <button
+                                                                    key={item.id}
+                                                                    type="button"
+                                                                    onClick={() => pickCatalogItem(item)}
+                                                                    className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-[#FCFDFE] transition group"
+                                                                >
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className="font-bold text-[#0F172A]">
+                                                                            {item.name}
+                                                                        </p>
+                                                                        {item.description && (
+                                                                            <p className="text-sm text-[#64748B] mt-0.5 line-clamp-2">
+                                                                                {item.description}
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                    <p
+                                                                        className="font-black text-base shrink-0"
+                                                                        style={{
+                                                                            color: 'var(--brand-primary)'
+                                                                        }}
+                                                                    >
+                                                                        {formatCents(item.priceCents)}
+                                                                    </p>
+                                                                    <span
+                                                                        className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg text-white opacity-90 group-hover:opacity-100"
+                                                                        style={{
+                                                                            background:
+                                                                                'var(--brand-secondary)'
+                                                                        }}
+                                                                    >
+                                                                        Select
+                                                                    </span>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                        {menuItems.length === 0 && (
+                                            <p className="text-sm text-[#94A3B8] text-center py-10">
+                                                Treatments will appear here once the clinic publishes them.
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4 shadow-sm">
+                            <h2 className="font-bold text-lg text-[#0F172A]">What do you need?</h2>
+                            <p className="text-sm text-[#64748B]">
+                                Choose a service or treatment — then pick a date and time.
+                            </p>
+                            {error && <p className="text-sm text-red-600">{error}</p>}
+                            <div className="space-y-3">
+                                {eventTypes.map((et) => {
+                                    const emergency = et.slug.includes('emergency');
+                                    const price = eventPriceDisplay(et);
+                                    return (
+                                        <button
+                                            key={`et-${et.slug}`}
+                                            type="button"
+                                            onClick={() => pickService(et)}
+                                            className={cn(
+                                                'w-full text-left rounded-xl border p-4 transition',
+                                                emergency
+                                                    ? 'border-red-200 hover:border-red-400 hover:bg-red-50/50'
+                                                    : 'border-[#E2E8F0] hover:border-[var(--brand-primary)] hover:bg-[color-mix(in_srgb,var(--brand-primary)_5%,white)]'
+                                            )}
+                                        >
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div>
+                                                    <p className="font-bold text-[#0F172A] flex items-center gap-2">
+                                                        {emergency && (
+                                                            <Flame className="w-4 h-4 text-red-500" />
+                                                        )}
+                                                        {cleanEventName(et.name)}
+                                                    </p>
+                                                    {et.description && et.description !== et.name && (
+                                                        <p className="text-sm text-[#64748B] mt-1">
+                                                            {et.description}
+                                                        </p>
+                                                    )}
+                                                    <p className="text-xs text-[#64748B] mt-1 flex items-center gap-1">
+                                                        <Clock className="w-3 h-3" /> {et.durationMinutes}{' '}
+                                                        min
+                                                    </p>
+                                                </div>
+                                                <div className="text-right shrink-0">
+                                                    <p className="text-[10px] font-bold uppercase text-[#64748B]">
+                                                        {price.label}
+                                                    </p>
+                                                    <p
+                                                        className={cn(
+                                                            'text-xl font-black',
+                                                            emergency ? 'text-red-600' : ''
+                                                        )}
+                                                        style={
+                                                            emergency
+                                                                ? undefined
+                                                                : { color: 'var(--brand-primary)' }
+                                                        }
+                                                    >
+                                                        {formatCents(price.cents)}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                                {menuItems.map((item) => (
+                                    <button
+                                        key={`menu-${item.id}`}
+                                        type="button"
+                                        onClick={() => pickCatalogItem(item)}
+                                        className="w-full text-left rounded-xl border border-[#E2E8F0] p-4 transition hover:border-[var(--brand-primary)] hover:bg-[color-mix(in_srgb,var(--brand-primary)_5%,white)]"
                                     >
                                         <div className="flex items-center justify-between gap-3">
                                             <div>
-                                                <p className="font-bold text-[#0F172A] flex items-center gap-2">
-                                                    {emergency && <Flame className="w-4 h-4 text-red-500" />}
-                                                    {et.name}
-                                                </p>
-                                                {et.description && et.description !== et.name && (
-                                                    <p className="text-sm text-[#64748B] mt-1">{et.description}</p>
+                                                {item.category && (
+                                                    <p className="text-[10px] font-bold uppercase text-[#94A3B8]">
+                                                        {item.category}
+                                                    </p>
                                                 )}
-                                                <p className="text-xs text-[#64748B] mt-1 flex items-center gap-1">
-                                                    <Clock className="w-3 h-3" /> {et.durationMinutes} min
-                                                </p>
+                                                <p className="font-bold text-[#0F172A]">{item.name}</p>
+                                                {item.description && (
+                                                    <p className="text-sm text-[#64748B] mt-1">
+                                                        {item.description}
+                                                    </p>
+                                                )}
                                             </div>
                                             <div className="text-right shrink-0">
                                                 <p className="text-[10px] font-bold uppercase text-[#64748B]">
-                                                    {et.depositCents > 0 ? 'From' : 'Price'}
+                                                    Price
                                                 </p>
                                                 <p
-                                                    className={cn('text-xl font-black', emergency ? 'text-red-600' : '')}
-                                                    style={emergency ? undefined : { color: 'var(--brand-primary)' }}
+                                                    className="text-xl font-black"
+                                                    style={{ color: 'var(--brand-primary)' }}
                                                 >
-                                                    {formatCents(et.depositCents)}
+                                                    {formatCents(item.priceCents)}
                                                 </p>
                                             </div>
                                         </div>
                                     </button>
-                                );
-                            })}
-                            {menuItems.map((item) => (
-                                <button
-                                    key={`menu-${item.id}`}
-                                    type="button"
-                                    onClick={() => pickCatalogItem(item)}
-                                    className="w-full text-left rounded-xl border border-[#E2E8F0] p-4 transition hover:border-[var(--brand-primary)] hover:bg-[color-mix(in_srgb,var(--brand-primary)_5%,white)]"
-                                >
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div>
-                                            {item.category && (
-                                                <p className="text-[10px] font-bold uppercase text-[#94A3B8]">
-                                                    {item.category}
-                                                </p>
-                                            )}
-                                            <p className="font-bold text-[#0F172A]">{item.name}</p>
-                                            {item.description && (
-                                                <p className="text-sm text-[#64748B] mt-1">{item.description}</p>
-                                            )}
-                                        </div>
-                                        <div className="text-right shrink-0">
-                                            <p className="text-[10px] font-bold uppercase text-[#64748B]">Price</p>
-                                            <p className="text-xl font-black" style={{ color: 'var(--brand-primary)' }}>
-                                                {formatCents(item.priceCents)}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </button>
-                            ))}
-                            {eventTypes.length === 0 && menuItems.length === 0 && (
-                                <p className="text-sm text-[#94A3B8] text-center py-6">
-                                    No services available yet.
-                                </p>
-                            )}
+                                ))}
+                                {eventTypes.length === 0 && menuItems.length === 0 && (
+                                    <p className="text-sm text-[#94A3B8] text-center py-6">
+                                        No services available yet.
+                                    </p>
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
             </div>
         );
@@ -586,7 +1123,15 @@ export function CustomerBookingFlow({
     }
 
     return (
-        <div className="min-h-screen bg-[#F8FAFC] py-6 px-4" style={orgBrandStyle(host)}>
+        <div
+            className="min-h-screen py-6 px-4"
+            style={{
+                ...orgBrandStyle(host),
+                background: isDentistsFlow
+                    ? 'linear-gradient(180deg, color-mix(in srgb, var(--brand-primary) 10%, #F8FAFC) 0%, #F8FAFC 40%, #F1F5F9 100%)'
+                    : '#F8FAFC'
+            }}
+        >
             <div className="max-w-4xl mx-auto space-y-4">
                 <BrandHeader
                     host={host}
@@ -625,16 +1170,43 @@ export function CustomerBookingFlow({
                     <button
                         type="button"
                         onClick={backToServicePicker}
-                        className="text-xs font-bold underline"
-                        style={{ color: 'var(--brand-primary)' }}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-full bg-white border border-[#E2E8F0] hover:border-[var(--brand-primary)] transition"
+                        style={{ color: 'var(--brand-secondary)' }}
                     >
-                        ← Change service
+                        <ArrowLeft className="w-3.5 h-3.5" />
+                        {isDentistsFlow ? 'Change booking option' : 'Change service'}
                     </button>
                 )}
 
-                <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm overflow-hidden">
-                    <div className="px-5 pt-5 pb-3 border-b border-[#E2E8F0] bg-[#FAFBFC]">
+                <div
+                    className={cn(
+                        'bg-white overflow-hidden',
+                        isDentistsFlow
+                            ? 'rounded-[1.75rem] border border-white/70 shadow-[0_20px_50px_-28px_rgba(15,23,42,0.45)]'
+                            : 'rounded-2xl border border-[#E2E8F0] shadow-sm'
+                    )}
+                >
+                    <div
+                        className={cn(
+                            'px-5 pt-5 pb-3 border-b',
+                            isDentistsFlow ? 'border-[#F1F5F9] bg-white' : 'border-[#E2E8F0] bg-[#FAFBFC]'
+                        )}
+                    >
                         {stepIndicator(step)}
+                        {isDentistsFlow && (
+                            <p className="mt-3 text-sm font-bold text-[#0F172A] flex items-center gap-2">
+                                <span
+                                    className="inline-flex items-center justify-center w-7 h-7 rounded-lg shrink-0"
+                                    style={{
+                                        background: 'color-mix(in srgb, var(--brand-primary) 18%, white)',
+                                        color: 'var(--brand-secondary)'
+                                    }}
+                                >
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                </span>
+                                <span className="min-w-0 truncate">{serviceLabel}</span>
+                            </p>
+                        )}
                     </div>
 
                     {}
@@ -648,9 +1220,9 @@ export function CustomerBookingFlow({
                                         setError('');
                                     }}
                                     className={cn(
-                                        'px-3 py-1.5 rounded-lg text-xs font-bold border',
+                                        'px-3.5 py-2 rounded-full text-xs font-bold border transition',
                                         intakeMode === 'instant'
-                                            ? 'text-white border-transparent'
+                                            ? 'text-white border-transparent shadow-sm'
                                             : 'bg-white text-[#64748B] border-[#E2E8F0]'
                                     )}
                                     style={
@@ -659,7 +1231,7 @@ export function CustomerBookingFlow({
                                             : undefined
                                     }
                                 >
-                                    Book a time
+                                    {isDentistsFlow ? 'Pick a slot' : 'Book a time'}
                                 </button>
                                 <button
                                     type="button"
@@ -669,9 +1241,9 @@ export function CustomerBookingFlow({
                                         setError('');
                                     }}
                                     className={cn(
-                                        'px-3 py-1.5 rounded-lg text-xs font-bold border',
+                                        'px-3.5 py-2 rounded-full text-xs font-bold border transition',
                                         intakeMode === 'request'
-                                            ? 'text-white border-transparent'
+                                            ? 'text-white border-transparent shadow-sm'
                                             : 'bg-white text-[#64748B] border-[#E2E8F0]'
                                     )}
                                     style={
@@ -680,13 +1252,15 @@ export function CustomerBookingFlow({
                                             : undefined
                                     }
                                 >
-                                    Request a visit
+                                    {isDentistsFlow ? 'Request a time' : 'Request a visit'}
                                 </button>
                             </div>
                             {intakeMode === 'request' ? (
                                 <div className="p-5 space-y-4">
                                     <p className="text-sm text-[#64748B]">
-                                        Tell us when you prefer — the business will confirm a time. No deposit is taken on requests.
+                                        {isDentistsFlow
+                                            ? 'Prefer a time that isn’t listed? Tell the clinic when works — they’ll confirm. No deposit on requests.'
+                                            : 'Tell us when you prefer — the business will confirm a time. No deposit is taken on requests.'}
                                     </p>
                                     <label className="block text-xs font-bold text-[#64748B]">
                                         Preferred date & time
@@ -804,7 +1378,7 @@ export function CustomerBookingFlow({
                                             onClick={goToDetails}
                                             className="w-full py-3.5 rounded-xl bg-[var(--brand-secondary)] text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2"
                                         >
-                                            Next — enter your details
+                                            {isDentistsFlow ? 'Continue' : 'Next — enter your details'}
                                             <ChevronRight className="w-4 h-4" />
                                         </button>
                                     </div>
@@ -880,7 +1454,10 @@ export function CustomerBookingFlow({
                                     {detailsTouched && fieldErrors.phone && <p className="text-xs text-red-600 mt-1">{fieldErrors.phone}</p>}
                                 </label>
                                 <label className="block sm:col-span-2">
-                                    <span className="text-xs font-bold text-[#64748B]">Property address / postcode <span className="text-red-500">*</span></span>
+                                    <span className="text-xs font-bold text-[#64748B]">
+                                        {isDentistsFlow ? 'Your address / postcode' : 'Property address / postcode'}{' '}
+                                        <span className="text-red-500">*</span>
+                                    </span>
                                     <input
                                         value={address}
                                         onChange={(e) => { setAddress(e.target.value); setFieldErrors((p) => ({ ...p, address: '' })); }}
@@ -992,7 +1569,8 @@ export function CustomerBookingFlow({
                     {step === 'payment' && selectedSlot && (
                         <div className="p-5 space-y-4">
                             <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
-                                <ShieldCheck className="w-4 h-4 text-[var(--brand-primary)]" /> Review & pay deposit
+                                <ShieldCheck className="w-4 h-4 text-[var(--brand-primary)]" />{' '}
+                                {isDentistsFlow ? 'Review & confirm' : 'Review & pay deposit'}
                             </h3>
 
                             <div className="rounded-xl border border-[#E2E8F0] divide-y divide-[#E2E8F0] text-sm">

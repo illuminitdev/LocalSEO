@@ -3,16 +3,17 @@ import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryP
 
 function resolveOrgIndustryId(org: any): string | null {
     const fromCol = normalizeBookingIndustryId(org?.booking_industry_id);
-    if (fromCol) return fromCol;
     const trade = String(org?.trade_type || '').trim();
-    if (!trade) return null;
-    return getBookingPreset(trade).id;
+    const fromTrade = trade ? getBookingPreset(trade).id : null;
+    
+    if (fromTrade === 'dentists') return 'dentists';
+    if (fromCol) return fromCol;
+    return fromTrade;
 }
 
 export function isRestaurantOrg(org: any): boolean {
     return resolveOrgIndustryId(org) === 'restaurants';
 }
-
 
 export function isCatalogOrg(org: any): boolean {
     const id = resolveOrgIndustryId(org);
@@ -33,7 +34,9 @@ export function assertRestaurantOrg(org: { booking_industry_id?: string | null; 
 
 export function assertCatalogOrg(org: { booking_industry_id?: string | null; trade_type?: string | null }) {
     if (isCatalogOrg(org)) return;
-    const err: any = new Error('Price list is only available for Dental & Aesthetics (and Menu for restaurants)');
+    const err: any = new Error(
+        'Price list / menu is only available for Dental & Aesthetics clinics and restaurants'
+    );
     err.status = 403;
     err.code = 'catalog_only';
     throw err;
@@ -46,10 +49,9 @@ export async function loadOrgForMenu(orgId: string) {
         err.status = 404;
         throw err;
     }
-    
-    
+
     const resolved = resolveOrgIndustryId(rows[0]);
-    if (resolved && !normalizeBookingIndustryId(rows[0].booking_industry_id)) {
+    if (resolved && normalizeBookingIndustryId(rows[0].booking_industry_id) !== resolved) {
         try {
             await query(`UPDATE organizations SET booking_industry_id = $2 WHERE id = $1`, [
                 orgId,
@@ -60,6 +62,8 @@ export async function loadOrgForMenu(orgId: string) {
             
         }
     }
+
+    assertCatalogOrg(rows[0]);
     return rows[0];
 }
 

@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Building2,
-    LogOut,
     MapPin,
     Search,
     Shield,
@@ -41,8 +40,7 @@ const ACCOUNT_NAV = [
     { id: 'password', label: 'Account security', icon: Shield },
     { id: 'branding', label: 'Branding', icon: ImageIcon },
     { id: 'business', label: 'Business', icon: Building2 },
-    { id: 'location', label: 'Location', icon: MapPin },
-    { id: 'signout', label: 'Sign out', icon: LogOut }
+    { id: 'location', label: 'Location', icon: MapPin }
 ] as const;
 
 type OrgForm = {
@@ -492,11 +490,6 @@ export default function Account() {
         }
     };
 
-    const logout = () => {
-        clearToken();
-        navigate('/', { replace: true });
-    };
-
     const handleSimulatePlan = async (nextPlanId: string) => {
         setSimBusy(true);
         try {
@@ -917,7 +910,7 @@ export default function Account() {
                     className="rounded-2xl border border-[#E2E8F0] bg-white p-5 sm:p-6 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.35)]"
                     style={orgBrandStyle({ brandPrimary, brandSecondary })}
                 >
-                    <div className="mb-5">
+                    <div className="mb-6">
                         <h2 className="text-base font-black text-[#0F172A]">Branding</h2>
                         <p className="text-xs text-[#64748B] mt-1">
                             Logo and colors for sidebar, booking page, and client hub.
@@ -927,107 +920,136 @@ export default function Account() {
                     {brandErr && <p className="mb-3 text-sm text-red-700">{brandErr}</p>}
                     {brandMsg && <p className="mb-3 text-sm text-emerald-700">{brandMsg}</p>}
 
-                    <form onSubmit={saveBranding} className="space-y-5">
-                        <div className="flex items-center gap-3">
-                            <div className="h-14 w-14 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] overflow-hidden flex items-center justify-center shrink-0">
-                                {logoUrl ? (
-                                    <img src={logoUrl} alt="Business logo" className="h-full w-full object-contain p-1" />
-                                ) : (
-                                    <ImageIcon className="w-5 h-5 text-[#CBD5E1]" />
-                                )}
+                    <form onSubmit={saveBranding} className="space-y-6">
+                        <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]/80 p-4">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-3">
+                                Logo
+                            </p>
+                            <div className="flex items-center gap-4">
+                                <div className="h-16 w-16 rounded-xl border border-[#E2E8F0] bg-white overflow-hidden flex items-center justify-center shrink-0">
+                                    {logoUrl ? (
+                                        <img
+                                            src={logoUrl}
+                                            alt="Business logo"
+                                            className="h-12 w-12 object-contain"
+                                        />
+                                    ) : (
+                                        <ImageIcon className="w-5 h-5 text-[#CBD5E1]" />
+                                    )}
+                                </div>
+                                <div className="flex flex-wrap gap-2 min-w-0">
+                                    <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:bg-[#F1F5F9] cursor-pointer">
+                                        <Camera className="w-3.5 h-3.5" />
+                                        {logoBusy ? 'Uploading…' : logoUrl ? 'Change logo' : 'Upload logo'}
+                                        <input
+                                            type="file"
+                                            accept="image/jpeg,image/png,image/webp,image/gif"
+                                            className="hidden"
+                                            disabled={logoBusy}
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                e.target.value = '';
+                                                if (file) void uploadLogo(file);
+                                            }}
+                                        />
+                                    </label>
+                                    {logoUrl && (
+                                        <button
+                                            type="button"
+                                            disabled={logoBusy}
+                                            onClick={() => void clearLogo()}
+                                            className="px-3 py-2 rounded-xl border border-[#E2E8F0] bg-white text-xs font-bold text-[#64748B] hover:bg-[#F1F5F9] disabled:opacity-50"
+                                        >
+                                            Remove
+                                        </button>
+                                    )}
+                                </div>
                             </div>
-                            <div className="flex flex-wrap gap-2 min-w-0">
-                                <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-[#E2E8F0] text-xs font-bold text-[#0F172A] hover:bg-[#F8FAFC] cursor-pointer">
-                                    <Camera className="w-3.5 h-3.5" />
-                                    {logoBusy ? 'Uploading…' : logoUrl ? 'Change logo' : 'Upload logo'}
-                                    <input
-                                        type="file"
-                                        accept="image/jpeg,image/png,image/webp,image/gif"
-                                        className="hidden"
-                                        disabled={logoBusy}
-                                        onChange={(e) => {
-                                            const file = e.target.files?.[0];
-                                            e.target.value = '';
-                                            if (file) void uploadLogo(file);
-                                        }}
-                                    />
+                        </div>
+
+                        <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]/80 p-4">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-3">
+                                Colors
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg">
+                                <label className="block text-xs font-bold text-[#64748B]">
+                                    Primary
+                                    <div className="mt-1.5 flex items-center gap-2">
+                                        <input
+                                            type="color"
+                                            value={normalizeBrandHex(brandPrimary, DEFAULT_BRAND_PRIMARY)}
+                                            onChange={(e) => setBrandPrimary(e.target.value.toUpperCase())}
+                                            className="h-9 w-9 shrink-0 rounded-lg border border-[#E2E8F0] bg-white cursor-pointer"
+                                        />
+                                        <input
+                                            type="text"
+                                            value={brandPrimary}
+                                            onChange={(e) => setBrandPrimary(e.target.value)}
+                                            className="w-28 rounded-xl border border-[#E2E8F0] bg-white px-2.5 py-2 text-sm font-mono text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)]"
+                                            placeholder="#F59E0B"
+                                            maxLength={7}
+                                        />
+                                    </div>
                                 </label>
-                                {logoUrl && (
-                                    <button
-                                        type="button"
-                                        disabled={logoBusy}
-                                        onClick={() => void clearLogo()}
-                                        className="px-3 py-2 rounded-xl border border-[#E2E8F0] text-xs font-bold text-[#64748B] hover:bg-[#F8FAFC] disabled:opacity-50"
-                                    >
-                                        Remove
-                                    </button>
-                                )}
+                                <label className="block text-xs font-bold text-[#64748B]">
+                                    Secondary
+                                    <div className="mt-1.5 flex items-center gap-2">
+                                        <input
+                                            type="color"
+                                            value={normalizeBrandHex(brandSecondary, DEFAULT_BRAND_SECONDARY)}
+                                            onChange={(e) => setBrandSecondary(e.target.value.toUpperCase())}
+                                            className="h-9 w-9 shrink-0 rounded-lg border border-[#E2E8F0] bg-white cursor-pointer"
+                                        />
+                                        <input
+                                            type="text"
+                                            value={brandSecondary}
+                                            onChange={(e) => setBrandSecondary(e.target.value)}
+                                            className="w-28 rounded-xl border border-[#E2E8F0] bg-white px-2.5 py-2 text-sm font-mono text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)]"
+                                            placeholder="#0F172A"
+                                            maxLength={7}
+                                        />
+                                    </div>
+                                </label>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md">
-                            <label className="block text-xs font-bold text-[#64748B]">
-                                Primary
-                                <div className="mt-1.5 flex items-center gap-2">
-                                    <input
-                                        type="color"
-                                        value={normalizeBrandHex(brandPrimary, DEFAULT_BRAND_PRIMARY)}
-                                        onChange={(e) => setBrandPrimary(e.target.value.toUpperCase())}
-                                        className="h-9 w-9 shrink-0 rounded-lg border border-[#E2E8F0] bg-white cursor-pointer"
-                                    />
-                                    <input
-                                        type="text"
-                                        value={brandPrimary}
-                                        onChange={(e) => setBrandPrimary(e.target.value)}
-                                        className="w-24 rounded-xl border border-[#E2E8F0] px-2.5 py-2 text-sm font-mono text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)]"
-                                        placeholder="#F59E0B"
-                                        maxLength={7}
-                                    />
-                                </div>
-                            </label>
-                            <label className="block text-xs font-bold text-[#64748B]">
-                                Secondary
-                                <div className="mt-1.5 flex items-center gap-2">
-                                    <input
-                                        type="color"
-                                        value={normalizeBrandHex(brandSecondary, DEFAULT_BRAND_SECONDARY)}
-                                        onChange={(e) => setBrandSecondary(e.target.value.toUpperCase())}
-                                        className="h-9 w-9 shrink-0 rounded-lg border border-[#E2E8F0] bg-white cursor-pointer"
-                                    />
-                                    <input
-                                        type="text"
-                                        value={brandSecondary}
-                                        onChange={(e) => setBrandSecondary(e.target.value)}
-                                        className="w-24 rounded-xl border border-[#E2E8F0] px-2.5 py-2 text-sm font-mono text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)]"
-                                        placeholder="#0F172A"
-                                        maxLength={7}
-                                    />
-                                </div>
-                            </label>
-                        </div>
-
-                        <div
-                            className="rounded-xl px-4 py-3 text-white flex items-center gap-3"
-                            style={{ background: 'var(--brand-secondary)' }}
-                        >
-                            {logoUrl ? (
-                                <img src={logoUrl} alt="" className="h-8 w-8 rounded-lg object-contain bg-white/10 p-0.5 shrink-0" />
-                            ) : null}
-                            <div className="min-w-0 flex-1">
-                                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--brand-primary)' }}>
-                                    Preview
-                                </p>
-                                <p className="text-sm font-black truncate">{org.name || 'Your business'}</p>
-                            </div>
-                            <span
-                                className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold"
-                                style={{ background: 'var(--brand-primary)', color: 'var(--brand-secondary)' }}
+                        <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-2">
+                                Preview
+                            </p>
+                            <div
+                                className="rounded-xl px-4 py-3.5 text-white flex items-center gap-3"
+                                style={{ background: 'var(--brand-secondary)' }}
                             >
-                                Book now
-                            </span>
+                                {logoUrl ? (
+                                    <img
+                                        src={logoUrl}
+                                        alt=""
+                                        className="h-8 w-8 rounded-lg object-contain bg-white/10 p-0.5 shrink-0"
+                                    />
+                                ) : null}
+                                <div className="min-w-0 flex-1">
+                                    <p
+                                        className="text-[10px] font-bold uppercase tracking-widest"
+                                        style={{ color: 'var(--brand-primary)' }}
+                                    >
+                                        Preview
+                                    </p>
+                                    <p className="text-sm font-black truncate">{org.name || 'Your business'}</p>
+                                </div>
+                                <span
+                                    className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold"
+                                    style={{
+                                        background: 'var(--brand-primary)',
+                                        color: 'var(--brand-secondary)'
+                                    }}
+                                >
+                                    Book now
+                                </span>
+                            </div>
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-2 pt-1">
                             <button
                                 type="submit"
                                 disabled={brandBusy || logoBusy}
@@ -1244,26 +1266,6 @@ export default function Account() {
                         )}
                     </div>
                 </SectionCard>
-                )}
-
-                {activeSection === 'signout' && (
-                <section
-                    id="signout"
-                    className="relative overflow-hidden rounded-2xl border border-red-100 bg-gradient-to-br from-white to-red-50/40 p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-[0_10px_30px_-18px_rgba(127,29,29,0.35)]"
-                >
-                    <div>
-                        <h2 className="text-base font-black text-[#0F172A]">Sign out</h2>
-                        <p className="text-xs text-[#64748B] mt-0.5">End your session on this device.</p>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={logout}
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 bg-white text-sm font-bold text-red-700 hover:bg-red-50 transition-colors shadow-sm"
-                    >
-                        <LogOut className="w-4 h-4" strokeWidth={1.75} />
-                        Log out
-                    </button>
-                </section>
                 )}
             </div>
 

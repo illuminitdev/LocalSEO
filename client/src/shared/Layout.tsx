@@ -207,6 +207,11 @@ export default function Layout() {
 
     const initials = (userName || userEmail || 'U').charAt(0).toUpperCase();
 
+    
+    const logoScale = sidebarWidth / SIDEBAR_DEFAULT;
+    const logoHeight = Math.round(Math.min(48, Math.max(28, 36 * logoScale)));
+    const logoWidth = Math.round(Math.min(220, Math.max(100, (sidebarWidth - 48) * 0.85)));
+
     const sidebar = (
         <>
             <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2 border-b-2 border-[#E2E8F0]">
@@ -214,20 +219,20 @@ export default function Layout() {
                     <img
                         src={orgLogoUrl}
                         alt="Business logo"
-                        className="h-9 w-auto max-w-[180px] object-contain object-left min-w-0 flex-1"
-                        style={{ maxHeight: '36px', maxWidth: '160px', objectFit: 'contain' }}
+                        className="shrink-0 object-contain object-left"
+                        style={{ height: logoHeight, width: logoWidth, maxWidth: '100%' }}
                     />
                 ) : (
                     <img
                         src="/localseo.png"
                         alt="Local SEO"
-                        className="h-9 w-auto max-w-[180px] object-contain object-left min-w-0 flex-1"
-                        style={{ maxHeight: '36px', maxWidth: '160px', objectFit: 'contain' }}
+                        className="shrink-0 object-contain object-left"
+                        style={{ height: logoHeight, width: logoWidth, maxWidth: '100%' }}
                     />
                 )}
                 <button
                     type="button"
-                    className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9]"
+                    className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9] shrink-0"
                     aria-label="Close menu"
                     onClick={() => setNavOpen(false)}
                 >
@@ -354,15 +359,13 @@ export default function Layout() {
                             <img
                                 src={orgLogoUrl}
                                 alt="Business logo"
-                                className="h-7 w-auto max-w-[140px] object-contain object-left"
-                                style={{ maxHeight: '28px', maxWidth: '140px', objectFit: 'contain' }}
+                                className="h-7 w-[140px] object-contain object-left"
                             />
                         ) : (
                             <img
                                 src="/localseo.png"
                                 alt="Local SEO"
-                                className="h-7 w-auto max-w-[140px] object-contain object-left"
-                                style={{ maxHeight: '28px', maxWidth: '140px', objectFit: 'contain' }}
+                                className="h-7 w-[140px] object-contain object-left"
                             />
                         )}
                     </div>

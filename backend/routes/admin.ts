@@ -14,7 +14,8 @@ import {
 } from '../lib/planCatalog';
 import {
     isBookingPlanId,
-    normalizeBookingIndustryId
+    normalizeBookingIndustryId,
+    bookingIndustryLabel
 } from '../lib/bookingIndustryPresets';
 import { setOrgBookingIndustry } from '../lib/bookingIndustryHydrate';
 import Stripe from 'stripe';
@@ -92,11 +93,14 @@ async function verifyAdminPassword(password: string) {
 
 function mapRegisteredUser(row: any) {
     const features = row.plan_id ? getFeaturesForPlan(row.plan_id) : [];
+    const phone = String(row.phone || '').trim() || null;
+    const bookingIndustryId = row.booking_industry_id || null;
     return {
         kind: 'user' as const,
         userId: row.user_id,
         email: row.email,
         name: row.user_name,
+        phone,
         createdAt: row.user_created_at,
         mustChangePassword: Boolean(row.must_change_password),
         platformRole: row.platform_role === 'sales_agent' ? 'sales_agent' : 'customer',
@@ -106,10 +110,14 @@ function mapRegisteredUser(row: any) {
                   name: row.org_name,
                   slug: row.org_slug,
                   tradeType: row.trade_type,
-                  bookingIndustryId: row.booking_industry_id || null,
+                  bookingIndustryId,
                   setupComplete: row.setup_complete
               }
             : null,
+        serviceLabel:
+            bookingIndustryLabel(bookingIndustryId) ||
+            String(row.trade_type || '').trim() ||
+            null,
         subscription: row.plan_id
             ? {
                   id: row.subscription_id,
@@ -161,15 +169,19 @@ function mapRegisteredUser(row: any) {
 
 function mapInviteUser(row: any) {
     const features = row.plan_id ? getFeaturesForPlan(row.plan_id) : [];
+    const phone = String(row.phone || '').trim() || null;
+    const bookingIndustryId = row.booking_industry_id || null;
     return {
         kind: 'invite' as const,
         userId: null,
         email: row.email,
         name: row.full_name || '',
+        phone,
         createdAt: row.invite_created_at,
         mustChangePassword: true,
         platformRole: 'customer' as const,
         organization: null,
+        serviceLabel: bookingIndustryLabel(bookingIndustryId) || null,
         subscription: row.plan_id
             ? {
                   id: row.subscription_id,
@@ -367,6 +379,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                     u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
                     u.must_change_password, COALESCE(u.platform_role, 'customer') AS platform_role,
                     o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.booking_industry_id, o.setup_complete,
+                    COALESCE(NULLIF(TRIM(o.phone), ''), NULLIF(TRIM(pi.phone), '')) AS phone,
                     s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
                     s.stripe_subscription_id, s.stripe_customer_id, s.cancel_at_period_end,
@@ -388,7 +401,8 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
              )
              LEFT JOIN plans p ON p.id = s.plan_id
              LEFT JOIN LATERAL (
-                 SELECT * FROM portal_invites
+                 SELECT id, status, claimed_at, credentials_emailed_at, created_at, phone
+                 FROM portal_invites
                  WHERE LOWER(email) = LOWER(u.email)
                  ORDER BY created_at DESC
                  LIMIT 1
@@ -407,7 +421,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
             `SELECT pi.id AS invite_id, pi.email, pi.full_name, pi.phone, pi.plan_id, pi.status,
                     pi.claimed_at, pi.credentials_emailed_at, pi.created_at AS invite_created_at,
                     pi.stripe_subscription_id, pi.stripe_customer_id, pi.stripe_session_id,
-                    pi.features AS invite_features,
+                    pi.features AS invite_features, pi.booking_industry_id,
                     p.name AS plan_name, p.price_cents, p.currency,
                     s.id AS subscription_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
@@ -445,6 +459,7 @@ router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Respon
             `SELECT u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
                     u.must_change_password, COALESCE(u.platform_role, 'customer') AS platform_role,
                     o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.booking_industry_id, o.setup_complete,
+                    COALESCE(NULLIF(TRIM(o.phone), ''), NULLIF(TRIM(pi.phone), '')) AS phone,
                     s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
                     s.stripe_subscription_id, s.stripe_customer_id, s.cancel_at_period_end,
@@ -466,7 +481,8 @@ router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Respon
              )
              LEFT JOIN plans p ON p.id = s.plan_id
              LEFT JOIN LATERAL (
-                 SELECT * FROM portal_invites
+                 SELECT id, status, claimed_at, credentials_emailed_at, created_at, phone
+                 FROM portal_invites
                  WHERE LOWER(email) = LOWER(u.email)
                  ORDER BY created_at DESC
                  LIMIT 1
@@ -491,6 +507,7 @@ router.get('/users/invite/:inviteId', requireAdmin, async (req: Request, res: Re
             `SELECT pi.id AS invite_id, pi.email, pi.full_name, pi.phone, pi.plan_id, pi.status,
                     pi.claimed_at, pi.credentials_emailed_at, pi.created_at AS invite_created_at,
                     pi.stripe_subscription_id, pi.stripe_customer_id, pi.stripe_session_id,
+                    pi.booking_industry_id,
                     p.name AS plan_name, p.price_cents, p.currency,
                     s.id AS subscription_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
