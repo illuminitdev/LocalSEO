@@ -12,6 +12,7 @@ import {
     bulkImportSalesLeads,
     convertLeadToCustomer,
     ensureCrmTables,
+    resolveAllLeadIds,
     type CallOutcome,
     type LeadStatus
 } from '../lib/sales';
@@ -384,12 +385,12 @@ router.patch('/tasks/:id', async (req: Request, res: Response) => {
             try {
                 const agentName = (req as any).user.name || 'Sales Agent';
                 const agentId = (req as any).user.id;
-                const statusStr = status ? `marked as ${String(status).replace('_', ' ').toUpperCase()}` : 'updated';
-                const noteStr = notes && String(notes).trim() ? ` — Note: "${String(notes).trim()}"` : '';
+                const statusStr = status ? String(status).replace('_', ' ').toUpperCase() : 'UPDATED';
+                const cleanNote = notes && String(notes).trim() ? String(notes).trim() : `Task "${task.title}" status changed to ${statusStr}`;
                 await query(`
-                    INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, note)
-                    VALUES ($1, $2, $3, 'task_event', $4)
-                `, [task.leadId, agentId, agentName, `Task "${task.title}" ${statusStr}${noteStr}`]);
+                    INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note, created_at)
+                    VALUES ($1, $2, $3, 'task_event', $4, $5, NOW())
+                `, [task.leadId, agentId, agentName, status || task.status || 'in_progress', cleanNote]);
             } catch (actErr) {
                 console.warn('Failed to record task status activity:', actErr);
             }
@@ -462,6 +463,16 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
             source: ''
         };
 
+        const allLeadIds = await resolveAllLeadIds(leadId);
+
+        const [salesRes, subRes] = await Promise.all([
+            query(`SELECT id, name, email, phone FROM sales_leads WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] })),
+            query(`SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email FROM submissions WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] }))
+        ]);
+
+        const leadName = (salesRes.rows[0]?.name || subRes.rows[0]?.bname || subRes.rows[0]?.name || '').trim().toLowerCase();
+        const leadEmail = (salesRes.rows[0]?.email || subRes.rows[0]?.email || '').trim().toLowerCase();
+
         const [tasksRes, activitiesRes] = await Promise.all([
             query(`
                 SELECT 
@@ -480,14 +491,14 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
                     COALESCE(created_by_role, 'admin') AS "createdByRole",
                     COALESCE(created_by_name, 'Admin') AS "createdByName"
                 FROM lead_tasks
-                WHERE lead_id = $1
+                WHERE lead_id = ANY($1::text[])
                 ORDER BY 
                     CASE WHEN status = 'pending' THEN 1 WHEN status = 'in_progress' THEN 2 ELSE 3 END,
                     due_date ASC NULLS LAST,
                     created_at DESC
-            `, [leadId]),
+            `, [allLeadIds]),
             query(`
-                SELECT 
+                SELECT DISTINCT
                     a.id,
                     a.lead_id AS "leadId",
                     a.activity_type AS "activityType",
@@ -499,11 +510,15 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
                     u.email AS "userEmail"
                 FROM lead_activities a
                 LEFT JOIN users u ON u.id = a.user_id
-                WHERE a.lead_id = $1 
-                  AND (a.activity_type = 'call_log' OR (a.activity_type = 'task_event' AND a.note NOT LIKE 'Created task:%'))
+                WHERE (
+                    a.lead_id = ANY($1::text[])
+                    OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(email)) = $3)))
+                    OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)))
+                )
+                  AND a.activity_type IN ('call_log', 'status_change', 'note', 'task_event')
                 ORDER BY a.created_at DESC
                 LIMIT 200
-            `, [leadId])
+            `, [allLeadIds, leadName || null, leadEmail || null])
         ]);
 
         res.json({
@@ -514,6 +529,50 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
     } catch (err: any) {
         console.error('Sales get lead CRM error:', err);
         res.status(500).json({ error: err.message || 'Failed to fetch lead CRM' });
+    }
+});
+
+router.get('/leads/:id/activities', async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = String(req.params.id);
+        const allLeadIds = await resolveAllLeadIds(leadId);
+
+        const [salesRes, subRes] = await Promise.all([
+            query(`SELECT id, name, email, phone FROM sales_leads WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] })),
+            query(`SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email FROM submissions WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] }))
+        ]);
+
+        const leadName = (salesRes.rows[0]?.name || subRes.rows[0]?.bname || subRes.rows[0]?.name || '').trim().toLowerCase();
+        const leadEmail = (salesRes.rows[0]?.email || subRes.rows[0]?.email || '').trim().toLowerCase();
+
+        const { rows } = await query(`
+            SELECT DISTINCT
+                a.id,
+                a.lead_id AS "leadId",
+                a.activity_type AS "activityType",
+                a.disposition,
+                a.note,
+                a.author_name AS "authorName",
+                a.created_at AS "createdAt",
+                u.name AS "userName",
+                u.email AS "userEmail"
+            FROM lead_activities a
+            LEFT JOIN users u ON u.id = a.user_id
+            WHERE (
+                a.lead_id = ANY($1::text[])
+                OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(email)) = $3)))
+                OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)))
+            )
+              AND a.activity_type IN ('call_log', 'status_change', 'note', 'task_event')
+            ORDER BY a.created_at DESC
+            LIMIT 200
+        `, [allLeadIds, leadName || null, leadEmail || null]);
+
+        res.json({ activities: rows });
+    } catch (err: any) {
+        console.error('Sales get lead activities error:', err);
+        res.status(500).json({ error: err.message || 'Failed to fetch lead activities' });
     }
 });
 
@@ -555,7 +614,29 @@ router.post('/leads/:id/crm/activities', async (req: Request, res: Response) => 
 
         const activity = rows[0];
 
-        
+        // Sync disposition to sales_leads status so Admin & Sales stay 100% in sync
+        let mappedLeadStatus: string | null = null;
+        if (sanitizedDisposition === 'converted') mappedLeadStatus = 'converted';
+        else if (sanitizedDisposition === 'callback_requested') mappedLeadStatus = 'callback';
+        else if (sanitizedDisposition === 'not_interested') mappedLeadStatus = 'not_interested';
+        else if (sanitizedDisposition === 'connected' || sanitizedDisposition === 'voicemail') mappedLeadStatus = 'contacted';
+
+        if (mappedLeadStatus) {
+            try {
+                await query(
+                    `UPDATE sales_leads 
+                     SET status = $1, 
+                         notes = COALESCE(NULLIF($2, ''), notes),
+                         updated_at = NOW()
+                         ${mappedLeadStatus === 'converted' ? ', is_customer = TRUE, converted_at = NOW()' : ''}
+                     WHERE id::text = $3`,
+                    [mappedLeadStatus, String(note || '').trim() || null, leadId]
+                );
+            } catch (updateErr) {
+                console.warn('Could not sync status to sales_leads:', updateErr);
+            }
+        }
+
         if (nextFollowUpAt) {
             try {
                 await query(`
@@ -815,6 +896,17 @@ router.post('/leads', async (req: Request, res: Response) => {
     }
 });
 
+function normalizeSpreadsheetStatus(rawStatus: any): string {
+    const s = String(rawStatus || '').toLowerCase().trim().replace(/[-_]/g, ' ');
+    if (!s) return 'new';
+    if (s.includes('convert') || s.includes('won') || s.includes('closed') || s.includes('customer') || s.includes('paid')) return 'converted';
+    if (s.includes('not interested') || s.includes('lost') || s.includes('rejected') || s.includes('declined') || s.includes('dnc') || s.includes('cold') || s.includes('wrong number')) return 'not_interested';
+    if (s.includes('callback') || s.includes('call back') || s.includes('follow') || s.includes('call later')) return 'callback';
+    if (s.includes('interested') || s.includes('warm') || s.includes('hot') || s.includes('qualified') || s.includes('in progress') || s.includes('audit scheduled')) return 'interested';
+    if (s.includes('contacted') || s.includes('called') || s.includes('spoke') || s.includes('reached') || s.includes('connected') || s.includes('attempted') || s.includes('voicemail') || s.includes('ringing') || s.includes('no answer') || s.includes('busy')) return 'contacted';
+    return 'new';
+}
+
 /** Bulk Import Leads (Excel / CSV) */
 router.post('/leads/bulk-import', async (req: Request, res: Response) => {
     try {
@@ -859,6 +951,8 @@ router.post('/leads/bulk-import', async (req: Request, res: Response) => {
                 }
             }
 
+            const rawStatusVal = item.status || item.callingStatus || item.stage || item.disposition || item['Status'] || item['Calling Status'] || item['Lead Status'] || item['Disposition'] || 'new';
+
             return {
                 name: String(item.businessName || item.name || item['Business name'] || item['Business Name'] || item['Company Name'] || '').trim(),
                 phone: String(item.phone || item.businessPhone || item['Business Phone'] || item['Phone'] || '').trim(),
@@ -870,7 +964,7 @@ router.post('/leads/bulk-import', async (req: Request, res: Response) => {
                 aiVisibilityObservation: String(item.aiVisibilityObservation || item['My Observation AI Visibility'] || item['AI Visibility'] || '').trim(),
                 leadOpportunity: String(item.leadOpportunity || item['Lead Opportunity'] || item['Opportunity'] || '').trim(),
                 opportunityLevel: String(item.opportunityLevel || '').toLowerCase() || 'medium',
-                status: String(item.status || 'new').trim().toLowerCase() === 'converted' ? 'converted' : 'new',
+                status: normalizeSpreadsheetStatus(rawStatusVal),
                 notes: String(rawConclusion).trim(),
                 assignedTo: item.assignedTo || agentId
             };
