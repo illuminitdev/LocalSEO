@@ -25,11 +25,26 @@ function localDateStr(d: Date) {
     return `${y}-${m}-${day}`;
 }
 
-function ruleDateStr(r: any): string | null {
-    if (r.avail_date) {
-        return r.avail_date instanceof Date ? localDateStr(r.avail_date) : String(r.avail_date).slice(0, 10);
+/** Calendar YYYY-MM-DD for pg DATE / ISO strings (UTC day — avoids US Lambda day-shift). */
+function calendarDateStr(value: any): string | null {
+    if (value == null || value === '') return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        const y = value.getUTCFullYear();
+        const m = String(value.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(value.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
     }
-    if (r.date) return String(r.date).slice(0, 10);
+    const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : null;
+}
+
+function ruleDateStr(r: any): string | null {
+    if (r.avail_date != null && r.avail_date !== '') {
+        return calendarDateStr(r.avail_date);
+    }
+    if (r.date != null && r.date !== '') {
+        return calendarDateStr(r.date);
+    }
     return null;
 }
 

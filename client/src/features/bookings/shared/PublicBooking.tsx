@@ -166,7 +166,6 @@ export function CustomerBookingFlow({
         getBookingPreset(host.tradeType || '').id;
     const isDentistsFlow = industryId === 'dentists';
     const isRestaurantFlow = industryId === 'restaurants';
-    const venueOnlyBooking = isRestaurantFlow; // table at the restaurant — no customer property address
     const [activeEventSlug, setActiveEventSlug] = useState(initialEventSlug || '');
     const [eventType, setEventType] = useState<EventType | null>(initialEventType || null);
     const [selectedCatalog, setSelectedCatalog] = useState<MenuItemPublic | null>(null);
@@ -174,6 +173,8 @@ export function CustomerBookingFlow({
     const [stripePaymentsReady, setStripePaymentsReady] = useState(true);
     const [maxDaysAhead, setMaxDaysAhead] = useState(60);
     const [hasAvailabilityRules, setHasAvailabilityRules] = useState(false);
+    const [availableDates, setAvailableDates] = useState<Set<string>>(() => new Set());
+    const [loadingMonthDates, setLoadingMonthDates] = useState(false);
     const [step, setStep] = useState<BookingStep>('schedule');
     const [month, setMonth] = useState(() => {
         const n = new Date();
@@ -186,7 +187,6 @@ export function CustomerBookingFlow({
     const [customerName, setCustomerName] = useState('');
     const [email, setEmail] = useState('');
     const [phone, setPhone] = useState('');
-    const [address, setAddress] = useState('');
     const [description, setDescription] = useState('');
     const [photoUrl, setPhotoUrl] = useState('');
     const [intakeAnswers, setIntakeAnswers] = useState<Record<string, string>>({});
@@ -318,7 +318,6 @@ export function CustomerBookingFlow({
     useEffect(() => {
         if (!activeEventSlug || !selectedDate) {
             setDaySlots([]);
-            setHasAvailabilityRules(false);
             return;
         }
         setLoadingSlots(true);
@@ -330,11 +329,33 @@ export function CustomerBookingFlow({
             })
             .catch(() => {
                 setDaySlots([]);
-                setHasAvailabilityRules(false);
             })
             .finally(() => setLoadingSlots(false));
         setSelectedSlot(null);
     }, [hostSlug, activeEventSlug, selectedDate]);
+
+    useEffect(() => {
+        if (!activeEventSlug) {
+            setAvailableDates(new Set());
+            setHasAvailabilityRules(false);
+            return;
+        }
+        const from = `${month.year}-${String(month.month + 1).padStart(2, '0')}-01`;
+        const lastDay = new Date(month.year, month.month + 1, 0).getDate();
+        const to = `${month.year}-${String(month.month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        setLoadingMonthDates(true);
+        setAvailableDates(new Set());
+        apiGet(`/api/public/${hostSlug}/${activeEventSlug}/availability?from=${from}&to=${to}`)
+            .then((data) => {
+                setHasAvailabilityRules(Boolean(data.hasAvailabilityRules));
+                setAvailableDates(new Set(data.availableDates || []));
+                if (data.maxDaysAhead) setMaxDaysAhead(data.maxDaysAhead);
+            })
+            .catch(() => {
+                setAvailableDates(new Set());
+            })
+            .finally(() => setLoadingMonthDates(false));
+    }, [hostSlug, activeEventSlug, month.year, month.month]);
 
     const pickService = (et: EventType) => {
         setSelectedCatalog(null);
@@ -380,7 +401,6 @@ export function CustomerBookingFlow({
         else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) errors.email = 'Enter a valid email address.';
         if (!phone.trim()) errors.phone = 'Phone number is required.';
         else if (phone.replace(/\D/g, '').length < 10) errors.phone = 'Enter a valid phone number (at least 10 digits).';
-        if (!venueOnlyBooking && !address.trim()) errors.address = 'Property address is required.';
         for (const field of industry.customFields || []) {
             if (!String(intakeAnswers[field.id] || '').trim()) {
                 errors[field.id] = `${field.label.replace(/\s*\*$/, '')} is required.`;
@@ -391,12 +411,12 @@ export function CustomerBookingFlow({
 
     const detailsValid = useMemo(
         () => Object.keys(validateDetails()).length === 0,
-        [customerName, email, phone, address, intakeAnswers, industry, venueOnlyBooking]
+        [customerName, email, phone, intakeAnswers, industry]
     );
 
-    const bookingAddress = venueOnlyBooking
-        ? host.serviceArea?.trim() || 'Restaurant table booking'
-        : address.trim();
+    const bookingAddress =
+        host.serviceArea?.trim() ||
+        (isDentistsFlow ? 'Clinic visit' : isRestaurantFlow ? 'Restaurant table booking' : 'Booking');
 
     const uploadPhotoFile = async (file: File) => {
         if (!mediaUploadsEnabled) return;
@@ -1312,7 +1332,13 @@ export function CustomerBookingFlow({
                                             <div className="grid grid-cols-7 gap-1">
                                                 {days.map((d, i) => {
                                                     if (!d.inMonth) return <div key={i} />;
-                                                    const selectable = isDateSelectable(d.date, maxDaysAhead);
+                                                    const inWindow = isDateSelectable(d.date, maxDaysAhead);
+                                                    const knownOpen = availableDates.has(d.date);
+                                                    const selectable =
+                                                        inWindow &&
+                                                        (loadingMonthDates ||
+                                                            !hasAvailabilityRules ||
+                                                            knownOpen);
                                                     const isPast = d.date < todayStr();
                                                     return (
                                                         <button
@@ -1325,8 +1351,14 @@ export function CustomerBookingFlow({
                                                                 selectable
                                                                     ? 'hover:bg-[var(--brand-secondary)] hover:text-white border border-[#E2E8F0] bg-[#F8FAFC]'
                                                                     : 'text-[#CBD5E1] cursor-not-allowed',
-                                                                selectedDate === d.date && 'bg-[var(--brand-secondary)] text-white',
-                                                                isPast && !selectable && 'opacity-40'
+                                                                selectable &&
+                                                                    hasAvailabilityRules &&
+                                                                    knownOpen &&
+                                                                    'border-[color-mix(in_srgb,var(--brand-primary)_45%,#E2E8F0)] bg-[color-mix(in_srgb,var(--brand-primary)_12%,white)]',
+                                                                selectedDate === d.date &&
+                                                                    'bg-[var(--brand-secondary)] text-white border-[var(--brand-secondary)]',
+                                                                isPast && !selectable && 'opacity-40',
+                                                                loadingMonthDates && inWindow && 'opacity-70'
                                                             )}
                                                         >
                                                             {d.date.slice(8)}
@@ -1334,6 +1366,11 @@ export function CustomerBookingFlow({
                                                     );
                                                 })}
                                             </div>
+                                            {hasAvailabilityRules && (
+                                                <p className="text-[11px] text-[#94A3B8] mt-3">
+                                                    Highlighted days have open appointment times.
+                                                </p>
+                                            )}
                                         </div>
 
                                         <div className="p-5">
@@ -1460,21 +1497,6 @@ export function CustomerBookingFlow({
                                     />
                                     {detailsTouched && fieldErrors.phone && <p className="text-xs text-red-600 mt-1">{fieldErrors.phone}</p>}
                                 </label>
-                                {!venueOnlyBooking && (
-                                <label className="block sm:col-span-2">
-                                    <span className="text-xs font-bold text-[#64748B]">
-                                        {isDentistsFlow ? 'Your address / postcode' : 'Property address / postcode'}{' '}
-                                        <span className="text-red-500">*</span>
-                                    </span>
-                                    <input
-                                        value={address}
-                                        onChange={(e) => { setAddress(e.target.value); setFieldErrors((p) => ({ ...p, address: '' })); }}
-                                        onBlur={() => setFieldErrors((p) => ({ ...p, ...validateDetails() }))}
-                                        className={cn('mt-1 w-full rounded-xl border bg-white px-3 py-2.5 text-sm', fieldErrors.address && detailsTouched ? 'border-red-400' : 'border-[#E2E8F0]')}
-                                    />
-                                    {detailsTouched && fieldErrors.address && <p className="text-xs text-red-600 mt-1">{fieldErrors.address}</p>}
-                                </label>
-                                )}
                                 {(industry.customFields || []).map((field) => (
                                     <label key={field.id} className="block sm:col-span-1">
                                         <span className="text-xs font-bold text-[#64748B]">{field.label}</span>
@@ -1599,12 +1621,6 @@ export function CustomerBookingFlow({
                                     <span className="text-[#64748B]">Name</span>
                                     <span className="font-bold text-[#0F172A]">{customerName}</span>
                                 </div>
-                                {!venueOnlyBooking && (
-                                <div className="px-4 py-3 flex justify-between">
-                                    <span className="text-[#64748B]">Address</span>
-                                    <span className="font-bold text-[#0F172A] text-right max-w-[60%]">{address}</span>
-                                </div>
-                                )}
                                 <div className="px-4 py-3 flex justify-between bg-[#FAFBFC]">
                                     <span className="font-bold text-[#0F172A]">
                                         {chargeCents > 0 ? 'Amount due today' : 'Amount due'}
@@ -1996,7 +2012,15 @@ export function BookSuccess() {
                 <div className="mt-6 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] p-4 text-left text-sm space-y-2">
                     <p><span className="text-[#64748B]">Name:</span> <strong>{booking.customer_name}</strong></p>
                     <p><span className="text-[#64748B]">When:</span> <strong>{when}</strong></p>
-                    <p><span className="text-[#64748B]">Address:</span> <strong>{booking.customer_address}</strong></p>
+                    {booking.customer_address &&
+                        !/^(clinic visit|salon visit|restaurant table booking|booking)$/i.test(
+                            String(booking.customer_address).trim()
+                        ) && (
+                            <p>
+                                <span className="text-[#64748B]">Address:</span>{' '}
+                                <strong>{booking.customer_address}</strong>
+                            </p>
+                        )}
                 </div>
 
                 <div className="mt-4 flex flex-col gap-2">

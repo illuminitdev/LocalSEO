@@ -168,54 +168,58 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 ? [{ id: memberUserId }]
                 : await listBookableMembers(org.id);
 
-            if (!members.length) {
-                return [];
+            if (members.length) {
+                const slotLists: any[][] = [];
+                for (const m of members) {
+                    const mid = m.id || m.user_id;
+                    const [{ rows: memberDateRules }, { rows: memberWeeklyRules }] = await Promise.all([
+                        query(
+                            `SELECT * FROM availability_date_rules WHERE org_id = $1 AND user_id = $2::uuid`,
+                            [org.id, mid]
+                        ),
+                        query(
+                            `SELECT * FROM availability_rules WHERE org_id = $1 AND enabled = TRUE AND user_id = $2::uuid`,
+                            [org.id, mid]
+                        )
+                    ]);
+                    const memberHasSchedule =
+                        (memberDateRules || []).length > 0 || (memberWeeklyRules || []).length > 0;
+                    const { rows: bookings } = await query(
+                        `SELECT start_at, end_at FROM bookings
+                         WHERE org_id = $1 AND status IN ('confirmed', 'done')
+                           AND start_at >= $2 AND start_at <= $3
+                           AND (
+                             assigned_user_id = $4::uuid
+                             OR assigned_user_id IS NULL
+                           )`,
+                        [org.id, new Date(fromDate), new Date(`${toDate}T23:59:59`), mid]
+                    );
+                    let busyBlocks: any[] = [];
+                    busyBlocks = await fetchBusyBlocks(mid, `${fromDate}T00:00:00`, `${toDate}T23:59:59`);
+                    // Members without a personal calendar inherit org opening hours.
+                    const slots = generateSlots({
+                        fromDate,
+                        toDate,
+                        timezone: org.timezone,
+                        intersectWithOrg: memberHasSchedule,
+                        orgDateRules,
+                        orgWeeklyRules,
+                        memberDateRules,
+                        memberWeeklyRules,
+                        dateRules: memberHasSchedule ? undefined : orgDateRules,
+                        weeklyRules: memberHasSchedule ? undefined : orgWeeklyRules,
+                        durationMinutes: eventType.duration_minutes,
+                        bufferMinutes: org.buffer_minutes,
+                        minNoticeHours: org.min_notice_hours,
+                        maxDaysAhead: org.max_days_ahead,
+                        existingBookings: bookings,
+                        busyBlocks
+                    }).map((s: any) => ({ ...s, assignedUserId: mid }));
+                    slotLists.push(slots);
+                }
+                return mergeSlotsByStart(slotLists);
             }
-
-            const slotLists: any[][] = [];
-            for (const m of members) {
-                const mid = m.id || m.user_id;
-                const [{ rows: memberDateRules }, { rows: memberWeeklyRules }] = await Promise.all([
-                    query(
-                        `SELECT * FROM availability_date_rules WHERE org_id = $1 AND user_id = $2::uuid`,
-                        [org.id, mid]
-                    ),
-                    query(
-                        `SELECT * FROM availability_rules WHERE org_id = $1 AND enabled = TRUE AND user_id = $2::uuid`,
-                        [org.id, mid]
-                    )
-                ]);
-                const { rows: bookings } = await query(
-                    `SELECT start_at, end_at FROM bookings
-                     WHERE org_id = $1 AND status IN ('confirmed', 'done')
-                       AND start_at >= $2 AND start_at <= $3
-                       AND (
-                         assigned_user_id = $4::uuid
-                         OR assigned_user_id IS NULL
-                       )`,
-                    [org.id, new Date(fromDate), new Date(`${toDate}T23:59:59`), mid]
-                );
-                let busyBlocks: any[] = [];
-                busyBlocks = await fetchBusyBlocks(mid, `${fromDate}T00:00:00`, `${toDate}T23:59:59`);
-                const slots = generateSlots({
-                    fromDate,
-                    toDate,
-                    timezone: org.timezone,
-                    intersectWithOrg: true,
-                    orgDateRules,
-                    orgWeeklyRules,
-                    memberDateRules,
-                    memberWeeklyRules,
-                    durationMinutes: eventType.duration_minutes,
-                    bufferMinutes: org.buffer_minutes,
-                    minNoticeHours: org.min_notice_hours,
-                    maxDaysAhead: org.max_days_ahead,
-                    existingBookings: bookings,
-                    busyBlocks
-                }).map((s: any) => ({ ...s, assignedUserId: mid }));
-                slotLists.push(slots);
-            }
-            return mergeSlotsByStart(slotLists);
+            // No bookable members — fall through to org opening hours below.
         }
 
         // Solo / non-team: org-wide rules (user_id IS NULL, plus legacy rows without filter if any)
@@ -852,7 +856,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const isRequest = intakeType === 'request';
             const salonVisit = isSalonsOrg(org);
             const restaurantVisit = isRestaurantOrg(org);
-            const venueVisit = salonVisit || restaurantVisit;
+            const dentistVisit = isDentistsOrg(org);
             const teamsEnabled = await orgTeamsEnabled(org.id);
             let resolvedAssignedUserId: string | null = null;
             if (teamsEnabled) {
@@ -875,14 +879,17 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
 
             const resolvedAddress =
                 String(address || '').trim() ||
-                (venueVisit
-                    ? org.service_area || (restaurantVisit ? 'Restaurant table booking' : 'Salon visit')
-                    : '');
-            if (!customerName?.trim() || !email?.trim() || !phone?.trim() || (!venueVisit && !resolvedAddress)) {
+                org.service_area ||
+                (restaurantVisit
+                    ? 'Restaurant table booking'
+                    : salonVisit
+                      ? 'Salon visit'
+                      : dentistVisit
+                        ? 'Clinic visit'
+                        : 'Booking');
+            if (!customerName?.trim() || !email?.trim() || !phone?.trim()) {
                 return res.status(400).json({
-                    error: venueVisit
-                        ? 'Name, email, and phone are required'
-                        : 'Name, email, phone, and address are required'
+                    error: 'Name, email, and phone are required'
                 });
             }
 
@@ -925,9 +932,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             } else {
                 if (!start || !end) {
                     return res.status(400).json({
-                        error: venueVisit
-                            ? 'Name, email, phone, and time slot are required'
-                            : 'Name, email, phone, address, and time slot are required'
+                        error: 'Name, email, phone, and time slot are required'
                     });
                 }
                 const dateStr = String(start).slice(0, 10);
