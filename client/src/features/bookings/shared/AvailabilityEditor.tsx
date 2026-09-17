@@ -57,6 +57,8 @@ type Props = {
     onSettingsChange: (settings: AvailabilitySettings) => void;
     onSave: (payload: AvailabilitySavePayload) => Promise<void>;
     saving?: boolean;
+    title?: string;
+    hideOrgSettings?: boolean;
 };
 
 function toDateKey(d: Date): string {
@@ -197,7 +199,9 @@ export default function AvailabilityEditor({
     settings,
     onSettingsChange,
     onSave,
-    saving
+    saving,
+    title = 'Your availability',
+    hideOrgSettings = false
 }: Props) {
     const [month, setMonth] = useState(() => {
         const n = new Date();
@@ -391,12 +395,13 @@ export default function AvailabilityEditor({
     return (
         <div className="space-y-4">
             <div>
-                <h2 className="font-bold text-[#0F172A]">Your availability</h2>
+                <h2 className="font-bold text-[#0F172A]">{title}</h2>
                 <p className="text-sm text-[#64748B] mt-1">
                     Pick any day, set hours, Save — locks remaining days that week (today onward), not past days.
                 </p>
             </div>
 
+            {!hideOrgSettings && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <label className="text-xs font-bold text-[#64748B]">
                     Min notice (hours)
@@ -437,6 +442,7 @@ export default function AvailabilityEditor({
                     />
                 </label>
             </div>
+            )}
 
             {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
 

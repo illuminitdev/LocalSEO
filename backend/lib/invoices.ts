@@ -28,19 +28,43 @@ function effectiveJobTotalCents(booking: any, eventType: any) {
     let totalCents = Math.max(Number(booking.total_cents) || 0, Number(eventType.total_cents) || 0);
     if (depositCents <= 0) return totalCents;
     if (totalCents <= depositCents) return depositCents;
-    
+
     const legacyEstimate = Math.round(depositCents * 3.33);
     if (Math.abs(totalCents - legacyEstimate) <= 2) return depositCents;
     return totalCents;
 }
 
-async function createBalanceInvoice(stripeClient: any, booking: any, eventType: any, org: any) {
+function resolveBalanceCents(
+    booking: any,
+    eventType: any,
+    amountCentsOverride?: number | null
+): { depositCents: number; totalCents: number; balance: number } {
     const depositCents = Number(booking.deposit_cents) || 0;
+    if (amountCentsOverride != null && Number.isFinite(Number(amountCentsOverride))) {
+        const balance = Math.max(0, Math.round(Number(amountCentsOverride)));
+        return { depositCents, totalCents: depositCents + balance, balance };
+    }
     const totalCents = effectiveJobTotalCents(booking, eventType);
     const balance = Math.max(0, totalCents - depositCents);
+    return { depositCents, totalCents, balance };
+}
+
+async function createBalanceInvoice(
+    stripeClient: any,
+    booking: any,
+    eventType: any,
+    org: any,
+    opts?: { amountCents?: number | null }
+) {
+    const { depositCents, totalCents, balance } = resolveBalanceCents(
+        booking,
+        eventType,
+        opts?.amountCents
+    );
+
     if (balance <= 0) {
         if (!depositCents || !booking.deposit_paid) {
-            return { skipped: true, reason: 'No balance due — deposit covers the full job price' };
+            return { skipped: true, reason: 'No balance due — nothing to charge the customer' };
         }
 
         const customer = await getOrCreateCustomer(stripeClient, booking);
@@ -75,20 +99,29 @@ async function createBalanceInvoice(stripeClient: any, booking: any, eventType: 
 
     await clearPendingInvoiceItems(stripeClient, customer.id);
 
-    await stripeClient.invoiceItems.create({
-        customer: customer.id,
-        amount: totalCents,
-        currency: (org.currency || 'GBP').toLowerCase(),
-        description: `${eventType.name} — full job price`
-    });
-
-    if (depositCents > 0) {
+    if (opts?.amountCents != null && Number.isFinite(Number(opts.amountCents))) {
         await stripeClient.invoiceItems.create({
             customer: customer.id,
-            amount: -depositCents,
+            amount: balance,
             currency: (org.currency || 'GBP').toLowerCase(),
-            description: 'Deposit already paid'
+            description: `${eventType.name} — payment request`
         });
+    } else {
+        await stripeClient.invoiceItems.create({
+            customer: customer.id,
+            amount: totalCents,
+            currency: (org.currency || 'GBP').toLowerCase(),
+            description: `${eventType.name} — full job price`
+        });
+
+        if (depositCents > 0) {
+            await stripeClient.invoiceItems.create({
+                customer: customer.id,
+                amount: -depositCents,
+                currency: (org.currency || 'GBP').toLowerCase(),
+                description: 'Deposit already paid'
+            });
+        }
     }
 
     const invoice = await stripeClient.invoices.create({
@@ -113,11 +146,6 @@ async function createBalanceInvoice(stripeClient: any, booking: any, eventType: 
         status: sent.status
     };
 }
-
-
-
-
-
 
 async function refundBookingDeposit(
     stripeClient: any,
@@ -153,7 +181,6 @@ async function refundBookingDeposit(
         return { skipped: true, reason: 'No Stripe payment found to refund' };
     }
 
-    
     const refund = await stripeClient.refunds.create(
         {
             payment_intent: paymentIntentId,
@@ -170,11 +197,16 @@ async function refundBookingDeposit(
         depositCents,
         refundToCustomerCents: refund.amount,
         platformFeeKeptCents: platformFeeCents,
-        
         hostNetAfterRefundNote:
             'Host Express balance is reduced by the refund. Platform keeps the application fee. Stripe card fees are usually not returned.',
         currency: (refund.currency || 'gbp').toUpperCase()
     };
 }
 
-export { createBalanceInvoice, refundBookingDeposit, formatMoney };
+export {
+    createBalanceInvoice,
+    refundBookingDeposit,
+    formatMoney,
+    effectiveJobTotalCents,
+    resolveBalanceCents
+};

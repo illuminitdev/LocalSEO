@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../lib/db';
-import { generateSlots, datesWithAvailability } from '../lib/availability';
+import { generateSlots, datesWithAvailability, mergeSlotsByStart } from '../lib/availability';
 import { newManageToken } from '../lib/authTokens';
 import { fetchBusyBlocks, updateCalendarEvent, deleteCalendarEvent } from '../lib/googleCalendar';
 import {
@@ -48,6 +48,9 @@ import {
     publicFoodOrderPayload,
     verifyFoodOrderCheckout
 } from '../lib/foodOrders';
+import { loadOrgEntitlements } from '../middleware/entitlements';
+import { orgHasBookingTeams } from '../lib/planCatalog';
+import { listBookableMembers } from '../lib/team';
 
 function frontendOrigin() {
     return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -133,19 +136,108 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         return rows[0]?.user_id || null;
     }
 
-    async function computeAvailability(org: any, eventType: any, fromDate: any, toDate: any, userId: any) {
+    async function orgTeamsEnabled(orgId: string) {
+        const ents = await loadOrgEntitlements(orgId);
+        return orgHasBookingTeams(ents.planId);
+    }
+
+    async function computeAvailability(
+        org: any,
+        eventType: any,
+        fromDate: any,
+        toDate: any,
+        opts?: { memberUserId?: string | null; firstAvailable?: boolean }
+    ) {
+        const teamsEnabled = await orgTeamsEnabled(org.id);
+        const memberUserId = opts?.memberUserId || null;
+        const firstAvailable = Boolean(opts?.firstAvailable);
+
+        if (teamsEnabled && (memberUserId || firstAvailable)) {
+            const [{ rows: orgDateRules }, { rows: orgWeeklyRules }] = await Promise.all([
+                query(
+                    `SELECT * FROM availability_date_rules WHERE org_id = $1 AND user_id IS NULL`,
+                    [org.id]
+                ),
+                query(
+                    `SELECT * FROM availability_rules WHERE org_id = $1 AND enabled = TRUE AND user_id IS NULL`,
+                    [org.id]
+                )
+            ]);
+
+            const members = memberUserId
+                ? [{ id: memberUserId }]
+                : await listBookableMembers(org.id);
+
+            if (!members.length) {
+                return [];
+            }
+
+            const slotLists: any[][] = [];
+            for (const m of members) {
+                const mid = m.id || m.user_id;
+                const [{ rows: memberDateRules }, { rows: memberWeeklyRules }] = await Promise.all([
+                    query(
+                        `SELECT * FROM availability_date_rules WHERE org_id = $1 AND user_id = $2::uuid`,
+                        [org.id, mid]
+                    ),
+                    query(
+                        `SELECT * FROM availability_rules WHERE org_id = $1 AND enabled = TRUE AND user_id = $2::uuid`,
+                        [org.id, mid]
+                    )
+                ]);
+                const { rows: bookings } = await query(
+                    `SELECT start_at, end_at FROM bookings
+                     WHERE org_id = $1 AND status IN ('confirmed', 'done')
+                       AND start_at >= $2 AND start_at <= $3
+                       AND (
+                         assigned_user_id = $4::uuid
+                         OR assigned_user_id IS NULL
+                       )`,
+                    [org.id, new Date(fromDate), new Date(`${toDate}T23:59:59`), mid]
+                );
+                let busyBlocks: any[] = [];
+                busyBlocks = await fetchBusyBlocks(mid, `${fromDate}T00:00:00`, `${toDate}T23:59:59`);
+                const slots = generateSlots({
+                    fromDate,
+                    toDate,
+                    timezone: org.timezone,
+                    intersectWithOrg: true,
+                    orgDateRules,
+                    orgWeeklyRules,
+                    memberDateRules,
+                    memberWeeklyRules,
+                    durationMinutes: eventType.duration_minutes,
+                    bufferMinutes: org.buffer_minutes,
+                    minNoticeHours: org.min_notice_hours,
+                    maxDaysAhead: org.max_days_ahead,
+                    existingBookings: bookings,
+                    busyBlocks
+                }).map((s: any) => ({ ...s, assignedUserId: mid }));
+                slotLists.push(slots);
+            }
+            return mergeSlotsByStart(slotLists);
+        }
+
+        // Solo / non-team: org-wide rules (user_id IS NULL, plus legacy rows without filter if any)
         const [{ rows: dateRules }, { rows: weeklyRules }] = await Promise.all([
-            query('SELECT * FROM availability_date_rules WHERE org_id = $1', [org.id]),
-            query('SELECT * FROM availability_rules WHERE org_id = $1 AND enabled = TRUE', [org.id])
+            query(
+                `SELECT * FROM availability_date_rules WHERE org_id = $1 AND user_id IS NULL`,
+                [org.id]
+            ),
+            query(
+                `SELECT * FROM availability_rules WHERE org_id = $1 AND enabled = TRUE AND user_id IS NULL`,
+                [org.id]
+            )
         ]);
         const { rows: bookings } = await query(
             `SELECT start_at, end_at FROM bookings
              WHERE org_id = $1 AND status IN ('confirmed', 'done') AND start_at >= $2 AND start_at <= $3`,
             [org.id, new Date(fromDate), new Date(`${toDate}T23:59:59`)]
         );
+        const ownerId = await getHostUserId(org.id);
         let busyBlocks: any[] = [];
-        if (userId) {
-            busyBlocks = await fetchBusyBlocks(userId, `${fromDate}T00:00:00`, `${toDate}T23:59:59`);
+        if (ownerId) {
+            busyBlocks = await fetchBusyBlocks(ownerId, `${fromDate}T00:00:00`, `${toDate}T23:59:59`);
         }
         return generateSlots({
             fromDate,
@@ -454,9 +546,12 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const { rows: etRows } = await query('SELECT * FROM event_types WHERE id = $1', [booking.event_type_id]);
             const eventType = etRows[0];
 
-            const userId = await getHostUserId(org.id);
             const dateStr = startAt.slice(0, 10);
-            const slots = await computeAvailability(org, eventType, dateStr, dateStr, userId);
+            const teamsEnabled = await orgTeamsEnabled(org.id);
+            const slots = await computeAvailability(org, eventType, dateStr, dateStr, {
+                memberUserId: teamsEnabled ? booking.assigned_user_id || null : null,
+                firstAvailable: teamsEnabled && !booking.assigned_user_id
+            });
             const startMs = new Date(startAt).getTime();
             const endMs = new Date(endAt).getTime();
             const valid = slots.some(
@@ -470,7 +565,10 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             );
             const updated = (await query('SELECT * FROM bookings WHERE id = $1', [booking.id])).rows[0];
 
-            if (userId && booking.google_event_id) await updateCalendarEvent(userId, booking.google_event_id, updated);
+            const calendarUserId = booking.assigned_user_id || (await getHostUserId(org.id));
+            if (calendarUserId && booking.google_event_id) {
+                await updateCalendarEvent(calendarUserId, booking.google_event_id, updated);
+            }
 
             await sendRescheduleEmail({
                 to: booking.customer_email,
@@ -609,6 +707,27 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
+    router.get('/:hostSlug/team', async (req: Request, res: Response) => {
+        try {
+            const org = await loadOrg(req.params.hostSlug);
+            if (!org) return res.status(404).json({ error: 'Business not found' });
+            const teamsEnabled = await orgTeamsEnabled(org.id);
+            if (!teamsEnabled) {
+                return res.json({ teamsEnabled: false, members: [] });
+            }
+            const members = await listBookableMembers(org.id);
+            res.json({
+                teamsEnabled: true,
+                members: members.map((m: any) => ({
+                    id: m.id,
+                    displayName: m.display_name
+                }))
+            });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
     router.get('/:hostSlug/:eventSlug', async (req: Request, res: Response) => {
         try {
             const org = await loadOrg(req.params.hostSlug);
@@ -664,21 +783,44 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             if (!eventType) return res.status(404).json({ error: 'Service not found' });
 
             const fromDate = (req.query.from as string) || new Date().toISOString().slice(0, 10);
-            const toDate = (req.query.to as string) || new Date(Date.now() + org.max_days_ahead * 86400000).toISOString().slice(0, 10);
-            const userId = await getHostUserId(org.id);
+            const toDate =
+                (req.query.to as string) ||
+                new Date(Date.now() + org.max_days_ahead * 86400000).toISOString().slice(0, 10);
+            const teamsEnabled = await orgTeamsEnabled(org.id);
+            const memberUserId = String(req.query.userId || '').trim() || null;
+            const firstAvailable =
+                String(req.query.firstAvailable || '').toLowerCase() === 'true' ||
+                String(req.query.firstAvailable || '') === '1';
+
+            if (memberUserId && !teamsEnabled) {
+                return res.status(403).json({
+                    error: 'Member availability requires Booking Pro',
+                    code: 'upgrade_required'
+                });
+            }
+
             const { rows: anyRules } = await query(
-                `(SELECT id FROM availability_rules WHERE org_id = $1 AND enabled = TRUE LIMIT 1)
-                 UNION ALL
-                 (SELECT id FROM availability_date_rules WHERE org_id = $1 AND enabled = TRUE LIMIT 1)`,
+                teamsEnabled
+                    ? `(SELECT id FROM availability_rules WHERE org_id = $1 AND enabled = TRUE AND user_id IS NULL LIMIT 1)
+                       UNION ALL
+                       (SELECT id FROM availability_date_rules WHERE org_id = $1 AND enabled = TRUE AND user_id IS NULL LIMIT 1)`
+                    : `(SELECT id FROM availability_rules WHERE org_id = $1 AND enabled = TRUE AND user_id IS NULL LIMIT 1)
+                       UNION ALL
+                       (SELECT id FROM availability_date_rules WHERE org_id = $1 AND enabled = TRUE AND user_id IS NULL LIMIT 1)`,
                 [org.id]
             );
-            const slots = await computeAvailability(org, eventType, fromDate, toDate, userId);
+
+            const slots = await computeAvailability(org, eventType, fromDate, toDate, {
+                memberUserId: teamsEnabled ? memberUserId : null,
+                firstAvailable: teamsEnabled && (firstAvailable || !memberUserId)
+            });
 
             res.json({
                 slots,
                 availableDates: datesWithAvailability(slots),
                 hasAvailabilityRules: anyRules.length > 0,
-                maxDaysAhead: org.max_days_ahead
+                maxDaysAhead: org.max_days_ahead,
+                teamsEnabled
             });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
@@ -703,11 +845,32 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 intakeType,
                 preferredSlots,
                 photoUrls,
-                intakeAnswers
+                intakeAnswers,
+                assignedUserId
             } = req.body || {};
 
             const isRequest = intakeType === 'request';
             const salonVisit = isSalonsOrg(org);
+            const teamsEnabled = await orgTeamsEnabled(org.id);
+            let resolvedAssignedUserId: string | null = null;
+            if (teamsEnabled) {
+                const requested = String(assignedUserId || '').trim();
+                if (requested) {
+                    const { rows: mem } = await query(
+                        `SELECT user_id FROM memberships
+                         WHERE org_id = $1 AND user_id = $2::uuid
+                           AND COALESCE(active, TRUE) = TRUE
+                           AND COALESCE(bookable, FALSE) = TRUE
+                         LIMIT 1`,
+                        [org.id, requested]
+                    );
+                    if (!mem.length) {
+                        return res.status(400).json({ error: 'Selected team member is not bookable' });
+                    }
+                    resolvedAssignedUserId = mem[0].user_id;
+                }
+            }
+
             const resolvedAddress = String(address || '').trim() || (salonVisit ? org.service_area || 'Salon visit' : '');
             if (!customerName?.trim() || !email?.trim() || !phone?.trim() || (!salonVisit && !resolvedAddress)) {
                 return res.status(400).json({
@@ -757,15 +920,20 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 if (!start || !end) {
                     return res.status(400).json({ error: 'Name, email, phone, address, and time slot are required' });
                 }
-                const userId = await getHostUserId(org.id);
                 const dateStr = String(start).slice(0, 10);
-                const slots = await computeAvailability(org, eventType, dateStr, dateStr, userId);
+                const slots = await computeAvailability(org, eventType, dateStr, dateStr, {
+                    memberUserId: resolvedAssignedUserId,
+                    firstAvailable: teamsEnabled && !resolvedAssignedUserId
+                });
                 const startMs = new Date(start).getTime();
                 const endMs = new Date(end).getTime();
-                const valid = slots.some(
+                const matched = slots.find(
                     (s: any) => new Date(s.startAt).getTime() === startMs && new Date(s.endAt).getTime() === endMs
                 );
-                if (!valid) return res.status(409).json({ error: 'That time slot is no longer available' });
+                if (!matched) return res.status(409).json({ error: 'That time slot is no longer available' });
+                if (teamsEnabled && !resolvedAssignedUserId && matched.assignedUserId) {
+                    resolvedAssignedUserId = matched.assignedUserId;
+                }
             }
 
             const { client, property } = await upsertClientWithProperty({
@@ -804,7 +972,10 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     }
                 }
             }
-            const totalCents = depositCents;
+            const totalCents = Math.max(
+                Number(eventType.total_cents) || 0,
+                isRequest ? 0 : depositCents
+            );
             const allowSimulated =
                 String(process.env.ALLOW_SIMULATED_PAYMENTS || '').toLowerCase() === 'true' ||
                 String(process.env.ALLOW_SIMULATED_PAYMENTS || '') === '1';
@@ -839,9 +1010,9 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     org_id, event_type_id, status, customer_name, customer_email, customer_phone,
                     customer_address, description, start_at, end_at, deposit_cents, total_cents, manage_token,
                     client_id, property_id, job_status, photo_urls, preferred_slots, intake_type, deposit_paid,
-                    intake_answers
+                    intake_answers, assigned_user_id
                  ) VALUES (
-                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb,$19,$20,$21::jsonb
+                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb,$19,$20,$21::jsonb,$22
                  ) RETURNING *`,
                 [
                     org.id,
@@ -864,7 +1035,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     JSON.stringify(preferred),
                     isRequest ? 'request' : 'instant',
                     isRequest,
-                    JSON.stringify(answers)
+                    JSON.stringify(answers),
+                    resolvedAssignedUserId
                 ]
             );
             const booking = pendingRes.rows[0];

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Users, UserPlus } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Calendar, Users, UserPlus } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '../../shared/utils';
 
 export default function Team() {
@@ -10,12 +11,14 @@ export default function Team() {
     const [error, setError] = useState('');
     const [info, setInfo] = useState('');
     const [busy, setBusy] = useState(false);
+    const [teamsEnabled, setTeamsEnabled] = useState(false);
 
     const load = async () => {
         try {
             const res = await apiGet('/api/host/team');
             setMembers(res.members || []);
             setInvites(res.invites || []);
+            setTeamsEnabled(Boolean(res.teamsEnabled));
         } catch (e: any) {
             setError(e.message);
         }
@@ -47,10 +50,21 @@ export default function Team() {
                 <h1 className="font-black text-xl flex items-center gap-2">
                     <Users className="w-5 h-5" /> Team
                 </h1>
-                <p className="text-sm text-white/60 mt-1">Invite admins, dispatchers, and techs</p>
+                <p className="text-sm text-white/60 mt-1">
+                    {teamsEnabled
+                        ? 'Invite staff, mark them bookable, and set each member’s schedule under Booking → Availability'
+                        : 'Invite admins, dispatchers, and techs. Member calendars require Booking Pro.'}
+                </p>
             </div>
             {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
             {info && <p className="text-sm text-emerald-800 bg-emerald-50 rounded-xl px-4 py-2 break-all">{info}</p>}
+
+            {!teamsEnabled && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-900">
+                    Bookable stylist schedules are a <strong>Booking Pro</strong> feature. Solo plans keep organisation
+                    opening hours only.
+                </div>
+            )}
 
             <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 space-y-3">
                 <h2 className="text-xs font-bold uppercase text-[#64748B] flex items-center gap-1">
@@ -86,18 +100,82 @@ export default function Team() {
             <div className="bg-white border border-[#E2E8F0] rounded-2xl overflow-hidden">
                 <ul className="divide-y divide-[#F1F5F9]">
                     {members.map((m) => (
-                        <li key={m.user_id || m.membership_id} className="px-4 py-3 flex justify-between gap-3 items-center">
-                            <div>
-                                <p className="font-bold text-sm">{m.name}</p>
+                        <li
+                            key={m.user_id || m.membership_id}
+                            className="px-4 py-3 flex flex-col sm:flex-row sm:justify-between gap-3 sm:items-center"
+                        >
+                            <div className="min-w-0">
+                                <p className="font-bold text-sm">{m.display_name || m.name}</p>
                                 <p className="text-xs text-[#64748B]">{m.email}</p>
+                                {teamsEnabled && (
+                                    <input
+                                        type="text"
+                                        defaultValue={m.display_name || m.name || ''}
+                                        placeholder="Display name (shown to customers)"
+                                        className="mt-2 w-full max-w-xs rounded-lg border border-[#E2E8F0] px-2 py-1 text-xs"
+                                        onBlur={async (e) => {
+                                            const displayName = e.target.value.trim();
+                                            if (displayName === (m.display_name || m.name || '')) return;
+                                            try {
+                                                await apiPatch(
+                                                    `/api/host/team/members/${m.user_id || m.membership_id}`,
+                                                    {
+                                                        role: m.role,
+                                                        active: m.active !== false,
+                                                        bookable: Boolean(m.bookable),
+                                                        displayName
+                                                    }
+                                                );
+                                                load();
+                                            } catch (err: any) {
+                                                setError(err.message);
+                                            }
+                                        }}
+                                    />
+                                )}
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                                {teamsEnabled && (
+                                    <>
+                                        <label className="text-xs font-bold text-[#64748B] flex items-center gap-1.5">
+                                            <input
+                                                type="checkbox"
+                                                checked={Boolean(m.bookable)}
+                                                onChange={async (e) => {
+                                                    try {
+                                                        await apiPatch(
+                                                            `/api/host/team/members/${m.user_id || m.membership_id}`,
+                                                            {
+                                                                role: m.role,
+                                                                active: m.active !== false,
+                                                                bookable: e.target.checked,
+                                                                displayName: m.display_name || m.name || ''
+                                                            }
+                                                        );
+                                                        load();
+                                                    } catch (err: any) {
+                                                        setError(err.message);
+                                                    }
+                                                }}
+                                            />
+                                            Bookable
+                                        </label>
+                                        <Link
+                                            to="/booking?panel=settings&tab=availability"
+                                            className="text-xs font-bold text-[#F59E0B] inline-flex items-center gap-1"
+                                        >
+                                            <Calendar className="w-3 h-3" /> Schedule
+                                        </Link>
+                                    </>
+                                )}
                                 <select
                                     value={m.role}
                                     onChange={async (e) => {
                                         await apiPatch(`/api/host/team/members/${m.user_id || m.membership_id}`, {
                                             role: e.target.value,
-                                            active: m.active !== false
+                                            active: m.active !== false,
+                                            bookable: Boolean(m.bookable),
+                                            displayName: m.display_name || m.name || ''
                                         });
                                         load();
                                     }}
@@ -114,7 +192,9 @@ export default function Team() {
                                     onClick={async () => {
                                         await apiPatch(`/api/host/team/members/${m.user_id || m.membership_id}`, {
                                             role: m.role,
-                                            active: m.active === false
+                                            active: m.active === false,
+                                            bookable: Boolean(m.bookable),
+                                            displayName: m.display_name || m.name || ''
                                         });
                                         load();
                                     }}

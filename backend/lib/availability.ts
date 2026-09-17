@@ -67,6 +67,63 @@ function resolveRulesForDate(dateStr: string, dateRules: any[], weeklyRules: any
     });
 }
 
+/** Intersect two sets of time windows (minutes from midnight). */
+function intersectWindows(
+    a: { start: number; end: number }[],
+    b: { start: number; end: number }[]
+): { start: number; end: number }[] {
+    const out: { start: number; end: number }[] = [];
+    for (const wa of a) {
+        for (const wb of b) {
+            const start = Math.max(wa.start, wb.start);
+            const end = Math.min(wa.end, wb.end);
+            if (end > start) out.push({ start, end });
+        }
+    }
+    return out;
+}
+
+function rulesToWindows(rules: any[]): { start: number; end: number }[] {
+    return (rules || []).map((r) => ({
+        start: parseTimeToMinutes(normalizeTime(r.start_time ?? r.startTime)),
+        end: parseTimeToMinutes(normalizeTime(r.end_time ?? r.endTime))
+    }));
+}
+
+/**
+ * When teamsEnabled, bookable windows = org opening hours ∩ member availability.
+ * Pass org*Rules as opening hours (user_id IS NULL) and member*Rules for the member.
+ */
+function resolveWindowsForDate(
+    dateStr: string,
+    opts: {
+        dateRules?: any[];
+        weeklyRules?: any[];
+        orgDateRules?: any[];
+        orgWeeklyRules?: any[];
+        memberDateRules?: any[];
+        memberWeeklyRules?: any[];
+        intersectWithOrg?: boolean;
+    }
+): { start: number; end: number }[] {
+    if (opts.intersectWithOrg) {
+        const orgDay = resolveRulesForDate(
+            dateStr,
+            opts.orgDateRules || [],
+            opts.orgWeeklyRules || []
+        );
+        const memberDay = resolveRulesForDate(
+            dateStr,
+            opts.memberDateRules || [],
+            opts.memberWeeklyRules || []
+        );
+        if (!orgDay.length || !memberDay.length) return [];
+        return intersectWindows(rulesToWindows(orgDay), rulesToWindows(memberDay));
+    }
+    const dayRules = resolveRulesForDate(dateStr, opts.dateRules || [], opts.weeklyRules || []);
+    return rulesToWindows(dayRules);
+}
+
 function generateSlots({
     fromDate,
     toDate,
@@ -74,6 +131,11 @@ function generateSlots({
     rules,
     weeklyRules,
     dateRules,
+    orgWeeklyRules,
+    orgDateRules,
+    memberWeeklyRules,
+    memberDateRules,
+    intersectWithOrg,
     durationMinutes,
     bufferMinutes,
     minNoticeHours,
@@ -86,21 +148,25 @@ function generateSlots({
     const minStart = new Date(now.getTime() + minNoticeHours * 60 * 60 * 1000);
     const maxEnd = new Date(now.getTime() + maxDaysAhead * 24 * 60 * 60 * 1000);
 
-    
-    const resolvedDateRules = dateRules || rules || [];
-    const resolvedWeekly = weeklyRules || [];
-
     const start = new Date(`${fromDate}T00:00:00`);
     const end = new Date(`${toDate}T23:59:59`);
 
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         if (d > maxEnd) break;
         const dateStr = localDateStr(d);
-        const dayRules = resolveRulesForDate(dateStr, resolvedDateRules, resolvedWeekly);
+        const windows = resolveWindowsForDate(dateStr, {
+            dateRules: dateRules || rules || [],
+            weeklyRules: weeklyRules || [],
+            orgDateRules,
+            orgWeeklyRules,
+            memberDateRules,
+            memberWeeklyRules,
+            intersectWithOrg: Boolean(intersectWithOrg)
+        });
 
-        for (const rule of dayRules) {
-            const windowStart = parseTimeToMinutes(rule.start_time ?? rule.startTime);
-            const windowEnd = parseTimeToMinutes(rule.end_time ?? rule.endTime);
+        for (const win of windows) {
+            const windowStart = win.start;
+            const windowEnd = win.end;
             let cursor = windowStart;
 
             while (cursor + durationMinutes <= windowEnd) {
@@ -150,11 +216,26 @@ function datesWithAvailability(slots: any[]) {
     return [...set];
 }
 
+/** Merge slots by startAt, keeping first occurrence (for First Available union). */
+function mergeSlotsByStart(slotLists: any[][]): any[] {
+    const map = new Map<string, any>();
+    for (const list of slotLists) {
+        for (const s of list) {
+            if (!map.has(s.startAt)) map.set(s.startAt, s);
+        }
+    }
+    return [...map.values()].sort(
+        (a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
+    );
+}
+
 export {
     generateSlots,
     datesWithAvailability,
     parseTimeToMinutes,
     minutesToTime,
     resolveRulesForDate,
-    dayOfWeekForDate
+    dayOfWeekForDate,
+    intersectWindows,
+    mergeSlotsByStart
 };

@@ -2,12 +2,13 @@ import { Router, Request, Response } from 'express';
 import { query } from '../lib/db';
 import { requireHost } from '../middleware/auth';
 import { uniqueEventSlug } from '../lib/slug';
-import { createBalanceInvoice, refundBookingDeposit } from '../lib/invoices';
+import { createBalanceInvoice, effectiveJobTotalCents, refundBookingDeposit } from '../lib/invoices';
 import { sendInvoiceEmail, sendCancellationEmail } from '../lib/bookingEmail';
 import { createBookingOrg, listUserBookingOrgs, assertUserOrgMembership } from '../lib/seed';
 import { confirmBookingPayment } from '../lib/confirmBooking';
 import { deleteCalendarEvent } from '../lib/googleCalendar';
-import { requireFeature } from '../middleware/entitlements';
+import { loadOrgEntitlements, requireFeature } from '../middleware/entitlements';
+import { orgHasBookingTeams } from '../lib/planCatalog';
 import {
     connectStatusPayload,
     createConnectAccountLink,
@@ -158,11 +159,11 @@ async function loadDashboard(orgId: any) {
         [orgId]
     );
     const { rows: dateRules } = await query(
-        'SELECT * FROM availability_date_rules WHERE org_id = $1 ORDER BY avail_date, start_time',
+        'SELECT * FROM availability_date_rules WHERE org_id = $1 AND user_id IS NULL ORDER BY avail_date, start_time',
         [orgId]
     );
     const { rows: weeklyRules } = await query(
-        'SELECT * FROM availability_rules WHERE org_id = $1 ORDER BY day_of_week, start_time',
+        'SELECT * FROM availability_rules WHERE org_id = $1 AND user_id IS NULL ORDER BY day_of_week, start_time',
         [orgId]
     );
     return {
@@ -235,10 +236,14 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             processDueScheduledMessages(25).catch((err: any) => {
                 console.error('Reminder process error:', err.message);
             });
+            const ents = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
+            const teamsEnabled = orgHasBookingTeams(ents.planId);
             res.json({
                 ready: true,
                 canResume: false,
                 ...data,
+                teamsEnabled,
+                planId: ents.planId || null,
                 bookingIndustry: industryPreset
                     ? {
                           id: industryPreset.id,
@@ -598,6 +603,12 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const { name, description, durationMinutes, depositCents, totalCents, active, category } =
                 req.body || {};
             if (!name) return res.status(400).json({ error: 'Name is required' });
+            const dep = Math.max(0, Math.round(Number(depositCents) || 0));
+            const totRaw = totalCents !== undefined && totalCents !== null ? Number(totalCents) : dep;
+            if (!Number.isFinite(totRaw) || totRaw < 0) {
+                return res.status(400).json({ error: 'totalCents must be a non-negative amount in pence' });
+            }
+            const tot = Math.max(dep, Math.round(totRaw));
             const slug = await uniqueEventSlug((req as any).orgId, name, query);
             const { rows } = await query(
                 `INSERT INTO event_types (org_id, slug, name, description, duration_minutes, deposit_cents, total_cents, active, category)
@@ -608,8 +619,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                     name,
                     description || '',
                     Number(durationMinutes) || 60,
-                    Number(depositCents) || 4500,
-                    Number(totalCents) || Number(depositCents) || 4500,
+                    dep,
+                    tot,
                     active !== false,
                     String(category || '').trim()
                 ]
@@ -624,6 +635,27 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         try {
             const { name, description, durationMinutes, depositCents, totalCents, active, category } =
                 req.body || {};
+            if (depositCents !== undefined || totalCents !== undefined) {
+                const { rows: cur } = await query(
+                    `SELECT deposit_cents, total_cents FROM event_types WHERE id = $1 AND org_id = $2`,
+                    [req.params.id, (req as any).orgId]
+                );
+                if (!cur.length) return res.status(404).json({ error: 'Event type not found' });
+                const dep =
+                    depositCents !== undefined
+                        ? Math.max(0, Math.round(Number(depositCents) || 0))
+                        : Number(cur[0].deposit_cents) || 0;
+                const tot =
+                    totalCents !== undefined
+                        ? Math.max(0, Math.round(Number(totalCents) || 0))
+                        : Number(cur[0].total_cents) || 0;
+                if (totalCents !== undefined && (!Number.isFinite(Number(totalCents)) || Number(totalCents) < 0)) {
+                    return res.status(400).json({ error: 'totalCents must be a non-negative amount in pence' });
+                }
+                if (tot < dep) {
+                    return res.status(400).json({ error: 'Service price (total) must be at least the deposit' });
+                }
+            }
             const { rows } = await query(
                 `UPDATE event_types SET
                   name = COALESCE($1, name),
@@ -638,8 +670,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                     name,
                     description,
                     durationMinutes,
-                    depositCents,
-                    totalCents,
+                    depositCents === undefined ? null : Math.max(0, Math.round(Number(depositCents) || 0)),
+                    totalCents === undefined ? null : Math.max(0, Math.round(Number(totalCents) || 0)),
                     active,
                     category === undefined ? null : String(category || '').trim(),
                     req.params.id,
@@ -744,57 +776,151 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
     });
 
     router.get('/availability', async (req: Request, res: Response) => {
-        const { rows: org } = await query('SELECT timezone, min_notice_hours, max_days_ahead, buffer_minutes FROM organizations WHERE id = $1', [(req as any).orgId]);
+        const ents = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
+        const teamsEnabled = orgHasBookingTeams(ents.planId);
+        const memberUserId = String(req.query.userId || '').trim() || null;
+        if (memberUserId && !teamsEnabled) {
+            return res.status(403).json({
+                error: 'Member schedules require Booking Pro',
+                code: 'upgrade_required',
+                teamsEnabled: false
+            });
+        }
+        const { rows: org } = await query(
+            'SELECT timezone, min_notice_hours, max_days_ahead, buffer_minutes FROM organizations WHERE id = $1',
+            [(req as any).orgId]
+        );
+        if (memberUserId) {
+            const { rows: dateRules } = await query(
+                `SELECT * FROM availability_date_rules
+                 WHERE org_id = $1 AND user_id = $2::uuid
+                 ORDER BY avail_date, start_time`,
+                [(req as any).orgId, memberUserId]
+            );
+            const { rows: weeklyRules } = await query(
+                `SELECT * FROM availability_rules
+                 WHERE org_id = $1 AND user_id = $2::uuid
+                 ORDER BY day_of_week, start_time`,
+                [(req as any).orgId, memberUserId]
+            );
+            return res.json({
+                settings: org[0],
+                dateRules,
+                weeklyRules,
+                teamsEnabled,
+                scope: 'member',
+                userId: memberUserId
+            });
+        }
         const { rows: dateRules } = await query(
-            'SELECT * FROM availability_date_rules WHERE org_id = $1 ORDER BY avail_date, start_time',
+            `SELECT * FROM availability_date_rules
+             WHERE org_id = $1 AND user_id IS NULL
+             ORDER BY avail_date, start_time`,
             [(req as any).orgId]
         );
         const { rows: weeklyRules } = await query(
-            'SELECT * FROM availability_rules WHERE org_id = $1 ORDER BY day_of_week, start_time',
+            `SELECT * FROM availability_rules
+             WHERE org_id = $1 AND user_id IS NULL
+             ORDER BY day_of_week, start_time`,
             [(req as any).orgId]
         );
-        res.json({ settings: org[0], dateRules, weeklyRules });
+        res.json({
+            settings: org[0],
+            dateRules,
+            weeklyRules,
+            teamsEnabled,
+            scope: teamsEnabled ? 'org_hours' : 'org'
+        });
     });
 
     router.put('/availability', async (req: Request, res: Response) => {
         try {
-            const { settings, dateRules, weeklyRules } = req.body || {};
-            if (settings) {
+            const { settings, dateRules, weeklyRules, userId: bodyUserId } = req.body || {};
+            const ents = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
+            const teamsEnabled = orgHasBookingTeams(ents.planId);
+            const memberUserId = String(bodyUserId || '').trim() || null;
+            if (memberUserId && !teamsEnabled) {
+                return res.status(403).json({
+                    error: 'Member schedules require Booking Pro',
+                    code: 'upgrade_required',
+                    teamsEnabled: false
+                });
+            }
+            if (memberUserId) {
+                const { rows: mem } = await query(
+                    `SELECT user_id FROM memberships WHERE org_id = $1 AND user_id = $2::uuid LIMIT 1`,
+                    [(req as any).orgId, memberUserId]
+                );
+                if (!mem.length) return res.status(404).json({ error: 'Team member not found' });
+            }
+            if (settings && !memberUserId) {
                 await query(
                     `UPDATE organizations SET timezone = COALESCE($1, timezone), min_notice_hours = COALESCE($2, min_notice_hours),
                      max_days_ahead = COALESCE($3, max_days_ahead), buffer_minutes = COALESCE($4, buffer_minutes) WHERE id = $5`,
-                    [settings.timezone, settings.minNoticeHours, settings.maxDaysAhead, settings.bufferMinutes, (req as any).orgId]
+                    [
+                        settings.timezone,
+                        settings.minNoticeHours,
+                        settings.maxDaysAhead,
+                        settings.bufferMinutes,
+                        (req as any).orgId
+                    ]
                 );
             }
             if (Array.isArray(weeklyRules)) {
-                await query('DELETE FROM availability_rules WHERE org_id = $1', [(req as any).orgId]);
+                if (memberUserId) {
+                    await query('DELETE FROM availability_rules WHERE org_id = $1 AND user_id = $2::uuid', [
+                        (req as any).orgId,
+                        memberUserId
+                    ]);
+                } else {
+                    await query('DELETE FROM availability_rules WHERE org_id = $1 AND user_id IS NULL', [
+                        (req as any).orgId
+                    ]);
+                }
                 for (const r of weeklyRules) {
                     const dayOfWeek = Number(r.dayOfWeek ?? r.day_of_week);
                     const startTime = String(r.startTime || r.start_time || '').slice(0, 5);
                     const endTime = String(r.endTime || r.end_time || '').slice(0, 5);
-                    if (Number.isNaN(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6 || !startTime || !endTime) continue;
+                    if (Number.isNaN(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6 || !startTime || !endTime)
+                        continue;
                     await query(
-                        `INSERT INTO availability_rules (org_id, day_of_week, start_time, end_time, enabled)
-                         VALUES ($1, $2, $3, $4, $5)`,
-                        [(req as any).orgId, dayOfWeek, startTime, endTime, r.enabled !== false]
+                        `INSERT INTO availability_rules (org_id, day_of_week, start_time, end_time, enabled, user_id)
+                         VALUES ($1, $2, $3, $4, $5, $6)`,
+                        [
+                            (req as any).orgId,
+                            dayOfWeek,
+                            startTime,
+                            endTime,
+                            r.enabled !== false,
+                            memberUserId
+                        ]
                     );
                 }
             }
             if (Array.isArray(dateRules)) {
-                await query('DELETE FROM availability_date_rules WHERE org_id = $1', [(req as any).orgId]);
+                if (memberUserId) {
+                    await query(
+                        'DELETE FROM availability_date_rules WHERE org_id = $1 AND user_id = $2::uuid',
+                        [(req as any).orgId, memberUserId]
+                    );
+                } else {
+                    await query('DELETE FROM availability_date_rules WHERE org_id = $1 AND user_id IS NULL', [
+                        (req as any).orgId
+                    ]);
+                }
                 for (const r of dateRules) {
                     const date = String(r.date || r.avail_date || '').slice(0, 10);
                     const startTime = String(r.startTime || r.start_time || '').slice(0, 5);
                     const endTime = String(r.endTime || r.end_time || '').slice(0, 5);
                     if (!date || !startTime || !endTime) continue;
                     await query(
-                        `INSERT INTO availability_date_rules (org_id, avail_date, start_time, end_time, enabled)
-                         VALUES ($1, $2, $3, $4, $5)`,
-                        [(req as any).orgId, date, startTime, endTime, r.enabled !== false]
+                        `INSERT INTO availability_date_rules (org_id, avail_date, start_time, end_time, enabled, user_id)
+                         VALUES ($1, $2, $3, $4, $5, $6)`,
+                        [(req as any).orgId, date, startTime, endTime, r.enabled !== false, memberUserId]
                     );
                 }
             }
-            res.json({ success: true });
+            res.json({ success: true, teamsEnabled, userId: memberUserId });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }
@@ -1213,7 +1339,9 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         try {
             const members = await listTeamMembers((req as any).orgId);
             const invites = await listPendingInvites((req as any).orgId);
-            res.json({ members, invites });
+            const ents = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
+            const teamsEnabled = orgHasBookingTeams(ents.planId);
+            res.json({ members, invites, teamsEnabled, planId: ents.planId || null });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }
@@ -1235,13 +1363,30 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
 
     router.patch('/team/members/:membershipId', async (req: Request, res: Response) => {
         try {
+            const ents = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
+            const teamsEnabled = orgHasBookingTeams(ents.planId);
+            const wantsBookable =
+                req.body?.bookable !== undefined || req.body?.displayName !== undefined;
+            if (wantsBookable && !teamsEnabled) {
+                return res.status(403).json({
+                    error: 'Bookable team members require Booking Pro',
+                    code: 'upgrade_required',
+                    teamsEnabled: false
+                });
+            }
             const member = await updateMemberRole(
                 (req as any).orgId,
                 String(req.params.membershipId),
                 String(req.body?.role || 'tech'),
-                req.body?.active
+                req.body?.active,
+                teamsEnabled
+                    ? {
+                          bookable: req.body?.bookable,
+                          displayName: req.body?.displayName
+                      }
+                    : undefined
             );
-            res.json({ member });
+            res.json({ member, teamsEnabled });
         } catch (err: any) {
             res.status(err.status || 500).json({ error: err.message });
         }
@@ -1694,12 +1839,12 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             }
 
             await query(
-                `UPDATE bookings SET status = 'done', job_status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE id = $1`,
+                `UPDATE bookings SET status = 'done', job_status = 'completed', completed_at = NOW(),
+                 invoice_last_error = NULL, updated_at = NOW() WHERE id = $1`,
                 [booking.id]
             );
             const updated = (await query('SELECT * FROM bookings WHERE id = $1', [booking.id])).rows[0];
 
-            
             res.json({ booking: updated, invoicePending: Boolean(stripeClient) });
 
             fireZapierEvent((req as any).orgId, 'booking.completed', {
@@ -1710,15 +1855,36 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
 
             schedulePostJobFollowup(updated).catch(() => {});
 
-            if (stripeClient) {
+            if (!stripeClient) {
+                await query(
+                    `UPDATE bookings SET invoice_last_error = $2, updated_at = NOW() WHERE id = $1`,
+                    [booking.id, 'Stripe not configured on the server']
+                ).catch(() => {});
+            } else {
                 setImmediate(async () => {
                     try {
-                        const { rows: orgRows } = await query('SELECT * FROM organizations WHERE id = $1', [(req as any).orgId]);
+                        const { rows: orgRows } = await query('SELECT * FROM organizations WHERE id = $1', [
+                            (req as any).orgId
+                        ]);
                         const org = orgRows[0];
-                        const { rows: etRows } = await query('SELECT * FROM event_types WHERE id = $1', [booking.event_type_id]);
+                        const { rows: etRows } = await query('SELECT * FROM event_types WHERE id = $1', [
+                            booking.event_type_id
+                        ]);
                         const eventType = etRows[0];
-                        const invoiceResult = await createBalanceInvoice(stripeClient, updated, eventType, org);
-                        if (!invoiceResult.skipped && invoiceResult.stripeInvoiceId) {
+                        const invoiceResult = await createBalanceInvoice(
+                            stripeClient,
+                            updated,
+                            eventType,
+                            org
+                        );
+                        if (invoiceResult.skipped) {
+                            await query(
+                                `UPDATE bookings SET invoice_last_error = $2, updated_at = NOW() WHERE id = $1`,
+                                [booking.id, invoiceResult.reason || 'Invoice skipped']
+                            );
+                            return;
+                        }
+                        if (invoiceResult.stripeInvoiceId) {
                             const invIns = await query(
                                 `INSERT INTO invoices (booking_id, client_id, stripe_invoice_id, stripe_hosted_url, amount_cents, status)
                                  VALUES ($1, $2, $3, $4, $5, $6)
@@ -1736,7 +1902,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                                 ]
                             );
                             await query(
-                                `UPDATE bookings SET job_status = 'invoiced', updated_at = NOW() WHERE id = $1`,
+                                `UPDATE bookings SET job_status = 'invoiced', invoice_last_error = NULL, updated_at = NOW() WHERE id = $1`,
                                 [booking.id]
                             );
                             if (invoiceResult.status !== 'paid') {
@@ -1762,6 +1928,10 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                         }
                     } catch (err: any) {
                         console.error('Balance invoice error (job already marked done):', err.message);
+                        await query(
+                            `UPDATE bookings SET invoice_last_error = $2, updated_at = NOW() WHERE id = $1`,
+                            [booking.id, String(err.message || 'Invoice failed').slice(0, 500)]
+                        ).catch(() => {});
                     }
                 });
             }
@@ -1773,7 +1943,13 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
 
     router.post('/bookings/:id/invoice', async (req: Request, res: Response) => {
         try {
-            if (!stripeClient) return res.status(400).json({ error: 'Stripe not configured' });
+            if (!stripeClient) {
+                return res.status(400).json({
+                    error: 'Stripe not configured',
+                    skipped: true,
+                    reason: 'Stripe not configured on the server'
+                });
+            }
 
             const { rows } = await query(
                 `SELECT b.*, e.name AS event_name, e.slug AS event_slug
@@ -1784,14 +1960,49 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             if (!rows.length) return res.status(404).json({ error: 'Booking not found' });
             const booking = rows[0];
 
-            const { rows: orgRows } = await query('SELECT * FROM organizations WHERE id = $1', [(req as any).orgId]);
+            const { rows: orgRows } = await query('SELECT * FROM organizations WHERE id = $1', [
+                (req as any).orgId
+            ]);
             const org = orgRows[0];
-            const { rows: etRows } = await query('SELECT * FROM event_types WHERE id = $1', [booking.event_type_id]);
+            if (!org?.stripe_account_id || !org?.stripe_charges_enabled) {
+                const reason =
+                    'Connect Stripe in Settings → Integrations so payment requests can be sent';
+                await query(
+                    `UPDATE bookings SET invoice_last_error = $2, updated_at = NOW() WHERE id = $1`,
+                    [booking.id, reason]
+                );
+                return res.status(400).json({ error: reason, skipped: true, reason });
+            }
+
+            const { rows: etRows } = await query('SELECT * FROM event_types WHERE id = $1', [
+                booking.event_type_id
+            ]);
             const eventType = etRows[0];
 
-            const invoiceResult = await createBalanceInvoice(stripeClient, booking, eventType, org);
+            const amountOverride =
+                req.body?.amountCents != null && req.body?.amountCents !== ''
+                    ? Math.round(Number(req.body.amountCents))
+                    : null;
+            if (amountOverride != null && (!Number.isFinite(amountOverride) || amountOverride < 0)) {
+                return res.status(400).json({ error: 'amountCents must be a non-negative integer' });
+            }
+
+            const invoiceResult = await createBalanceInvoice(stripeClient, booking, eventType, org, {
+                amountCents: amountOverride
+            });
             if (invoiceResult.skipped) {
-                return res.json({ skipped: true, reason: invoiceResult.reason });
+                await query(
+                    `UPDATE bookings SET invoice_last_error = $2, updated_at = NOW() WHERE id = $1`,
+                    [booking.id, invoiceResult.reason || 'Invoice skipped']
+                );
+                return res.json({
+                    skipped: true,
+                    reason: invoiceResult.reason,
+                    suggestedAmountCents: Math.max(
+                        0,
+                        effectiveJobTotalCents(booking, eventType) - (Number(booking.deposit_cents) || 0)
+                    )
+                });
             }
 
             const invIns = await query(
@@ -1813,7 +2024,9 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             await scheduleInvoiceUnpaidReminder(invIns.rows[0], booking, org).catch(() => {});
 
             await query(
-                `UPDATE bookings SET status = 'done', job_status = 'invoiced', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW() WHERE id = $1`,
+                `UPDATE bookings SET status = 'done', job_status = 'invoiced',
+                 completed_at = COALESCE(completed_at, NOW()), invoice_last_error = NULL, updated_at = NOW()
+                 WHERE id = $1`,
                 [booking.id]
             );
             schedulePostJobFollowup(booking).catch(() => {});
@@ -1827,9 +2040,23 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 invoiceUrl: invoiceResult.hostedUrl
             });
 
-            res.json({ invoice: invoiceResult, email: emailResult });
+            const updated = (await query('SELECT * FROM bookings WHERE id = $1', [booking.id])).rows[0];
+            res.json({
+                invoice: invoiceResult,
+                email: emailResult,
+                booking: updated,
+                invoiceUrl: invoiceResult.hostedUrl
+            });
         } catch (err: any) {
             console.error('Invoice error:', err);
+            try {
+                await query(
+                    `UPDATE bookings SET invoice_last_error = $2, updated_at = NOW() WHERE id = $1 AND org_id = $3`,
+                    [req.params.id, String(err.message || 'Invoice failed').slice(0, 500), (req as any).orgId]
+                );
+            } catch {
+                /* ignore */
+            }
             res.status(500).json({ error: err.message });
         }
     });

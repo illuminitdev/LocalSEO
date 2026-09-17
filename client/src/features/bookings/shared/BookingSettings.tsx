@@ -115,6 +115,8 @@ type Props = {
         eventTypes?: any[];
         availabilityDateRules?: any[];
         availabilityWeeklyRules?: any[];
+        teamsEnabled?: boolean;
+        planId?: string | null;
     } | null;
     onRefresh?: () => void;
 };
@@ -182,10 +184,12 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
     const [newSlotName, setNewSlotName] = useState('');
     const [newSlotDuration, setNewSlotDuration] = useState('60');
     const [newSlotDeposit, setNewSlotDeposit] = useState('0');
+    const [newSlotPrice, setNewSlotPrice] = useState('45');
     const [newSlotCategory, setNewSlotCategory] = useState<string>(SALON_SERVICE_CATEGORIES[0]);
     const [customCategories, setCustomCategories] = useState<string[]>([]);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editDepositPounds, setEditDepositPounds] = useState('');
+    const [editPricePounds, setEditPricePounds] = useState('');
     const [editCategory, setEditCategory] = useState('');
     const [editName, setEditName] = useState('');
     const [editDuration, setEditDuration] = useState('60');
@@ -195,12 +199,17 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
     const [savingProfile, setSavingProfile] = useState(false);
     const [savingAvailability, setSavingAvailability] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
+    const [teamsEnabled, setTeamsEnabled] = useState(false);
+    const [availScope, setAvailScope] = useState<'org' | string>('org');
+    const [bookableMembers, setBookableMembers] = useState<any[]>([]);
+    const [loadingMemberAvail, setLoadingMemberAvail] = useState(false);
 
     const applyDashboard = (dash: NonNullable<Props['initialDashboard']>) => {
         setOrg(dash.organization);
         setEventTypes(dash.eventTypes || []);
         setDateRules(dash.availabilityDateRules || []);
         setWeeklyRules(dash.availabilityWeeklyRules || []);
+        setTeamsEnabled(Boolean(dash.teamsEnabled));
         setSettings({
             timezone: dash.organization?.timezone || 'Europe/London',
             minNoticeHours: dash.organization?.min_notice_hours || 2,
@@ -209,6 +218,40 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         });
         setZapierUrl(dash.organization?.zapier_webhook_url || '');
         setZapierSecret(dash.organization?.zapier_secret || '');
+    };
+
+    useEffect(() => {
+        if (!org?.id) return;
+        apiGet('/api/host/team')
+            .then((res) => {
+                setBookableMembers(res.members || []);
+                if (res.teamsEnabled != null) setTeamsEnabled(Boolean(res.teamsEnabled));
+            })
+            .catch(() => {});
+    }, [org?.id]);
+
+    const loadAvailabilityScope = async (scope: 'org' | string) => {
+        setLoadingMemberAvail(true);
+        setError('');
+        try {
+            const qs = scope === 'org' ? '' : `?userId=${encodeURIComponent(scope)}`;
+            const res = await apiGet(`/api/host/availability${qs}`);
+            setDateRules(res.dateRules || []);
+            setWeeklyRules(res.weeklyRules || []);
+            if (res.settings) {
+                setSettings({
+                    timezone: res.settings.timezone || settings.timezone,
+                    minNoticeHours: res.settings.min_notice_hours ?? settings.minNoticeHours,
+                    maxDaysAhead: res.settings.max_days_ahead ?? settings.maxDaysAhead,
+                    bufferMinutes: res.settings.buffer_minutes ?? settings.bufferMinutes
+                });
+            }
+            setAvailScope(scope);
+        } catch (e: any) {
+            setError(e.message || 'Could not load availability');
+        } finally {
+            setLoadingMemberAvail(false);
+        }
     };
 
     useEffect(() => {
@@ -289,18 +332,22 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         setError('');
         try {
             await apiPut('/api/host/availability', {
-                settings: {
-                    timezone: payload.settings.timezone,
-                    minNoticeHours: payload.settings.minNoticeHours,
-                    maxDaysAhead: payload.settings.maxDaysAhead,
-                    bufferMinutes: payload.settings.bufferMinutes
-                },
+                settings:
+                    availScope === 'org'
+                        ? {
+                              timezone: payload.settings.timezone,
+                              minNoticeHours: payload.settings.minNoticeHours,
+                              maxDaysAhead: payload.settings.maxDaysAhead,
+                              bufferMinutes: payload.settings.bufferMinutes
+                          }
+                        : undefined,
                 weeklyRules: payload.weeklyRules,
-                dateRules: payload.dateRules
+                dateRules: payload.dateRules,
+                ...(availScope !== 'org' ? { userId: availScope } : {})
             });
             setDateRules(payload.dateRules);
             setWeeklyRules(payload.weeklyRules);
-            setSettings(payload.settings);
+            if (availScope === 'org') setSettings(payload.settings);
             setSaved(true);
             onRefresh?.();
             setTimeout(() => setSaved(false), 2000);
@@ -358,6 +405,13 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
             setError('Enter a valid deposit (0 is allowed for free slots).');
             return;
         }
+        const priceCents = isSalons
+            ? poundsToCentsAllowZero(newSlotPrice)
+            : depositCents;
+        if (isSalons && (priceCents == null || priceCents < depositCents)) {
+            setError('Enter a service price that is at least the deposit amount.');
+            return;
+        }
         const category = isSalons ? rememberCategory(newSlotCategory) : '';
         if (isSalons && !category) {
             setError('Enter or pick a category (e.g. Hair, Beauty, or your own).');
@@ -371,13 +425,14 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 description: name,
                 durationMinutes,
                 depositCents,
-                totalCents: depositCents,
+                totalCents: isSalons ? priceCents : depositCents,
                 ...(isSalons ? { category } : {})
             });
             setEventTypes((prev) => [...prev, et]);
             setNewSlotName('');
             setNewSlotDuration('60');
             setNewSlotDeposit('0');
+            setNewSlotPrice('45');
             if (isSalons) setNewSlotCategory(category || SALON_SERVICE_CATEGORIES[0]);
         } catch (e: any) {
             setError(e.message || (isSalons ? 'Could not add service' : 'Could not add appointment slot'));
@@ -389,6 +444,9 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
     const startEdit = (et: any) => {
         setEditingId(et.id);
         setEditDepositPounds((et.deposit_cents / 100).toFixed(2).replace(/\.00$/, ''));
+        setEditPricePounds(
+            ((et.total_cents ?? et.deposit_cents) / 100).toFixed(2).replace(/\.00$/, '')
+        );
         setEditName(et.name || '');
         setEditDuration(String(et.duration_minutes || 60));
         setEditCategory(resolveSalonServiceCategory(et.name, et.category) || SALON_SERVICE_CATEGORIES[0]);
@@ -399,6 +457,13 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         const depositCents = poundsToCentsAllowZero(editDepositPounds);
         if (depositCents == null || depositCents < 0) {
             setError('Enter a valid deposit amount (0 allowed).');
+            return;
+        }
+        const priceCents = isSalons
+            ? poundsToCentsAllowZero(editPricePounds)
+            : depositCents;
+        if (isSalons && (priceCents == null || priceCents < depositCents)) {
+            setError('Service price must be at least the deposit.');
             return;
         }
         const durationMinutes = parseInt(editDuration, 10);
@@ -421,7 +486,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         try {
             const updated = await apiPatch(`/api/host/event-types/${et.id}`, {
                 depositCents,
-                totalCents: depositCents,
+                totalCents: isSalons ? priceCents : depositCents,
                 ...(isSalons
                     ? {
                           name,
@@ -923,6 +988,25 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                                                                     />
                                                                                 </div>
                                                                             </label>
+                                                                            <label className="block text-xs font-bold text-[#64748B]">
+                                                                                Price (£) *
+                                                                                <div className="relative mt-1">
+                                                                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B] font-bold">
+                                                                                        £
+                                                                                    </span>
+                                                                                    <input
+                                                                                        type="text"
+                                                                                        inputMode="decimal"
+                                                                                        value={editPricePounds}
+                                                                                        onChange={(e) =>
+                                                                                            setEditPricePounds(
+                                                                                                e.target.value
+                                                                                            )
+                                                                                        }
+                                                                                        className="w-full rounded-xl border border-[#E2E8F0] pl-8 pr-3 py-2 text-sm font-bold"
+                                                                                    />
+                                                                                </div>
+                                                                            </label>
                                                                             <div className="flex gap-2">
                                                                                 <button
                                                                                     type="button"
@@ -945,10 +1029,13 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                                                         <>
                                                                             <div className="rounded-lg bg-[#F8FAFC] px-3 py-2">
                                                                                 <p className="text-[10px] font-bold uppercase text-[#64748B]">
-                                                                                    Deposit
+                                                                                    Price
                                                                                 </p>
                                                                                 <p className="text-xl font-black text-[#F59E0B]">
-                                                                                    {formatCents(et.deposit_cents)}
+                                                                                    {formatCents(et.total_cents ?? et.deposit_cents)}
+                                                                                </p>
+                                                                                <p className="text-[10px] text-[#64748B] mt-0.5">
+                                                                                    Deposit {formatCents(et.deposit_cents)}
                                                                                 </p>
                                                                             </div>
                                                                             <p className="text-[10px] text-[#94A3B8] truncate">
@@ -1136,6 +1223,22 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                                 />
                                             </div>
                                         </label>
+                                        {isSalons && (
+                                            <label className="block">
+                                                <span className="text-xs font-bold text-[#64748B]">Price (£) *</span>
+                                                <div className="relative mt-1">
+                                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B] font-bold">£</span>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="decimal"
+                                                        value={newSlotPrice}
+                                                        onChange={(e) => setNewSlotPrice(e.target.value)}
+                                                        placeholder="45"
+                                                        className="w-full rounded-xl border border-[#E2E8F0] pl-8 pr-3 py-2.5 text-sm font-bold"
+                                                    />
+                                                </div>
+                                            </label>
+                                        )}
                                     </div>
                                     <button
                                         type="button"
@@ -1220,15 +1323,48 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 )}
 
                 {tab === 'availability' && (
-                    <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5">
+                    <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
+                        {teamsEnabled && (
+                            <div className="space-y-2">
+                                <p className="text-xs font-bold uppercase text-[#64748B]">Schedule scope</p>
+                                <p className="text-sm text-[#64748B]">
+                                    Opening hours limit when the salon is open. Member schedules are who can be booked
+                                    (Booking Pro).
+                                </p>
+                                <select
+                                    value={availScope}
+                                    disabled={loadingMemberAvail || savingAvailability}
+                                    onChange={(e) => loadAvailabilityScope(e.target.value)}
+                                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm font-semibold max-w-md"
+                                >
+                                    <option value="org">Opening hours (organisation)</option>
+                                    {bookableMembers
+                                        .filter((m) => m.active !== false)
+                                        .map((m) => (
+                                            <option key={m.user_id} value={m.user_id}>
+                                                {m.display_name || m.name || m.email}
+                                                {m.bookable ? '' : ' (not bookable yet)'}
+                                            </option>
+                                        ))}
+                                </select>
+                            </div>
+                        )}
                         <AvailabilityEditor
-                            key={`${weeklyRules.length}-${dateRules.length}`}
+                            key={`${availScope}-${weeklyRules.length}-${dateRules.length}`}
                             initialDateRules={dateRules}
                             initialWeeklyRules={weeklyRules}
                             settings={settings}
                             onSettingsChange={setSettings}
                             onSave={saveAvailability}
-                            saving={savingAvailability}
+                            saving={savingAvailability || loadingMemberAvail}
+                            title={
+                                availScope === 'org'
+                                    ? teamsEnabled
+                                        ? 'Opening hours'
+                                        : 'Your availability'
+                                    : 'Member schedule'
+                            }
+                            hideOrgSettings={availScope !== 'org'}
                         />
                     </div>
                 )}
