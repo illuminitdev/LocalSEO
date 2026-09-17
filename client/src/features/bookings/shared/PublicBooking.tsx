@@ -1845,14 +1845,15 @@ export function PublicBookHost() {
                     industry={data.industry || getBookingPreset(data.bookingIndustryId || data.tradeType)}
                     mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
                     eventTypes={eventTypes}
-                    menuItems={(data.menuItems || []).map((m: any) => ({
-                        id: m.id,
-                        category: m.category || '',
-                        name: m.name,
-                        description: m.description || '',
-                        priceCents: Number(m.priceCents ?? m.price_cents) || 0
-                    }))}
-                    eventSlug={eventTypes.length === 1 && !(data.menuItems || []).length ? eventTypes[0].slug : undefined}
+                    menuItems={[]}
+                    eventSlug={
+                        eventTypes.length === 0
+                            ? undefined
+                            : eventTypes.length === 1
+                              ? eventTypes[0].slug
+                              : eventTypes.find((et) => /book\s+a\s+table/i.test(et.name))?.slug ||
+                                eventTypes[0].slug
+                    }
                 />
             </div>
         </div>

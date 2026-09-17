@@ -96,6 +96,12 @@ export function formatPlanPrice(plan: Plan | null): string {
     return `£${(plan.priceCents / 100).toFixed(0)}/mo`;
 }
 
+/** Member-level Teams schedules: Booking Pro + Complete Growth only (not Solo / Solo Plus). */
+export function orgHasBookingTeams(planId: string | null | undefined): boolean {
+    const id = String(planId || '').trim();
+    return id === 'booking-pro' || id === 'complete-growth-system';
+}
+
 export function routeRequiresFeatures(path: string): FeatureKey[] {
     const key = ROUTE_FEATURES[path];
     if (!key) return [];

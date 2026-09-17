@@ -39,7 +39,7 @@ function categoryIcon(category: string): LucideIcon {
     return CATEGORY_ICONS[category] || LayoutGrid;
 }
 
-type Slot = { startAt: string; endAt: string; date: string; label: string };
+type Slot = { startAt: string; endAt: string; date: string; label: string; assignedUserId?: string };
 
 export type SalonEventType = {
     slug: string;
@@ -50,6 +50,8 @@ export type SalonEventType = {
     totalCents?: number;
     category?: string;
 };
+
+type BookableMember = { id: string; displayName: string };
 
 type HostBrand = {
     name: string;
@@ -151,6 +153,9 @@ export default function SalonBookingFlow({
     const [category, setCategory] = useState('');
     const [service, setService] = useState<SalonEventType | null>(null);
     const [stylist, setStylist] = useState('');
+    const [stylistUserId, setStylistUserId] = useState<string | null>(null);
+    const [teamsEnabled, setTeamsEnabled] = useState(false);
+    const [teamMembers, setTeamMembers] = useState<BookableMember[]>([]);
     const [intakeAnswers, setIntakeAnswers] = useState<Record<string, string>>({});
     const [month, setMonth] = useState(() => {
         const n = new Date();
@@ -186,6 +191,23 @@ export default function SalonBookingFlow({
     }, [categorizedEventTypes, category]);
 
     useEffect(() => {
+        apiGet(`/api/public/${hostSlug}/team`)
+            .then((data) => {
+                setTeamsEnabled(Boolean(data.teamsEnabled));
+                setTeamMembers(
+                    (data.members || []).map((m: any) => ({
+                        id: m.id,
+                        displayName: m.displayName || m.display_name || 'Stylist'
+                    }))
+                );
+            })
+            .catch(() => {
+                setTeamsEnabled(false);
+                setTeamMembers([]);
+            });
+    }, [hostSlug]);
+
+    useEffect(() => {
         if (!service?.slug) return;
         apiGet(`/api/public/${hostSlug}/${service.slug}`)
             .then((data) => {
@@ -203,9 +225,12 @@ export default function SalonBookingFlow({
             return;
         }
         setLoadingSlots(true);
-        apiGet(
-            `/api/public/${hostSlug}/${service.slug}/availability?from=${selectedDate}&to=${selectedDate}`
-        )
+        const qs = new URLSearchParams({ from: selectedDate, to: selectedDate });
+        if (teamsEnabled) {
+            if (stylistUserId) qs.set('userId', stylistUserId);
+            else qs.set('firstAvailable', 'true');
+        }
+        apiGet(`/api/public/${hostSlug}/${service.slug}/availability?${qs.toString()}`)
             .then((data) => {
                 setDaySlots(data.slots || []);
                 setHasAvailabilityRules(Boolean(data.hasAvailabilityRules));
@@ -217,7 +242,17 @@ export default function SalonBookingFlow({
             })
             .finally(() => setLoadingSlots(false));
         setSelectedSlot(null);
-    }, [hostSlug, service?.slug, selectedDate]);
+    }, [hostSlug, service?.slug, selectedDate, teamsEnabled, stylistUserId]);
+
+    const stylistOptions = useMemo(() => {
+        if (teamsEnabled && teamMembers.length) {
+            return [
+                { id: '', label: 'First Available' },
+                ...teamMembers.map((m) => ({ id: m.id, label: m.displayName }))
+            ];
+        }
+        return (stylistField?.options || ['First Available']).map((opt) => ({ id: '', label: opt }));
+    }, [teamsEnabled, teamMembers, stylistField?.options]);
 
     const stepIndex = STEPS.findIndex((s) => s.key === step);
 
@@ -273,8 +308,12 @@ export default function SalonBookingFlow({
         try {
             const answers = {
                 ...intakeAnswers,
-                ...(stylistField ? { [stylistField.id]: stylist || stylistField.options?.[0] || 'First Available' } : {})
+                ...(stylistField
+                    ? { [stylistField.id]: stylist || stylistOptions[0]?.label || 'First Available' }
+                    : {})
             };
+            const assignedFromSlot =
+                teamsEnabled && !stylistUserId ? selectedSlot.assignedUserId || null : stylistUserId;
             const result = await apiPost(`/api/public/${hostSlug}/${service.slug}/book`, {
                 customerName: customerName.trim(),
                 email: email.trim(),
@@ -285,7 +324,8 @@ export default function SalonBookingFlow({
                 intakeAnswers: answers,
                 intakeType: 'instant',
                 startAt: selectedSlot.startAt,
-                endAt: selectedSlot.endAt
+                endAt: selectedSlot.endAt,
+                ...(teamsEnabled && assignedFromSlot ? { assignedUserId: assignedFromSlot } : {})
             });
             if (result.url) {
                 window.location.href = result.url;
@@ -540,10 +580,11 @@ export default function SalonBookingFlow({
                                             setSelectedDate('');
                                             setSelectedSlot(null);
                                             setError('');
-                                            if (stylistField?.options?.length) {
+                                            if (teamsEnabled || stylistField?.options?.length) {
                                                 setStep('stylist');
                                             } else {
                                                 setStylist('First Available');
+                                                setStylistUserId(null);
                                                 setStep('when');
                                             }
                                         }}
@@ -570,8 +611,8 @@ export default function SalonBookingFlow({
                                                 </p>
                                             </div>
                                             <p className="text-sm font-black text-[#0F172A] shrink-0">
-                                                {et.depositCents > 0
-                                                    ? formatCents(et.depositCents)
+                                                {Number(et.totalCents || et.depositCents) > 0
+                                                    ? formatCents(et.totalCents || et.depositCents)
                                                     : 'Free'}
                                             </p>
                                         </div>
@@ -581,7 +622,7 @@ export default function SalonBookingFlow({
                         </>
                     )}
 
-                    {step === 'stylist' && stylistField && (
+                    {step === 'stylist' && (stylistField || teamsEnabled) && (
                         <>
                             <div>
                                 <h2 className="font-black text-lg text-[#0F172A]">Who would you like?</h2>
@@ -590,24 +631,25 @@ export default function SalonBookingFlow({
                                 </p>
                             </div>
                             <div className="space-y-2">
-                                {(stylistField.options || []).map((opt) => (
+                                {stylistOptions.map((opt) => (
                                     <button
-                                        key={opt}
+                                        key={`${opt.id}-${opt.label}`}
                                         type="button"
                                         onClick={() => {
-                                            setStylist(opt);
+                                            setStylist(opt.label);
+                                            setStylistUserId(opt.id || null);
                                             setError('');
                                             setStep('when');
                                         }}
                                         className={cn(
                                             'w-full text-left rounded-2xl border px-4 py-3.5 font-bold text-sm transition flex items-center gap-2',
-                                            stylist === opt
+                                            stylist === opt.label
                                                 ? 'border-[var(--brand-primary)] text-[#0F172A]'
                                                 : 'border-[#E2E8F0] text-[#0F172A] hover:border-[var(--brand-primary)]'
                                         )}
                                     >
                                         <User className="w-4 h-4 text-[#64748B]" />
-                                        {opt}
+                                        {opt.label}
                                     </button>
                                 ))}
                             </div>
