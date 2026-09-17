@@ -18,9 +18,11 @@ import {
     Check,
     RotateCcw,
     XCircle,
-    FileText
+    FileText,
+    History
 } from 'lucide-react';
 import TaskCompletionModal, { type CrmTaskStatus } from '../../shared/TaskCompletionModal';
+import LeadStatusHistoryModal from '../admin/LeadStatusHistoryModal';
 import {
     type SalesLeadTask,
     type SalesTaskPriority,
@@ -103,6 +105,7 @@ export default function SalesQueue() {
 
     
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask; isCompleting: boolean } | null>(null);
+    const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
     const [modalLoading, setModalLoading] = useState(false);
 
     
@@ -519,19 +522,25 @@ export default function SalesQueue() {
                                                 </div>
 
                                                 <div className="flex items-center gap-2 shrink-0">
-                                                    <span className={cn(
-                                                        "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg border shadow-2xs",
-                                                        task.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300" :
-                                                        task.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300" :
-                                                        task.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200" :
-                                                        "bg-slate-50 text-slate-700 border-slate-200"
-                                                    )}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setSelectedHistoryTask(task)}
+                                                        className={cn(
+                                                            "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg border shadow-2xs cursor-pointer hover:shadow-xs hover:scale-105 transition-all group/badge",
+                                                            task.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100" :
+                                                            task.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100" :
+                                                            task.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100" :
+                                                            "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                                                        )}
+                                                        title="Click to view full lead status history timeline"
+                                                    >
                                                         {task.status === 'completed' && <Check className="w-3 h-3 text-emerald-600" />}
                                                         {task.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600" />}
                                                         {task.status === 'cancelled' && <XCircle className="w-3 h-3 text-rose-600" />}
                                                         {task.status === 'pending' && <RotateCcw className="w-3 h-3 text-slate-500" />}
                                                         <span className="capitalize">{task.status.replace('_', ' ')}</span>
-                                                    </span>
+                                                        <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100 shrink-0 ml-0.5" />
+                                                    </button>
 
                                                     <button
                                                         type="button"
@@ -729,7 +738,7 @@ export default function SalesQueue() {
                 </div>
             )}
 
-            {}
+            {/* Task Update Modal */}
             <TaskCompletionModal
                 isOpen={!!confirmModalTask}
                 onClose={() => setConfirmModalTask(null)}
@@ -742,6 +751,24 @@ export default function SalesQueue() {
                 isCompleting={confirmModalTask?.isCompleting ?? true}
                 loading={modalLoading}
             />
+
+            {/* Lead Status History Modal */}
+            {selectedHistoryTask && (
+                <LeadStatusHistoryModal
+                    isOpen={Boolean(selectedHistoryTask)}
+                    leadId={selectedHistoryTask.leadId}
+                    leadName={selectedHistoryTask.leadBusinessName || selectedHistoryTask.title}
+                    currentStatus={selectedHistoryTask.status || 'pending'}
+                    initialNote={selectedHistoryTask.notes}
+                    initialDate={selectedHistoryTask.updatedAt || selectedHistoryTask.createdAt}
+                    authorName={(selectedHistoryTask as any).assignedToName || undefined}
+                    readOnly={true}
+                    onClose={() => setSelectedHistoryTask(null)}
+                    onStatusUpdated={async () => {
+                        await loadData();
+                    }}
+                />
+            )}
         </div>
     );
 }
