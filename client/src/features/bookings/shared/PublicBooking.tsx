@@ -165,6 +165,8 @@ export function CustomerBookingFlow({
         normalizeBookingIndustryId(industry.id) ||
         getBookingPreset(host.tradeType || '').id;
     const isDentistsFlow = industryId === 'dentists';
+    const isRestaurantFlow = industryId === 'restaurants';
+    const venueOnlyBooking = isRestaurantFlow; // table at the restaurant — no customer property address
     const [activeEventSlug, setActiveEventSlug] = useState(initialEventSlug || '');
     const [eventType, setEventType] = useState<EventType | null>(initialEventType || null);
     const [selectedCatalog, setSelectedCatalog] = useState<MenuItemPublic | null>(null);
@@ -378,7 +380,7 @@ export function CustomerBookingFlow({
         else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) errors.email = 'Enter a valid email address.';
         if (!phone.trim()) errors.phone = 'Phone number is required.';
         else if (phone.replace(/\D/g, '').length < 10) errors.phone = 'Enter a valid phone number (at least 10 digits).';
-        if (!address.trim()) errors.address = 'Property address is required.';
+        if (!venueOnlyBooking && !address.trim()) errors.address = 'Property address is required.';
         for (const field of industry.customFields || []) {
             if (!String(intakeAnswers[field.id] || '').trim()) {
                 errors[field.id] = `${field.label.replace(/\s*\*$/, '')} is required.`;
@@ -389,8 +391,12 @@ export function CustomerBookingFlow({
 
     const detailsValid = useMemo(
         () => Object.keys(validateDetails()).length === 0,
-        [customerName, email, phone, address, intakeAnswers, industry]
+        [customerName, email, phone, address, intakeAnswers, industry, venueOnlyBooking]
     );
+
+    const bookingAddress = venueOnlyBooking
+        ? host.serviceArea?.trim() || 'Restaurant table booking'
+        : address.trim();
 
     const uploadPhotoFile = async (file: File) => {
         if (!mediaUploadsEnabled) return;
@@ -454,7 +460,7 @@ export function CustomerBookingFlow({
                 customerName: customerName.trim(),
                 email: email.trim(),
                 phone: phone.trim(),
-                address: address.trim(),
+                address: bookingAddress,
                 description: description.trim(),
                 intakeType: 'request',
                 preferredSlots: [{ startAt: start.toISOString(), endAt: end.toISOString() }],
@@ -486,7 +492,7 @@ export function CustomerBookingFlow({
                 customerName: customerName.trim(),
                 email: email.trim(),
                 phone: phone.trim(),
-                address: address.trim(),
+                address: bookingAddress,
                 description: description.trim(),
                 photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
                 intakeAnswers: bookingIntakeAnswers,
@@ -1454,6 +1460,7 @@ export function CustomerBookingFlow({
                                     />
                                     {detailsTouched && fieldErrors.phone && <p className="text-xs text-red-600 mt-1">{fieldErrors.phone}</p>}
                                 </label>
+                                {!venueOnlyBooking && (
                                 <label className="block sm:col-span-2">
                                     <span className="text-xs font-bold text-[#64748B]">
                                         {isDentistsFlow ? 'Your address / postcode' : 'Property address / postcode'}{' '}
@@ -1467,6 +1474,7 @@ export function CustomerBookingFlow({
                                     />
                                     {detailsTouched && fieldErrors.address && <p className="text-xs text-red-600 mt-1">{fieldErrors.address}</p>}
                                 </label>
+                                )}
                                 {(industry.customFields || []).map((field) => (
                                     <label key={field.id} className="block sm:col-span-1">
                                         <span className="text-xs font-bold text-[#64748B]">{field.label}</span>
@@ -1591,10 +1599,12 @@ export function CustomerBookingFlow({
                                     <span className="text-[#64748B]">Name</span>
                                     <span className="font-bold text-[#0F172A]">{customerName}</span>
                                 </div>
+                                {!venueOnlyBooking && (
                                 <div className="px-4 py-3 flex justify-between">
                                     <span className="text-[#64748B]">Address</span>
                                     <span className="font-bold text-[#0F172A] text-right max-w-[60%]">{address}</span>
                                 </div>
+                                )}
                                 <div className="px-4 py-3 flex justify-between bg-[#FAFBFC]">
                                     <span className="font-bold text-[#0F172A]">
                                         {chargeCents > 0 ? 'Amount due today' : 'Amount due'}
