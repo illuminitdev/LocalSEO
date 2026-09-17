@@ -576,6 +576,7 @@ export default function SalesTasks() {
                     initialNote={selectedHistoryTask.notes}
                     initialDate={selectedHistoryTask.updatedAt || selectedHistoryTask.createdAt}
                     authorName={(selectedHistoryTask as any).assignedToName || undefined}
+                    readOnly={true}
                     onClose={() => setSelectedHistoryTask(null)}
                     onStatusUpdated={async () => {
                         await loadData();
