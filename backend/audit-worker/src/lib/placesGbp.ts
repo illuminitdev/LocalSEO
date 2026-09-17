@@ -113,6 +113,6 @@ export function gbpFieldsFromPlaceDetails(place: Record<string, unknown>) {
     photoNames: (Array.isArray(place.photos) ? place.photos : [])
       .map((p: any) => String(p?.name || ''))
       .filter(Boolean)
-      .slice(0, 3)
+      .slice(0, 4)
   };
 }

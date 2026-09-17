@@ -15,7 +15,7 @@ import {
     MapPin,
     Phone,
     ShieldCheck,
-    Sparkles,
+    CalendarCheck,
     User
 } from 'lucide-react';
 import { API_BASE, apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../../shared/utils';
@@ -688,7 +688,7 @@ export function CustomerBookingFlow({
                                             className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em]"
                                             style={{ color: 'var(--brand-primary)' }}
                                         >
-                                            <Sparkles className="w-3.5 h-3.5" /> Book online
+                                            <CalendarCheck className="w-3.5 h-3.5" /> Book online
                                         </p>
                                         <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-[#0F172A]">
                                             How would you like to book?
@@ -1203,7 +1203,7 @@ export function CustomerBookingFlow({
                                         color: 'var(--brand-secondary)'
                                     }}
                                 >
-                                    <Sparkles className="w-3.5 h-3.5" />
+                                    <CalendarCheck className="w-3.5 h-3.5" />
                                 </span>
                                 <span className="min-w-0 truncate">{serviceLabel}</span>
                             </p>

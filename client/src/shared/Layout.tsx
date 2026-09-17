@@ -8,7 +8,7 @@ import {
     MessageSquareQuote,
     MapPin,
     Image as ImageIcon,
-    Sparkles,
+    Wand2,
     BookMarked,
     CalendarClock,
     Settings,
@@ -54,7 +54,7 @@ const NAV: NavSection[] = [
         group: 'Track visibility',
         items: [
             { name: 'Local Search Grid', to: '/rank-tracker', icon: MapPin, featurePath: '/rank-tracker' },
-            { name: 'AI Insights', to: '/report', icon: Sparkles, featurePath: '/report' },
+            { name: 'AI Insights', to: '/report', icon: Wand2, featurePath: '/report' },
         ]
     },
     {

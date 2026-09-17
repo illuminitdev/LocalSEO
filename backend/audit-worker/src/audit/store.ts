@@ -5,6 +5,7 @@ import { randomBytes } from 'crypto';
 import { buildChecklist } from './checklistSchema.js';
 import { computeScore } from './score.js';
 import { isDatabaseEnabled, query } from '../lib/db.js';
+import { resolveSearchArea } from '../lib/searchArea.js';
 import type { AuditCreateInput, AuditRecord, ChecklistCheck } from '../types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -57,11 +58,19 @@ export async function createAudit(input: AuditCreateInput = {}) {
   const id = newId();
   const now = new Date().toISOString();
   const tradeId = input.tradeId || 'general';
-  const city = input.city || 'Manchester';
+  const area = resolveSearchArea({ city: input.city, address: input.address });
+  const city =
+    area.label && area.label !== 'the local area'
+      ? area.label
+      : String(input.city || '').trim() || area.label || 'the local area';
+  const locations =
+    input.locations?.length
+      ? input.locations
+      : [city, area.postcode].filter((x, i, arr): x is string => Boolean(x) && arr.indexOf(x) === i);
   const checklist = buildChecklist({
     tradeId,
     city,
-    locations: input.locations
+    locations
   });
 
   const audit: AuditRecord = {
@@ -83,6 +92,8 @@ export async function createAudit(input: AuditCreateInput = {}) {
       serviceLabel: input.serviceLabel || '',
       tradeId,
       city,
+      searchAreaLabel: city,
+      postcode: area.postcode || '',
       contactName: input.contactName || ''
     },
     operatorNotes: input.operatorNotes || '',
@@ -262,6 +273,8 @@ export function publicReportView(audit: AuditRecord | null) {
       businessName: audit.business.businessName,
       website: audit.business.website,
       city: audit.business.city,
+      searchAreaLabel: audit.business.searchAreaLabel || audit.business.city || null,
+      postcode: audit.business.postcode || null,
       tradeId: audit.business.tradeId,
       service: audit.business.service || null,
       serviceId: audit.business.serviceId || null,
@@ -321,7 +334,105 @@ export function publicReportView(audit: AuditRecord | null) {
             (audit.gbpLookup as Record<string, unknown>).ownerRepliesEvidence || null,
           reviewSamples: (audit.gbpLookup as Record<string, unknown>).reviewSamples || [],
           localRank: (audit.gbpLookup as Record<string, unknown>).localRank || null,
-          serviceQuery: (audit.gbpLookup as Record<string, unknown>).serviceQuery || null
+          serviceQuery: (audit.gbpLookup as Record<string, unknown>).serviceQuery || null,
+          localPackScreenshot: (() => {
+            const shot = (audit.gbpLookup as Record<string, unknown>).localPackScreenshot as
+              | { dataUrl?: string; skipped?: boolean; reason?: string; query?: string; capturedAt?: string }
+              | null
+              | undefined;
+            if (!shot) return null;
+            if (shot.dataUrl && String(shot.dataUrl).startsWith('data:image/')) {
+              return {
+                dataUrl: shot.dataUrl,
+                query: shot.query || null,
+                capturedAt: shot.capturedAt || null
+              };
+            }
+            return {
+              skipped: true,
+              reason: shot.reason || 'Unavailable',
+              query: shot.query || null,
+              capturedAt: shot.capturedAt || null
+            };
+          })(),
+          mapsScreenshot: (() => {
+            const shot = (audit.gbpLookup as Record<string, unknown>).mapsScreenshot as
+              | { dataUrl?: string; skipped?: boolean; reason?: string; query?: string; capturedAt?: string }
+              | null
+              | undefined;
+            if (!shot) return null;
+            if (shot.dataUrl && String(shot.dataUrl).startsWith('data:image/')) {
+              return {
+                dataUrl: shot.dataUrl,
+                query: shot.query || null,
+                capturedAt: shot.capturedAt || null
+              };
+            }
+            return {
+              skipped: true,
+              reason: shot.reason || 'Unavailable',
+              query: shot.query || null,
+              capturedAt: shot.capturedAt || null
+            };
+          })(),
+          aiEngineChecks: (() => {
+            const rows = (audit.gbpLookup as Record<string, unknown>).aiEngineChecks;
+            if (!Array.isArray(rows)) return [];
+            return rows
+              .slice(0, 4)
+              .map((row: any) => ({
+                engine: row?.engine || null,
+                label: row?.label || null,
+                prompt: row?.prompt || null,
+                mentioned: typeof row?.mentioned === 'boolean' ? row.mentioned : null,
+                recommendedLikely:
+                  typeof row?.recommendedLikely === 'boolean' ? row.recommendedLikely : null,
+                citedHosts: Array.isArray(row?.citedHosts)
+                  ? row.citedHosts.map((h: unknown) => String(h)).slice(0, 12)
+                  : [],
+                answerExcerpt: String(row?.answerExcerpt || '').slice(0, 800),
+                skipped: Boolean(row?.skipped),
+                reason: row?.reason || null,
+                capturedAt: row?.capturedAt || null
+              }));
+          })(),
+          geoChecklist: (() => {
+            const gc = (audit.gbpLookup as Record<string, unknown>).geoChecklist as
+              | {
+                  builtAt?: string;
+                  groups?: Array<{
+                    id?: string;
+                    title?: string;
+                    items?: Array<{
+                      id?: string;
+                      label?: string;
+                      status?: string;
+                      evidence?: string;
+                    }>;
+                  }>;
+                }
+              | null
+              | undefined;
+            if (!gc || !Array.isArray(gc.groups)) return null;
+            return {
+              builtAt: gc.builtAt || null,
+              groups: gc.groups.slice(0, 6).map((g) => ({
+                id: g?.id || null,
+                title: g?.title || null,
+                items: Array.isArray(g?.items)
+                  ? g.items.slice(0, 16).map((it) => ({
+                      id: it?.id || null,
+                      label: it?.label || null,
+                      status:
+                        it?.status === 'yes' || it?.status === 'no' || it?.status === 'unknown'
+                          ? it.status
+                          : 'unknown',
+                      evidence: String(it?.evidence || '').slice(0, 400)
+                    }))
+                  : []
+              }))
+            };
+          })()
         }
       : null,
     crawlMeta: audit.crawlMeta

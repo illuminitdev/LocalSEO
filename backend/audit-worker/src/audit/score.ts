@@ -160,7 +160,8 @@ export function computeTriadScore(checks = [], context: { localRank?: any } = {}
     aeo: {
       id: 'aeo',
       label: 'AEO',
-      focus: 'FAQs, answer content, featured-snippet readiness',
+      focus:
+        'Optimising content to appear as answers to user questions — e.g. Google People Also Ask, featured snippets, direct answers, and AI-generated answers.',
       weight: 30,
       score: aeo.score,
       max: 100,
@@ -170,7 +171,8 @@ export function computeTriadScore(checks = [], context: { localRank?: any } = {}
     geo: {
       id: 'geo',
       label: 'GEO / AI SEO',
-      focus: 'Local pack + AI / entity visibility',
+      focus:
+        'Optimising a business/entity to be mentioned or recommended in generative AI/search experiences such as Google AI Overviews, ChatGPT, Perplexity, etc.',
       weight: 30,
       score: geo.score,
       max: 100,

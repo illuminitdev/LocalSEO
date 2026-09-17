@@ -5,7 +5,7 @@ import {
     Crosshair,
     Users,
     Activity,
-    Sparkles,
+    Wand2,
     TrendingUp,
     TrendingDown,
     Radar,
@@ -870,14 +870,14 @@ export default function RankTracker() {
                                 disabled={isGeneratingGap}
                                 className="flex items-center gap-2 px-6 py-3 bg-[#0F172A] hover:bg-[#111827] text-white rounded-xl font-bold transition-all shadow-sm disabled:opacity-70 cursor-pointer"
                             >
-                                <Sparkles className={`w-5 h-5 ${isGeneratingGap ? 'animate-spin' : ''}`} />
+                                <Wand2 className={`w-5 h-5 ${isGeneratingGap ? 'animate-spin' : ''}`} />
                                 {isGeneratingGap ? 'Analyzing Ecosystem...' : 'Generate Gap Analysis'}
                             </button>
                         </div>
                     ) : (
                         <div className="bg-white p-5 rounded-xl border border-[#F59E0B]/30 shadow-sm animate-in zoom-in duration-300">
                             <h3 className="text-[#0F172A] font-bold mb-3 flex items-center gap-2">
-                                <Sparkles className="w-5 h-5" /> Executive Insight
+                                <Wand2 className="w-5 h-5" /> Executive Insight
                             </h3>
                             <p className="text-gray-700 leading-relaxed text-sm mb-4">{gapAnalysis}</p>
 

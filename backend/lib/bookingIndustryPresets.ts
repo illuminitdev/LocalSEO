@@ -160,7 +160,7 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         id: 'cleaners',
         name: 'Cleaning Services',
         shortName: 'Cleaning',
-        icon: 'Sparkles',
+        icon: 'SprayCan',
         eyebrow: 'CLEANING SERVICE BOOKING FLOW DEMO',
         demoTitle: 'How Cleaning Companies Secure Recurring Clients 24/7',
         confirmationTitle: 'Cleaning Service Confirmed!',

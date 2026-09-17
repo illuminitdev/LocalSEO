@@ -23,6 +23,31 @@ function scrubFalsePhoneClaims(text) {
     .trim();
 }
 
+function stripEmojiText(text) {
+  if (text == null) return text;
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    .replace(/\uFE0F/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function stripEmojiDeep(value) {
+  if (value == null) return value;
+  if (typeof value === 'string') return stripEmojiText(value);
+  if (Array.isArray(value)) return value.map(stripEmojiDeep);
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = stripEmojiDeep(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 
 function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards, localRank }) {
   const out = { ...parsed };
@@ -70,25 +95,28 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
 
   
   const measuredMaps = (Array.isArray(localRank?.topResults) ? localRank.topResults : [])
-    .filter((r) => r?.name && !r.isProspect)
-    .slice(0, 3)
+    .filter((r) => r?.name)
+    .slice(0, 5)
     .map((r) => ({
       position: r.position,
       name: r.name,
       rating: r.rating ?? null,
-      reviewCount: r.reviewCount ?? null
+      reviewCount: r.reviewCount ?? null,
+      isProspect: Boolean(r.isProspect)
     }));
   const measuredNames = measuredMaps.map((r) => r.name);
+  const measuredQuery = String(localRank?.query || '').trim();
+  const aeoMapsOnly = measuredMaps.filter((r) => !r.isProspect).slice(0, 3);
 
   if (out.aeoFixes?.queryCards) {
     out.aeoFixes = {
       ...out.aeoFixes,
       queryCards: (out.aeoFixes.queryCards || []).map((card) => {
         const { note: _drop, ...rest } = card || {};
-        if (!measuredMaps.length) return rest;
+        if (!aeoMapsOnly.length) return rest;
         return {
           ...rest,
-          mapsResults: measuredMaps,
+          mapsResults: aeoMapsOnly,
           featuredSnippet: card?.featuredSnippet
             ? {
                 ...card.featuredSnippet,
@@ -105,21 +133,31 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
       })
     };
   }
-  if (out.geoFixes?.queryCards) {
+  if (out.geoFixes) {
     out.geoFixes = {
       ...out.geoFixes,
-      queryCards: (out.geoFixes.queryCards || []).map((card) => {
-        const { note: _drop, ...rest } = card || {};
-        return {
-          ...rest,
-          competitorsShown: measuredNames.length ? measuredNames.slice(0, 4) : rest.competitorsShown || [],
-          competitorsDetailed: measuredMaps.length ? measuredMaps : rest.competitorsDetailed || [],
-          aiSummary: scrubFalsePhoneClaims(card?.aiSummary || '')
-        };
-      })
+      title: out.geoFixes.title || 'GEO: Google + AI visibility',
+      queryCards: measuredMaps.length
+        ? [
+            {
+              query: measuredQuery || restQuery(out.geoFixes),
+              competitorsShown: measuredNames.slice(0, 5),
+              competitorsDetailed: measuredMaps,
+              mapsResults: measuredMaps,
+              measured: true
+            }
+          ]
+        : [],
+      aiEngines: Array.isArray(out.geoFixes.aiEngines) ? out.geoFixes.aiEngines : undefined,
+      geoChecklist: out.geoFixes.geoChecklist || undefined
     };
   }
   return out;
+}
+
+function restQuery(geoFixes: any): string {
+  const first = Array.isArray(geoFixes?.queryCards) ? geoFixes.queryCards[0] : null;
+  return String(first?.query || '').trim();
 }
 
 
@@ -144,7 +182,7 @@ export async function generateAiReport(audit) {
 Focus on PUBLIC local visibility: website live?, Google Business Profile name, NAP (name/address/phone), reviews & owner replies, GBP optimisation, Google Maps listing, and where they appear for local searches like “{service} near {town}”.
 Do NOT invent ratings, review counts, owner replies, or rankings. Use only the measured JSON below.
 If owner replies are unknown, say so clearly and tell them to check Maps.
-If near-me position is measured, explain it in plain English (e.g. “#2 for pest control near Manchester” or “not in the top 10”).
+If near-me position is measured, explain it in plain English (e.g. “#2 for pest control near Didsbury” or “not in the top 10 for the measured local area”). Prefer the business town/suburb/search area over a large city name.
 British English. Commercial but honest. Soft-sell ZappSites Local Presence (£99/mo) or Local Growth (£199/mo) as ways we can fix gaps — no hard pressure, no fake guarantees.
 
 Business claimed:
@@ -249,6 +287,12 @@ export async function generateDeepAiReport(audit) {
   const prompt = `You are a UK Local SEO + AEO + GEO consultant writing an internal ZappSites Deep Audit report.
 Tone: clear, commercial, British English. Do NOT invent ratings, rankings, credentials, phones, or crawl facts.
 Use only the measured JSON. Structure the narrative like a client deck: overall visibility, Local SEO / AEO / GEO, four critical issues, strengths, 90-day roadmap, plus three fix decks.
+For every issue use Issue → Evidence → Impact → Recommendation → Priority (fill evidence/recommendation/priority fields; keep title/detail/impact too).
+GEO visuals must describe Google Local Pack / Maps results only — never invent or request an AI Overview block.
+
+EMOJI RULE (must follow):
+- Never use emojis, emoticons, or pictographs in any JSON string field (headlines, summaries, titles, details, decks, roadmap, next steps).
+- Use plain professional text only. Icons are added by the report UI separately.
 
 CRITICAL PHONE RULES (must follow):
 - Measured crawl phones: ${JSON.stringify(sitePhones)}
@@ -301,13 +345,13 @@ Return ONLY JSON:
   },
   "strengths": ["up to 4 strengths"],
   "criticalIssues": [
-    { "title": "", "detail": "", "impact": "Critical|High|Medium", "area": "Local SEO|AEO|GEO" }
+    { "title": "", "detail": "", "impact": "Critical|High|Medium", "area": "Local SEO|AEO|GEO", "evidence": "", "recommendation": "", "priority": "Critical|High|Medium" }
   ],
   "findings": [
-    { "title": "", "detail": "", "impact": "High|Medium|Low", "area": "Local SEO|AEO|GEO|Technical" }
+    { "title": "", "detail": "", "impact": "High|Medium|Low", "area": "Local SEO|AEO|GEO|Technical", "evidence": "", "recommendation": "", "priority": "High|Medium|Low" }
   ],
   "priorityFixes": [
-    { "title": "", "why": "", "action": "", "suggestedPackage": "Local Presence|Local Growth|Website|Booking" }
+    { "title": "", "why": "", "action": "", "suggestedPackage": "Local Presence|Local Growth|Website|Booking", "issue": "", "evidence": "", "impact": "High|Medium|Low", "recommendation": "", "priority": "Critical|High|Medium" }
   ],
   "roadmap": [
     { "month": 1, "title": "Foundation", "items": ["3-5 concrete tasks"] },
@@ -321,14 +365,14 @@ Return ONLY JSON:
       { "field": "address|phone|hours|brand|website", "title": "", "gbpShows": "", "websiteShows": "", "status": "match|mismatch|unknown", "tone": "green|amber|purple|teal" }
     ],
     "actions": [
-      { "priority": "Critical|High|Medium|Tracking", "title": "", "detail": "", "howTo": "concrete how-to steps" }
+      { "priority": "Critical|High|Medium|Tracking", "title": "", "detail": "", "howTo": "concrete how-to steps", "issue": "", "evidence": "", "impact": "", "recommendation": "" }
     ]
   },
   "aeoFixes": {
     "title": "AEO: Answer Engine Optimisation",
     "visualIntro": "one sentence about question / FAQ search readiness for this service and city",
     "priorities": [
-      { "priority": "Critical|High|Medium", "title": "", "detail": "", "howTo": "concrete how-to steps" }
+      { "priority": "Critical|High|Medium", "title": "", "detail": "", "howTo": "concrete how-to steps", "issue": "", "evidence": "", "impact": "", "recommendation": "" }
     ],
     "queryCards": [
       {
@@ -345,22 +389,26 @@ Return ONLY JSON:
     "opportunity": "one sentence opportunity — do NOT invent 'Brand is not mentioned' red-tag style notes"
   },
   "geoFixes": {
-    "title": "GEO: AI Search Visibility",
-    "visualIntro": "one sentence about Maps / near-me visibility using localRank facts",
+    "title": "GEO: Google + AI visibility",
+    "visualIntro": "one sentence about the MEASURED Google Local Pack query from localRank — tell the user to re-type that exact query to verify; do NOT invent other queries or AI Overview",
+    "verifyHint": "Cross-check: search the measured query on Google; ask ChatGPT / Claude the same text",
     "queryCards": [
       {
-        "query": "best {service} near {city} OR {service} near me — must match business service",
+        "query": "MUST equal gbpLookup.localRank.query exactly",
         "competitorsShown": ["names from localRank topResults only — never invent"],
         "competitorsDetailed": [
-          { "position": 1, "name": "from localRank only", "rating": 4.8, "reviewCount": 100 }
+          { "position": 1, "name": "from localRank only", "rating": 4.8, "reviewCount": 100, "isProspect": false }
         ],
-        "aiSummary": "1 sentence on who appears for that near-me query"
+        "mapsResults": [
+          { "position": 1, "name": "from localRank only", "rating": 4.8, "reviewCount": 100, "isProspect": false }
+        ],
+        "measured": true
       }
     ],
-    "goalLine": "win best {service} near me style searches",
-    "opportunity": "one sentence based on whether brand is in localRank — never invent 'Brand is not mentioned in the AI assistant result'",
+    "goalLine": "win the measured Google query and get cited in ChatGPT / Claude",
+    "opportunity": "one sentence based on localRank + whether brand is mentioned in AI engines — never invent AI Overview",
     "actions": [
-      { "title": "", "detail": "", "howTo": "concrete how-to steps" }
+      { "title": "", "detail": "", "howTo": "concrete how-to steps", "priority": "High|Medium", "issue": "", "evidence": "", "impact": "", "recommendation": "" }
     ]
   },
   "nextSteps": ["4 short next steps for the team"],
@@ -369,6 +417,7 @@ Return ONLY JSON:
   "closingLine": "soft next-step CTA"
 }
 
+For every criticalIssue, finding, priorityFix, and deck action/priority use Issue → Evidence → Impact → Recommendation → Priority (map title/detail/why/action into those fields; keep existing keys too).
 Include exactly 4 criticalIssues, 4-6 findings, exactly 3 priorityFixes, roadmap months 1–3,
 exactly 3 aeoFixes.queryCards, 2 geoFixes.queryCards, 3-4 actions per Local SEO and GEO decks, 3-4 AEO priorities.
 Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (you may refine titles only — never change phone/address facts or invent missing phones).`;
@@ -435,36 +484,23 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
       const geoFixes = {
         ...fallbacks.geoFixes,
         ...(parsed.geoFixes || {}),
-        queryCards: (() => {
-          const fromAi = Array.isArray(parsed.geoFixes?.queryCards)
-            ? parsed.geoFixes.queryCards.slice(0, 2)
-            : null;
-          const base = fromAi || fallbacks.geoFixes.queryCards;
-          return base.map((card: Record<string, unknown>, i: number) => {
-            const fb = (fallbacks.geoFixes.queryCards[i] || {}) as Record<string, unknown>;
-            const shown = Array.isArray(card?.competitorsShown) ? card.competitorsShown : [];
-            const detailed = Array.isArray(card?.competitorsDetailed)
-              ? card.competitorsDetailed
-              : [];
-            return {
-              ...fb,
-              ...card,
-              competitorsShown: shown.length
-                ? shown.slice(0, 4)
-                : (fb.competitorsShown as unknown[]) || [],
-              competitorsDetailed: detailed.length
-                ? detailed.slice(0, 4)
-                : (fb.competitorsDetailed as unknown[]) || [],
-              aiSummary: card?.aiSummary || fb.aiSummary || null
-            };
-          });
-        })(),
+        // Always prefer measured Google query cards from fallbacks (cross-checkable)
+        queryCards: Array.isArray(fallbacks.geoFixes.queryCards)
+          ? fallbacks.geoFixes.queryCards
+          : [],
+        aiEngines: Array.isArray(fallbacks.geoFixes.aiEngines)
+          ? fallbacks.geoFixes.aiEngines
+          : Array.isArray(parsed.geoFixes?.aiEngines)
+            ? parsed.geoFixes.aiEngines
+            : [],
+        geoChecklist: fallbacks.geoFixes.geoChecklist || parsed.geoFixes?.geoChecklist || null,
+        verifyHint: fallbacks.geoFixes.verifyHint || parsed.geoFixes?.verifyHint || '',
         actions: Array.isArray(parsed.geoFixes?.actions)
           ? parsed.geoFixes.actions.slice(0, 4)
           : fallbacks.geoFixes.actions
       };
 
-      return {
+      return stripEmojiDeep({
         generatedAt: new Date().toISOString(),
         model: modelName,
         kind: 'deep-local-aeo-geo',
@@ -485,7 +521,7 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
         gbpNote: parsed.gbpNote || '',
         offerLine: parsed.offerLine || '',
         closingLine: parsed.closingLine || ''
-      };
+      });
     } catch (err) {
       lastError = err;
     }

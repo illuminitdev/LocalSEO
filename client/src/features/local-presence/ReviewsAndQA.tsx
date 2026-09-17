@@ -8,7 +8,7 @@ import {
     Layers,
     MessageCircle,
     Save,
-    Sparkles,
+    Wand2,
     Star
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
@@ -183,7 +183,7 @@ export function ReviewManagement() {
                                     <div className="flex-1 flex flex-col items-center justify-center text-center py-6">
                                         <MessageCircle className="w-6 h-6 text-[#F59E0B] mb-3" />
                                         <button onClick={() => handleDraftSingle(review.id)} disabled={review.isDrafting} className="flex items-center gap-2 px-4 py-2 border border-[#F59E0B]/40 rounded-lg font-bold cursor-pointer">
-                                            <Sparkles className={`w-4 h-4 ${review.isDrafting ? 'animate-spin' : ''}`} />
+                                            <Wand2 className={`w-4 h-4 ${review.isDrafting ? 'animate-spin' : ''}`} />
                                             {review.isDrafting ? 'Drafting...' : 'Draft AI Reply'}
                                         </button>
                                     </div>
@@ -324,7 +324,7 @@ export function QAAutoResponder() {
                             {q.status === 'pending' ? (
                                 <div className="pt-4 flex justify-end">
                                     <button onClick={() => handleAutoAnswer(q.id, q.text)} disabled={isGenerating === q.id} className="flex items-center gap-2 px-4 py-2 border border-[#F59E0B]/40 rounded-lg font-bold cursor-pointer">
-                                        <Sparkles className={`w-4 h-4 ${isGenerating === q.id ? 'animate-spin' : ''}`} />
+                                        <Wand2 className={`w-4 h-4 ${isGenerating === q.id ? 'animate-spin' : ''}`} />
                                         {isGenerating === q.id ? 'Thinking...' : 'Auto-Answer via KB'}
                                     </button>
                                 </div>

@@ -6,7 +6,7 @@ import {
     Mail,
     Globe,
     MapPin,
-    Sparkles,
+    Lightbulb,
     Loader2,
     AlertCircle,
     CheckCircle2
@@ -285,7 +285,7 @@ export default function AddLeadModal({
 
                         <div>
                             <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5 flex items-center gap-1.5">
-                                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                                <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
                                 Lead Opportunity & Pitch Angle (Optional)
                             </label>
                             <input

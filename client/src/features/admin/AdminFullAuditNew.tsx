@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Check, Circle, Globe2, Loader2, MapPinned, Search, Sparkles } from 'lucide-react';
+import { Check, Circle, Globe2, Loader2, MapPinned, Search, Wand2 } from 'lucide-react';
 import { pollFullAuditJob, startFullCrawl, fetchFullAudit } from './adminApi';
 import { AUDIT_SERVICE_OPTIONS, resolveAuditService } from './auditServices';
 import { cn } from '../../shared/utils';
@@ -113,7 +113,7 @@ export default function AdminFullAuditNew() {
             const jobId = res.data?.jobId;
 
             if (res.data?.status === 'complete' && auditIdOut) {
-                navigate(`/admin/full-audits/${auditIdOut}`, { replace: true });
+                navigate('/admin/full-audits', { replace: true });
                 return;
             }
             if (!jobId || !auditIdOut) {
@@ -146,7 +146,7 @@ export default function AdminFullAuditNew() {
                 }
                 if (st === 'complete') {
                     setStepIndex(CRAWL_STEPS.length - 1);
-                    navigate(`/admin/full-audits/${auditIdOut}`, { replace: true });
+                    navigate('/admin/full-audits', { replace: true });
                     return;
                 }
                 if (st === 'failed') {
@@ -158,7 +158,7 @@ export default function AdminFullAuditNew() {
                         const auditRes = await fetchFullAudit(auditIdOut);
                         if (auditRes.data?.published) {
                             setStepIndex(CRAWL_STEPS.length - 1);
-                            navigate(`/admin/full-audits/${auditIdOut}`, { replace: true });
+                            navigate('/admin/full-audits', { replace: true });
                             return;
                         }
                     } catch {
@@ -189,7 +189,7 @@ export default function AdminFullAuditNew() {
                     <h2 className="text-lg font-bold text-[#0F172A]">New full audit</h2>
                     <p className="text-sm text-[#64748B] mt-1">
                         Enter business details — we look up Google Maps / GBP, crawl the website, score Local SEO +
-                        AEO + GEO, then open share + PDF actions.
+                        AEO + GEO, then return you to the list so you can open the shareable report.
                     </p>
                 </div>
 
@@ -207,7 +207,7 @@ export default function AdminFullAuditNew() {
                             </div>
                             <div>
                                 <p className="text-xs font-bold uppercase tracking-wide text-[#F59E0B] flex items-center gap-1.5">
-                                    <Sparkles className="w-3.5 h-3.5" /> Building full crawl report
+                                    <Wand2 className="w-3.5 h-3.5" /> Building full crawl report
                                 </p>
                                 <h3 className="text-base font-bold text-[#0F172A] mt-1">
                                     Please wait — this usually takes 3–8 minutes
@@ -235,7 +235,7 @@ export default function AdminFullAuditNew() {
                             {CRAWL_STEPS.map((step, i) => {
                                 const done = i < stepIndex;
                                 const active = i === stepIndex;
-                                const Icon = i === 0 ? MapPinned : i === 1 ? Globe2 : i === 2 ? Search : Sparkles;
+                                const Icon = i === 0 ? MapPinned : i === 1 ? Globe2 : i === 2 ? Search : Wand2;
                                 return (
                                     <li
                                         key={step.id}

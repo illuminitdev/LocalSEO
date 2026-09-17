@@ -13,8 +13,7 @@ import {
     Building2,
     X,
     Shield,
-    Clock,
-    Sparkles
+    Clock
 } from 'lucide-react';
 import TaskCompletionModal, { type CrmTaskStatus } from '../../shared/TaskCompletionModal';
 import {
@@ -404,7 +403,7 @@ export default function SalesTasks() {
                     </div>
                 ) : !filteredTasks.length ? (
                     <div className="p-12 text-center text-[#64748B]">
-                        <Sparkles className="w-8 h-8 text-[#CBD5E1] mx-auto mb-2" />
+                        <CheckSquare className="w-8 h-8 text-[#CBD5E1] mx-auto mb-2" />
                         <p className="text-sm font-bold text-[#0F172A]">No tasks found</p>
                         <p className="text-xs mt-1">
                             {statusFilter === 'pending'

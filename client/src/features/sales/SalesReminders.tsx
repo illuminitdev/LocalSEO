@@ -11,7 +11,6 @@ import {
     ArrowUpRight,
     Plus,
     Trash2,
-    Sparkles,
     Building2,
     X,
     User,
@@ -523,7 +522,7 @@ export default function SalesReminders() {
                         </div>
                     ) : !filteredTasks.length ? (
                         <div className="p-12 text-center text-[#64748B]">
-                            <Sparkles className="w-8 h-8 text-[#CBD5E1] mx-auto mb-2" />
+                            <Bell className="w-8 h-8 text-[#CBD5E1] mx-auto mb-2" />
                             <p className="text-sm font-bold text-[#0F172A]">No self reminders found</p>
                             <p className="text-xs mt-1">
                                 {statusFilter === 'pending'
