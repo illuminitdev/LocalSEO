@@ -652,6 +652,7 @@ export default function SalesLeadDetail() {
                     initialNote={(lead as any)?.salesNotes || (lead as any)?.notes || activities[0]?.note}
                     initialDate={activities[0]?.createdAt || (lead as any)?.updatedAt || (lead as any)?.createdAt}
                     authorName={activities[0]?.authorName || (lead as any)?.assignedAgentName}
+                    readOnly={true}
                     onClose={() => setShowLeadHistoryModal(false)}
                     onStatusUpdated={async () => {
                         await loadLead();
@@ -669,6 +670,7 @@ export default function SalesLeadDetail() {
                     initialNote={selectedHistoryTask.notes}
                     initialDate={selectedHistoryTask.updatedAt || selectedHistoryTask.createdAt}
                     authorName={(selectedHistoryTask as any).assignedToName || undefined}
+                    readOnly={true}
                     onClose={() => setSelectedHistoryTask(null)}
                     onStatusUpdated={async () => {
                         await loadLead();
