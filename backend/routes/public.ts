@@ -851,6 +851,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
 
             const isRequest = intakeType === 'request';
             const salonVisit = isSalonsOrg(org);
+            const restaurantVisit = isRestaurantOrg(org);
+            const venueVisit = salonVisit || restaurantVisit;
             const teamsEnabled = await orgTeamsEnabled(org.id);
             let resolvedAssignedUserId: string | null = null;
             if (teamsEnabled) {
@@ -871,10 +873,14 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 }
             }
 
-            const resolvedAddress = String(address || '').trim() || (salonVisit ? org.service_area || 'Salon visit' : '');
-            if (!customerName?.trim() || !email?.trim() || !phone?.trim() || (!salonVisit && !resolvedAddress)) {
+            const resolvedAddress =
+                String(address || '').trim() ||
+                (venueVisit
+                    ? org.service_area || (restaurantVisit ? 'Restaurant table booking' : 'Salon visit')
+                    : '');
+            if (!customerName?.trim() || !email?.trim() || !phone?.trim() || (!venueVisit && !resolvedAddress)) {
                 return res.status(400).json({
-                    error: salonVisit
+                    error: venueVisit
                         ? 'Name, email, and phone are required'
                         : 'Name, email, phone, and address are required'
                 });
@@ -918,7 +924,11 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 }
             } else {
                 if (!start || !end) {
-                    return res.status(400).json({ error: 'Name, email, phone, address, and time slot are required' });
+                    return res.status(400).json({
+                        error: venueVisit
+                            ? 'Name, email, phone, and time slot are required'
+                            : 'Name, email, phone, address, and time slot are required'
+                    });
                 }
                 const dateStr = String(start).slice(0, 10);
                 const slots = await computeAvailability(org, eventType, dateStr, dateStr, {

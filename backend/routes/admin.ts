@@ -20,7 +20,7 @@ import {
 import { setOrgBookingIndustry } from '../lib/bookingIndustryHydrate';
 import Stripe from 'stripe';
 import adminFullAuditsRouter from './adminFullAudits';
-import { createSalesLead, bulkImportSalesLeads, convertLeadToCustomer, ensureCrmTables } from '../lib/sales';
+import { createSalesLead, bulkImportSalesLeads, convertLeadToCustomer, ensureCrmTables, resolveAllLeadIds } from '../lib/sales';
 
 const router = Router();
 router.use(adminFullAuditsRouter);
@@ -747,8 +747,11 @@ function mapSalesLeadToAdminLead(row: any) {
         aiVisibilityObservation: row.ai_visibility_observation || null,
         isCustomer: Boolean(row.is_customer),
         convertedAt: row.converted_at || null,
+        updatedAt: row.updated_at || row.created_at,
         notes: row.notes || null,
-        assignedTo: row.assigned_to || null
+        assignedTo: row.assigned_to || null,
+        assignedAgentName: row.assignedAgentName || row.assigned_agent_name || null,
+        assignedAgentEmail: row.assignedAgentEmail || row.assigned_agent_email || null
     };
 }
 
@@ -844,8 +847,9 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
         }
 
         const salesLeadsPromise = query(
-            `SELECT l.*
+            `SELECT l.*, u.name AS "assignedAgentName", u.email AS "assignedAgentEmail"
              FROM sales_leads l
+             LEFT JOIN users u ON u.id = l.assigned_to
              WHERE ${salesWhere.join(' AND ')}
              ORDER BY l.created_at DESC
              LIMIT 500`,
@@ -876,12 +880,16 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
             try {
                 const [actResult, salesLeadStatusResult, taskResult] = await Promise.all([
                     query(
-                        `SELECT DISTINCT ON (lead_id) 
-                            lead_id, activity_type, disposition, note, author_name, created_at
-                         FROM lead_activities
-                         WHERE lead_id = ANY($1::text[])
-                         ORDER BY lead_id, created_at DESC`,
-                        [leadIds]
+                        `SELECT DISTINCT ON (COALESCE(LOWER(sl.email), LOWER(sub.email), a.lead_id))
+                            a.lead_id, a.activity_type, a.disposition, a.note, a.author_name, a.created_at,
+                            COALESCE(LOWER(sl.email), LOWER(sub.email)) AS lead_email
+                         FROM lead_activities a
+                         LEFT JOIN sales_leads sl ON sl.id::text = a.lead_id
+                         LEFT JOIN submissions sub ON sub.id::text = a.lead_id
+                         WHERE a.lead_id = ANY($1::text[]) 
+                            OR (COALESCE(LOWER(sl.email), LOWER(sub.email)) = ANY($2::text[]) AND COALESCE(sl.email, sub.email, '') <> '')
+                         ORDER BY COALESCE(LOWER(sl.email), LOWER(sub.email), a.lead_id), a.created_at DESC`,
+                        [leadIds, emails]
                     ).catch(() => ({ rows: [] })),
                     query(
                         `SELECT sl.id, sl.email, sl.status, sl.notes,
@@ -892,26 +900,32 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                         [leadIds, emails]
                     ).catch(() => ({ rows: [] })),
                     query(
-                        `SELECT DISTINCT ON (t.lead_id)
+                        `SELECT DISTINCT ON (COALESCE(LOWER(sl.email), LOWER(sub.email), t.lead_id))
                             t.lead_id, t.status AS task_status, t.notes AS task_notes, t.title AS task_title,
-                            u.name AS task_agent_name
+                            u.name AS task_agent_name,
+                            COALESCE(LOWER(sl.email), LOWER(sub.email)) AS lead_email
                          FROM lead_tasks t
                          LEFT JOIN users u ON u.id = t.assigned_to_user_id
+                         LEFT JOIN sales_leads sl ON sl.id::text = t.lead_id
+                         LEFT JOIN submissions sub ON sub.id::text = t.lead_id
                          WHERE t.lead_id = ANY($1::text[])
-                         ORDER BY t.lead_id, t.updated_at DESC`,
-                        [leadIds]
+                            OR (COALESCE(LOWER(sl.email), LOWER(sub.email)) = ANY($2::text[]) AND COALESCE(sl.email, sub.email, '') <> '')
+                         ORDER BY COALESCE(LOWER(sl.email), LOWER(sub.email), t.lead_id), t.updated_at DESC`,
+                        [leadIds, emails]
                     ).catch(() => ({ rows: [] }))
                 ]);
 
                 const actMap = new Map<string, any>();
                 for (const act of actResult.rows) {
-                    actMap.set(String(act.lead_id), {
+                    const entry = {
                         type: act.activity_type,
                         disposition: act.disposition,
                         note: act.note,
                         authorName: act.author_name,
                         createdAt: act.created_at
-                    });
+                    };
+                    if (act.lead_id) actMap.set(String(act.lead_id), entry);
+                    if (act.lead_email) actMap.set(String(act.lead_email).toLowerCase(), entry);
                 }
 
                 const statusMap = new Map<string, { status: string; notes: string | null; agentName: string | null }>();
@@ -923,12 +937,14 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
 
                 const taskMap = new Map<string, { status: string; notes: string | null; title: string | null; agentName: string | null }>();
                 for (const t of taskResult.rows) {
-                    taskMap.set(String(t.lead_id), {
+                    const entry = {
                         status: t.task_status,
                         notes: t.task_notes || null,
                         title: t.task_title || null,
                         agentName: t.task_agent_name || null
-                    });
+                    };
+                    if (t.lead_id) taskMap.set(String(t.lead_id), entry);
+                    if (t.lead_email) taskMap.set(String(t.lead_email).toLowerCase(), entry);
                 }
 
                 for (const lead of allLeads) {
@@ -936,7 +952,7 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                     const emailStr = String(lead.email || '').toLowerCase();
 
                     // 1. Attach latest activity log
-                    const latest = actMap.get(leadIdStr);
+                    const latest = actMap.get(leadIdStr) || (emailStr ? actMap.get(emailStr) : null);
                     if (latest) {
                         (lead as any).latestActivity = latest;
                         if (latest.disposition && (!lead.status || lead.status === 'new' || lead.status === 'otp_pending')) {
@@ -945,7 +961,7 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                     }
 
                     // 2. Direct sales_leads data always wins — authoritative agent update
-                    const slData = statusMap.get(leadIdStr) || (emailStr && statusMap.get(emailStr));
+                    const slData = statusMap.get(leadIdStr) || (emailStr ? statusMap.get(emailStr) : null);
                     if (slData) {
                         if (slData.status && slData.status !== 'new') {
                             lead.status = slData.status;
@@ -958,18 +974,14 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                         }
                     }
 
-                    // 3. Lead tasks data — fallback/complement for notes, agent name, and active status
-                    const taskData = taskMap.get(leadIdStr);
+                    // 3. Lead tasks data — fallback/complement for notes & agent name
+                    const taskData = taskMap.get(leadIdStr) || (emailStr ? taskMap.get(emailStr) : null);
                     if (taskData) {
                         if (!(lead as any).salesNotes && taskData.notes) {
                             (lead as any).salesNotes = taskData.notes;
                         }
                         if (!(lead as any).assignedAgentName && taskData.agentName) {
                             (lead as any).assignedAgentName = taskData.agentName;
-                        }
-                        // If lead is still marked new but has an in_progress task, show in_progress
-                        if ((!lead.status || lead.status === 'new') && taskData.status === 'in_progress') {
-                            lead.status = 'in_progress';
                         }
                     }
                 }
@@ -1512,8 +1524,19 @@ router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Task title is required.' });
         }
 
-        const validTaskTypes = ['prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom'];
-        const sanitizedTaskType = validTaskTypes.includes(task_type) ? task_type : 'custom';
+        const validTaskTypes = ['prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom', 'call', 'follow_up', 'audit_review', 'proposal', 'meeting', 'email', 'other'];
+        const TASK_TYPE_MAP: Record<string, string> = {
+            call: 'follow_up_call',
+            follow_up: 'follow_up_call',
+            audit_review: 'prepare_audit',
+            proposal: 'send_proposal',
+            meeting: 'custom',
+            email: 'custom',
+            other: 'custom'
+        };
+        const sanitizedTaskType = validTaskTypes.includes(task_type)
+            ? (TASK_TYPE_MAP[task_type] || task_type)
+            : 'custom';
 
         const validPriorities = ['low', 'medium', 'high', 'urgent'];
         const sanitizedPriority = validPriorities.includes(priority) ? priority : 'medium';
@@ -1549,13 +1572,31 @@ router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
 
         const task = rows[0];
 
-        
-        try {
-            await query(`
-                INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
-                VALUES ($1, 'Admin', 'task_event', $2)
-            `, [lead_id, `Admin created task: "${task.title}"`]);
-        } catch {}
+        if (assigned_to_user_id) {
+            try {
+                let agentName = 'Sales Agent';
+                const { rows: uRows } = await query(`SELECT name FROM users WHERE id = $1`, [assigned_to_user_id]);
+                if (uRows[0]?.name) agentName = uRows[0].name;
+
+                await query(`
+                    UPDATE sales_leads 
+                    SET assigned_to = $1, updated_at = NOW() 
+                    WHERE id::text = $2 OR email = (SELECT email FROM submissions WHERE id::text = $2 LIMIT 1)
+                `, [assigned_to_user_id, lead_id]).catch(() => {});
+
+                await query(`
+                    INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
+                    VALUES ($1, 'Admin', 'task_event', $2)
+                `, [lead_id, `Admin created task "${task.title}" assigned to ${agentName}${task.notes ? ` — Note: "${task.notes}"` : ''}`]).catch(() => {});
+            } catch {}
+        } else {
+            try {
+                await query(`
+                    INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
+                    VALUES ($1, 'Admin', 'task_event', $2)
+                `, [lead_id, `Admin created task: "${task.title}"${task.notes ? ` — Note: "${task.notes}"` : ''}`]).catch(() => {});
+            } catch {}
+        }
 
         res.status(201).json({ task });
     } catch (err: any) {
@@ -1596,7 +1637,20 @@ router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response)
             updates.push(`title = $${params.length}`);
         }
         if (task_type !== undefined) {
-            params.push(task_type);
+            const validTaskTypes = ['prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom', 'call', 'follow_up', 'audit_review', 'proposal', 'meeting', 'email', 'other'];
+            const TASK_TYPE_MAP: Record<string, string> = {
+                call: 'follow_up_call',
+                follow_up: 'follow_up_call',
+                audit_review: 'prepare_audit',
+                proposal: 'send_proposal',
+                meeting: 'custom',
+                email: 'custom',
+                other: 'custom'
+            };
+            const sanitized = validTaskTypes.includes(task_type)
+                ? (TASK_TYPE_MAP[task_type] || task_type)
+                : 'custom';
+            params.push(sanitized);
             updates.push(`task_type = $${params.length}`);
         }
         if (assigned_to_user_id !== undefined) {
@@ -1635,13 +1689,37 @@ router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response)
 
         const task = rows[0];
 
-        
-        if (status) {
+        // 1. If assigned_to_user_id was updated, synchronize sales_leads assignment and log activity
+        if (assigned_to_user_id !== undefined) {
             try {
+                let agentName = 'Unassigned';
+                if (assigned_to_user_id) {
+                    const { rows: uRows } = await query(`SELECT name FROM users WHERE id = $1`, [assigned_to_user_id]);
+                    if (uRows[0]?.name) agentName = uRows[0].name;
+                }
+                await query(`
+                    UPDATE sales_leads 
+                    SET assigned_to = $1, updated_at = NOW() 
+                    WHERE id::text = $2 OR email = (SELECT email FROM submissions WHERE id::text = $2 LIMIT 1)
+                `, [assigned_to_user_id || null, task.leadId]).catch(() => {});
+
                 await query(`
                     INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
                     VALUES ($1, 'Admin', 'task_event', $2)
-                `, [task.leadId, `Task "${task.title}" marked as ${status}`]);
+                `, [task.leadId, assigned_to_user_id ? `Admin assigned task "${task.title}" to ${agentName}` : `Admin unassigned task "${task.title}"`]).catch(() => {});
+            } catch {}
+        }
+
+        // 2. Record task event activity for task edits without corrupting lead lifecycle status
+        if (status !== undefined || (notes !== undefined && String(notes).trim())) {
+            try {
+                const author = (req as any).user?.name || 'Admin';
+                const statusStr = status ? String(status).replace('_', ' ').toUpperCase() : (task.status ? String(task.status).replace('_', ' ').toUpperCase() : 'UPDATED');
+                const cleanNote = notes && String(notes).trim() ? String(notes).trim() : `Task "${task.title}" status changed to ${statusStr}`;
+                await query(`
+                    INSERT INTO lead_activities (lead_id, author_name, activity_type, disposition, note, created_at)
+                    VALUES ($1, $2, 'task_event', $3, $4, NOW())
+                `, [task.leadId, author, status || task.status || 'in_progress', cleanNote]).catch(() => {});
             } catch {}
         }
 
@@ -1658,9 +1736,8 @@ router.delete('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response
         await ensureCrmTables();
         const taskId = req.params.id;
 
-        
         const { rows: taskRows } = await query(
-            `SELECT title, lead_id, assigned_to_user_id FROM lead_tasks WHERE id = $1`,
+            `SELECT title, lead_id FROM lead_tasks WHERE id = $1`,
             [taskId]
         );
 
@@ -1668,8 +1745,8 @@ router.delete('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response
             const task = taskRows[0];
             try {
                 await query(`
-                    INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
-                    VALUES ($1, 'Admin', 'task_event', $2)
+                    INSERT INTO lead_activities (lead_id, author_name, activity_type, disposition, note, created_at)
+                    VALUES ($1, 'Admin', 'task_event', 'cancelled', $2, NOW())
                 `, [task.lead_id, `Task "${task.title}" was deleted by Admin`]);
             } catch (actErr) {
                 console.warn('Failed to record task deletion activity:', actErr);
@@ -1688,9 +1765,19 @@ router.delete('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response
 router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
-        const leadId = req.params.leadId;
+        const leadId = String(req.params.leadId);
+        const allLeadIds = await resolveAllLeadIds(leadId);
+
+        const [salesRes, subRes] = await Promise.all([
+            query(`SELECT id, name, email, phone FROM sales_leads WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] })),
+            query(`SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email FROM submissions WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] }))
+        ]);
+
+        const leadName = (salesRes.rows[0]?.name || subRes.rows[0]?.bname || subRes.rows[0]?.name || '').trim().toLowerCase();
+        const leadEmail = (salesRes.rows[0]?.email || subRes.rows[0]?.email || '').trim().toLowerCase();
+
         const { rows } = await query(`
-            SELECT 
+            SELECT DISTINCT
                 a.id,
                 a.lead_id AS "leadId",
                 a.activity_type AS "activityType",
@@ -1702,11 +1789,15 @@ router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, r
                 u.email AS "userEmail"
             FROM lead_activities a
             LEFT JOIN users u ON u.id = a.user_id
-            WHERE a.lead_id = $1 
-              AND (a.activity_type = 'call_log' OR (a.activity_type = 'task_event' AND a.note NOT LIKE 'Created task:%'))
+            WHERE (
+                a.lead_id = ANY($1::text[])
+                OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(email)) = $3)))
+                OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)))
+            )
+              AND a.activity_type IN ('call_log', 'status_change', 'note', 'task_event')
             ORDER BY a.created_at DESC
             LIMIT 200
-        `, [leadId]);
+        `, [allLeadIds, leadName || null, leadEmail || null]);
 
         res.json({ activities: rows });
     } catch (err: any) {
@@ -1914,6 +2005,17 @@ router.post('/crm/leads', requireAdmin, async (req: Request, res: Response) => {
     }
 });
 
+function normalizeSpreadsheetStatus(rawStatus: any): string {
+    const s = String(rawStatus || '').toLowerCase().trim().replace(/[-_]/g, ' ');
+    if (!s) return 'new';
+    if (s.includes('convert') || s.includes('won') || s.includes('closed') || s.includes('customer') || s.includes('paid')) return 'converted';
+    if (s.includes('not interested') || s.includes('lost') || s.includes('rejected') || s.includes('declined') || s.includes('dnc') || s.includes('cold') || s.includes('wrong number')) return 'not_interested';
+    if (s.includes('callback') || s.includes('call back') || s.includes('follow') || s.includes('call later')) return 'callback';
+    if (s.includes('interested') || s.includes('warm') || s.includes('hot') || s.includes('qualified') || s.includes('in progress') || s.includes('audit scheduled')) return 'interested';
+    if (s.includes('contacted') || s.includes('called') || s.includes('spoke') || s.includes('reached') || s.includes('connected') || s.includes('attempted') || s.includes('voicemail') || s.includes('ringing') || s.includes('no answer') || s.includes('busy')) return 'contacted';
+    return 'new';
+}
+
 /** Admin: Bulk Import Leads (Excel / CSV) */
 router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Response) => {
     try {
@@ -1957,6 +2059,8 @@ router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Re
                 }
             }
 
+            const rawStatusVal = item.status || item.callingStatus || item.stage || item.disposition || item['Status'] || item['Calling Status'] || item['Lead Status'] || item['Disposition'] || 'new';
+
             return {
                 name: String(item.businessName || item.name || item['Business name'] || item['Business Name'] || item['Company Name'] || '').trim(),
                 phone: String(item.phone || item.businessPhone || item['Business Phone'] || item['Phone'] || '').trim(),
@@ -1968,7 +2072,7 @@ router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Re
                 aiVisibilityObservation: String(item.aiVisibilityObservation || item['My Observation AI Visibility'] || item['AI Visibility'] || '').trim(),
                 leadOpportunity: String(item.leadOpportunity || item['Lead Opportunity'] || item['Opportunity'] || '').trim(),
                 opportunityLevel: String(item.opportunityLevel || '').toLowerCase() || 'medium',
-                status: String(item.status || 'new').trim().toLowerCase() === 'converted' ? 'converted' : 'new',
+                status: normalizeSpreadsheetStatus(rawStatusVal),
                 notes: String(rawConclusion).trim(),
                 assignedTo: item.assignedTo || null
             };
@@ -1979,6 +2083,252 @@ router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Re
     } catch (err: any) {
         console.error('Admin bulk import error:', err);
         res.status(500).json({ error: err.message || 'Failed to import leads' });
+    }
+});
+
+/** Admin: Bulk Assign Leads to Telecaller / Agent */
+router.post('/crm/leads/bulk-assign', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const { leadIds, assignedToUserId, task } = req.body || {};
+
+        if (!Array.isArray(leadIds) || !leadIds.length) {
+            return res.status(400).json({ error: 'No lead IDs provided.' });
+        }
+
+        const agentId = assignedToUserId ? String(assignedToUserId).trim() : null;
+
+        let agentName = 'Unassigned';
+        if (agentId) {
+            const { rows: userRows } = await query(`SELECT name FROM users WHERE id = $1`, [agentId]);
+            if (userRows[0]) {
+                agentName = userRows[0].name;
+            }
+        }
+
+        const validTaskTypes = ['prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom'];
+        const validPriorities = ['low', 'medium', 'high', 'urgent'];
+        const hasTaskToCreate = Boolean(task && task.title && String(task.title).trim());
+        const taskTitle = hasTaskToCreate ? String(task.title).trim() : '';
+        const taskType = hasTaskToCreate && validTaskTypes.includes(task.taskType) ? task.taskType : 'follow_up_call';
+        const taskPriority = hasTaskToCreate && validPriorities.includes(task.priority) ? task.priority : 'medium';
+        const taskNotes = hasTaskToCreate && task.notes ? String(task.notes).trim() : '';
+        const taskDueDate = hasTaskToCreate && task.dueDate ? task.dueDate : null;
+
+        let updatedCount = 0;
+        let createdTasksCount = 0;
+
+        for (const rawId of leadIds) {
+            const id = String(rawId).trim();
+            if (!id) continue;
+
+            let targetLeadId: string | null = null;
+
+            // 1. Try to update existing sales_leads
+            const { rows: updatedRows } = await query(`
+                UPDATE sales_leads
+                SET assigned_to = $1, updated_at = NOW()
+                WHERE id::text = $2 OR email = (SELECT email FROM submissions WHERE id::text = $2 LIMIT 1)
+                RETURNING id
+            `, [agentId, id]);
+
+            if (updatedRows.length > 0) {
+                updatedCount += updatedRows.length;
+                for (const row of updatedRows) {
+                    targetLeadId = String(row.id);
+                    try {
+                        await query(`
+                            INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
+                            VALUES ($1, 'Admin', 'task_event', $2)
+                        `, [targetLeadId, agentId ? `Assigned to telecaller: ${agentName}` : `Unassigned telecaller`]);
+                    } catch {}
+
+                    if (hasTaskToCreate) {
+                        try {
+                            await query(`
+                                INSERT INTO lead_tasks (
+                                    lead_id, task_type, title, notes, priority, status, assigned_to_user_id, due_date, created_by_role, created_by_name
+                                ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, 'admin', 'Admin')
+                            `, [targetLeadId, taskType, taskTitle, taskNotes, taskPriority, agentId, taskDueDate]);
+
+                            await query(`
+                                INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
+                                VALUES ($1, 'Admin', 'task_event', $2)
+                            `, [targetLeadId, `Admin created task: "${taskTitle}"`]);
+                            createdTasksCount++;
+                        } catch (tErr) {
+                            console.warn('Could not create task during bulk assign:', tErr);
+                        }
+                    }
+                }
+            } else {
+                // 2. If it's a submission lead not yet in sales_leads, fetch submission and create a sales_lead entry
+                const { rows: subRows } = await query(`
+                    SELECT id, type, email, payload FROM submissions WHERE id::text = $1 LIMIT 1
+                `, [id]);
+
+                if (subRows[0]) {
+                    const sub = subRows[0];
+                    const p = sub.payload || {};
+                    const name = String(p.businessName || p.name || p.contactName || p.fullName || 'Lead').trim();
+                    const phone = String(p.phone || '').trim();
+                    const email = String(sub.email || p.email || '').trim().toLowerCase();
+
+                    try {
+                        const newLead = await createSalesLead({
+                            name,
+                            phone,
+                            email,
+                            source: sub.type || 'growth_audit',
+                            assignedTo: agentId,
+                            createdByAdmin: true
+                        });
+                        updatedCount++;
+                        targetLeadId = String(newLead.id);
+
+                        try {
+                            await query(`
+                                INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
+                                VALUES ($1, 'Admin', 'task_event', $2)
+                            `, [targetLeadId, agentId ? `Assigned to telecaller: ${agentName}` : `Unassigned telecaller`]);
+                        } catch {}
+
+                        if (hasTaskToCreate) {
+                            try {
+                                await query(`
+                                    INSERT INTO lead_tasks (
+                                        lead_id, task_type, title, notes, priority, status, assigned_to_user_id, due_date, created_by_role, created_by_name
+                                    ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, 'admin', 'Admin')
+                                `, [targetLeadId, taskType, taskTitle, taskNotes, taskPriority, agentId, taskDueDate]);
+
+                                await query(`
+                                    INSERT INTO lead_activities (lead_id, author_name, activity_type, note)
+                                    VALUES ($1, 'Admin', 'task_event', $2)
+                                `, [targetLeadId, `Admin created task: "${taskTitle}"`]);
+                                createdTasksCount++;
+                            } catch (tErr) {
+                                console.warn('Could not create task during bulk assign:', tErr);
+                            }
+                        }
+                    } catch (createErr) {
+                        console.warn('Could not create sales lead from submission during bulk assign:', createErr);
+                    }
+                }
+            }
+        }
+
+        res.json({
+            success: true,
+            updatedCount,
+            createdTasksCount,
+            agentName,
+            message: `Successfully assigned ${updatedCount} lead(s) to ${agentName}${createdTasksCount > 0 ? ` and created ${createdTasksCount} task(s)` : ''}.`
+        });
+    } catch (err: any) {
+        console.error('Admin bulk assign leads error:', err);
+        res.status(500).json({ error: err.message || 'Failed to bulk assign leads' });
+    }
+});
+
+/** Admin: Update Single Lead (Assignee, Status, Notes, etc.) */
+router.patch('/crm/leads/:id', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = String(req.params.id);
+        const { assignedTo, status, notes, opportunityLevel, industry, website, phone, email, name } = req.body || {};
+
+        const updates: string[] = ['updated_at = NOW()'];
+        const params: any[] = [leadId];
+
+        if (assignedTo !== undefined) {
+            params.push(assignedTo || null);
+            updates.push(`assigned_to = $${params.length}`);
+        }
+        if (status !== undefined) {
+            params.push(status);
+            updates.push(`status = $${params.length}`);
+        }
+        if (notes !== undefined) {
+            params.push(String(notes || '').trim());
+            updates.push(`notes = $${params.length}`);
+        }
+        if (opportunityLevel !== undefined) {
+            params.push(String(opportunityLevel || '').toLowerCase());
+            updates.push(`opportunity_level = $${params.length}`);
+        }
+        if (industry !== undefined) {
+            params.push(String(industry || '').trim());
+            updates.push(`industry = $${params.length}`);
+        }
+        if (website !== undefined) {
+            params.push(String(website || '').trim());
+            updates.push(`website = $${params.length}`);
+        }
+        if (phone !== undefined) {
+            params.push(String(phone || '').trim());
+            updates.push(`phone = $${params.length}`);
+        }
+        if (email !== undefined) {
+            params.push(String(email || '').trim().toLowerCase());
+            updates.push(`email = $${params.length}`);
+        }
+        if (name !== undefined) {
+            params.push(String(name || '').trim());
+            updates.push(`name = $${params.length}`);
+        }
+
+        const { rows } = await query(`
+            UPDATE sales_leads
+            SET ${updates.join(', ')}
+            WHERE id::text = $1
+            RETURNING *
+        `, params);
+
+        let updatedLead = rows[0];
+        if (!rows.length) {
+            // Check if it's a submission ID
+            const { rows: subRows } = await query(`
+                SELECT id, type, email, payload FROM submissions WHERE id::text = $1 LIMIT 1
+            `, [leadId]);
+            if (subRows[0]) {
+                const sub = subRows[0];
+                const p = sub.payload || {};
+                const leadName = String(name || p.businessName || p.name || p.contactName || 'Lead').trim();
+                const leadPhone = String(phone || p.phone || '').trim();
+                const leadEmail = String(email || sub.email || p.email || '').trim().toLowerCase();
+                const newLead = await createSalesLead({
+                    name: leadName,
+                    phone: leadPhone,
+                    email: leadEmail,
+                    source: sub.type || 'growth_audit',
+                    status: status || 'contacted',
+                    notes: notes ? String(notes).trim() : '',
+                    assignedTo: assignedTo || null,
+                    createdByAdmin: true
+                });
+                updatedLead = newLead;
+            } else {
+                return res.status(404).json({ error: 'Lead not found' });
+            }
+        }
+
+        if (status !== undefined || (notes !== undefined && String(notes).trim())) {
+            try {
+                const author = (req as any).user?.name || 'Admin';
+                const actDate = req.body?.createdAt || req.body?.activityDate ? new Date(req.body.createdAt || req.body.activityDate) : new Date();
+                await query(`
+                    INSERT INTO lead_activities (lead_id, author_name, activity_type, disposition, note, created_at)
+                    VALUES ($1, $2, 'status_change', $3, $4, $5)
+                `, [leadId, author, status || updatedLead?.status || 'status_change', notes ? String(notes).trim() : `Status updated to ${status}`, actDate]);
+            } catch (actErr) {
+                console.warn('Could not record status change activity:', actErr);
+            }
+        }
+
+        res.json({ success: true, lead: updatedLead });
+    } catch (err: any) {
+        console.error('Admin update lead error:', err);
+        res.status(500).json({ error: err.message || 'Failed to update lead' });
     }
 });
 

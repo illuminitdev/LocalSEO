@@ -68,7 +68,8 @@ async function sendBookingConfirmationEmail({
     hostPhone,
     hostEmail,
     manageUrl,
-    icsUrl
+    icsUrl,
+    logoUrl
 }: any) {
     const whenLabel = [date, slotLabel].filter(Boolean).join(' — ');
     const paid = formatDeposit(depositAmount, currency || 'GBP');
@@ -78,6 +79,10 @@ async function sendBookingConfirmationEmail({
         hostPhone ? `Phone: ${hostPhone}` : '',
         hostEmail ? `Email: ${hostEmail}` : ''
     ].filter(Boolean);
+    const safeLogo = String(logoUrl || '')
+        .trim()
+        .replace(/"/g, '');
+    const logoOk = /^https?:\/\//i.test(safeLogo);
 
     const text = [
         `Hi ${customerName},`,
@@ -101,7 +106,12 @@ async function sendBookingConfirmationEmail({
 
     const html = `
         <div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0F172A">
-            <h1 style="color:#0F172A;font-size:22px">Booking confirmed</h1>
+            ${
+                logoOk
+                    ? `<div style="margin:0 0 20px 0"><img src="${safeLogo}" alt="${businessName}" width="160" style="display:block;max-width:160px;height:auto;border:0" /></div>`
+                    : ''
+            }
+            <h1 style="color:#0F172A;font-size:22px;margin:0 0 12px 0">Booking confirmed</h1>
             <p>Hi ${customerName},</p>
             <p>Your deposit payment was <strong>successful</strong> and your booking is confirmed.</p>
             <table style="width:100%;border-collapse:collapse;margin:20px 0">

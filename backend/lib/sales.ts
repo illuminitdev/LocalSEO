@@ -3,10 +3,13 @@ import { query } from './db';
 export const LEAD_STATUSES = [
     'new',
     'contacted',
+    'in_progress',
     'callback',
     'interested',
     'not_interested',
-    'converted'
+    'converted',
+    'completed',
+    'pending'
 ] as const;
 
 export const CALL_OUTCOMES = [
@@ -39,14 +42,18 @@ export async function ensureCrmTables() {
                 phone TEXT NOT NULL DEFAULT '',
                 email TEXT NOT NULL DEFAULT '',
                 notes TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'new'
-                    CHECK (status IN ('new', 'contacted', 'callback', 'interested', 'not_interested', 'converted')),
+                status TEXT NOT NULL DEFAULT 'new',
                 source TEXT NOT NULL DEFAULT '',
                 assigned_to UUID REFERENCES users(id) ON DELETE SET NULL,
                 next_follow_up_at TIMESTAMPTZ,
                 created_by_admin BOOLEAN NOT NULL DEFAULT TRUE,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
+            ALTER TABLE sales_leads DROP CONSTRAINT IF EXISTS sales_leads_status_check;
+            ALTER TABLE sales_leads ADD CONSTRAINT sales_leads_status_check CHECK (
+                status IN ('new', 'contacted', 'in_progress', 'callback', 'interested', 'not_interested', 'converted', 'completed', 'pending')
             );
 
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS industry TEXT DEFAULT '';
@@ -99,11 +106,16 @@ export async function ensureCrmTables() {
                 lead_id TEXT NOT NULL,
                 user_id UUID REFERENCES users(id) ON DELETE SET NULL,
                 author_name TEXT NOT NULL DEFAULT 'Admin',
-                activity_type TEXT NOT NULL DEFAULT 'call_log' CHECK (activity_type IN ('call_log', 'status_change', 'task_event', 'note')),
-                disposition TEXT CHECK (disposition IN ('connected', 'voicemail', 'callback_requested', 'not_interested', 'converted', 'other')),
+                disposition TEXT,
                 note TEXT NOT NULL DEFAULT '',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
+            ALTER TABLE lead_tasks DROP CONSTRAINT IF EXISTS lead_tasks_task_type_check;
+            ALTER TABLE lead_tasks ADD CONSTRAINT lead_tasks_task_type_check CHECK (task_type IN (
+                'prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom',
+                'call', 'follow_up', 'audit_review', 'proposal', 'meeting', 'email', 'other'
+            ));
+            ALTER TABLE lead_activities DROP CONSTRAINT IF EXISTS lead_activities_disposition_check;
             CREATE INDEX IF NOT EXISTS idx_lead_activities_lead_id ON lead_activities(lead_id);
             CREATE INDEX IF NOT EXISTS idx_lead_activities_created_at ON lead_activities(created_at DESC);
         `);
@@ -233,6 +245,68 @@ export async function getAssignedLead(leadId: string, agentId: string) {
     };
 }
 
+export async function resolveAllLeadIds(leadId: string): Promise<string[]> {
+    if (!leadId) return [];
+    try {
+        // Step 1: Find lead info from sales_leads, submissions, and lead_tasks
+        const [salesRes, subRes, taskRes] = await Promise.all([
+            query(`SELECT id, name, email, phone FROM sales_leads WHERE id::text = $1`, [leadId]).catch(() => ({ rows: [] })),
+            query(`SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email, payload->>'phone' AS phone FROM submissions WHERE id::text = $1`, [leadId]).catch(() => ({ rows: [] })),
+            query(`SELECT id, lead_id FROM lead_tasks WHERE id::text = $1 OR lead_id = $1`, [leadId]).catch(() => ({ rows: [] }))
+        ]);
+
+        const idSet = new Set<string>([leadId]);
+        for (const t of taskRes.rows) {
+            if (t.lead_id) idSet.add(String(t.lead_id));
+        }
+
+        // If we found a task linked to another lead_id, also lookup that lead
+        let extraName = '';
+        let extraEmail = '';
+        let extraPhone = '';
+        if (taskRes.rows.length > 0 && taskRes.rows[0].lead_id && taskRes.rows[0].lead_id !== leadId) {
+            const [extraSales, extraSub] = await Promise.all([
+                query(`SELECT id, name, email, phone FROM sales_leads WHERE id::text = $1`, [taskRes.rows[0].lead_id]).catch(() => ({ rows: [] })),
+                query(`SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email, payload->>'phone' AS phone FROM submissions WHERE id::text = $1`, [taskRes.rows[0].lead_id]).catch(() => ({ rows: [] }))
+            ]);
+            extraName = (extraSales.rows[0]?.name || extraSub.rows[0]?.bname || extraSub.rows[0]?.name || '').trim().toLowerCase();
+            extraEmail = (extraSales.rows[0]?.email || extraSub.rows[0]?.email || '').trim().toLowerCase();
+            extraPhone = (extraSales.rows[0]?.phone || extraSub.rows[0]?.phone || '').replace(/[^0-9]/g, '');
+        }
+
+        const leadName = (salesRes.rows[0]?.name || subRes.rows[0]?.bname || subRes.rows[0]?.name || extraName || '').trim().toLowerCase();
+        const leadEmail = (salesRes.rows[0]?.email || subRes.rows[0]?.email || extraEmail || '').trim().toLowerCase();
+        const rawPhone = (salesRes.rows[0]?.phone || subRes.rows[0]?.phone || extraPhone || '').replace(/[^0-9]/g, '');
+
+        // Step 2: Gather all matching IDs from sales_leads, submissions, and lead_tasks
+        const matches = await query(`
+            SELECT DISTINCT id::text AS id FROM sales_leads 
+            WHERE id::text = $1
+               OR (NULLIF($2, '') IS NOT NULL AND LOWER(TRIM(email)) = $2)
+               OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(name)) = $3)
+               OR (NULLIF($4, '') IS NOT NULL AND REGEXP_REPLACE(phone, '[^0-9]', '', 'g') = $4 AND length($4) >= 7)
+            UNION
+            SELECT DISTINCT id::text AS id FROM submissions
+            WHERE id::text = $1
+               OR (NULLIF($2, '') IS NOT NULL AND LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $2)
+               OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $3)
+               OR (NULLIF($4, '') IS NOT NULL AND REGEXP_REPLACE(COALESCE(payload->>'phone', ''), '[^0-9]', '', 'g') = $4 AND length($4) >= 7)
+            UNION
+            SELECT DISTINCT lead_id::text AS id FROM lead_tasks
+            WHERE lead_id = $1 OR id::text = $1
+        `, [leadId, leadEmail || null, leadName || null, rawPhone || null]);
+
+        for (const row of matches.rows) {
+            if (row.id) idSet.add(String(row.id));
+        }
+
+        return Array.from(idSet);
+    } catch (err) {
+        console.warn('resolveAllLeadIds error:', err);
+        return [leadId];
+    }
+}
+
 export async function logCall({
     leadId,
     agentId,
@@ -256,12 +330,28 @@ export async function logCall({
         throw Object.assign(new Error('Lead not found'), { status: 404 });
     }
 
+    let agentName = 'Sales Agent';
+    try {
+        const { rows: uRows } = await query(`SELECT name FROM users WHERE id = $1`, [agentId]);
+        if (uRows[0]?.name) agentName = uRows[0].name;
+    } catch {}
+
     const { rows: callRows } = await query(
         `INSERT INTO sales_call_logs (lead_id, agent_id, outcome, notes)
          VALUES ($1, $2, $3, $4)
          RETURNING *`,
         [leadId, agentId, outcome, String(notes || '').trim()]
     );
+
+    try {
+        await query(
+            `INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note, created_at)
+             VALUES ($1, $2, $3, 'call_log', $4, $5, NOW())`,
+            [leadId, agentId, agentName, outcome, String(notes || '').trim() || null]
+        );
+    } catch (actErr) {
+        console.warn('Could not record call activity:', actErr);
+    }
 
     const sets: string[] = ['updated_at = NOW()'];
     const params: any[] = [leadId, agentId];
@@ -314,6 +404,12 @@ export async function updateAssignedLead(
         throw Object.assign(new Error('Lead not found'), { status: 404 });
     }
 
+    let agentName = 'Sales Agent';
+    try {
+        const { rows: uRows } = await query(`SELECT name FROM users WHERE id = $1`, [agentId]);
+        if (uRows[0]?.name) agentName = uRows[0].name;
+    } catch {}
+
     const sets: string[] = ['updated_at = NOW()'];
     const params: any[] = [leadId, agentId];
 
@@ -341,6 +437,25 @@ export async function updateAssignedLead(
          RETURNING *`,
         params
     );
+
+    if (patch.status != null || patch.notes != null) {
+        try {
+            await query(
+                `INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note, created_at)
+                 VALUES ($1, $2, $3, 'status_change', $4, $5, NOW())`,
+                [
+                    leadId,
+                    agentId,
+                    agentName,
+                    patch.status || owned.rows[0].status || 'status_change',
+                    patch.notes ? String(patch.notes).trim() : null
+                ]
+            );
+        } catch (actErr) {
+            console.warn('Could not record status activity for assigned lead:', actErr);
+        }
+    }
+
     return mapLead(rows[0]);
 }
 
@@ -370,12 +485,15 @@ export async function createSalesLead(data: {
     const status = LEAD_STATUSES.includes(data.status as LeadStatus) ? data.status : 'new';
     const assignedTo = sanitizeUuid(data.assignedTo);
 
+    const isCustomer = status === 'converted';
+    const convertedAt = isCustomer ? new Date() : null;
+
     const { rows } = await query(
         `INSERT INTO sales_leads (
             name, phone, email, notes, status, source, industry, address, website,
             gbp_observation, ai_visibility_observation, lead_opportunity, opportunity_level,
-            assigned_to, next_follow_up_at, created_by_admin
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            assigned_to, next_follow_up_at, created_by_admin, is_customer, converted_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING *`,
         [
             String(data.name || 'New Lead').trim(),
@@ -393,7 +511,9 @@ export async function createSalesLead(data: {
             oppLevel,
             assignedTo,
             data.nextFollowUpAt || null,
-            data.createdByAdmin ?? true
+            data.createdByAdmin ?? true,
+            isCustomer,
+            convertedAt
         ]
     );
 
@@ -439,20 +559,32 @@ export async function bulkImportSalesLeads(
             continue;
         }
 
-        // Deduplication & Upsert check: check if phone (if exists) or name exists
+        // Deduplication & Upsert check: check phone (normalized or exact), email, or name
         let existingId: string | null = null;
+        const rawPhoneDigits = phone.replace(/[^0-9]/g, '');
+
         if (phone) {
             const existing = await query(
-                `SELECT id FROM sales_leads WHERE phone = $1 LIMIT 1`,
-                [phone]
+                `SELECT id FROM sales_leads WHERE phone = $1 OR (length($2) >= 7 AND REGEXP_REPLACE(phone, '[^0-9]', '', 'g') = $2) LIMIT 1`,
+                [phone, rawPhoneDigits]
             );
             if (existing.rows.length > 0) {
                 existingId = existing.rows[0].id;
             }
-        } else if (name) {
+        }
+        if (!existingId && email) {
             const existing = await query(
-                `SELECT id FROM sales_leads WHERE LOWER(name) = LOWER($1) LIMIT 1`,
-                [name]
+                `SELECT id FROM sales_leads WHERE LOWER(TRIM(email)) = $1 LIMIT 1`,
+                [email]
+            );
+            if (existing.rows.length > 0) {
+                existingId = existing.rows[0].id;
+            }
+        }
+        if (!existingId && name) {
+            const existing = await query(
+                `SELECT id FROM sales_leads WHERE LOWER(TRIM(name)) = $1 LIMIT 1`,
+                [name.toLowerCase()]
             );
             if (existing.rows.length > 0) {
                 existingId = existing.rows[0].id;
@@ -460,9 +592,17 @@ export async function bulkImportSalesLeads(
         }
 
         if (existingId) {
-            // Update existing lead observations & notes if provided in the spreadsheet
+            // Update existing lead observations, notes & status if provided in the spreadsheet
             const updates: string[] = ['updated_at = NOW()'];
             const params: any[] = [existingId];
+
+            if (item.status && LEAD_STATUSES.includes(item.status as LeadStatus)) {
+                params.push(item.status);
+                updates.push(`status = $${params.length}`);
+                if (item.status === 'converted') {
+                    updates.push(`is_customer = TRUE, converted_at = NOW()`);
+                }
+            }
 
             if (item.notes && String(item.notes).trim()) {
                 params.push(String(item.notes).trim());
@@ -502,6 +642,20 @@ export async function bulkImportSalesLeads(
                     createdLeads.push(mapLead(updatedRows[0]));
                 }
             }
+
+            // Always log activity if status or conclusion notes were imported
+            if (item.status || (item.notes && String(item.notes).trim())) {
+                try {
+                    const cleanNote = item.notes && String(item.notes).trim()
+                        ? String(item.notes).trim()
+                        : (item.status ? `Status updated from Excel as ${item.status}` : 'Updated from Excel import');
+                    await query(`
+                        INSERT INTO lead_activities (lead_id, author_name, activity_type, disposition, note)
+                        VALUES ($1, 'Excel Import', 'status_change', $2, $3)
+                    `, [existingId, item.status || 'updated', cleanNote]);
+                } catch {}
+            }
+
             skipped++;
             continue;
         }
@@ -532,6 +686,17 @@ export async function bulkImportSalesLeads(
 
         createdLeads.push(lead);
         created++;
+
+        // Log initial activity in lead_activities
+        try {
+            const initialCleanNote = item.notes && String(item.notes).trim()
+                ? String(item.notes).trim()
+                : `Lead imported from Excel with status ${item.status || 'new'}`;
+            await query(`
+                INSERT INTO lead_activities (lead_id, author_name, activity_type, disposition, note)
+                VALUES ($1, 'Excel Import', 'status_change', $2, $3)
+            `, [String(lead.id), item.status || 'new', initialCleanNote]);
+        } catch {}
     }
 
     return {
