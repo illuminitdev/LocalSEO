@@ -1851,8 +1851,8 @@ export function PublicBookHost() {
                             ? undefined
                             : eventTypes.length === 1
                               ? eventTypes[0].slug
-                              : eventTypes.find((et) => /book\s+a\s+table/i.test(et.name))?.slug ||
-                                eventTypes[0].slug
+                              : eventTypes.find((et: EventType) => /book\s+a\s+table/i.test(et.name))
+                                    ?.slug || eventTypes[0].slug
                     }
                 />
             </div>

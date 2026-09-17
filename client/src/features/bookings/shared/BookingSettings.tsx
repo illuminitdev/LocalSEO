@@ -115,6 +115,8 @@ type Props = {
         eventTypes?: any[];
         availabilityDateRules?: any[];
         availabilityWeeklyRules?: any[];
+        teamsEnabled?: boolean;
+        planId?: string | null;
     } | null;
     onRefresh?: () => void;
 };
