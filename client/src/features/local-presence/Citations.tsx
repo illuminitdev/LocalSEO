@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react';
-import { BookMarked, Sparkles, CheckCircle2, AlertTriangle, MinusCircle } from 'lucide-react';
+import { BookMarked, Wand2, CheckCircle2, AlertTriangle, MinusCircle } from 'lucide-react';
 import { apiPost, logDashboardActivity } from '../../shared/utils';
 
 export default function Citations() {
@@ -47,7 +47,7 @@ export default function Citations() {
                     disabled={loading}
                     className="flex items-center gap-2 px-5 py-2.5 bg-[#0F172A] hover:bg-[#111827] text-white rounded-lg font-bold cursor-pointer disabled:opacity-70"
                 >
-                    <Sparkles className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                    <Wand2 className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                     {loading ? 'Scanning directories...' : 'Run citation audit'}
                 </button>
             </div>

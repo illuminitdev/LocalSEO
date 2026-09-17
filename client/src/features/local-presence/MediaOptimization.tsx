@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react';
-import { Image as ImageIcon, Sparkles, MapPin, Tag as TagIcon, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Image as ImageIcon, Wand2, MapPin, Tag as TagIcon, CheckCircle2, AlertCircle } from 'lucide-react';
 import { apiPost, logDashboardActivity } from '../../shared/utils';
 import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
 
@@ -105,7 +105,7 @@ export default function MediaOptimization() {
                                 disabled={isGenerating}
                                 className="flex items-center gap-2 px-5 py-2.5 bg-[#D97706] hover:bg-[#B45309] text-white rounded-xl font-bold transition-all disabled:opacity-70 shadow-sm cursor-pointer"
                             >
-                                <Sparkles className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
+                                <Wand2 className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
                                 {isGenerating ? 'Generating...' : 'AI Generate Photo'}
                             </button>
                         </div>

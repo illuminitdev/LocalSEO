@@ -6,8 +6,7 @@ import {
     CreditCard,
     MailWarning,
     Users,
-    ArrowRight,
-    Sparkles
+    ArrowRight
 } from 'lucide-react';
 import { adminGet } from './adminApi';
 import { FEATURE_LABELS, type FeatureKey } from '../../shared/planCatalog';
@@ -62,7 +61,7 @@ export default function AdminDashboard() {
                 <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
                     <div>
                         <p className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-[#F59E0B]">
-                            <Sparkles className="w-3.5 h-3.5" /> Today
+                            <CalendarDays className="w-3.5 h-3.5" /> Today
                         </p>
                         <h2 className="text-2xl font-bold mt-2 tracking-tight">Portal at a glance</h2>
                         <p className="text-sm text-white/60 mt-2 max-w-md">

@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from 'react';
 import {
-    Sparkles,
+    Wand2,
     Save,
     ShieldAlert,
     CheckCircle2,
@@ -245,7 +245,7 @@ export default function ProfileAudit() {
                         disabled={isAuditing}
                         className="flex items-center justify-center gap-2 px-5 py-2.5 bg-[#0F172A] hover:bg-[#111827] text-white rounded-xl font-bold transition-all disabled:opacity-70 disabled:cursor-not-allowed shadow-sm cursor-pointer"
                     >
-                        <Sparkles className={`w-5 h-5 ${isAuditing ? 'animate-spin' : ''}`} />
+                        <Wand2 className={`w-5 h-5 ${isAuditing ? 'animate-spin' : ''}`} />
                         {isAuditing ? 'Analyzing Profile...' : 'Run AI Audit'}
                     </button>
                 )}
@@ -265,7 +265,7 @@ export default function ProfileAudit() {
                 <div className="bg-[#F8FAFC] border border-[#F59E0B]/30 rounded-2xl p-6 mb-8 shadow-sm">
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-lg font-bold text-[#0F172A] flex items-center gap-2">
-                            <Sparkles className="w-5 h-5" /> Audit Results
+                            <Wand2 className="w-5 h-5" /> Audit Results
                         </h2>
                         <div className="flex items-center gap-2">
                             <span className="text-sm text-gray-500 font-semibold">Optimization Score:</span>

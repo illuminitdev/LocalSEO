@@ -87,29 +87,71 @@ export async function proxyZappSitesOps(
 
 export async function proxyZappSitesPdf(auditId: string): Promise<ProxyResult> {
     const url = reportPdfUrl(auditId);
-    const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/pdf' } });
-    const contentType = res.headers.get('content-type') || '';
-    if (!res.ok || !contentType.includes('application/pdf')) {
-        const json = await res.json().catch(() => ({
-            success: false,
-            error: `PDF unavailable (${res.status})`
-        }));
-        return { status: res.status || 502, json };
-    }
-    const ab = await res.arrayBuffer();
-    const buffer = Buffer.from(ab);
-    if (!buffer.length || buffer.slice(0, 5).toString() !== '%PDF-') {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90000);
+    try {
+        const res = await fetch(url, {
+            method: 'GET',
+            headers: { Accept: 'application/pdf,*/*' },
+            signal: controller.signal
+        });
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        const ab = await res.arrayBuffer();
+        const buffer = Buffer.from(ab);
+        const isPdfMagic = buffer.length >= 5 && buffer.slice(0, 5).toString() === '%PDF-';
+
+        if (!res.ok) {
+            let json: unknown = {
+                success: false,
+                error: `PDF unavailable (${res.status})`
+            };
+            if (contentType.includes('application/json') || contentType.includes('text/')) {
+                try {
+                    json = JSON.parse(buffer.toString('utf8'));
+                } catch {
+                    /* keep default */
+                }
+            }
+            return { status: res.status || 502, json };
+        }
+
+        // Accept application/pdf or octet-stream when body is a real PDF
+        if (!isPdfMagic) {
+            return {
+                status: 502,
+                json: { success: false, error: 'PDF generation produced an invalid file. Please retry.' }
+            };
+        }
+        if (
+            contentType &&
+            !contentType.includes('application/pdf') &&
+            !contentType.includes('application/octet-stream') &&
+            !contentType.includes('binary')
+        ) {
+            // Still allow if magic bytes are correct
+            console.warn('[proxyZappSitesPdf] unexpected content-type', contentType, 'len', buffer.length);
+        }
+
+        return {
+            status: 200,
+            buffer,
+            contentType: 'application/pdf',
+            contentDisposition:
+                res.headers.get('content-disposition') ||
+                `attachment; filename="zappsites-audit-${auditId}.pdf"`
+        };
+    } catch (err: any) {
+        const aborted = err?.name === 'AbortError';
         return {
             status: 502,
-            json: { success: false, error: 'PDF generation produced an invalid file. Please retry.' }
+            json: {
+                success: false,
+                error: aborted
+                    ? 'PDF download timed out. Please retry.'
+                    : err?.message || 'PDF generation failed. Please try again in a moment.'
+            }
         };
+    } finally {
+        clearTimeout(timer);
     }
-    return {
-        status: 200,
-        buffer,
-        contentType: 'application/pdf',
-        contentDisposition:
-            res.headers.get('content-disposition') ||
-            `attachment; filename="zappsites-audit-${auditId}.pdf"`
-    };
 }

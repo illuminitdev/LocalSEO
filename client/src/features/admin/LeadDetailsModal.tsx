@@ -8,7 +8,7 @@ import {
     MapPin,
     Store,
     Bot,
-    Sparkles,
+    Lightbulb,
     CheckSquare,
     ShieldCheck
 } from 'lucide-react';
@@ -175,7 +175,7 @@ export default function LeadDetailsModal({
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold">
-                                        <Sparkles className="w-3.5 h-3.5" />
+                                        <Lightbulb className="w-3.5 h-3.5" />
                                     </div>
                                     <span className="font-bold text-emerald-900 uppercase tracking-wider text-[11px]">
                                         Lead Opportunity & Sales Pitch

@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
     CheckSquare,
     ChevronLeft,
     ChevronRight,
     ClipboardCheck,
     Copy,
-    Download,
     ExternalLink,
     Plus,
     RefreshCw,
@@ -15,7 +14,6 @@ import {
 } from 'lucide-react';
 import {
     deleteFullAudit,
-    downloadFullAuditPdf,
     fetchFullAudits,
     fetchSalesAgents,
     shareFullAuditEmail,
@@ -60,7 +58,7 @@ export default function AdminFullAudits() {
     const [error, setError] = useState('');
     const [message, setMessage] = useState('');
     const [busyId, setBusyId] = useState('');
-    const [busyAction, setBusyAction] = useState<'pdf' | 'share' | 'delete' | ''>('');
+    const [busyAction, setBusyAction] = useState<'share' | 'delete' | ''>('');
     const [page, setPage] = useState(1);
 
     const load = useCallback(() => {
@@ -99,22 +97,6 @@ export default function AdminFullAudits() {
     const onCopy = async (url: string) => {
         const ok = await copyText(url);
         setMessage(ok ? 'Shareable link copied.' : url);
-    };
-
-    const onPdf = async (a: FullAuditListItem) => {
-        setBusyId(a.id);
-        setBusyAction('pdf');
-        setError('');
-        setMessage('');
-        try {
-            await downloadFullAuditPdf(a.id, a.businessName);
-            setMessage('PDF downloaded.');
-        } catch (err: any) {
-            setError(err.message || 'PDF download failed');
-        } finally {
-            setBusyId('');
-            setBusyAction('');
-        }
     };
 
     const onShare = async (a: FullAuditListItem) => {
@@ -278,12 +260,6 @@ export default function AdminFullAudits() {
                                 </div>
 
                                 <div className="flex flex-wrap items-center gap-2 shrink-0">
-                                    <Link
-                                        to={`/admin/full-audits/${a.id}`}
-                                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:bg-[#F8FAFC]"
-                                    >
-                                        Details
-                                    </Link>
                                     {share ? (
                                         <>
                                             <a
@@ -305,17 +281,6 @@ export default function AdminFullAudits() {
                                             </button>
                                         </>
                                     ) : null}
-                                    {a.published ? (
-                                        <button
-                                            type="button"
-                                            disabled={busy}
-                                            onClick={() => onPdf(a)}
-                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#0F172A] text-xs font-bold text-white hover:bg-[#1E293B] disabled:opacity-60"
-                                        >
-                                            <Download className="w-3.5 h-3.5" />
-                                            {busy && busyAction === 'pdf' ? 'Downloading…' : 'Download PDF'}
-                                        </button>
-                                    ) : null}
                                     <button
                                         type="button"
                                         disabled={busy || !canShare}
@@ -327,7 +292,7 @@ export default function AdminFullAudits() {
                                                 ? 'No company email on this audit'
                                                 : !a.published
                                                   ? 'Publish before sharing'
-                                                  : `Email PDF to ${a.email}`
+                                                  : `Email report to ${a.email}`
                                         }
                                     >
                                         <Share2
