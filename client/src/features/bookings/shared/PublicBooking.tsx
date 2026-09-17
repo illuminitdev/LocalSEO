@@ -1821,6 +1821,19 @@ export function PublicBookHost() {
         );
     }
 
+    const isRestaurantHost =
+        normalizeBookingIndustryId(data.bookingIndustryId) === 'restaurants';
+    const isDentistsHost = normalizeBookingIndustryId(data.bookingIndustryId) === 'dentists';
+
+    const tableEventSlug = (() => {
+        if (!isRestaurantHost || eventTypes.length === 0) return undefined;
+        if (eventTypes.length === 1) return eventTypes[0].slug;
+        return (
+            eventTypes.find((et: EventType) => /book\s+a\s+table/i.test(et.name))?.slug ||
+            eventTypes[0].slug
+        );
+    })();
+
     return (
         <div
             className="min-h-screen bg-[#F8FAFC] py-6 px-4"
@@ -1831,7 +1844,7 @@ export function PublicBookHost() {
             })}
         >
             <div className="max-w-5xl mx-auto space-y-3">
-                {normalizeBookingIndustryId(data.bookingIndustryId) === 'restaurants' && (
+                {isRestaurantHost && (
                     <button
                         type="button"
                         onClick={() => setPath('choose')}
@@ -1855,14 +1868,25 @@ export function PublicBookHost() {
                     industry={data.industry || getBookingPreset(data.bookingIndustryId || data.tradeType)}
                     mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
                     eventTypes={eventTypes}
-                    menuItems={[]}
+                    menuItems={
+                        isRestaurantHost
+                            ? []
+                            : (data.menuItems || []).map((m: any) => ({
+                                  id: m.id,
+                                  category: m.category || '',
+                                  name: m.name,
+                                  description: m.description || '',
+                                  priceCents: Number(m.priceCents ?? m.price_cents) || 0
+                              }))
+                    }
                     eventSlug={
-                        eventTypes.length === 0
-                            ? undefined
-                            : eventTypes.length === 1
-                              ? eventTypes[0].slug
-                              : eventTypes.find((et: EventType) => /book\s+a\s+table/i.test(et.name))
-                                    ?.slug || eventTypes[0].slug
+                        isRestaurantHost
+                            ? tableEventSlug
+                            : isDentistsHost
+                              ? undefined
+                              : eventTypes.length === 1 && !(data.menuItems || []).length
+                                ? eventTypes[0].slug
+                                : undefined
                     }
                 />
             </div>
