@@ -1,28 +1,53 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     ArrowLeft,
     Bell,
+    BookOpen,
     Calendar,
     Check,
     CreditCard,
+    Droplets,
     Flame,
+    LayoutGrid,
     ListOrdered,
     LogOut,
+    Paintbrush,
     Pencil,
     Plus,
+    Scissors,
     Settings,
     ShieldAlert,
+    Syringe,
     Trash2,
     Wallet,
     Wrench,
     X,
-    Utensils
+    Utensils,
+    type LucideIcon
 } from 'lucide-react';
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, cn, formatCents } from '../../../shared/utils';
 import AvailabilityEditor, { type AvailabilitySavePayload, type AvailabilitySettings } from './AvailabilityEditor';
-import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryPresets';
+import {
+    getBookingPreset,
+    normalizeBookingIndustryId,
+    resolveSalonServiceCategory,
+    SALON_SERVICE_CATEGORIES
+} from './bookingIndustryPresets';
 import RestaurantMenuEditor from '../restaurants/RestaurantMenuEditor';
+
+const SALON_CATEGORY_ICONS: Record<string, LucideIcon> = {
+    Hair: Scissors,
+    Beauty: Droplets,
+    Aesthetics: Syringe,
+    Makeup: Paintbrush,
+    Courses: BookOpen,
+    Other: LayoutGrid
+};
+
+function salonCategoryIcon(category: string): LucideIcon {
+    return SALON_CATEGORY_ICONS[category] || LayoutGrid;
+}
 
 type Tab = 'events' | 'menu' | 'availability' | 'integrations' | 'profile' | 'reminders';
 
@@ -90,6 +115,8 @@ type Props = {
         eventTypes?: any[];
         availabilityDateRules?: any[];
         availabilityWeeklyRules?: any[];
+        teamsEnabled?: boolean;
+        planId?: string | null;
     } | null;
     onRefresh?: () => void;
 };
@@ -113,9 +140,15 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
     const fromTrade = org?.trade_type ? getBookingPreset(org.trade_type).id : null;
     const fromCol = normalizeBookingIndustryId(org?.booking_industry_id);
     
-    const industryId = fromTrade === 'dentists' ? 'dentists' : fromCol || fromTrade;
+    const industryId =
+        fromTrade === 'dentists'
+            ? 'dentists'
+            : fromTrade === 'salons'
+              ? 'salons'
+              : fromCol || fromTrade;
     const isRestaurant = industryId === 'restaurants';
     const isDentists = industryId === 'dentists';
+    const isSalons = industryId === 'salons';
     const hasCatalogTab = isRestaurant || isDentists;
     const tab: Tab =
         tabParam === 'availability' ||
@@ -151,18 +184,32 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
     const [newSlotName, setNewSlotName] = useState('');
     const [newSlotDuration, setNewSlotDuration] = useState('60');
     const [newSlotDeposit, setNewSlotDeposit] = useState('0');
+    const [newSlotPrice, setNewSlotPrice] = useState('45');
+    const [newSlotCategory, setNewSlotCategory] = useState<string>(SALON_SERVICE_CATEGORIES[0]);
+    const [customCategories, setCustomCategories] = useState<string[]>([]);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editDepositPounds, setEditDepositPounds] = useState('');
+    const [editPricePounds, setEditPricePounds] = useState('');
+    const [editCategory, setEditCategory] = useState('');
+    const [editName, setEditName] = useState('');
+    const [editDuration, setEditDuration] = useState('60');
+    const [renamingCategory, setRenamingCategory] = useState<string | null>(null);
+    const [renameCategoryValue, setRenameCategoryValue] = useState('');
     const [savingEdit, setSavingEdit] = useState(false);
     const [savingProfile, setSavingProfile] = useState(false);
     const [savingAvailability, setSavingAvailability] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
+    const [teamsEnabled, setTeamsEnabled] = useState(false);
+    const [availScope, setAvailScope] = useState<'org' | string>('org');
+    const [bookableMembers, setBookableMembers] = useState<any[]>([]);
+    const [loadingMemberAvail, setLoadingMemberAvail] = useState(false);
 
     const applyDashboard = (dash: NonNullable<Props['initialDashboard']>) => {
         setOrg(dash.organization);
         setEventTypes(dash.eventTypes || []);
         setDateRules(dash.availabilityDateRules || []);
         setWeeklyRules(dash.availabilityWeeklyRules || []);
+        setTeamsEnabled(Boolean(dash.teamsEnabled));
         setSettings({
             timezone: dash.organization?.timezone || 'Europe/London',
             minNoticeHours: dash.organization?.min_notice_hours || 2,
@@ -171,6 +218,40 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         });
         setZapierUrl(dash.organization?.zapier_webhook_url || '');
         setZapierSecret(dash.organization?.zapier_secret || '');
+    };
+
+    useEffect(() => {
+        if (!org?.id) return;
+        apiGet('/api/host/team')
+            .then((res) => {
+                setBookableMembers(res.members || []);
+                if (res.teamsEnabled != null) setTeamsEnabled(Boolean(res.teamsEnabled));
+            })
+            .catch(() => {});
+    }, [org?.id]);
+
+    const loadAvailabilityScope = async (scope: 'org' | string) => {
+        setLoadingMemberAvail(true);
+        setError('');
+        try {
+            const qs = scope === 'org' ? '' : `?userId=${encodeURIComponent(scope)}`;
+            const res = await apiGet(`/api/host/availability${qs}`);
+            setDateRules(res.dateRules || []);
+            setWeeklyRules(res.weeklyRules || []);
+            if (res.settings) {
+                setSettings({
+                    timezone: res.settings.timezone || settings.timezone,
+                    minNoticeHours: res.settings.min_notice_hours ?? settings.minNoticeHours,
+                    maxDaysAhead: res.settings.max_days_ahead ?? settings.maxDaysAhead,
+                    bufferMinutes: res.settings.buffer_minutes ?? settings.bufferMinutes
+                });
+            }
+            setAvailScope(scope);
+        } catch (e: any) {
+            setError(e.message || 'Could not load availability');
+        } finally {
+            setLoadingMemberAvail(false);
+        }
     };
 
     useEffect(() => {
@@ -224,23 +305,49 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         eventTypes.map((et) => templateKeyForName(et.name)).filter(Boolean) as EventTemplateKey[]
     );
 
+    const salonCategoryOptions = useMemo(() => {
+        const fromEvents = eventTypes
+            .map((et) => resolveSalonServiceCategory(et.name, et.category))
+            .filter(Boolean);
+        return Array.from(
+            new Set([
+                ...SALON_SERVICE_CATEGORIES,
+                ...customCategories,
+                ...fromEvents
+            ])
+        );
+    }, [eventTypes, customCategories]);
+
+    const rememberCategory = (raw: string) => {
+        const cat = String(raw || '').trim();
+        if (!cat) return '';
+        if (!(SALON_SERVICE_CATEGORIES as readonly string[]).includes(cat)) {
+            setCustomCategories((prev) => (prev.includes(cat) ? prev : [...prev, cat]));
+        }
+        return cat;
+    };
+
     const saveAvailability = async (payload: AvailabilitySavePayload) => {
         setSavingAvailability(true);
         setError('');
         try {
             await apiPut('/api/host/availability', {
-                settings: {
-                    timezone: payload.settings.timezone,
-                    minNoticeHours: payload.settings.minNoticeHours,
-                    maxDaysAhead: payload.settings.maxDaysAhead,
-                    bufferMinutes: payload.settings.bufferMinutes
-                },
+                settings:
+                    availScope === 'org'
+                        ? {
+                              timezone: payload.settings.timezone,
+                              minNoticeHours: payload.settings.minNoticeHours,
+                              maxDaysAhead: payload.settings.maxDaysAhead,
+                              bufferMinutes: payload.settings.bufferMinutes
+                          }
+                        : undefined,
                 weeklyRules: payload.weeklyRules,
-                dateRules: payload.dateRules
+                dateRules: payload.dateRules,
+                ...(availScope !== 'org' ? { userId: availScope } : {})
             });
             setDateRules(payload.dateRules);
             setWeeklyRules(payload.weeklyRules);
-            setSettings(payload.settings);
+            if (availScope === 'org') setSettings(payload.settings);
             setSaved(true);
             onRefresh?.();
             setTimeout(() => setSaved(false), 2000);
@@ -285,7 +392,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
     const addAppointmentSlot = async () => {
         const name = newSlotName.trim();
         if (!name) {
-            setError('Enter a name for the appointment slot.');
+            setError(isSalons ? 'Enter a name for the service.' : 'Enter a name for the appointment slot.');
             return;
         }
         const durationMinutes = parseInt(newSlotDuration, 10);
@@ -298,6 +405,18 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
             setError('Enter a valid deposit (0 is allowed for free slots).');
             return;
         }
+        const priceCents = isSalons
+            ? poundsToCentsAllowZero(newSlotPrice)
+            : depositCents;
+        if (isSalons && (priceCents == null || priceCents < depositCents)) {
+            setError('Enter a service price that is at least the deposit amount.');
+            return;
+        }
+        const category = isSalons ? rememberCategory(newSlotCategory) : '';
+        if (isSalons && !category) {
+            setError('Enter or pick a category (e.g. Hair, Beauty, or your own).');
+            return;
+        }
         setAddingEvent(true);
         setError('');
         try {
@@ -306,14 +425,17 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 description: name,
                 durationMinutes,
                 depositCents,
-                totalCents: depositCents
+                totalCents: isSalons ? priceCents : depositCents,
+                ...(isSalons ? { category } : {})
             });
             setEventTypes((prev) => [...prev, et]);
             setNewSlotName('');
             setNewSlotDuration('60');
             setNewSlotDeposit('0');
+            setNewSlotPrice('45');
+            if (isSalons) setNewSlotCategory(category || SALON_SERVICE_CATEGORIES[0]);
         } catch (e: any) {
-            setError(e.message || 'Could not add appointment slot');
+            setError(e.message || (isSalons ? 'Could not add service' : 'Could not add appointment slot'));
         } finally {
             setAddingEvent(false);
         }
@@ -322,13 +444,41 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
     const startEdit = (et: any) => {
         setEditingId(et.id);
         setEditDepositPounds((et.deposit_cents / 100).toFixed(2).replace(/\.00$/, ''));
+        setEditPricePounds(
+            ((et.total_cents ?? et.deposit_cents) / 100).toFixed(2).replace(/\.00$/, '')
+        );
+        setEditName(et.name || '');
+        setEditDuration(String(et.duration_minutes || 60));
+        setEditCategory(resolveSalonServiceCategory(et.name, et.category) || SALON_SERVICE_CATEGORIES[0]);
         setError('');
     };
 
     const saveEdit = async (et: any) => {
-        const depositCents = poundsToCents(editDepositPounds);
+        const depositCents = poundsToCentsAllowZero(editDepositPounds);
         if (depositCents == null || depositCents < 0) {
-            setError('Enter a valid deposit amount.');
+            setError('Enter a valid deposit amount (0 allowed).');
+            return;
+        }
+        const priceCents = isSalons
+            ? poundsToCentsAllowZero(editPricePounds)
+            : depositCents;
+        if (isSalons && (priceCents == null || priceCents < depositCents)) {
+            setError('Service price must be at least the deposit.');
+            return;
+        }
+        const durationMinutes = parseInt(editDuration, 10);
+        if (isSalons && (!Number.isFinite(durationMinutes) || durationMinutes < 15)) {
+            setError('Duration must be at least 15 minutes.');
+            return;
+        }
+        const name = editName.trim();
+        if (isSalons && !name) {
+            setError('Service name is required.');
+            return;
+        }
+        const category = isSalons ? rememberCategory(editCategory) : undefined;
+        if (isSalons && !category) {
+            setError('Category is required.');
             return;
         }
         setSavingEdit(true);
@@ -336,12 +486,55 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         try {
             const updated = await apiPatch(`/api/host/event-types/${et.id}`, {
                 depositCents,
-                totalCents: depositCents
+                totalCents: isSalons ? priceCents : depositCents,
+                ...(isSalons
+                    ? {
+                          name,
+                          description: name,
+                          durationMinutes,
+                          category
+                      }
+                    : {})
             });
             setEventTypes((prev) => prev.map((x) => (x.id === et.id ? updated : x)));
             setEditingId(null);
         } catch (e: any) {
             setError(e.message);
+        } finally {
+            setSavingEdit(false);
+        }
+    };
+
+    const renameSalonCategory = async (fromCat: string) => {
+        const toCat = rememberCategory(renameCategoryValue);
+        if (!toCat) {
+            setError('Enter a new category name.');
+            return;
+        }
+        if (toCat === fromCat) {
+            setRenamingCategory(null);
+            return;
+        }
+        setSavingEdit(true);
+        setError('');
+        try {
+            const targets = eventTypes.filter(
+                (et) => resolveSalonServiceCategory(et.name, et.category) === fromCat
+            );
+            const updatedRows = await Promise.all(
+                targets.map((et) =>
+                    apiPatch(`/api/host/event-types/${et.id}`, {
+                        category: toCat
+                    })
+                )
+            );
+            const byId = new Map(updatedRows.map((row: any) => [row.id, row]));
+            setEventTypes((prev) => prev.map((x) => byId.get(x.id) || x));
+            if (newSlotCategory === fromCat) setNewSlotCategory(toCat);
+            setRenamingCategory(null);
+            setRenameCategoryValue('');
+        } catch (e: any) {
+            setError(e.message || 'Could not rename category');
         } finally {
             setSavingEdit(false);
         }
@@ -509,7 +702,17 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 <div className="flex flex-wrap gap-2">
                     {(
                         [
-                            ['events', isRestaurant ? 'Book a table' : 'Event types', Settings],
+                            [
+                                'events',
+                                isRestaurant
+                                    ? 'Book a table'
+                                    : isSalons
+                                      ? 'Services'
+                                      : isDentists
+                                        ? 'Event types'
+                                        : 'Event types',
+                                Settings
+                            ],
                             ...(isRestaurant
                                 ? [['menu', 'Menu', Utensils] as const]
                                 : isDentists
@@ -562,14 +765,22 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                         <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
                             <div>
                                 <h2 className="font-bold text-[#0F172A]">
-                                    {isRestaurant ? 'Table booking' : isDentists ? 'Appointment slots' : 'Your services'}
+                                    {isRestaurant
+                                        ? 'Table booking'
+                                        : isDentists
+                                          ? 'Appointment slots'
+                                          : isSalons
+                                            ? 'Your salon services'
+                                            : 'Your services'}
                                 </h2>
                                 <p className="text-sm text-[#64748B] mt-1">
                                     {isRestaurant
                                         ? 'Guests who choose Book a table pick a date/time against this offer. Food menu and online orders are managed under the Menu tab.'
                                         : isDentists
                                           ? 'Calendar slots guests book against (e.g. Free Consultation, Routine Check-up). Add more below if you need them.'
-                                          : 'Set the deposit customers pay when booking each service type.'}
+                                          : isSalons
+                                            ? 'Group services by category (Hair, Beauty, Aesthetics, Makeup). Customers pick a category, then a service, then a stylist and time.'
+                                            : 'Set the deposit customers pay when booking each service type.'}
                                 </p>
                             </div>
 
@@ -577,10 +788,270 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                 <p className="text-sm text-[#94A3B8] border border-dashed border-[#E2E8F0] rounded-xl px-4 py-6 text-center">
                                     {isDentists
                                         ? 'No appointment slots yet — add one below.'
-                                        : 'No services yet — add Standard, Emergency, or Serious below.'}
+                                        : isSalons
+                                          ? 'No services yet — add your first category and service below (e.g. Hair, Facial).'
+                                          : 'No services yet — add Standard, Emergency, or Serious below.'}
                                 </p>
                             )}
 
+                            {isSalons ? (
+                                <div className="space-y-6">
+                                    {(
+                                        [
+                                            ...SALON_SERVICE_CATEGORIES,
+                                            ...Array.from(
+                                                new Set(
+                                                    eventTypes
+                                                        .map((et) =>
+                                                            resolveSalonServiceCategory(et.name, et.category)
+                                                        )
+                                                        .filter(
+                                                            (c) =>
+                                                                c &&
+                                                                !(SALON_SERVICE_CATEGORIES as readonly string[]).includes(
+                                                                    c
+                                                                )
+                                                        )
+                                                )
+                                            ),
+                                            ...(eventTypes.some(
+                                                (et) => !resolveSalonServiceCategory(et.name, et.category)
+                                            )
+                                                ? ['Other']
+                                                : [])
+                                        ] as string[]
+                                    )
+                                        .filter((cat, i, arr) => arr.indexOf(cat) === i)
+                                        .map((cat) => {
+                                            const items = eventTypes.filter((et) => {
+                                                const c = resolveSalonServiceCategory(et.name, et.category);
+                                                if (cat === 'Other') return !c;
+                                                return c === cat;
+                                            });
+                                            if (!items.length && !(SALON_SERVICE_CATEGORIES as readonly string[]).includes(cat)) {
+                                                return null;
+                                            }
+                                            if (!items.length) return null;
+                                            const CatIcon = salonCategoryIcon(cat);
+                                            return (
+                                                <div key={cat} className="space-y-3">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        {renamingCategory === cat ? (
+                                                            <div className="flex flex-wrap items-center gap-2 flex-1">
+                                                                <input
+                                                                    value={renameCategoryValue}
+                                                                    onChange={(e) =>
+                                                                        setRenameCategoryValue(e.target.value)
+                                                                    }
+                                                                    className="rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-sm font-bold"
+                                                                    placeholder="Category name"
+                                                                    autoFocus
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={savingEdit}
+                                                                    onClick={() => renameSalonCategory(cat)}
+                                                                    className="px-3 py-1.5 rounded-lg bg-[#0F172A] text-white text-xs font-bold"
+                                                                >
+                                                                    Save
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setRenamingCategory(null);
+                                                                        setRenameCategoryValue('');
+                                                                    }}
+                                                                    className="px-3 py-1.5 rounded-lg border border-[#E2E8F0] text-xs font-bold text-[#64748B]"
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <p className="text-xs font-bold uppercase tracking-wide text-[#64748B] inline-flex items-center gap-1.5">
+                                                                    <CatIcon className="w-3.5 h-3.5" />
+                                                                    {cat}
+                                                                </p>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setRenamingCategory(cat);
+                                                                        setRenameCategoryValue(cat);
+                                                                    }}
+                                                                    className="text-[11px] font-bold text-[#64748B] hover:text-[#0F172A] inline-flex items-center gap-1"
+                                                                    title="Rename category"
+                                                                >
+                                                                    <Pencil className="w-3 h-3" /> Rename
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                                        {items.map((et) => {
+                                                            const isEditing = editingId === et.id;
+                                                            const Icon = salonCategoryIcon(
+                                                                resolveSalonServiceCategory(et.name, et.category)
+                                                            );
+                                                            return (
+                                                                <div
+                                                                    key={et.id}
+                                                                    className="rounded-xl border border-[#E2E8F0] p-4 flex flex-col gap-2 bg-white"
+                                                                >
+                                                                    <div className="flex items-start justify-between gap-2">
+                                                                        <div className="flex items-center gap-2 min-w-0">
+                                                                            <div className="w-9 h-9 rounded-lg bg-[#F8FAFC] flex items-center justify-center shrink-0 text-[#0F172A]">
+                                                                                <Icon className="w-4 h-4" />
+                                                                            </div>
+                                                                            <div className="min-w-0">
+                                                                                <p className="font-bold text-[#0F172A] truncate">
+                                                                                    {et.name}
+                                                                                </p>
+                                                                                <p className="text-[10px] text-[#64748B]">
+                                                                                    {et.duration_minutes} min
+                                                                                </p>
+                                                                            </div>
+                                                                        </div>
+                                                                        {!isEditing && (
+                                                                            <div className="flex items-center gap-1 shrink-0">
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => startEdit(et)}
+                                                                                    className="p-2 rounded-lg border border-[#E2E8F0] text-[#64748B] hover:text-[#0F172A] hover:border-[#0F172A]/30"
+                                                                                    title="Edit service"
+                                                                                >
+                                                                                    <Pencil className="w-4 h-4" />
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => deleteEventType(et)}
+                                                                                    className="p-2 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                                                                                    title="Delete service"
+                                                                                >
+                                                                                    <Trash2 className="w-4 h-4" />
+                                                                                </button>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    {isEditing ? (
+                                                                        <div className="space-y-2 pt-1">
+                                                                            <label className="block text-xs font-bold text-[#64748B]">
+                                                                                Category
+                                                                                <input
+                                                                                    list="salon-category-options"
+                                                                                    value={editCategory}
+                                                                                    onChange={(e) =>
+                                                                                        setEditCategory(e.target.value)
+                                                                                    }
+                                                                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
+                                                                                    placeholder="Hair, Beauty, or type new…"
+                                                                                />
+                                                                            </label>
+                                                                            <label className="block text-xs font-bold text-[#64748B]">
+                                                                                Name
+                                                                                <input
+                                                                                    value={editName}
+                                                                                    onChange={(e) =>
+                                                                                        setEditName(e.target.value)
+                                                                                    }
+                                                                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
+                                                                                />
+                                                                            </label>
+                                                                            <label className="block text-xs font-bold text-[#64748B]">
+                                                                                Duration (min)
+                                                                                <input
+                                                                                    type="number"
+                                                                                    min={15}
+                                                                                    step={15}
+                                                                                    value={editDuration}
+                                                                                    onChange={(e) =>
+                                                                                        setEditDuration(e.target.value)
+                                                                                    }
+                                                                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
+                                                                                />
+                                                                            </label>
+                                                                            <label className="block text-xs font-bold text-[#64748B]">
+                                                                                Deposit (£)
+                                                                                <div className="relative mt-1">
+                                                                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B] font-bold">
+                                                                                        £
+                                                                                    </span>
+                                                                                    <input
+                                                                                        type="text"
+                                                                                        inputMode="decimal"
+                                                                                        value={editDepositPounds}
+                                                                                        onChange={(e) =>
+                                                                                            setEditDepositPounds(
+                                                                                                e.target.value
+                                                                                            )
+                                                                                        }
+                                                                                        className="w-full rounded-xl border border-[#E2E8F0] pl-8 pr-3 py-2 text-sm font-bold"
+                                                                                    />
+                                                                                </div>
+                                                                            </label>
+                                                                            <label className="block text-xs font-bold text-[#64748B]">
+                                                                                Price (£) *
+                                                                                <div className="relative mt-1">
+                                                                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B] font-bold">
+                                                                                        £
+                                                                                    </span>
+                                                                                    <input
+                                                                                        type="text"
+                                                                                        inputMode="decimal"
+                                                                                        value={editPricePounds}
+                                                                                        onChange={(e) =>
+                                                                                            setEditPricePounds(
+                                                                                                e.target.value
+                                                                                            )
+                                                                                        }
+                                                                                        className="w-full rounded-xl border border-[#E2E8F0] pl-8 pr-3 py-2 text-sm font-bold"
+                                                                                    />
+                                                                                </div>
+                                                                            </label>
+                                                                            <div className="flex gap-2">
+                                                                                <button
+                                                                                    type="button"
+                                                                                    disabled={savingEdit}
+                                                                                    onClick={() => saveEdit(et)}
+                                                                                    className="flex-1 inline-flex items-center justify-center gap-1 py-2 rounded-lg bg-[#0F172A] text-white text-xs font-bold"
+                                                                                >
+                                                                                    <Check className="w-3.5 h-3.5" /> Save
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setEditingId(null)}
+                                                                                    className="p-2 rounded-lg border border-[#E2E8F0] text-[#64748B]"
+                                                                                >
+                                                                                    <X className="w-4 h-4" />
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <>
+                                                                            <div className="rounded-lg bg-[#F8FAFC] px-3 py-2">
+                                                                                <p className="text-[10px] font-bold uppercase text-[#64748B]">
+                                                                                    Price
+                                                                                </p>
+                                                                                <p className="text-xl font-black text-[#F59E0B]">
+                                                                                    {formatCents(et.total_cents ?? et.deposit_cents)}
+                                                                                </p>
+                                                                                <p className="text-[10px] text-[#64748B] mt-0.5">
+                                                                                    Deposit {formatCents(et.deposit_cents)}
+                                                                                </p>
+                                                                            </div>
+                                                                            <p className="text-[10px] text-[#94A3B8] truncate">
+                                                                                /book/{org?.slug}/{et.slug}
+                                                                            </p>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                </div>
+                            ) : (
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                                 {eventTypes.map((et) => {
                                     const key = templateKeyForName(et.name);
@@ -677,23 +1148,53 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                     );
                                 })}
                             </div>
+                            )}
 
-                            {isDentists && (
+                            {(isDentists || isSalons) && (
                                 <div className="border-t border-[#E2E8F0] pt-4 space-y-3">
                                     <div>
-                                        <p className="text-xs font-bold uppercase text-[#64748B]">Add appointment slot</p>
+                                        <p className="text-xs font-bold uppercase text-[#64748B]">
+                                            {isSalons ? 'Add service' : 'Add appointment slot'}
+                                        </p>
                                         <p className="text-sm text-[#64748B] mt-0.5">
-                                            e.g. Free Consultation, New Patient Exam — sets duration and deposit for the calendar.
+                                            {isSalons
+                                                ? 'Pick or type a category, then name, duration, and deposit. You can rename categories on each section header.'
+                                                : 'e.g. Free Consultation, New Patient Exam — sets duration and deposit for the calendar.'}
                                         </p>
                                     </div>
-                                    <div className="grid sm:grid-cols-3 gap-3">
-                                        <label className="block sm:col-span-1">
+                                    <div className={cn('grid gap-3', isSalons ? 'sm:grid-cols-2 lg:grid-cols-4' : 'sm:grid-cols-3')}>
+                                        {isSalons && (
+                                            <label className="block">
+                                                <span className="text-xs font-bold text-[#64748B]">
+                                                    Category * (pick or type new)
+                                                </span>
+                                                <input
+                                                    list="salon-category-options"
+                                                    value={newSlotCategory}
+                                                    onChange={(e) => setNewSlotCategory(e.target.value)}
+                                                    placeholder="Hair, Beauty, Nails…"
+                                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm bg-white"
+                                                />
+                                                <datalist id="salon-category-options">
+                                                    {salonCategoryOptions.map((c) => (
+                                                        <option key={c} value={c} />
+                                                    ))}
+                                                </datalist>
+                                                <p className="text-[10px] text-[#94A3B8] mt-1">
+                                                    Suggestions: {SALON_SERVICE_CATEGORIES.join(', ')}. Type any new
+                                                    name to create a category.
+                                                </p>
+                                            </label>
+                                        )}
+                                        <label className={cn('block', isSalons ? '' : 'sm:col-span-1')}>
                                             <span className="text-xs font-bold text-[#64748B]">Name *</span>
                                             <input
                                                 type="text"
                                                 value={newSlotName}
                                                 onChange={(e) => setNewSlotName(e.target.value)}
-                                                placeholder="e.g. Free Consultation"
+                                                placeholder={
+                                                    isSalons ? 'e.g. Cut & Blow Dry' : 'e.g. Free Consultation'
+                                                }
                                                 className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
                                             />
                                         </label>
@@ -722,6 +1223,22 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                                 />
                                             </div>
                                         </label>
+                                        {isSalons && (
+                                            <label className="block">
+                                                <span className="text-xs font-bold text-[#64748B]">Price (£) *</span>
+                                                <div className="relative mt-1">
+                                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B] font-bold">£</span>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="decimal"
+                                                        value={newSlotPrice}
+                                                        onChange={(e) => setNewSlotPrice(e.target.value)}
+                                                        placeholder="45"
+                                                        className="w-full rounded-xl border border-[#E2E8F0] pl-8 pr-3 py-2.5 text-sm font-bold"
+                                                    />
+                                                </div>
+                                            </label>
+                                        )}
                                     </div>
                                     <button
                                         type="button"
@@ -730,13 +1247,13 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                         className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold disabled:opacity-40"
                                     >
                                         <Plus className="w-4 h-4" />
-                                        {addingEvent ? 'Adding…' : 'Add slot'}
+                                        {addingEvent ? 'Adding…' : isSalons ? 'Add service' : 'Add slot'}
                                     </button>
                                 </div>
                             )}
                         </div>
 
-                        {!isDentists && (
+                        {!isDentists && !isSalons && (
                             <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
                                 <div>
                                     <p className="text-xs font-bold uppercase text-[#64748B]">Add a service</p>
@@ -806,15 +1323,48 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 )}
 
                 {tab === 'availability' && (
-                    <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5">
+                    <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-4">
+                        {teamsEnabled && (
+                            <div className="space-y-2">
+                                <p className="text-xs font-bold uppercase text-[#64748B]">Schedule scope</p>
+                                <p className="text-sm text-[#64748B]">
+                                    Opening hours limit when the salon is open. Member schedules are who can be booked
+                                    (Booking Pro).
+                                </p>
+                                <select
+                                    value={availScope}
+                                    disabled={loadingMemberAvail || savingAvailability}
+                                    onChange={(e) => loadAvailabilityScope(e.target.value)}
+                                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm font-semibold max-w-md"
+                                >
+                                    <option value="org">Opening hours (organisation)</option>
+                                    {bookableMembers
+                                        .filter((m) => m.active !== false)
+                                        .map((m) => (
+                                            <option key={m.user_id} value={m.user_id}>
+                                                {m.display_name || m.name || m.email}
+                                                {m.bookable ? '' : ' (not bookable yet)'}
+                                            </option>
+                                        ))}
+                                </select>
+                            </div>
+                        )}
                         <AvailabilityEditor
-                            key={`${weeklyRules.length}-${dateRules.length}`}
+                            key={`${availScope}-${weeklyRules.length}-${dateRules.length}`}
                             initialDateRules={dateRules}
                             initialWeeklyRules={weeklyRules}
                             settings={settings}
                             onSettingsChange={setSettings}
                             onSave={saveAvailability}
-                            saving={savingAvailability}
+                            saving={savingAvailability || loadingMemberAvail}
+                            title={
+                                availScope === 'org'
+                                    ? teamsEnabled
+                                        ? 'Opening hours'
+                                        : 'Your availability'
+                                    : 'Member schedule'
+                            }
+                            hideOrgSettings={availScope !== 'org'}
                         />
                     </div>
                 )}
@@ -1056,7 +1606,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                     ['trade_type', 'Service type', `e.g. ${preset.name}`],
                                     ['phone', 'Phone number', 'e.g. 07700 900123'],
                                     ['email', 'Notification email', emailHint],
-                                    ['service_area', 'Service area', ph.serviceArea]
+                                    ['service_area', isSalons ? 'Salon location / area' : 'Service area', ph.serviceArea]
                                 ] as const
                             ).map(([field, label, placeholder]) => (
                                 <label key={field} className="block text-xs font-bold uppercase text-[#64748B]">

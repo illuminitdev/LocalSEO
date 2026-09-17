@@ -10,7 +10,7 @@ import {
     Wallet
 } from 'lucide-react';
 import { useEntitlements } from '../../../shared/EntitlementsContext';
-import { restrictEmailOrPhoneInput } from '../../../shared/utils';
+import { cn, restrictEmailOrPhoneInput } from '../../../shared/utils';
 import { getBookingPreset, type BookingIndustryId } from './bookingIndustryPresets';
 
 export type SetupForm = {
@@ -103,6 +103,7 @@ export default function BookingSetupWizard({
 
     const selectedPreset = getBookingPreset(checkoutIndustryId || form.bookingIndustryId);
     const placeholders = selectedPreset.setupPlaceholders;
+    const isSalons = selectedPreset.id === 'salons';
 
     useEffect(() => {
         if (!checkoutIndustryId) return;
@@ -135,7 +136,10 @@ export default function BookingSetupWizard({
         await onComplete({
             ...form,
             bookingIndustryId: preset.id,
-            tradeType: preset.name
+            tradeType: preset.name,
+            ...(preset.id === 'salons'
+                ? { acceptingEmergencies: false, emergencyDeposit: form.standardDeposit }
+                : {})
         });
     };
 
@@ -369,7 +373,7 @@ export default function BookingSetupWizard({
                                         </div>
                                     </label>
                                     <label className="block text-xs font-bold uppercase text-[#64748B]">
-                                        Service area
+                                        {isSalons ? 'Salon location / area' : 'Service area'}
                                         <div className="relative mt-1">
                                             <MapPin className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B] pointer-events-none" />
                                             <input
@@ -421,9 +425,9 @@ export default function BookingSetupWizard({
                                             service later.
                                         </p>
                                     </div>
-                                    <div className="grid sm:grid-cols-2 gap-3">
+                                    <div className={cn('grid gap-3', isSalons ? 'sm:grid-cols-1 max-w-sm' : 'sm:grid-cols-2')}>
                                         <label className="block text-xs font-bold uppercase text-[#64748B]">
-                                            Standard deposit (£)
+                                            {isSalons ? 'Default deposit (£)' : 'Standard deposit (£)'}
                                             <input
                                                 type="number"
                                                 min={0}
@@ -432,12 +436,19 @@ export default function BookingSetupWizard({
                                                 onChange={(e) =>
                                                     setForm((f) => ({
                                                         ...f,
-                                                        standardDeposit: Number(e.target.value) || 0
+                                                        standardDeposit: Number(e.target.value) || 0,
+                                                        ...(isSalons
+                                                            ? {
+                                                                  emergencyDeposit: Number(e.target.value) || 0,
+                                                                  acceptingEmergencies: false
+                                                              }
+                                                            : {})
                                                     }))
                                                 }
                                                 className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-sm focus:outline-none focus:border-[#0F172A]"
                                             />
                                         </label>
+                                        {!isSalons && (
                                         <label className="block text-xs font-bold uppercase text-[#64748B]">
                                             Emergency / call-out deposit (£)
                                             <input
@@ -454,6 +465,7 @@ export default function BookingSetupWizard({
                                                 className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-sm focus:outline-none focus:border-[#0F172A]"
                                             />
                                         </label>
+                                        )}
                                     </div>
                                     <p className="text-sm text-[#64748B]">
                                         Launching{' '}

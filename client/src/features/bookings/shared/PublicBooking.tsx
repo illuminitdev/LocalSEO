@@ -15,13 +15,14 @@ import {
     MapPin,
     Phone,
     ShieldCheck,
-    Sparkles,
+    CalendarCheck,
     User
 } from 'lucide-react';
 import { API_BASE, apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../../shared/utils';
 import { monthDays, todayStr } from './bookingUtils';
-import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryPresets';
+import { getBookingPreset, normalizeBookingIndustryId, resolveSalonServiceCategory } from './bookingIndustryPresets';
 import FoodOrderFlow from '../restaurants/FoodOrderFlow';
+import SalonBookingFlow from '../salons/SalonBookingFlow';
 import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
 
 type Slot = { startAt: string; endAt: string; date: string; label: string };
@@ -164,6 +165,8 @@ export function CustomerBookingFlow({
         normalizeBookingIndustryId(industry.id) ||
         getBookingPreset(host.tradeType || '').id;
     const isDentistsFlow = industryId === 'dentists';
+    const isRestaurantFlow = industryId === 'restaurants';
+    const venueOnlyBooking = isRestaurantFlow; // table at the restaurant — no customer property address
     const [activeEventSlug, setActiveEventSlug] = useState(initialEventSlug || '');
     const [eventType, setEventType] = useState<EventType | null>(initialEventType || null);
     const [selectedCatalog, setSelectedCatalog] = useState<MenuItemPublic | null>(null);
@@ -377,7 +380,7 @@ export function CustomerBookingFlow({
         else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) errors.email = 'Enter a valid email address.';
         if (!phone.trim()) errors.phone = 'Phone number is required.';
         else if (phone.replace(/\D/g, '').length < 10) errors.phone = 'Enter a valid phone number (at least 10 digits).';
-        if (!address.trim()) errors.address = 'Property address is required.';
+        if (!venueOnlyBooking && !address.trim()) errors.address = 'Property address is required.';
         for (const field of industry.customFields || []) {
             if (!String(intakeAnswers[field.id] || '').trim()) {
                 errors[field.id] = `${field.label.replace(/\s*\*$/, '')} is required.`;
@@ -388,8 +391,12 @@ export function CustomerBookingFlow({
 
     const detailsValid = useMemo(
         () => Object.keys(validateDetails()).length === 0,
-        [customerName, email, phone, address, intakeAnswers, industry]
+        [customerName, email, phone, address, intakeAnswers, industry, venueOnlyBooking]
     );
+
+    const bookingAddress = venueOnlyBooking
+        ? host.serviceArea?.trim() || 'Restaurant table booking'
+        : address.trim();
 
     const uploadPhotoFile = async (file: File) => {
         if (!mediaUploadsEnabled) return;
@@ -453,7 +460,7 @@ export function CustomerBookingFlow({
                 customerName: customerName.trim(),
                 email: email.trim(),
                 phone: phone.trim(),
-                address: address.trim(),
+                address: bookingAddress,
                 description: description.trim(),
                 intakeType: 'request',
                 preferredSlots: [{ startAt: start.toISOString(), endAt: end.toISOString() }],
@@ -485,7 +492,7 @@ export function CustomerBookingFlow({
                 customerName: customerName.trim(),
                 email: email.trim(),
                 phone: phone.trim(),
-                address: address.trim(),
+                address: bookingAddress,
                 description: description.trim(),
                 photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
                 intakeAnswers: bookingIntakeAnswers,
@@ -687,7 +694,7 @@ export function CustomerBookingFlow({
                                             className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em]"
                                             style={{ color: 'var(--brand-primary)' }}
                                         >
-                                            <Sparkles className="w-3.5 h-3.5" /> Book online
+                                            <CalendarCheck className="w-3.5 h-3.5" /> Book online
                                         </p>
                                         <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-[#0F172A]">
                                             How would you like to book?
@@ -1202,7 +1209,7 @@ export function CustomerBookingFlow({
                                         color: 'var(--brand-secondary)'
                                     }}
                                 >
-                                    <Sparkles className="w-3.5 h-3.5" />
+                                    <CalendarCheck className="w-3.5 h-3.5" />
                                 </span>
                                 <span className="min-w-0 truncate">{serviceLabel}</span>
                             </p>
@@ -1453,6 +1460,7 @@ export function CustomerBookingFlow({
                                     />
                                     {detailsTouched && fieldErrors.phone && <p className="text-xs text-red-600 mt-1">{fieldErrors.phone}</p>}
                                 </label>
+                                {!venueOnlyBooking && (
                                 <label className="block sm:col-span-2">
                                     <span className="text-xs font-bold text-[#64748B]">
                                         {isDentistsFlow ? 'Your address / postcode' : 'Property address / postcode'}{' '}
@@ -1466,6 +1474,7 @@ export function CustomerBookingFlow({
                                     />
                                     {detailsTouched && fieldErrors.address && <p className="text-xs text-red-600 mt-1">{fieldErrors.address}</p>}
                                 </label>
+                                )}
                                 {(industry.customFields || []).map((field) => (
                                     <label key={field.id} className="block sm:col-span-1">
                                         <span className="text-xs font-bold text-[#64748B]">{field.label}</span>
@@ -1590,10 +1599,12 @@ export function CustomerBookingFlow({
                                     <span className="text-[#64748B]">Name</span>
                                     <span className="font-bold text-[#0F172A]">{customerName}</span>
                                 </div>
+                                {!venueOnlyBooking && (
                                 <div className="px-4 py-3 flex justify-between">
                                     <span className="text-[#64748B]">Address</span>
                                     <span className="font-bold text-[#0F172A] text-right max-w-[60%]">{address}</span>
                                 </div>
+                                )}
                                 <div className="px-4 py-3 flex justify-between bg-[#FAFBFC]">
                                     <span className="font-bold text-[#0F172A]">
                                         {chargeCents > 0 ? 'Amount due today' : 'Amount due'}
@@ -1693,10 +1704,33 @@ export function PublicBookHost() {
         description: et.description,
         durationMinutes: et.duration_minutes,
         depositCents: et.deposit_cents,
-        totalCents: et.total_cents
+        totalCents: et.total_cents,
+        category: resolveSalonServiceCategory(et.name, et.category || '')
     }));
     const menuItems = data.menuItems || [];
     const hasMenu = menuItems.length > 0;
+    const isSalons = normalizeBookingIndustryId(data.bookingIndustryId) === 'salons';
+
+    if (isSalons) {
+        return (
+            <SalonBookingFlow
+                hostSlug={hostSlug!}
+                host={{
+                    name: data.name,
+                    tradeType: data.tradeType,
+                    phone: data.phone,
+                    email: data.email,
+                    serviceArea: data.serviceArea,
+                    logoUrl: data.logoUrl || data.logo_url || '',
+                    brandPrimary: data.brandPrimary || data.brand_primary,
+                    brandSecondary: data.brandSecondary || data.brand_secondary
+                }}
+                eventTypes={eventTypes}
+                industry={data.industry || getBookingPreset('salons')}
+                mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
+            />
+        );
+    }
 
     if (path === 'choose') {
         return (
@@ -1787,6 +1821,19 @@ export function PublicBookHost() {
         );
     }
 
+    const isRestaurantHost =
+        normalizeBookingIndustryId(data.bookingIndustryId) === 'restaurants';
+    const isDentistsHost = normalizeBookingIndustryId(data.bookingIndustryId) === 'dentists';
+
+    const tableEventSlug = (() => {
+        if (!isRestaurantHost || eventTypes.length === 0) return undefined;
+        if (eventTypes.length === 1) return eventTypes[0].slug;
+        return (
+            eventTypes.find((et: EventType) => /book\s+a\s+table/i.test(et.name))?.slug ||
+            eventTypes[0].slug
+        );
+    })();
+
     return (
         <div
             className="min-h-screen bg-[#F8FAFC] py-6 px-4"
@@ -1797,7 +1844,7 @@ export function PublicBookHost() {
             })}
         >
             <div className="max-w-5xl mx-auto space-y-3">
-                {normalizeBookingIndustryId(data.bookingIndustryId) === 'restaurants' && (
+                {isRestaurantHost && (
                     <button
                         type="button"
                         onClick={() => setPath('choose')}
@@ -1821,14 +1868,26 @@ export function PublicBookHost() {
                     industry={data.industry || getBookingPreset(data.bookingIndustryId || data.tradeType)}
                     mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
                     eventTypes={eventTypes}
-                    menuItems={(data.menuItems || []).map((m: any) => ({
-                        id: m.id,
-                        category: m.category || '',
-                        name: m.name,
-                        description: m.description || '',
-                        priceCents: Number(m.priceCents ?? m.price_cents) || 0
-                    }))}
-                    eventSlug={eventTypes.length === 1 && !(data.menuItems || []).length ? eventTypes[0].slug : undefined}
+                    menuItems={
+                        isRestaurantHost
+                            ? []
+                            : (data.menuItems || []).map((m: any) => ({
+                                  id: m.id,
+                                  category: m.category || '',
+                                  name: m.name,
+                                  description: m.description || '',
+                                  priceCents: Number(m.priceCents ?? m.price_cents) || 0
+                              }))
+                    }
+                    eventSlug={
+                        isRestaurantHost
+                            ? tableEventSlug
+                            : isDentistsHost
+                              ? undefined
+                              : eventTypes.length === 1 && !(data.menuItems || []).length
+                                ? eventTypes[0].slug
+                                : undefined
+                    }
                 />
             </div>
         </div>

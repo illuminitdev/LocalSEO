@@ -260,33 +260,6 @@ export async function shareFullAuditEmail(id: string): Promise<{
 
 
 
-export async function downloadFullAuditPdf(id: string, filenameHint?: string) {
-    const path = `/api/admin/full-audits/${encodeURIComponent(id)}/pdf`;
-    const res = await fetch(`${API_BASE}${path}`, { headers: { ...adminAuthHeaders() } });
-    const contentType = (res.headers.get('content-type') || '').toLowerCase();
-    if (!res.ok || !contentType.includes('application/pdf')) {
-        throw await readAdminError(res, path);
-    }
-    const blob = await res.blob();
-    if (!blob.size || blob.size < 800) {
-        throw new Error('PDF download was empty. Please retry.');
-    }
-    const safe =
-        String(filenameHint || 'audit')
-            .replace(/[^a-z0-9]+/gi, '-')
-            .replace(/^-|-$/g, '')
-            .slice(0, 40)
-            .toLowerCase() || 'audit';
-    const objectUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = objectUrl;
-    a.download = `zappsites-audit-${safe}.pdf`;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(objectUrl);
-}
 
 export type AdminCrmLead = {
     id: string;

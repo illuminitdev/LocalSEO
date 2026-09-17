@@ -7,8 +7,7 @@ import {
     AlertCircle,
     X,
     Loader2,
-    Layers,
-    Sparkles
+    Layers
 } from 'lucide-react';
 
 export interface ParsedLeadRow {
@@ -620,7 +619,7 @@ export default function ExcelLeadUploadModal({
                                         </>
                                     ) : (
                                         <>
-                                            <Sparkles className="w-4 h-4" />
+                                            <Upload className="w-4 h-4" />
                                             <span>Import {activeRowsToImport.length} Leads</span>
                                         </>
                                     )}

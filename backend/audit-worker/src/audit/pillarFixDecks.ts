@@ -102,7 +102,8 @@ export function fallbackPillarDecks(audit) {
   const checks = audit?.checklist?.checks || [];
   const failed = checks.filter((c) => c.status === 'fail');
   const name = audit?.business?.businessName || 'This business';
-  const city = audit?.business?.city || 'the local area';
+  const city =
+    audit?.business?.searchAreaLabel || audit?.business?.city || 'the local area';
   const service = audit?.business?.serviceLabel || audit?.business?.service || 'local services';
 
   const localFails = failed
@@ -118,26 +119,45 @@ export function fallbackPillarDecks(audit) {
     .slice(0, 4);
 
   const toActions = (rows, defaultPri) =>
-    rows.map((c, i) => ({
-      priority: i === 0 ? 'Critical' : i === 1 ? 'High' : defaultPri,
-      title: c.label,
-      detail: c.evidence || 'Failed automated check',
-      howTo: `Review and fix “${c.label}” on the live site / Google Business Profile, then re-check.`
-    }));
+    rows.map((c, i) => {
+      const priority = i === 0 ? 'Critical' : i === 1 ? 'High' : defaultPri;
+      const evidence = c.evidence || 'Failed automated check';
+      const impact =
+        priority === 'Critical'
+          ? 'Blocks local trust and ranking signals'
+          : priority === 'High'
+            ? 'Weakens Local Pack / answer visibility'
+            : 'Limits competitive local presence';
+      return {
+        priority,
+        title: c.label,
+        detail: evidence,
+        howTo: `Review and fix “${c.label}” on the live site / Google Business Profile, then re-check.`,
+        issue: c.label,
+        evidence,
+        impact,
+        recommendation: `Fix “${c.label}” using the measured evidence, then re-audit.`
+      };
+    });
 
   const mapsResults = (audit?.gbpLookup?.localRank?.topResults || [])
-    .filter((r) => r?.name && !r.isProspect)
-    .slice(0, 3)
+    .filter((r) => r?.name)
+    .slice(0, 5)
     .map((r) => ({
       position: r.position,
       name: r.name,
       rating: r.rating,
-      reviewCount: r.reviewCount
+      reviewCount: r.reviewCount,
+      isProspect: Boolean(r.isProspect)
     }));
   const inPack = typeof audit?.gbpLookup?.localRank?.position === 'number';
-  const nearQuery = audit?.gbpLookup?.localRank?.query || `${service} near ${city}`;
-  const bestNearQuery = `best ${service} near ${city}`;
-  const nearMeQuery = `${service} near me`;
+  const measuredQuery =
+    String(audit?.gbpLookup?.localRank?.query || '').trim() ||
+    `${service} near ${city}`;
+  const aiEngineChecks = Array.isArray(audit?.gbpLookup?.aiEngineChecks)
+    ? audit.gbpLookup.aiEngineChecks
+    : [];
+  const geoChecklist = audit?.gbpLookup?.geoChecklist || null;
 
   return {
     localSeoFixes: {
@@ -152,13 +172,18 @@ export function fallbackPillarDecks(audit) {
                 priority: 'High',
                 title: 'Complete Google Business Profile',
                 detail: 'Ensure categories, hours, photos and NAP match the website.',
-                howTo: 'Open Google Business Profile → Info → align name, address, phone, website and hours.'
+                howTo: 'Open Google Business Profile → Info → align name, address, phone, website and hours.',
+                issue: 'Incomplete or inconsistent Google Business Profile',
+                evidence: 'GBP fields or NAP alignment need strengthening for local trust.',
+                impact: 'Weak GBP signals reduce Local Pack and Maps visibility.',
+                recommendation: 'Complete categories, hours, photos and NAP so Google and the website match.'
               }
             ]
     },
     aeoFixes: {
       title: 'AEO: Answer Engine Optimisation',
-      visualIntro: `Question-based searches for ${service} in ${city} — how ready the site is for featured answers and People Also Ask.`,
+      visualIntro:
+        'Optimising content to appear as answers to user questions — e.g. Google People Also Ask, featured snippets, direct answers, and AI-generated answers.',
       priorities:
         toActions(aeoFails, 'Medium').length > 0
           ? toActions(aeoFails, 'Medium')
@@ -167,7 +192,11 @@ export function fallbackPillarDecks(audit) {
                 priority: 'Critical',
                 title: 'Add FAQ blocks',
                 detail: 'Build FAQ sections with 40–60 word direct answers and FAQPage schema.',
-                howTo: 'Add an FAQ section on key service pages; mark up with FAQPage JSON-LD.'
+                howTo: 'Add an FAQ section on key service pages; mark up with FAQPage JSON-LD.',
+                issue: 'Weak answer readiness for local questions',
+                evidence: 'FAQ blocks / FAQPage schema not strong enough for AEO.',
+                impact: 'Misses featured answers and People Also Ask for local service questions.',
+                recommendation: 'Add concise FAQ answers with FAQPage schema on key service pages.'
               }
             ],
       queryCards: [
@@ -198,7 +227,7 @@ export function fallbackPillarDecks(audit) {
           }
         },
         {
-          query: nearQuery,
+          query: measuredQuery,
           paaQuestions: [
             `Who is the best ${service} near ${city}?`,
             `Which ${service} is open near me?`,
@@ -208,49 +237,73 @@ export function fallbackPillarDecks(audit) {
         }
       ],
       opportunity: inPack
-        ? `${name} appears in the local pack for “${nearQuery}” — strengthen FAQ and schema so answer boxes can follow.`
-        : `For “${nearQuery}”, other local options show first — add FAQ blocks and schema so ${name} can compete in answer results.`
+        ? `${name} appears in the local pack for “${measuredQuery}” — strengthen FAQ and schema so answer boxes can follow.`
+        : `For “${measuredQuery}”, other local options show first — add FAQ blocks and schema so ${name} can compete in answer results.`
     },
     geoFixes: {
-      title: 'GEO: AI Search Visibility',
-      visualIntro: inPack
-        ? `Local pack for “${nearQuery}” — ${name} is listed; competitors shown are other nearby results.`
-        : `Local pack for “${nearQuery}” — ${name} is not in the top results; competitors below are who Google shows instead.`,
-      goalLine: `Win “best ${service} near me” / “${service} near ${city}” style searches for ${name}.`,
-      queryCards: [
-        {
-          query: nearMeQuery,
-          competitorsShown: mapsResults.map((r) => r.name),
-          competitorsDetailed: mapsResults,
-          aiSummary: mapsResults.length
-            ? `For “${nearMeQuery}”-style searches near ${city}, Google / AI answers commonly surface these nearby providers.`
-            : `For “${nearMeQuery}”-style searches, answers favour providers with stronger Maps and review signals.`
-        },
-        {
-          query: bestNearQuery,
-          competitorsShown: mapsResults.map((r) => r.name),
-          competitorsDetailed: mapsResults,
-          aiSummary: mapsResults.length
-            ? `“${bestNearQuery}” results typically reuse the same strong local names already visible in Maps.`
-            : `“Best ${service} near me” answers favour clinics with consistent citations, reviews and schema.`
-        }
-      ],
-      opportunity: inPack
-        ? `${name} is in the Maps pack for the measured query — keep entity signals strong so AI answers keep citing you.`
-        : `${name} is not listed in the measured Maps pack for “${nearQuery}”; strengthen GBP, reviews and entity signals to appear.`,
+      title: 'GEO: Google + AI visibility',
+      visualIntro:
+        'Optimising a business/entity to be mentioned or recommended in generative AI/search experiences such as Google AI Overviews, ChatGPT, Perplexity, etc.',
+      goalLine: `Win the measured query “${measuredQuery}” on Google Local Pack and get cited in ChatGPT / Claude answers.`,
+      verifyHint: `Cross-check: search “${measuredQuery}” on Google, and ask ChatGPT / Claude the same text.`,
+      queryCards: mapsResults.length
+        ? [
+            {
+              query: measuredQuery,
+              competitorsShown: mapsResults.map((r) => r.name),
+              competitorsDetailed: mapsResults,
+              mapsResults,
+              measured: true
+            }
+          ]
+        : [],
+      aiEngines: aiEngineChecks,
+      geoChecklist,
+      opportunity: (() => {
+        const mentioned = aiEngineChecks.filter((e) => e && e.mentioned === true).map((e) => e.label);
+        const missed = aiEngineChecks.filter((e) => e && e.mentioned === false).map((e) => e.label);
+        const googleBit = inPack
+          ? `${name} is in the measured Google Local Pack for “${measuredQuery}”.`
+          : `${name} is not in the measured Google Local Pack for “${measuredQuery}”.`;
+        const aiBit = mentioned.length
+          ? ` Mentioned in ${mentioned.join(' / ')}.`
+          : missed.length
+            ? ` Not mentioned in ${missed.join(' / ')} for the same prompt.`
+            : ' AI engine checks were unavailable for this run.';
+        return `${googleBit}${aiBit}`;
+      })(),
       actions:
         toActions(geoFails, 'Medium').length > 0
-          ? toActions(geoFails, 'Medium').map(({ title, detail, howTo }) => ({ title, detail, howTo }))
+          ? toActions(geoFails, 'Medium').map(({ title, detail, howTo, priority, issue, evidence, impact, recommendation }) => ({
+              title,
+              detail,
+              howTo,
+              priority,
+              issue,
+              evidence,
+              impact,
+              recommendation
+            }))
           : [
               {
                 title: 'Standardise brand name',
                 detail: `Use “${name}” consistently everywhere — no variations.`,
-                howTo: 'Align GBP, website title, schema and directories to the same legal/trading name.'
+                howTo: 'Align GBP, website title, schema and directories to the same legal/trading name.',
+                priority: 'High',
+                issue: 'Inconsistent entity naming',
+                evidence: `Brand must appear consistently as “${name}” for Google and AI citation.`,
+                impact: 'Google Local Pack and ChatGPT / Claude may prefer clearer competitor entities.',
+                recommendation: 'Standardise the trading name across GBP, site, schema and directories.'
               },
               {
                 title: 'Entity & schema signals',
                 detail: 'Add Organisation / LocalBusiness schema with NAP and sameAs links.',
-                howTo: 'Publish JSON-LD LocalBusiness on the homepage with address, phone, and social sameAs.'
+                howTo: 'Publish JSON-LD LocalBusiness on the homepage with address, phone, and social sameAs.',
+                priority: 'High',
+                issue: 'Weak entity / schema signals',
+                evidence: 'LocalBusiness / sameAs signals need strengthening for GEO.',
+                impact: 'Lower chance of appearing in Local Pack and being recommended by AI assistants.',
+                recommendation: 'Publish LocalBusiness JSON-LD with NAP and sameAs links.'
               }
             ]
     }

@@ -8,7 +8,7 @@ import {
     XCircle,
     Check,
     FileText,
-    Sparkles,
+    StickyNote,
     Loader2
 } from 'lucide-react';
 import { cn } from './utils';
@@ -297,7 +297,7 @@ export default function TaskCompletionModal({
                     {QUICK_NOTES[selectedStatus] && QUICK_NOTES[selectedStatus].length > 0 && (
                         <div className="flex flex-wrap items-center gap-1 pt-0.5">
                             <span className="text-[9px] font-bold text-slate-400 mr-0.5 flex items-center gap-0.5">
-                                <Sparkles className="w-2.5 h-2.5 text-amber-500" /> Quick notes:
+                                <StickyNote className="w-2.5 h-2.5 text-amber-500" /> Quick notes:
                             </span>
                             {QUICK_NOTES[selectedStatus].map((phrase) => (
                                 <button

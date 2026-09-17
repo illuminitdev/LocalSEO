@@ -38,6 +38,10 @@ fs.mkdirSync(out, { recursive: true });
 console.log('[prepare-lambda] Copying dist + migrations + package.json…');
 copyDir(path.join(root, 'dist'), path.join(out, 'dist'));
 copyDir(path.join(root, 'migrations'), path.join(out, 'migrations'));
+const assetsSrc = path.join(root, 'assets');
+if (fs.existsSync(assetsSrc)) {
+  copyDir(assetsSrc, path.join(out, 'assets'));
+}
 fs.copyFileSync(path.join(root, 'package.json'), path.join(out, 'package.json'));
 if (fs.existsSync(path.join(root, 'package-lock.json'))) {
   fs.copyFileSync(path.join(root, 'package-lock.json'), path.join(out, 'package-lock.json'));

@@ -33,7 +33,7 @@ import {
 } from './salesApi';
 import { cn } from '../../shared/utils';
 import {
-    Sparkles,
+    Lightbulb,
     Bot,
     Store,
     Award
@@ -261,7 +261,7 @@ export default function SalesLeadDetail() {
                               ? "bg-slate-50 border-slate-200 text-slate-700"
                               : "bg-amber-50/80 border-amber-200 text-amber-950"
                     )}>
-                        <Sparkles className={cn(
+                        <Lightbulb className={cn(
                             "w-4 h-4 shrink-0 mt-0.5",
                             lead.opportunityLevel === 'high' ? "text-emerald-600" : "text-amber-600"
                         )} />

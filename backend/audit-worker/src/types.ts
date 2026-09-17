@@ -24,6 +24,9 @@ export interface AuditBusiness {
   serviceLabel: string;
   tradeId: string;
   city: string;
+  /** Hyperlocal town/suburb/postcode used for Maps + report copy */
+  searchAreaLabel?: string;
+  postcode?: string;
   contactName: string;
 }
 

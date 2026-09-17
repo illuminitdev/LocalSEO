@@ -27,7 +27,7 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
         `SELECT b.*, e.name AS event_name,
                 o.name AS org_name, o.slug AS org_slug, o.email AS org_email,
                 o.phone AS org_phone, o.host_name AS org_host_name, o.currency AS org_currency,
-                o.reminder_visit_hours, o.reminders_enabled
+                o.reminder_visit_hours, o.reminders_enabled, o.logo_url AS org_logo_url
          FROM bookings b
          JOIN event_types e ON e.id = b.event_type_id
          JOIN organizations o ON o.id = b.org_id
@@ -95,7 +95,8 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
                 hostPhone: meta.org_phone,
                 hostEmail: meta.org_email,
                 manageUrl,
-                icsUrl
+                icsUrl,
+                logoUrl: meta.org_logo_url || process.env.BOOKING_EMAIL_LOGO_URL || ''
             });
 
             if (meta.org_email) {

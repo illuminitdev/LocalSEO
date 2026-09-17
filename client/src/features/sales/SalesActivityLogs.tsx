@@ -5,7 +5,6 @@ import {
     PhoneCall,
     RefreshCw,
     Search,
-    Sparkles,
     Building2,
     Clock,
     Send,
@@ -383,7 +382,7 @@ export default function SalesActivityLogs() {
                             </div>
                         ) : !filteredActivities.length ? (
                             <div className="p-12 text-center text-[#64748B]">
-                                <Sparkles className="w-8 h-8 text-[#CBD5E1] mx-auto mb-2" />
+                                <Phone className="w-8 h-8 text-[#CBD5E1] mx-auto mb-2" />
                                 <p className="text-sm font-bold text-[#0F172A]">No call activities found</p>
                                 <p className="text-xs mt-1 text-[#94A3B8]">
                                     {selectedDispositionFilter === 'all'

@@ -49,12 +49,22 @@ export function applyWebsiteChecks(
   checks: import('../types.js').ChecklistCheck[],
   crawl: any,
   lighthouse: any = null,
-  context: { city?: string; phone?: string; address?: string; gbpLookup?: any } = {}
+  context: {
+    city?: string;
+    postcode?: string;
+    phone?: string;
+    address?: string;
+    gbpLookup?: any;
+  } = {}
 ) {
   const byId = new Map(checks.map((c) => [c.id, c]));
   const home = crawl.pages[0];
   const corpus = crawl.corpus;
   const city = String(context.city || '').toLowerCase();
+  const postcode = String(context.postcode || '')
+    .toLowerCase()
+    .replace(/\s+/g, '');
+  const bodyLower = () => String(home?.bodyText || '').toLowerCase();
 
   if (!home) {
     for (const c of checks) {
@@ -132,14 +142,21 @@ export function applyWebsiteChecks(
     `H1: ${home.h1s[0] || 'none'}; title: ${home.title || 'none'}`
   );
   {
+    const text = bodyLower();
     const areaOk =
-      (city && home.bodyText.toLowerCase().includes(city)) ||
+      (city && text.includes(city)) ||
+      (postcode && text.replace(/\s+/g, '').includes(postcode)) ||
       /area|cover|serving|we (serve|cover)|across/i.test(home.bodyText);
+    const labelBits = [city && `“${city}”`, postcode && `postcode ${context.postcode}`]
+      .filter(Boolean)
+      .join(' / ');
     setCheck(
       byId,
       'web_home_2',
       areaOk ? 'pass' : 'fail',
-      city ? `Looking for service area / “${city}” on homepage` : 'Service-area language scan on homepage'
+      labelBits
+        ? `Looking for service area / ${labelBits} on homepage`
+        : 'Service-area language scan on homepage'
     );
   }
   setCheck(
@@ -164,7 +181,7 @@ export function applyWebsiteChecks(
   
   for (const c of checks) {
     if (c.section !== 'service_pages') continue;
-    const terms = c.matchTerms || [c.label.replace(/ page$/i, '').toLowerCase()];
+    const terms = (c.matchTerms || [c.label.replace(/ page$/i, '').toLowerCase()]) as string[];
     const found = pathOrTextHas(corpus, terms);
     setCheck(byId, c.id, found ? 'pass' : 'fail', found ? `Matched: ${terms.join(', ')}` : `No page/signal for: ${terms.join(', ')}`);
   }
@@ -172,7 +189,7 @@ export function applyWebsiteChecks(
   
   for (const c of checks) {
     if (!String(c.id).startsWith('loc_') || String(c.id).startsWith('loc_qual_')) continue;
-    const terms = c.matchTerms || [];
+    const terms = (c.matchTerms || []) as string[];
     const found = pathOrTextHas(corpus, terms);
     setCheck(byId, c.id, found ? 'pass' : 'fail', found ? `Found ${terms.join(', ')}` : `No location page signal for ${terms.join(', ')}`);
   }
@@ -328,6 +345,14 @@ export function applyWebsiteChecks(
       : 'fail',
     'Educational answers covering common questions'
   );
+  setCheck(
+    byId,
+    'aeo_4',
+    byId.get('aeo_2')?.status === 'pass' || byId.get('aeo_3')?.status === 'pass'
+      ? 'pass'
+      : 'fail',
+    'Near-me / best local question readiness (FAQ + service answers)'
+  );
 
   setCheck(
     byId,
@@ -355,6 +380,62 @@ export function applyWebsiteChecks(
     /about|team|our (story|mission)|founded|years experience/i.test(corpus.text) ? 'pass' : 'fail',
     'Entity / about / authority language'
   );
+
+  const localRank = context.gbpLookup?.localRank as
+    | {
+        query?: string;
+        position?: number | null;
+        evidence?: string;
+        topResults?: Array<{ position?: number; name?: string; isProspect?: boolean }>;
+      }
+    | null
+    | undefined;
+  if (localRank && (localRank.query || localRank.evidence || Array.isArray(localRank.topResults))) {
+    const inPack = typeof localRank.position === 'number';
+    const topNames = (localRank.topResults || [])
+      .slice(0, 3)
+      .map((r) => `#${r.position ?? '—'} ${r.name || ''}`)
+      .join('; ');
+    setCheck(
+      byId,
+      'maps_vis_1',
+      inPack ? 'pass' : 'fail',
+      localRank.evidence ||
+        (inPack
+          ? `In Local Pack at #${localRank.position} for “${localRank.query || 'local query'}”`
+          : `Not in measured Local Pack for “${localRank.query || 'local query'}”`)
+    );
+    setCheck(
+      byId,
+      'maps_vis_2',
+      inPack ? 'pass' : Array.isArray(localRank.topResults) && localRank.topResults.length ? 'fail' : 'unknown',
+      inPack
+        ? `Maps position #${localRank.position} for “${localRank.query || 'local query'}”`
+        : topNames
+          ? `Top Maps results: ${topNames}`
+          : localRank.evidence || 'No Maps pack measured'
+    );
+    setCheck(
+      byId,
+      'geo_5',
+      inPack ? 'pass' : 'fail',
+      inPack
+        ? `Listed in measured near-me / local results (#${localRank.position})`
+        : `Not listed in measured near-me / local results for “${localRank.query || 'local query'}”`
+    );
+    if (byId.has('maps_obs_8')) {
+      setCheck(
+        byId,
+        'maps_obs_8',
+        topNames ? 'pass' : 'unknown',
+        topNames || 'No top-3 competitors captured'
+      );
+    }
+  } else {
+    setCheck(byId, 'maps_vis_1', 'unknown', 'Local Pack not measured');
+    setCheck(byId, 'maps_vis_2', 'unknown', 'Maps ranking not measured');
+    setCheck(byId, 'geo_5', 'unknown', 'Near-me visibility not measured');
+  }
 
   
   const digits = (s) => String(s || '').replace(/\D/g, '');

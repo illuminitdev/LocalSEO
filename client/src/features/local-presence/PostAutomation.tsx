@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
-import { Calendar, Image as ImageIcon, Send, Sparkles, MessageSquare, Tag } from 'lucide-react';
+import { Calendar, Image as ImageIcon, Send, Wand2, MessageSquare, Tag } from 'lucide-react';
 import { cn, apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
 import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
 
@@ -145,7 +145,7 @@ export default function PostAutomation() {
                                 disabled={isGenerating}
                                 className="w-full flex items-center justify-center gap-2 py-3 bg-[#0F172A] hover:bg-[#111827] text-white rounded-xl font-bold transition-all disabled:opacity-70 cursor-pointer shadow-sm"
                             >
-                                <Sparkles className={`w-5 h-5 ${isGenerating ? 'animate-spin' : ''}`} />
+                                <Wand2 className={`w-5 h-5 ${isGenerating ? 'animate-spin' : ''}`} />
                                 {isGenerating ? 'Generating Magic...' : 'Generate AI Copy'}
                             </button>
                         </div>
@@ -218,7 +218,7 @@ export default function PostAutomation() {
                                             disabled={isGeneratingImage}
                                             className="flex items-center gap-2 px-4 py-2 bg-white border border-[#E2E8F0] rounded-full text-sm font-medium shadow-sm hover:bg-[#F8FAFC] transition-colors z-10 cursor-pointer"
                                         >
-                                            <Sparkles className={`w-4 h-4 text-[#D97706] ${isGeneratingImage ? 'animate-spin' : ''}`} />
+                                            <Wand2 className={`w-4 h-4 text-[#D97706] ${isGeneratingImage ? 'animate-spin' : ''}`} />
                                             {isGeneratingImage ? 'Creating...' : 'Generate Image'}
                                         </button>
                                     </>

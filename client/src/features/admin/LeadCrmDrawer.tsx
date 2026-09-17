@@ -17,8 +17,8 @@ import {
     MapPin,
     FileText,
     Eye,
-    Sparkles,
-    Pencil
+    Pencil,
+    CheckSquare
 } from 'lucide-react';
 import {
     type LeadTask,
@@ -612,7 +612,7 @@ export default function LeadCrmDrawer({
                                     <div className="py-8 text-center text-xs text-slate-400">Loading tasks...</div>
                                 ) : tasks.length === 0 ? (
                                     <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-2xl">
-                                        <Sparkles className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                        <CheckSquare className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                                         <p className="text-sm font-medium text-slate-600">No tasks assigned yet</p>
                                         <p className="text-xs text-slate-400 mt-0.5">Use the buttons above to assign "Prepare Audit" or "Onboard Customer".</p>
                                     </div>

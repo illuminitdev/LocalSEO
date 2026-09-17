@@ -29,6 +29,20 @@ export type BookingCustomField = {
     options: string[];
 };
 
+export type BookingCategorizedService = {
+    category: string;
+    name: string;
+    durationMinutes?: number;
+};
+
+export const SALON_SERVICE_CATEGORIES = [
+    'Hair',
+    'Beauty',
+    'Aesthetics',
+    'Makeup',
+    'Courses'
+] as const;
+
 export type BookingIndustryPreset = {
     id: BookingIndustryId;
     name: string;
@@ -40,6 +54,8 @@ export type BookingIndustryPreset = {
     tagline: string;
     defaultService: string;
     services: string[];
+    /** When set, seeded event types use category + optional duration. */
+    categorizedServices?: BookingCategorizedService[];
     timeSlots: string[];
     customFields: BookingCustomField[];
     uploadPrompt: string;
@@ -144,7 +160,7 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         id: 'cleaners',
         name: 'Cleaning Services',
         shortName: 'Cleaning',
-        icon: 'Sparkles',
+        icon: 'SprayCan',
         eyebrow: 'CLEANING SERVICE BOOKING FLOW DEMO',
         demoTitle: 'How Cleaning Companies Secure Recurring Clients 24/7',
         confirmationTitle: 'Cleaning Service Confirmed!',
@@ -365,34 +381,51 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
         eyebrow: 'SALON & BEAUTY BOOKING FLOW DEMO',
         demoTitle: 'How Salons & Aesthetic Clinics Fill Appointment Book 24/7',
         confirmationTitle: 'Salon Appointment Confirmed!',
-        tagline: 'Seamless bookings for hair restyles, facials, nails, and doctor consultations.',
-        defaultService: 'Facial Rejuvenation & Skin Peel (£70)',
+        tagline: 'Book hair, beauty, aesthetics, and makeup appointments online — pick a service, stylist, and time.',
+        defaultService: 'Classic Facial (£55)',
         services: [
-            'Facial Rejuvenation (£70)',
-            'Hair Cut, Colour & Restyle (£85)',
-            'Full Set Gel Nails (£55)',
-            'Doctor Consultation (£50 Deposit)',
-            'Lash Lift & Brow Lamination (£50)'
+            'Cut & Blow Dry (£45)',
+            'Colour & Restyle (£85)',
+            'Classic Facial (£55)',
+            'Lash Lift & Brow (£50)',
+            'Makeup Application (£65)',
+            'BB Glow (£120)',
+            'Hydrafacial (£95)',
+            'Exilis Elite (£150)',
+            'Botox Consultation (£0)',
+            'CPD Course Enquiry (£0)'
+        ],
+        categorizedServices: [
+            { category: 'Hair', name: 'Cut & Blow Dry (£45)', durationMinutes: 60 },
+            { category: 'Hair', name: 'Colour & Restyle (£85)', durationMinutes: 120 },
+            { category: 'Beauty', name: 'Classic Facial (£55)', durationMinutes: 60 },
+            { category: 'Beauty', name: 'Lash Lift & Brow (£50)', durationMinutes: 45 },
+            { category: 'Makeup', name: 'Makeup Application (£65)', durationMinutes: 60 },
+            { category: 'Aesthetics', name: 'BB Glow (£120)', durationMinutes: 75 },
+            { category: 'Aesthetics', name: 'Hydrafacial (£95)', durationMinutes: 60 },
+            { category: 'Aesthetics', name: 'Exilis Elite (£150)', durationMinutes: 45 },
+            { category: 'Aesthetics', name: 'Botox Consultation (£0)', durationMinutes: 30 },
+            { category: 'Courses', name: 'CPD Course Enquiry (£0)', durationMinutes: 30 }
         ],
         timeSlots: ['10:00 AM', '12:00 PM', '02:30 PM', '05:00 PM'],
         customFields: [
             {
                 id: 'practitionerPref',
-                label: 'Practitioner *',
+                label: 'Stylist / Practitioner *',
                 type: 'select',
-                options: ['First Available', 'Senior Therapist', 'Cosmetic Doctor']
+                options: ['First Available', 'Senior Stylist', 'Colour Specialist', 'Beauty Therapist', 'Aesthetic Practitioner']
             },
             {
                 id: 'patchTest',
                 label: 'Patch Test *',
                 type: 'select',
-                options: ['Patch Test Completed', 'Need 48h Patch Test', 'First-Time Visit']
+                options: ['Patch Test Completed', 'Need 48h Patch Test', 'First-Time Visit', 'Not Required']
             }
         ],
         uploadPrompt: 'Upload a hair inspiration photo or current skin concern',
         notesPlaceholder:
             'E.g. Wanting to go from dark brown to balayage blonde, skin sensitive.',
-        summaryBullet: 'Automated deposit captured with intake medical questionnaire link sent.'
+        summaryBullet: 'Deposit captured with stylist preference and patch-test intake saved to the board.'
     },
     {
         id: 'personal-trainers',
@@ -679,4 +712,50 @@ export function slugifyServiceName(name: string): string {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .slice(0, 60) || 'service';
+}
+
+function normalizeSalonServiceKey(name: string): string {
+    return String(name || '')
+        .toLowerCase()
+        .replace(/£[\d.,]+/g, '')
+        .replace(/\(.*?\)/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+/** Resolve Hair / Beauty / Aesthetics / Makeup / Courses when event_types.category is empty. */
+export function resolveSalonServiceCategory(
+    name: string,
+    existingCategory?: string | null
+): string {
+    const existing = String(existingCategory || '').trim();
+    if (existing) return existing;
+
+    const preset = getBookingPreset('salons');
+    const key = normalizeSalonServiceKey(name);
+    if (!key) return '';
+
+    const fromPreset = (preset.categorizedServices || []).find(
+        (s) => normalizeSalonServiceKey(s.name) === key
+    );
+    if (fromPreset?.category) return fromPreset.category;
+
+    if (/\b(course|cpd|train|class|diploma)\b/.test(key)) return 'Courses';
+    if (/\b(makeup|make up|bridal makeup)\b/.test(key)) return 'Makeup';
+    if (
+        /\b(bb glow|hydrafacial|hydra facial|exilis|botox|filler|plasma|meso|microneedl|profound|ipl|laser|scalp pigmentation)\b/.test(
+            key
+        )
+    ) {
+        return 'Aesthetics';
+    }
+    if (/\b(hair|cut|colour|color|blow|restyle|balayage|highlight|tint)\b/.test(key)) {
+        return 'Hair';
+    }
+    if (
+        /\b(facial|lash|brow|wax|massage|manicure|pedicure|nail|beauty|skin peel)\b/.test(key)
+    ) {
+        return 'Beauty';
+    }
+    return '';
 }

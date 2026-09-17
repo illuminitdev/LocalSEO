@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Calendar, CheckCircle2, Copy, ExternalLink, LogIn, Plus, Play, QrCode, Settings, User, Wrench } from 'lucide-react';
+import { Calendar, CheckCircle2, Copy, ExternalLink, FileText, LogIn, Plus, Play, QrCode, Scissors, Settings, User, Wrench } from 'lucide-react';
 import { apiGet, apiPost, formatCents, cn, restrictPhoneInput } from '../../../shared/utils';
 import { setBookingOrgSlug } from './bookingUtils';
 import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
@@ -10,13 +10,20 @@ import { normalizeBookingIndustryId } from './bookingIndustryPresets';
 
 function intakeAnswersList(raw: unknown): { key: string; label: string; value: string }[] {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const labelMap: Record<string, string> = {
+        practitionerPref: 'Stylist',
+        patchTest: 'Patch test',
+        priceListItemId: 'Treatment'
+    };
     return Object.entries(raw as Record<string, unknown>)
         .map(([key, value]) => ({
             key,
-            label: key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()),
+            label:
+                labelMap[key] ||
+                key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()),
             value: String(value ?? '').trim()
         }))
-        .filter((x) => x.value);
+        .filter((x) => x.value && x.key !== 'priceListItemId');
 }
 type BookingService = {
     id: string;
@@ -69,6 +76,7 @@ export default function BookingPlots() {
     const [filter, setFilter] = useState<'upcoming' | 'requests' | 'active' | 'past' | 'cancelled' | 'food'>('upcoming');
     const [copied, setCopied] = useState(false);
     const [busy, setBusy] = useState('');
+    const [payDialog, setPayDialog] = useState<{ id: string; amountPounds: string } | null>(null);
     const [showManual, setShowManual] = useState(false);
     const [manualBusy, setManualBusy] = useState(false);
     const [manualForm, setManualForm] = useState({
@@ -120,6 +128,7 @@ export default function BookingPlots() {
     const ready = Boolean(data?.ready);
     const org = data?.organization;
     const isRestaurant = normalizeBookingIndustryId(org?.booking_industry_id) === 'restaurants';
+    const isSalons = normalizeBookingIndustryId(org?.booking_industry_id) === 'salons';
     const eventTypes = data?.eventTypes || [];
     const bookings = data?.bookings || [];
     const displayServices: BookingService[] =
@@ -259,6 +268,54 @@ export default function BookingPlots() {
                 await load();
             } catch {
                 
+            }
+        } finally {
+            setBusy('');
+        }
+    };
+
+    const remainingBalanceCents = (b: any) => {
+        const total = Math.max(Number(b.total_cents) || 0, Number(b.invoice_amount_cents) || 0);
+        const deposit = Number(b.deposit_cents) || 0;
+        if (b.invoice_amount_cents != null && b.invoice_status && b.invoice_status !== 'paid') {
+            return Math.max(0, Number(b.invoice_amount_cents) || 0);
+        }
+        return Math.max(0, total - deposit);
+    };
+
+    const openPaymentRequest = (b: any) => {
+        const cents = remainingBalanceCents(b);
+        const pounds = (cents / 100).toFixed(2).replace(/\.00$/, '');
+        setPayDialog({ id: b.id, amountPounds: pounds || '0' });
+        setError('');
+    };
+
+    const sendPaymentRequest = async () => {
+        if (!payDialog) return;
+        const pounds = parseFloat(payDialog.amountPounds);
+        if (!Number.isFinite(pounds) || pounds < 0) {
+            setError('Enter a valid amount in pounds.');
+            return;
+        }
+        const amountCents = Math.round(pounds * 100);
+        setBusy(payDialog.id);
+        setError('');
+        setInfo('');
+        try {
+            const result = await apiPost(`/api/host/bookings/${payDialog.id}/invoice`, { amountCents });
+            if (result.skipped) {
+                setError(result.reason || 'Nothing to charge for this booking.');
+            } else {
+                setInfo(`Payment request sent${result.invoiceUrl ? ' — invoice link ready' : ''}.`);
+                setPayDialog(null);
+            }
+            await load();
+        } catch (e: any) {
+            setError(e.message || 'Could not send payment request');
+            try {
+                await load();
+            } catch {
+                /* ignore */
             }
         } finally {
             setBusy('');
@@ -545,7 +602,7 @@ export default function BookingPlots() {
                             }}
                             className="ml-auto inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold bg-[#0F172A] text-white"
                         >
-                            <Plus className="w-3.5 h-3.5" /> Add job
+                            <Plus className="w-3.5 h-3.5" /> {isSalons ? 'Add booking' : 'Add job'}
                         </button>
                         )}
                     </div>
@@ -558,7 +615,9 @@ export default function BookingPlots() {
                     {showManual && (
                         <form onSubmit={createManualBooking} className="p-4 border-b border-[#E2E8F0] bg-[#FAFBFC] space-y-3">
                             <div className="flex justify-between items-center">
-                                <h3 className="font-bold text-sm text-[#0F172A]">Manual booking / request</h3>
+                                <h3 className="font-bold text-sm text-[#0F172A]">
+                                    {isSalons ? 'Manual appointment' : 'Manual booking / request'}
+                                </h3>
                                 <button type="button" onClick={() => setShowManual(false)} className="text-xs font-bold text-[#64748B]">
                                     Close
                                 </button>
@@ -573,7 +632,7 @@ export default function BookingPlots() {
                                     <option value="">Select service</option>
                                     {eventTypes.map((et: any) => (
                                         <option key={et.id} value={et.id}>
-                                            {et.name}
+                                            {et.category ? `${et.category} · ${et.name}` : et.name}
                                         </option>
                                     ))}
                                 </select>
@@ -611,7 +670,7 @@ export default function BookingPlots() {
                                     className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
                                 />
                                 <input
-                                    placeholder="Address"
+                                    placeholder={isSalons ? 'Notes / location (optional)' : 'Address'}
                                     value={manualForm.address}
                                     onChange={(e) => setManualForm((f) => ({ ...f, address: e.target.value }))}
                                     className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm"
@@ -624,7 +683,7 @@ export default function BookingPlots() {
                                     className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm sm:col-span-2"
                                 />
                                 <input
-                                    placeholder="Job notes"
+                                    placeholder={isSalons ? 'Appointment notes' : 'Job notes'}
                                     value={manualForm.description}
                                     onChange={(e) => setManualForm((f) => ({ ...f, description: e.target.value }))}
                                     className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm sm:col-span-2"
@@ -643,10 +702,20 @@ export default function BookingPlots() {
                         {!filtered.length && (
                             <div className="border border-dashed border-[#E2E8F0] rounded-2xl p-10 text-center flex flex-col items-center justify-center min-h-[340px] bg-[#FAFBFC]">
                                 <div className="w-16 h-16 rounded-2xl bg-[#F59E0B]/25 flex items-center justify-center mb-4">
-                                    <Wrench className="w-8 h-8 text-[#0F172A]" />
+                                    {isSalons ? (
+                                        <Scissors className="w-8 h-8 text-[#0F172A]" />
+                                    ) : (
+                                        <Wrench className="w-8 h-8 text-[#0F172A]" />
+                                    )}
                                 </div>
-                                <h3 className="font-black text-lg text-[#0F172A]">No bookings yet</h3>
-                                <p className="text-sm text-[#64748B] mt-2 max-w-md">Share your link or open customer view to test a booking.</p>
+                                <h3 className="font-black text-lg text-[#0F172A]">
+                                    {isSalons ? 'No appointments yet' : 'No bookings yet'}
+                                </h3>
+                                <p className="text-sm text-[#64748B] mt-2 max-w-md">
+                                    {isSalons
+                                        ? 'Share your book link so clients can pick a service, stylist, and time.'
+                                        : 'Share your link or open customer view to test a booking.'}
+                                </p>
                                 <button type="button" onClick={openCustomerView} className="mt-5 px-5 py-3 rounded-xl bg-[#F59E0B] text-white text-sm font-bold inline-flex items-center gap-2">
                                     <ExternalLink className="w-4 h-4" /> Open customer view
                                 </button>
@@ -660,7 +729,11 @@ export default function BookingPlots() {
                                         <div className="flex justify-between gap-2 items-start">
                                             <div className="min-w-0">
                                                 <p className="font-bold text-[#0F172A] truncate">{b.customer_name}</p>
-                                                <p className="text-xs text-[#64748B]">{b.event_name}</p>
+                                                <p className="text-xs text-[#64748B]">
+                                                    {b.event_category
+                                                        ? `${b.event_category} · ${b.event_name}`
+                                                        : b.event_name}
+                                                </p>
                                                 {b.client_id && (
                                                     <Link
                                                         to={`/clients/${b.client_id}`}
@@ -678,9 +751,8 @@ export default function BookingPlots() {
                                             <Calendar className="w-3.5 h-3.5 text-[#F59E0B] shrink-0" />
                                             {new Date(b.start_at).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                                         </p>
-                                        <p className="text-xs text-[#64748B] line-clamp-2">{b.customer_address}</p>
-                                        {b.event_name && (
-                                            <p className="text-xs font-semibold text-[#0F172A]">Service: {b.event_name}</p>
+                                        {b.customer_address && (
+                                            <p className="text-xs text-[#64748B] line-clamp-2">{b.customer_address}</p>
                                         )}
                                         {intakeAnswersList(b.intake_answers).length > 0 && (
                                             <div className="text-xs text-[#64748B] bg-[#F8FAFC] rounded-lg px-2 py-1.5 space-y-0.5">
@@ -711,9 +783,15 @@ export default function BookingPlots() {
                                             </div>
                                         )}
                                         <div className="flex flex-wrap gap-2 pt-1">
-                                            {b.deposit_paid && (
+                                            {(Number(b.deposit_cents) > 0 || b.deposit_paid) && (
                                                 <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full">
                                                     Deposit {formatCents(b.deposit_cents)}
+                                                    {b.deposit_paid ? '' : ' unpaid'}
+                                                </span>
+                                            )}
+                                            {Number(b.total_cents) > 0 && (
+                                                <span className="text-[10px] font-bold text-[#0F172A] bg-[#F8FAFC] px-2 py-1 rounded-full border border-[#E2E8F0]">
+                                                    Total {formatCents(b.total_cents)}
                                                 </span>
                                             )}
                                             {b.invoice_status && (
@@ -722,18 +800,25 @@ export default function BookingPlots() {
                                                 </span>
                                             )}
                                         </div>
+                                        {b.invoice_last_error && (
+                                            <p className="text-[11px] text-amber-800 bg-amber-50 rounded-lg px-2 py-1.5">
+                                                {b.invoice_last_error}
+                                            </p>
+                                        )}
                                         <div className="flex flex-wrap gap-2 pt-2 mt-auto border-t border-[#F1F5F9]">
                                             {(b.status === 'confirmed' || b.job_status === 'scheduled' || b.job_status === 'requested') &&
                                                 b.job_status !== 'in_progress' &&
                                                 b.status !== 'done' &&
-                                                b.job_status !== 'completed' && (
+                                                b.job_status !== 'completed' &&
+                                                b.job_status !== 'invoiced' && (
                                                     <button
                                                         type="button"
                                                         disabled={busy === b.id}
                                                         onClick={() => startJob(b.id)}
                                                         className="text-xs font-bold px-3 py-1.5 rounded-lg bg-orange-600 text-white flex items-center gap-1"
                                                     >
-                                                        <Play className="w-3 h-3" /> {busy === b.id ? '…' : 'Start job'}
+                                                        <Play className="w-3 h-3" />{' '}
+                                                        {busy === b.id ? '…' : isSalons ? 'Start' : 'Start job'}
                                                     </button>
                                                 )}
                                             {(b.status === 'confirmed' ||
@@ -744,9 +829,28 @@ export default function BookingPlots() {
                                                 b.job_status !== 'completed' &&
                                                 b.job_status !== 'invoiced' && (
                                                 <button type="button" disabled={busy === b.id} onClick={() => markJobDone(b.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-[#0F172A] text-white flex items-center gap-1">
-                                                    <CheckCircle2 className="w-3 h-3" /> {busy === b.id ? 'Saving…' : 'Mark as done'}
+                                                    <CheckCircle2 className="w-3 h-3" />{' '}
+                                                    {busy === b.id ? 'Saving…' : isSalons ? 'Complete' : 'Mark as done'}
                                                 </button>
                                             )}
+                                            {(b.job_status === 'completed' ||
+                                                b.job_status === 'invoiced' ||
+                                                b.status === 'done') &&
+                                                b.invoice_status !== 'paid' && (
+                                                    <button
+                                                        type="button"
+                                                        disabled={busy === b.id}
+                                                        onClick={() => openPaymentRequest(b)}
+                                                        className="text-xs font-bold px-3 py-1.5 rounded-lg bg-[#F59E0B] text-[#0F172A] flex items-center gap-1"
+                                                    >
+                                                        <FileText className="w-3 h-3" />
+                                                        {busy === b.id
+                                                            ? '…'
+                                                            : b.invoice_url
+                                                              ? 'Resend payment request'
+                                                              : 'Send payment request'}
+                                                    </button>
+                                                )}
                                             {b.invoice_url && (
                                                 <a href={b.invoice_url} target="_blank" rel="noreferrer" className="text-xs font-bold px-3 py-1.5 rounded-lg border border-[#E2E8F0]">View invoice</a>
                                             )}
@@ -768,6 +872,49 @@ export default function BookingPlots() {
                         </>
                     )}
                 </div>
+
+                {payDialog && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                        <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 w-full max-w-sm space-y-3 shadow-xl">
+                            <h3 className="font-bold text-[#0F172A]">Send payment request</h3>
+                            <p className="text-sm text-[#64748B]">
+                                Email the customer a Stripe invoice link for the amount below.
+                            </p>
+                            <label className="block text-xs font-bold text-[#64748B] uppercase">
+                                Amount (£)
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={payDialog.amountPounds}
+                                    onChange={(e) =>
+                                        setPayDialog((prev) =>
+                                            prev ? { ...prev, amountPounds: e.target.value } : prev
+                                        )
+                                    }
+                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm font-semibold text-[#0F172A]"
+                                />
+                            </label>
+                            <div className="flex gap-2 justify-end pt-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setPayDialog(null)}
+                                    className="px-3 py-2 rounded-xl border border-[#E2E8F0] text-xs font-bold text-[#64748B]"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={busy === payDialog.id}
+                                    onClick={sendPaymentRequest}
+                                    className="px-3 py-2 rounded-xl bg-[#F59E0B] text-[#0F172A] text-xs font-bold"
+                                >
+                                    {busy === payDialog.id ? 'Sending…' : 'Send'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {panel === 'board' && (
                 <aside className="space-y-4">

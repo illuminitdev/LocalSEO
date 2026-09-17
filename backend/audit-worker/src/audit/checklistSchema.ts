@@ -33,12 +33,12 @@ export const TRADE_TEMPLATES = {
       'Emergency Pest Control'
     ],
     mapQueries: (city) => [
+      `Pest Control near ${city}`,
       `Pest Control ${city}`,
-      'Pest Control near me',
-      `Rat Control ${city}`,
-      `Mice Control ${city}`,
-      `Wasp Nest Removal ${city}`,
-      `Bed Bug Treatment ${city}`
+      `Rat Control near ${city}`,
+      `Mice Control near ${city}`,
+      `Wasp Nest Removal near ${city}`,
+      `Bed Bug Treatment near ${city}`
     ],
     aiQuestions: (city) => [
       `How much does pest control cost in ${city}?`,
@@ -77,11 +77,11 @@ export const TRADE_TEMPLATES = {
       'Gas Safe Services'
     ],
     mapQueries: (city) => [
+      `Plumber near ${city}`,
       `Plumber ${city}`,
-      'Plumber near me',
-      `Emergency Plumber ${city}`,
-      `Boiler Repair ${city}`,
-      `Heating Engineer ${city}`
+      `Emergency Plumber near ${city}`,
+      `Boiler Repair near ${city}`,
+      `Heating Engineer near ${city}`
     ],
     aiQuestions: (city) => [
       `How much does a plumber cost in ${city}?`,
@@ -106,11 +106,11 @@ export const TRADE_TEMPLATES = {
       'Lighting Installation'
     ],
     mapQueries: (city) => [
+      `Electrician near ${city}`,
       `Electrician ${city}`,
-      'Electrician near me',
-      `Emergency Electrician ${city}`,
-      `EICR ${city}`,
-      `EV Charger Installation ${city}`
+      `Emergency Electrician near ${city}`,
+      `EICR near ${city}`,
+      `EV Charger Installation near ${city}`
     ],
     aiQuestions: (city) => [
       `How much does an electrician cost in ${city}?`,
@@ -133,10 +133,10 @@ export const TRADE_TEMPLATES = {
       'Commercial Cleaning'
     ],
     mapQueries: (city) => [
+      `Cleaners near ${city}`,
       `Cleaners ${city}`,
-      'Cleaners near me',
-      `End of Tenancy Cleaning ${city}`,
-      `Office Cleaning ${city}`
+      `End of Tenancy Cleaning near ${city}`,
+      `Office Cleaning near ${city}`
     ],
     aiQuestions: (city) => [
       `How much do cleaners cost in ${city}?`,
@@ -150,7 +150,7 @@ export const TRADE_TEMPLATES = {
     label: 'Local Service Business',
     primaryService: 'Local Services',
     servicePages: ['Main Service', 'Emergency Call-Out', 'Commercial Services', 'Domestic Services'],
-    mapQueries: (city) => [`${city} near me`, `Services ${city}`],
+    mapQueries: (city) => [`Services near ${city}`, `Services ${city}`],
     aiQuestions: (city) => [
       `How much do services cost in ${city}?`,
       'How do I choose a local tradesperson?',
@@ -189,7 +189,7 @@ function check(id, section, label, source, extra = {}) {
 
 export function buildChecklist({
   tradeId = 'general',
-  city = 'Manchester',
+  city = 'the local area',
   locations
 }: {
   tradeId?: string;
@@ -197,7 +197,11 @@ export function buildChecklist({
   locations?: string[];
 } = {}) {
   const trade = TRADE_TEMPLATES[tradeId] || TRADE_TEMPLATES.general;
-  const locs = locations?.length ? locations : trade.defaultLocations;
+  const locs = locations?.length
+    ? locations
+    : city && city !== 'the local area'
+      ? [city, ...trade.defaultLocations.filter((l) => l.toLowerCase() !== city.toLowerCase())].slice(0, 6)
+      : trade.defaultLocations;
   const service = trade.primaryService;
   const checks = [];
 
@@ -251,6 +255,17 @@ export function buildChecklist({
       check(`maps_obs_${i + 1}`, 'maps_competitors', label, 'operator', {
         sectionTitle: '2. Google Maps Competitor Check',
         inputType: 'textarea'
+      })
+    );
+  });
+
+  [
+    ['Local Pack visibility (measured local query)', 'crawl'],
+    ['Google Maps ranking (measured local query)', 'crawl']
+  ].forEach(([label, source], i) => {
+    checks.push(
+      check(`maps_vis_${i + 1}`, 'maps_competitors', label, source, {
+        sectionTitle: '2. Google Maps Competitor Check'
       })
     );
   });
@@ -397,7 +412,8 @@ export function buildChecklist({
   [
     'FAQPage schema markup',
     'Visible FAQ / Q&A blocks',
-    'Answers common service questions'
+    'Answers common service questions',
+    'Near-me / best local question readiness'
   ].forEach((label, i) => {
     checks.push(
       check(`aeo_${i + 1}`, 'ai_seo', label, 'crawl', {
@@ -411,11 +427,56 @@ export function buildChecklist({
     'llms.txt published',
     'Content crawlable (not SPA shell)',
     'LocalBusiness or Person schema',
-    'About / entity authority content'
+    'About / entity authority content',
+    'Appears in measured local / near-me results'
   ].forEach((label, i) => {
     checks.push(
       check(`geo_${i + 1}`, 'ai_seo', label, 'crawl', {
         sectionTitle: '7. AI SEO / Search Visibility Audit'
+      })
+    );
+  });
+
+  // Local GEO core checklist (AI visibility / entity / external / citations)
+  [
+    ['geo_ai_1', 'Business mentioned in AI answers'],
+    ['geo_ai_2', 'Business recommended for local searches'],
+    ['geo_ai_3', 'Service + location visibility'],
+    ['geo_ai_4', '"Best" query visibility'],
+    ['geo_ai_5', '"Near me" query visibility'],
+    ['geo_ai_6', 'Problem/solution query visibility'],
+    ['geo_ai_7', 'Competitor mentions in AI answers'],
+    ['geo_ai_8', 'AI recommendation position/order'],
+    ['geo_ent_1', 'Business entity correctly identified'],
+    ['geo_ent_2', 'Business category correctly identified'],
+    ['geo_ent_3', 'Location correctly identified'],
+    ['geo_ent_4', 'Services correctly identified'],
+    ['geo_ent_5', 'Website correctly associated'],
+    ['geo_ent_6', 'Business information consistency'],
+    ['geo_ent_7', 'SameAs / entity connections'],
+    ['geo_ext_1', 'Review-platform presence'],
+    ['geo_ext_2', 'Directory presence'],
+    ['geo_ext_3', 'Industry mentions'],
+    ['geo_ext_4', 'Local publication mentions'],
+    ['geo_ext_5', 'Local backlinks'],
+    ['geo_ext_6', 'Brand mentions'],
+    ['geo_cite_1', 'Sources cited by AI'],
+    ['geo_cite_2', 'Website cited'],
+    ['geo_cite_3', 'GBP / business data referenced'],
+    ['geo_cite_4', 'Third-party sources referenced'],
+    ['geo_cite_5', 'Incorrect information detected'],
+    ['geo_cite_6', 'Missing information detected']
+  ].forEach(([id, label]) => {
+    const group = String(id).startsWith('geo_ai_')
+      ? 'GEO — AI Visibility'
+      : String(id).startsWith('geo_ent_')
+        ? 'GEO — Entity Strength'
+        : String(id).startsWith('geo_ext_')
+          ? 'GEO — External AI Signals'
+          : 'GEO — AI Citation / Source Monitoring';
+    checks.push(
+      check(id, 'ai_seo', label, 'crawl', {
+        sectionTitle: group
       })
     );
   });

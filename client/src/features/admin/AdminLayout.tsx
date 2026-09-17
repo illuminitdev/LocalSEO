@@ -31,13 +31,7 @@ function pageTitle(pathname: string) {
     if (pathname.startsWith('/admin/full-audits/new')) {
         return {
             title: 'New full audit',
-            subtitle: 'Run a deep crawl — Maps/GBP lookup, website score, shareable report + PDF.'
-        };
-    }
-    if (pathname.match(/\/admin\/full-audits\/[^/]+/)) {
-        return {
-            title: 'Full audit details',
-            subtitle: 'Shareable report link and print-quality PDF download.'
+            subtitle: 'Run a deep crawl — Maps/GBP lookup, website score, shareable report.'
         };
     }
     if (pathname.startsWith('/admin/full-audits')) {

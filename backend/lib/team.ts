@@ -12,14 +12,30 @@ function frontendOrigin() {
 }
 
 export async function listTeamMembers(orgId: string) {
-    
     const { rows } = await query(
         `SELECT m.user_id AS membership_id, m.user_id, m.role, COALESCE(m.active, TRUE) AS active,
+                COALESCE(m.bookable, FALSE) AS bookable,
+                COALESCE(NULLIF(TRIM(m.display_name), ''), u.name, u.email) AS display_name,
                 u.name, u.email, COALESCE(u.avatar_url, '') AS avatar_url
          FROM memberships m
          JOIN users u ON u.id = m.user_id
          WHERE m.org_id = $1
          ORDER BY u.name ASC, u.email ASC`,
+        [orgId]
+    );
+    return rows;
+}
+
+export async function listBookableMembers(orgId: string) {
+    const { rows } = await query(
+        `SELECT m.user_id AS id,
+                COALESCE(NULLIF(TRIM(m.display_name), ''), u.name, u.email) AS display_name
+         FROM memberships m
+         JOIN users u ON u.id = m.user_id
+         WHERE m.org_id = $1
+           AND COALESCE(m.active, TRUE) = TRUE
+           AND COALESCE(m.bookable, FALSE) = TRUE
+         ORDER BY display_name ASC`,
         [orgId]
     );
     return rows;
@@ -112,14 +128,30 @@ export async function acceptOrgInvite(token: string, userId: string) {
     return { orgId: invite.org_id, role: invite.role };
 }
 
-
-export async function updateMemberRole(orgId: string, membershipId: string, role: string, active?: boolean) {
+export async function updateMemberRole(
+    orgId: string,
+    membershipId: string,
+    role: string,
+    active?: boolean,
+    extras?: { bookable?: boolean; displayName?: string }
+) {
     const allowed = ['owner', 'admin', 'dispatcher', 'tech'];
     if (!allowed.includes(role)) throw Object.assign(new Error('Invalid role'), { status: 400 });
+
+    const bookable =
+        extras?.bookable === undefined ? null : Boolean(extras.bookable);
+    const displayName =
+        extras?.displayName === undefined ? null : String(extras.displayName || '').trim();
+
     const { rows } = await query(
-        `UPDATE memberships SET role = $1, active = COALESCE($2, active)
-         WHERE user_id = $3 AND org_id = $4 RETURNING user_id, org_id, role, active`,
-        [role, active == null ? null : Boolean(active), membershipId, orgId]
+        `UPDATE memberships SET
+            role = $1,
+            active = COALESCE($2, active),
+            bookable = COALESCE($3, bookable),
+            display_name = COALESCE($4, display_name)
+         WHERE user_id = $5 AND org_id = $6
+         RETURNING user_id, org_id, role, active, bookable, display_name`,
+        [role, active == null ? null : Boolean(active), bookable, displayName, membershipId, orgId]
     );
     if (!rows.length) throw Object.assign(new Error('Member not found'), { status: 404 });
     return rows[0];
