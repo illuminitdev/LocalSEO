@@ -72,11 +72,24 @@ export type SalesAgent = {
     name: string;
     email: string;
     avatar_url?: string | null;
-    platform_role: string;
-    created_at?: string;
+    platform_role?: string;
+    role?: string;
 };
 
-export type TaskType = 'prepare_audit' | 'onboard_customer' | 'follow_up_call' | 'send_proposal' | 'custom';
+export type TaskType =
+    | 'prepare_audit'
+    | 'onboard_customer'
+    | 'follow_up_call'
+    | 'send_proposal'
+    | 'custom'
+    | 'call'
+    | 'follow_up'
+    | 'audit_review'
+    | 'proposal'
+    | 'meeting'
+    | 'email'
+    | 'other'
+    | string;
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 
@@ -347,6 +360,29 @@ export async function fetchAdminCrmCustomers(params: {
 export async function fetchAdminCrmIndustries(): Promise<Array<{ name: string; count: number }>> {
     const res = await adminGet('/api/admin/crm/industries');
     return res.industries || [];
+}
+
+export type BulkAssignTaskPayload = {
+    title: string;
+    taskType?: TaskType;
+    priority?: TaskPriority;
+    dueDate?: string;
+    notes?: string;
+};
+
+export async function bulkAssignAdminLeads(
+    leadIds: string[],
+    assignedToUserId: string | null,
+    task?: BulkAssignTaskPayload
+): Promise<{ success: boolean; updatedCount: number; createdTasksCount?: number; agentName: string; message: string }> {
+    return adminPost('/api/admin/crm/leads/bulk-assign', { leadIds, assignedToUserId, task });
+}
+
+export async function updateAdminCrmLead(
+    leadId: string,
+    updates: Partial<AdminCrmLead>
+): Promise<{ success: boolean; lead: AdminCrmLead }> {
+    return adminPatch(`/api/admin/crm/leads/${encodeURIComponent(leadId)}`, updates);
 }
 
 export async function deleteAdminExcelLeads(): Promise<{ success: boolean; count: number; message: string }> {

@@ -17,7 +17,8 @@ import {
     MapPin,
     FileText,
     Eye,
-    Sparkles
+    Sparkles,
+    Pencil
 } from 'lucide-react';
 import {
     type LeadTask,
@@ -30,6 +31,7 @@ import {
     deleteCrmTask,
     fetchLeadActivities
 } from './adminApi';
+import EditTaskModal from './EditTaskModal';
 import { cn } from '../../shared/utils';
 
 export type GrowthAuditLeadRef = {
@@ -106,11 +108,11 @@ function leadStatusBadge(status?: string | null) {
 }
 
 const TASK_PRESETS: Array<{ type: TaskType; label: string; icon: string; defaultTitle: string; defaultPriority: TaskPriority }> = [
-    { type: 'prepare_audit', label: 'Prepare Audit', icon: '📊', defaultTitle: 'Prepare SEO Growth Audit', defaultPriority: 'high' },
-    { type: 'follow_up_call', label: 'Follow-Up Call', icon: '📞', defaultTitle: 'Call to review audit proposal', defaultPriority: 'medium' },
-    { type: 'send_proposal', label: 'Send Proposal', icon: '📄', defaultTitle: 'Send SEO contract and proposal', defaultPriority: 'high' },
-    { type: 'onboard_customer', label: 'Onboard Customer', icon: '🚀', defaultTitle: 'Onboard new customer', defaultPriority: 'urgent' },
-    { type: 'custom', label: 'Custom Task', icon: '📌', defaultTitle: '', defaultPriority: 'medium' }
+    { type: 'prepare_audit', label: 'Prepare Audit', icon: '📊', defaultTitle: 'Prepare & Review Growth Audit', defaultPriority: 'high' },
+    { type: 'follow_up_call', label: 'Follow-Up Call', icon: '📞', defaultTitle: 'Follow-up Call with Lead', defaultPriority: 'medium' },
+    { type: 'send_proposal', label: 'Send Proposal', icon: '📄', defaultTitle: 'Send Service Proposal & Pricing', defaultPriority: 'high' },
+    { type: 'onboard_customer', label: 'Onboard Customer', icon: '🚀', defaultTitle: 'Onboard as New Customer', defaultPriority: 'urgent' },
+    { type: 'custom', label: 'Custom Task', icon: '📌', defaultTitle: 'Custom Task', defaultPriority: 'medium' }
 ];
 
 interface LeadCrmDrawerProps {
@@ -136,7 +138,7 @@ export default function LeadCrmDrawer({
 
     
     const [taskType, setTaskType] = useState<TaskType>('prepare_audit');
-    const [taskTitle, setTaskTitle] = useState('');
+    const [taskTitle, setTaskTitle] = useState(TASK_PRESETS[0].defaultTitle);
     const [taskNotes, setTaskNotes] = useState('');
     const [taskAssignee, setTaskAssignee] = useState<string>('');
     const [taskPriority, setTaskPriority] = useState<TaskPriority>('medium');
@@ -148,6 +150,7 @@ export default function LeadCrmDrawer({
 
     
     const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+    const [editingTask, setEditingTask] = useState<LeadTask | null>(null);
 
     const loadLeadData = useCallback(async () => {
         if (!lead?.id) return;
@@ -399,6 +402,61 @@ export default function LeadCrmDrawer({
                     </button>
                 </div>
 
+                {/* Current Status & Latest Telecaller Remark Banner */}
+                {(lead.status || (lead as any).salesNotes || (lead as any).latestActivity?.note) && (
+                    <div className="mx-6 mt-4 p-3.5 bg-amber-500/10 border border-amber-300/80 rounded-2xl text-xs text-amber-950 space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center font-bold">
+                                    <Clock className="w-3.5 h-3.5" />
+                                </div>
+                                <span className="font-bold text-amber-950 uppercase tracking-wider text-[11px]">
+                                    Current Status & Telecaller Remark
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {statusBadge && (
+                                    <span className={cn(
+                                        'px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border shadow-2xs',
+                                        statusBadge.className
+                                    )}>
+                                        {statusBadge.label}
+                                    </span>
+                                )}
+                                {((lead as any).latestActivity?.createdAt || (lead as any).updatedAt) && (
+                                    <span className="text-[11px] text-slate-600 font-medium flex items-center gap-1">
+                                        <Calendar className="w-3 h-3 text-slate-400" />
+                                        {new Date((lead as any).latestActivity?.createdAt || (lead as any).updatedAt).toLocaleString(undefined, {
+                                            day: '2-digit',
+                                            month: 'short',
+                                            year: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            hour12: true
+                                        })}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                        {((lead as any).salesNotes || (lead as any).latestActivity?.note) && (
+                            <div className="flex items-start gap-2 bg-white/90 p-3 rounded-xl border border-amber-200/80 mt-1">
+                                <MessageSquare className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-slate-800 font-semibold text-xs leading-relaxed whitespace-pre-wrap">
+                                        {(lead as any).salesNotes || (lead as any).latestActivity?.note}
+                                    </p>
+                                    {((lead as any).latestActivity?.authorName || (lead as any).assignedAgentName) && (
+                                        <p className="text-[10px] text-slate-500 font-medium mt-1 flex items-center gap-1">
+                                            <User className="w-3 h-3 text-slate-400" />
+                                            Updated by <span className="text-slate-800 font-bold">{(lead as any).latestActivity?.authorName || (lead as any).assignedAgentName}</span>
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {successToast && (
                     <div className="mx-6 mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
                         <div className="flex items-center gap-2 font-medium">
@@ -649,6 +707,15 @@ export default function LeadCrmDrawer({
 
                                                         <button
                                                             type="button"
+                                                            onClick={() => setEditingTask(task)}
+                                                            className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                                                            title="Edit Task"
+                                                        >
+                                                            <Pencil className="w-3.5 h-3.5" />
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
                                                             disabled={deletingTaskId === task.id}
                                                             onClick={() => handleDeleteTask(task.id)}
                                                             className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
@@ -666,87 +733,157 @@ export default function LeadCrmDrawer({
                         </>
                     ) : (
                         <div className="space-y-4">
-                            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                                    <Clock className="w-3.5 h-3.5 text-amber-500" />
-                                    Activity & Call History
-                                </h3>
-                                <span className="bg-slate-100 text-slate-700 text-xs px-2.5 py-0.5 rounded-full font-bold">
-                                    {activities.length} {activities.length === 1 ? 'Event' : 'Events'}
-                                </span>
-                            </div>
+                            {(() => {
+                                const displayActivities: LeadActivity[] = (() => {
+                                    const list: LeadActivity[] = [...activities];
+                                    const initialNote = (lead as any).salesNotes || (lead as any).latestActivity?.note || lead.notes;
+                                    const initialStatus = lead.status || (lead as any).latestActivity?.disposition;
+                                    const initialDate = (lead as any).latestActivity?.createdAt || (lead as any).updatedAt || lead.createdAt;
+                                    const author = (lead as any).latestActivity?.authorName || (lead as any).assignedAgentName;
 
-                            {loading ? (
-                                <div className="py-12 text-center text-xs text-slate-400">Loading activity history…</div>
-                            ) : activities.length === 0 ? (
-                                <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-2xl text-xs text-slate-400 space-y-1">
-                                    <Clock className="w-6 h-6 mx-auto text-slate-300 mb-1" />
-                                    <p className="font-semibold text-slate-600">No call logs or activity recorded yet.</p>
-                                    <p className="text-[11px] text-slate-400">Calls logged by assigned telecallers will appear here in real-time.</p>
-                                </div>
-                            ) : (
-                                <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-                                    {activities.map((act) => {
-                                        const isCall = act.activityType === 'call_log';
-                                        const isTask = act.activityType === 'task_event';
-                                        const isDeleted = isTask && act.note.toLowerCase().includes('deleted');
+                                    if (initialNote && String(initialNote).trim()) {
+                                        const cleanInitial = String(initialNote).trim().toLowerCase();
+                                        const hasMatch = list.some(a => (a.note || '').toLowerCase().includes(cleanInitial));
+                                        if (!hasMatch) {
+                                            list.unshift({
+                                                id: 'lead-drawer-initial-note',
+                                                leadId: lead.id,
+                                                activityType: 'note',
+                                                disposition: initialStatus || 'in_progress',
+                                                note: initialNote,
+                                                authorName: author || 'Sales Agent',
+                                                createdAt: initialDate || new Date().toISOString()
+                                            } as LeadActivity);
+                                        }
+                                    } else if (list.length === 0 && initialStatus) {
+                                        list.push({
+                                            id: 'lead-drawer-initial-status',
+                                            leadId: lead.id,
+                                            activityType: 'status_change',
+                                            disposition: initialStatus,
+                                            note: '',
+                                            authorName: author || 'System',
+                                            createdAt: initialDate || new Date().toISOString()
+                                        } as LeadActivity);
+                                    }
+                                    return list;
+                                })();
 
-                                        return (
-                                            <div key={act.id} className="relative group">
-                                                <div className={cn(
-                                                    "absolute -left-6 top-1.5 w-3 h-3 rounded-full border-2 border-white shadow-xs",
-                                                    isCall ? "bg-amber-500" : isDeleted ? "bg-rose-500" : isTask ? "bg-indigo-500" : "bg-slate-400"
-                                                )} />
-                                                <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs hover:border-slate-300 transition-colors">
-                                                    <div className="flex items-center justify-between gap-2 text-xs flex-wrap">
-                                                        <div className="flex items-center gap-1.5 font-semibold text-slate-800">
-                                                            {isTask && (
-                                                                <span className={cn(
-                                                                    "px-2 py-0.5 rounded text-[10px] font-bold uppercase border",
-                                                                    isDeleted
-                                                                        ? "bg-rose-50 text-rose-700 border-rose-200"
-                                                                        : "bg-indigo-50 text-indigo-700 border-indigo-200"
-                                                                )}>
-                                                                    {isDeleted ? 'Task Deleted' : 'Admin Task'}
-                                                                </span>
-                                                            )}
-                                                            {act.disposition && (
-                                                                <span className={cn(
-                                                                    "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
-                                                                    act.disposition === 'converted' ? "bg-emerald-100 text-emerald-800 border border-emerald-200" :
-                                                                    act.disposition === 'callback_requested' ? "bg-amber-100 text-amber-800 border border-amber-200" :
-                                                                    act.disposition === 'not_interested' ? "bg-rose-100 text-rose-800 border border-rose-200" :
-                                                                    "bg-slate-100 text-slate-700 border border-slate-200"
-                                                                )}>
-                                                                    {act.disposition.replace('_', ' ')}
-                                                                </span>
-                                                            )}
-                                                            <span className="font-bold text-slate-900">{act.authorName || 'Sales Agent'}</span>
-                                                        </div>
-                                                        <span className="text-[10px] text-slate-400 font-medium">
-                                                            {new Date(act.createdAt).toLocaleString(undefined, {
-                                                                month: 'short',
-                                                                day: 'numeric',
-                                                                hour: '2-digit',
-                                                                minute: '2-digit'
-                                                            })}
-                                                        </span>
-                                                    </div>
-                                                    {act.note && (
-                                                        <p className="mt-2 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
-                                                            {act.note}
-                                                        </p>
-                                                    )}
-                                                </div>
+                                return (
+                                    <>
+                                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                                                <Clock className="w-3.5 h-3.5 text-amber-500" />
+                                                Activity & Call History
+                                            </h3>
+                                            <span className="bg-slate-100 text-slate-700 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                                                {displayActivities.length} {displayActivities.length === 1 ? 'Event' : 'Events'}
+                                            </span>
+                                        </div>
+
+                                        {loading ? (
+                                            <div className="py-12 text-center text-xs text-slate-400">Loading activity history…</div>
+                                        ) : displayActivities.length === 0 ? (
+                                            <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-2xl text-xs text-slate-400 space-y-1">
+                                                <Clock className="w-6 h-6 mx-auto text-slate-300 mb-1" />
+                                                <p className="font-semibold text-slate-600">No call logs or activity recorded yet.</p>
+                                                <p className="text-[11px] text-slate-400">Calls logged by assigned telecallers will appear here in real-time.</p>
                                             </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
+                                        ) : (
+                                            <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+                                                {displayActivities.map((act) => {
+                                                    const isCall = act.activityType === 'call_log';
+                                                    const isTask = act.activityType === 'task_event';
+                                                    const isDeleted = isTask && act.note?.toLowerCase().includes('deleted');
+
+                                                    return (
+                                                        <div key={act.id} className="relative group">
+                                                            <div className={cn(
+                                                                "absolute -left-6 top-1.5 w-3 h-3 rounded-full border-2 border-white shadow-xs",
+                                                                isCall ? "bg-amber-500" : isDeleted ? "bg-rose-500" : isTask ? "bg-indigo-500" : "bg-slate-400"
+                                                            )} />
+                                                            <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs hover:border-slate-300 transition-colors">
+                                                                <div className="flex items-center justify-between gap-2 text-xs flex-wrap">
+                                                                    <div className="flex items-center gap-1.5 font-semibold text-slate-800">
+                                                                        {isTask && (
+                                                                            <span className={cn(
+                                                                                "px-2 py-0.5 rounded text-[10px] font-bold uppercase border",
+                                                                                isDeleted
+                                                                                    ? "bg-rose-50 text-rose-700 border-rose-200"
+                                                                                    : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                                                            )}>
+                                                                                {isDeleted ? 'Task Deleted' : 'Admin Task'}
+                                                                            </span>
+                                                                        )}
+                                                                        {act.disposition && (
+                                                                            <span className={cn(
+                                                                                "px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                                                                                act.disposition === 'converted' ? "bg-emerald-100 text-emerald-800 border border-emerald-200" :
+                                                                                act.disposition === 'callback_requested' ? "bg-amber-100 text-amber-800 border border-amber-200" :
+                                                                                act.disposition === 'not_interested' ? "bg-rose-100 text-rose-800 border border-rose-200" :
+                                                                                "bg-slate-100 text-slate-700 border border-slate-200"
+                                                                            )}>
+                                                                                {act.disposition.replace('_', ' ')}
+                                                                            </span>
+                                                                        )}
+                                                                        <span className="font-bold text-slate-900">{act.authorName || 'Sales Agent'}</span>
+                                                                    </div>
+                                                                    <span className="text-[10px] text-slate-400 font-medium">
+                                                                        {new Date(act.createdAt).toLocaleString(undefined, {
+                                                                            month: 'short',
+                                                                            day: 'numeric',
+                                                                            hour: '2-digit',
+                                                                            minute: '2-digit'
+                                                                        })}
+                                                                    </span>
+                                                                </div>
+                                                                {act.note && (
+                                                                    <p className="mt-2 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
+                                                                        {(() => {
+                                                                            const raw = act.note || '';
+                                                                            const noteMatch = raw.match(/—\s*Note:\s*["']?([\s\S]*?)["']?$/i);
+                                                                            if (noteMatch && noteMatch[1]) {
+                                                                                return noteMatch[1].trim();
+                                                                            }
+                                                                            return raw;
+                                                                        })()}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </>
+                                );
+                            })()}
                         </div>
                     )}
                 </div>
             </div>
+
+            {/* Edit Task Modal */}
+            {editingTask && (
+                <EditTaskModal
+                    isOpen={Boolean(editingTask)}
+                    task={editingTask}
+                    salesAgents={salesAgents}
+                    onClose={() => setEditingTask(null)}
+                    onSuccess={() => {
+                        setEditingTask(null);
+                        setSuccessToast('Task updated successfully');
+                        loadLeadData();
+                        if (onTaskUpdated) onTaskUpdated();
+                    }}
+                    onDeleted={() => {
+                        setEditingTask(null);
+                        setSuccessToast('Task deleted successfully');
+                        loadLeadData();
+                        if (onTaskUpdated) onTaskUpdated();
+                    }}
+                />
+            )}
         </div>
     );
 }

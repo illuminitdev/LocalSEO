@@ -14,9 +14,11 @@ import {
     X,
     Shield,
     Clock,
-    Sparkles
+    Sparkles,
+    History
 } from 'lucide-react';
 import TaskCompletionModal, { type CrmTaskStatus } from '../../shared/TaskCompletionModal';
+import LeadStatusHistoryModal from '../admin/LeadStatusHistoryModal';
 import {
     type SalesLeadTask,
     type SalesTaskPriority,
@@ -57,6 +59,7 @@ export default function SalesTasks() {
 
     
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask; isCompleting: boolean } | null>(null);
+    const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
     const [modalLoading, setModalLoading] = useState(false);
 
     const loadData = useCallback(async () => {
@@ -488,25 +491,31 @@ export default function SalesTasks() {
                                             )}
                                         </div>
 
-                                        {}
+                                        {/* Status Badge & Actions */}
                                         <div className="shrink-0 flex items-center gap-2">
-                                            <span className={cn(
-                                                "inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-semibold rounded-md border",
-                                                task.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300" :
-                                                task.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300" :
-                                                task.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200" :
-                                                "bg-slate-50 text-slate-700 border-slate-200"
-                                            )}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setSelectedHistoryTask(task)}
+                                                className={cn(
+                                                    "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-md border cursor-pointer hover:shadow-xs hover:scale-105 transition-all group/badge",
+                                                    task.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100" :
+                                                    task.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100" :
+                                                    task.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100" :
+                                                    "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                                                )}
+                                                title="Click to view full lead status history timeline"
+                                            >
                                                 {task.status === 'completed' && <Check className="w-3 h-3 text-emerald-600" />}
                                                 {task.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600" />}
                                                 {task.status === 'cancelled' && <X className="w-3 h-3 text-rose-600" />}
                                                 <span className="capitalize">{task.status.replace('_', ' ')}</span>
-                                            </span>
+                                                <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100 shrink-0 ml-0.5" />
+                                            </button>
 
                                             <button
                                                 type="button"
                                                 onClick={(e) => handleOpenToggleModal(task, e)}
-                                                className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold rounded-md bg-amber-500 hover:bg-amber-600 text-white transition-all shadow-2xs"
+                                                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-md bg-amber-500 hover:bg-amber-600 text-white transition-all shadow-2xs"
                                                 title="Update Status"
                                             >
                                                 <span>Update Status</span>
@@ -514,7 +523,7 @@ export default function SalesTasks() {
                                         </div>
                                     </div>
 
-                                        {}
+                                        {/* Lead details link */}
                                         <div className="mt-2.5 flex items-center gap-2 flex-wrap text-xs">
                                             <Link
                                                 to={`/sales/leads/${encodeURIComponent(task.leadId)}`}
@@ -542,7 +551,7 @@ export default function SalesTasks() {
                 )}
             </div>
 
-            {}
+            {/* Task Update Modal */}
             {confirmModalTask && (
                 <TaskCompletionModal
                     isOpen={!!confirmModalTask}
@@ -555,6 +564,23 @@ export default function SalesTasks() {
                     loading={modalLoading}
                     onConfirm={handleConfirmToggleStatus}
                     onClose={() => setConfirmModalTask(null)}
+                />
+            )}
+
+            {/* Lead Status History Modal */}
+            {selectedHistoryTask && (
+                <LeadStatusHistoryModal
+                    isOpen={Boolean(selectedHistoryTask)}
+                    leadId={selectedHistoryTask.leadId}
+                    leadName={selectedHistoryTask.leadBusinessName || selectedHistoryTask.title}
+                    currentStatus={selectedHistoryTask.status || 'pending'}
+                    initialNote={selectedHistoryTask.notes}
+                    initialDate={selectedHistoryTask.updatedAt || selectedHistoryTask.createdAt}
+                    authorName={(selectedHistoryTask as any).assignedToName || undefined}
+                    onClose={() => setSelectedHistoryTask(null)}
+                    onStatusUpdated={async () => {
+                        await loadData();
+                    }}
                 />
             )}
         </div>

@@ -200,7 +200,8 @@ export default function ExcelLeadUploadModal({
                     }
 
                     const opp = findVal(['leadopportunity', 'opportunity', 'pitch', 'priority']);
-                    const statusVal = findVal(['status', 'disposition', 'callingstatus', 'callstatus', 'leadstatus']);
+                    const statusVal1 = findVal(['status', 'leadstatus', 'stage', 'status1', 'initialstatus', 'leadstage', 'leadstate', 'state', 'currentstatus', 'actionstatus']);
+                    const statusVal2 = findVal(['callingstatus', 'callstatus', 'disposition', 'callingdisposition', 'status2', 'lateststatus', 'callresult', 'telecallerstatus', 'outcomestatus', 'followupstatus', 'followup']);
                     const email = findVal(['email', 'mail', 'emailaddress', 'contactemail']);
 
                     // Skip empty rows
@@ -211,14 +212,26 @@ export default function ExcelLeadUploadModal({
                     if (oppLower.includes('high')) oppLevel = 'high';
                     else if (oppLower.includes('low')) oppLevel = 'low';
 
-                    let mappedStatus = 'new';
-                    const sLower = statusVal.toLowerCase();
-                    if (sLower.includes('converted') || sLower.includes('won') || sLower.includes('closed')) mappedStatus = 'converted';
-                    else if (sLower.includes('not interested') || sLower.includes('lost') || sLower.includes('rejected')) mappedStatus = 'not_interested';
-                    else if (sLower.includes('interested')) mappedStatus = 'interested';
-                    else if (sLower.includes('follow') || sLower.includes('callback') || sLower.includes('call back')) mappedStatus = 'follow_up';
-                    else if (sLower.includes('contacted') || sLower.includes('called') || sLower.includes('attempted')) mappedStatus = 'contacted';
-                    else if (sLower.includes('scheduled') || sLower.includes('meeting') || sLower.includes('audit')) mappedStatus = 'audit_scheduled';
+                    const mapStatus = (raw: string): string => {
+                        const sLower = raw.toLowerCase().trim().replace(/[-_]/g, ' ');
+                        if (!sLower) return 'new';
+                        if (sLower.includes('convert') || sLower.includes('won') || sLower.includes('closed') || sLower.includes('customer') || sLower.includes('paid') || sLower.includes('deal won')) return 'converted';
+                        if (sLower.includes('not interested') || sLower.includes('lost') || sLower.includes('rejected') || sLower.includes('declined') || sLower.includes('dnc') || sLower.includes('cold') || sLower.includes('wrong number') || sLower.includes('invalid')) return 'not_interested';
+                        if (sLower.includes('callback') || sLower.includes('call back') || sLower.includes('follow') || sLower.includes('call later')) return 'callback';
+                        if (sLower.includes('interested') || sLower.includes('warm') || sLower.includes('hot') || sLower.includes('qualified') || sLower.includes('in progress') || sLower.includes('audit scheduled')) return 'interested';
+                        if (sLower.includes('contacted') || sLower.includes('called') || sLower.includes('spoke') || sLower.includes('reached') || sLower.includes('connected') || sLower.includes('attempted') || sLower.includes('voicemail') || sLower.includes('ringing') || sLower.includes('no answer') || sLower.includes('busy')) return 'contacted';
+                        return 'new';
+                    };
+
+                    const activeStatusRaw = statusVal2 || statusVal1;
+                    const mappedStatus = mapStatus(activeStatusRaw);
+
+                    // Combine status context into conclusion notes if multiple distinct status columns exist
+                    let finalNotes = conclusion;
+                    if (statusVal1 && statusVal2 && statusVal1.toLowerCase().trim() !== statusVal2.toLowerCase().trim()) {
+                        const statusNote = `Status: ${statusVal1} | Calling Status: ${statusVal2}`;
+                        finalNotes = finalNotes ? `${statusNote}\n${finalNotes}` : statusNote;
+                    }
 
                     rows.push({
                         businessName: bName || 'Lead',
@@ -232,8 +245,8 @@ export default function ExcelLeadUploadModal({
                         leadOpportunity: opp,
                         opportunityLevel: oppLevel,
                         status: mappedStatus,
-                        notes: conclusion,
-                        conclusion: conclusion,
+                        notes: finalNotes,
+                        conclusion: finalNotes,
                         sheetName: sheet.trim()
                     });
                 }
@@ -492,6 +505,7 @@ export default function ExcelLeadUploadModal({
                                                         <tr className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
                                                             <th className="p-2.5">Industry</th>
                                                             <th className="p-2.5">Business Name</th>
+                                                            <th className="p-2.5">Status</th>
                                                             <th className="p-2.5">Phone</th>
                                                             <th className="p-2.5">Town / Postcode</th>
                                                             <th className="p-2.5">Website</th>
@@ -509,6 +523,18 @@ export default function ExcelLeadUploadModal({
                                                                 </td>
                                                                 <td className="p-2.5 font-semibold text-slate-900">
                                                                     {row.businessName}
+                                                                </td>
+                                                                <td className="p-2.5">
+                                                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
+                                                                        row.status === 'converted' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+                                                                        row.status === 'contacted' ? 'bg-blue-100 text-blue-800 border-blue-200' :
+                                                                        row.status === 'callback' ? 'bg-amber-100 text-amber-800 border-amber-200' :
+                                                                        row.status === 'interested' ? 'bg-purple-100 text-purple-800 border-purple-200' :
+                                                                        row.status === 'not_interested' ? 'bg-rose-100 text-rose-800 border-rose-200' :
+                                                                        'bg-slate-100 text-slate-700 border-slate-200'
+                                                                    }`}>
+                                                                        {row.status.replace(/_/g, ' ')}
+                                                                    </span>
                                                                 </td>
                                                                 <td className="p-2.5 text-slate-600 font-mono">
                                                                     {row.phone || '—'}

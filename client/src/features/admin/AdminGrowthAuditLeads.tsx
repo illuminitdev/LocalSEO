@@ -14,7 +14,13 @@ import {
     Mail,
     Globe,
     Trash2,
-    Eye
+    Eye,
+    User,
+    UserCheck,
+    CheckCircle2,
+    X,
+    History,
+    Clock
 } from 'lucide-react';
 import {
     adminGet,
@@ -27,6 +33,8 @@ import {
 } from './adminApi';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import LeadDetailsModal from './LeadDetailsModal';
+import BulkAssignTasksModal from './BulkAssignTasksModal';
+import LeadStatusHistoryModal from './LeadStatusHistoryModal';
 import ExcelLeadUploadModal from '../sales/ExcelLeadUploadModal';
 import AddLeadModal from '../sales/AddLeadModal';
 import { cn } from '../../shared/utils';
@@ -42,6 +50,7 @@ type AdminLead = GrowthAuditLeadRef & {
     service?: string | null;
     serviceLabel?: string | null;
     createdAt: string;
+    updatedAt?: string | null;
     auditId?: string | null;
     salesNotes?: string | null;
     assignedAgentName?: string | null;
@@ -167,20 +176,25 @@ function displayName(lead: AdminLead) {
     return lead.businessName || lead.name || '—';
 }
 
-function fmtDate(value?: string | null) {
-    if (!value) return '—';
+function formatDateParts(value?: string | null) {
+    if (!value) return { date: '—', time: '' };
     try {
         const d = new Date(value);
-        if (Number.isNaN(d.getTime())) return '—';
+        if (Number.isNaN(d.getTime())) return { date: '—', time: '' };
         const dd = String(d.getDate()).padStart(2, '0');
         const mm = String(d.getMonth() + 1).padStart(2, '0');
         const yyyy = d.getFullYear();
         const hh = String(d.getHours()).padStart(2, '0');
         const min = String(d.getMinutes()).padStart(2, '0');
-        return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+        return { date: `${dd}/${mm}/${yyyy}`, time: `${hh}:${min}` };
     } catch {
-        return '—';
+        return { date: '—', time: '' };
     }
+}
+
+function fmtDate(value?: string | null) {
+    const { date, time } = formatDateParts(value);
+    return time ? `${date} ${time}` : date;
 }
 
 export default function AdminGrowthAuditLeads() {
@@ -203,6 +217,8 @@ export default function AdminGrowthAuditLeads() {
     const [page, setPage] = useState(1);
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
     const [isAddLeadModalOpen, setIsAddLeadModalOpen] = useState(false);
+    const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
+    const [selectedStatusLead, setSelectedStatusLead] = useState<AdminLead | null>(null);
 
     const handleSetSourceCategory = (cat: SourceCategoryFilter) => {
         setSourceCategory(cat);
@@ -277,6 +293,37 @@ export default function AdminGrowthAuditLeads() {
     const rangeStart = filteredLeads.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
     const rangeEnd = Math.min(safePage * PAGE_SIZE, filteredLeads.length);
 
+    // Bulk selection state
+    const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+    const [bulkSuccessToast, setBulkSuccessToast] = useState<string | null>(null);
+
+    const isAllPageSelected = pageLeads.length > 0 && pageLeads.every((l) => selectedLeadIds.has(l.id));
+
+    const handleToggleSelectAllPage = () => {
+        setSelectedLeadIds((prev) => {
+            const next = new Set(prev);
+            if (isAllPageSelected) {
+                pageLeads.forEach((l) => next.delete(l.id));
+            } else {
+                pageLeads.forEach((l) => next.add(l.id));
+            }
+            return next;
+        });
+    };
+
+    const handleToggleLeadSelect = (id: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setSelectedLeadIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+            return next;
+        });
+    };
+
     const [isDeletingExcel, setIsDeletingExcel] = useState(false);
 
     const handleDeleteExcelLeads = async () => {
@@ -308,87 +355,42 @@ export default function AdminGrowthAuditLeads() {
         }
     };
 
-    const filters: { key: ContactFilter; label: string }[] = [
-        { key: 'any', label: 'All' },
-        { key: 'email', label: 'Has email' },
-        { key: 'phone', label: 'Has phone' },
-        { key: 'both', label: 'Both' }
-    ];
-
     return (
         <div className="space-y-3 w-full min-w-0">
             {error && (
                 <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">{error}</p>
             )}
 
+            {bulkSuccessToast && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-center gap-2 font-semibold">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>{bulkSuccessToast}</span>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setBulkSuccessToast(null)}
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5"
+                    >
+                        <X className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+            )}
+
             <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
                 {/* Source Category Segmented Bar & Action Buttons */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 sm:px-4 py-3 bg-slate-50/80 border-b border-[#E2E8F0]">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-bold text-[#64748B] mr-1 hidden sm:inline">Source:</span>
-
-                        <button
-                            type="button"
-                            onClick={() => handleSetSourceCategory('all')}
-                            className={cn(
-                                'px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5',
-                                sourceCategory === 'all'
-                                    ? 'bg-slate-900 text-white shadow-xs'
-                                    : 'bg-white text-[#475569] border border-[#E2E8F0] hover:bg-slate-100 hover:text-slate-900'
-                            )}
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-[#64748B] whitespace-nowrap">Source:</span>
+                        <select
+                            value={sourceCategory}
+                            onChange={(e) => handleSetSourceCategory(e.target.value as SourceCategoryFilter)}
+                            className="bg-white border border-[#CBD5E1] text-[#0F172A] font-bold text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:border-amber-500 shadow-2xs cursor-pointer hover:border-slate-400 transition-colors"
                         >
-                            <span>All Leads</span>
-                            <span
-                                className={cn(
-                                    'px-1.5 py-0.2 rounded-full text-[10px]',
-                                    sourceCategory === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
-                                )}
-                            >
-                                {leads.length}
-                            </span>
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={() => handleSetSourceCategory('added')}
-                            className={cn(
-                                'px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5',
-                                sourceCategory === 'added'
-                                    ? 'bg-indigo-600 text-white shadow-xs'
-                                    : 'bg-white text-[#475569] border border-[#E2E8F0] hover:bg-indigo-50 hover:text-indigo-800'
-                            )}
-                        >
-                            <span>Added / Uploaded Leads</span>
-                            <span
-                                className={cn(
-                                    'px-1.5 py-0.2 rounded-full text-[10px]',
-                                    sourceCategory === 'added' ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-700'
-                                )}
-                            >
-                                {addedCount}
-                            </span>
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={() => handleSetSourceCategory('growth_audit')}
-                            className={cn(
-                                'px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5',
-                                sourceCategory === 'growth_audit'
-                                    ? 'bg-amber-600 text-white shadow-xs'
-                                    : 'bg-white text-[#475569] border border-[#E2E8F0] hover:bg-amber-50 hover:text-amber-800'
-                            )}
-                        >
-                            <span>Growth Audit & Funnels</span>
-                            <span
-                                className={cn(
-                                    'px-1.5 py-0.2 rounded-full text-[10px]',
-                                    sourceCategory === 'growth_audit' ? 'bg-white/20 text-white' : 'bg-amber-50 text-amber-700'
-                                )}
-                            >
-                                {growthAuditCount}
-                            </span>
-                        </button>
+                            <option value="all">All Leads ({leads.length})</option>
+                            <option value="added">Added / Uploaded Leads ({addedCount})</option>
+                            <option value="growth_audit">Growth Audit & Funnels ({growthAuditCount})</option>
+                        </select>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
@@ -436,26 +438,21 @@ export default function AdminGrowthAuditLeads() {
                         />
                     </div>
                     <div className="flex flex-wrap items-center gap-2 shrink-0">
-                        {filters.map((f) => (
-                            <button
-                                key={f.key}
-                                type="button"
-                                onClick={() => setHasContact(f.key)}
-                                className={cn(
-                                    'px-3 py-1.5 rounded-lg text-xs font-bold transition-colors',
-                                    hasContact === f.key
-                                        ? 'bg-[#0F172A] text-white'
-                                        : 'bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]'
-                                )}
-                            >
-                                {f.label}
-                            </button>
-                        ))}
+                        <select
+                            value={hasContact}
+                            onChange={(e) => setHasContact(e.target.value as ContactFilter)}
+                            className="bg-white border border-[#CBD5E1] text-[#0F172A] font-bold text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-amber-500 shadow-2xs cursor-pointer hover:border-slate-400 transition-colors"
+                        >
+                            <option value="any">Contact: All</option>
+                            <option value="email">Has email</option>
+                            <option value="phone">Has phone</option>
+                            <option value="both">Both email & phone</option>
+                        </select>
 
                         <button
                             type="button"
                             onClick={load}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#475569] hover:bg-[#F8FAFC]"
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-[#E2E8F0] bg-white text-[#475569] hover:bg-[#F8FAFC] shadow-2xs transition-colors"
                         >
                             <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
                             Refresh
@@ -475,211 +472,346 @@ export default function AdminGrowthAuditLeads() {
                         <div className="overflow-x-auto">
                             {sourceCategory === 'growth_audit' ? (
                                 /* 1. ORIGINAL GROWTH AUDIT COLUMNS VIEW */
-                                <table className="w-full text-left text-sm min-w-[920px] table-fixed">
+                                <table className="w-full text-left text-sm min-w-[1360px] table-fixed">
                                     <colgroup>
-                                        <col className="w-[90px]" />
-                                        <col className="w-[130px]" />
-                                        <col className="w-[170px]" />
-                                        <col className="w-[180px]" />
-                                        <col className="w-[170px]" />
-                                        <col className="w-[65px]" />
-                                        <col className="w-[65px]" />
-                                        <col className="w-[130px]" />
+                                        <col className="w-[38px]" />
+                                        <col className="w-[105px]" />
+                                        <col className="w-[125px]" />
+                                        <col className="w-[160px]" />
+                                        <col className="w-[230px]" />
+                                        <col className="w-[185px]" />
+                                        <col className="w-[110px]" />
+                                        <col className="w-[135px]" />
+                                        <col className="w-[272px]" />
                                     </colgroup>
                                     <thead>
-                                        <tr className="border-b border-[#E2E8F0] text-[10px] uppercase tracking-wide text-[#64748B]">
+                                        <tr className="border-b border-[#E2E8F0] text-[10px] uppercase tracking-wide text-[#64748B] bg-slate-50/50">
+                                            <th className="px-3 py-2.5 font-bold">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isAllPageSelected}
+                                                    onChange={handleToggleSelectAllPage}
+                                                    className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                                                    title="Select / Deselect all on this page"
+                                                />
+                                            </th>
                                             <th className="px-3 py-2.5 font-bold">Date</th>
                                             <th className="px-3 py-2.5 font-bold">Type & Source</th>
                                             <th className="px-3 py-2.5 font-bold">Status & Notes</th>
                                             <th className="px-3 py-2.5 font-bold">Name / Business</th>
-                                            <th className="px-3 py-2.5 font-bold">Email</th>
-                                            <th className="px-3 py-2.5 font-bold">Score</th>
-                                            <th className="px-3 py-2.5 font-bold">Report</th>
-                                            <th className="px-3 py-2.5 font-bold text-right">CRM & Tasks</th>
+                                            <th className="px-3 py-2.5 font-bold">Contact Info</th>
+                                            <th className="px-3 py-2.5 font-bold text-center">Score / Report</th>
+                                            <th className="px-3 py-2.5 font-bold">Assigned To</th>
+                                            <th className="px-3 py-2.5 font-bold text-right">CRM & Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-[#F1F5F9]">
                                         {pageLeads.map((lead) => {
-                                            const badge = statusBadge(lead.status);
-                                            const title = displayName(lead);
-                                            return (
-                                                <tr
-                                                    key={lead.id}
-                                                    onClick={(e) => {
-                                                        if ((e.target as HTMLElement).closest('a, button')) return;
-                                                        setActiveLead(lead);
-                                                    }}
-                                                    className="group hover:bg-slate-50/80 cursor-pointer transition-colors"
-                                                >
-                                                    <td className="px-3 py-2.5 text-xs text-[#64748B] whitespace-nowrap truncate">
-                                                        {fmtDate(lead.createdAt)}
-                                                    </td>
-                                                    <td className="px-3 py-2.5 text-xs font-semibold text-[#334155]">
-                                                        <div className="flex items-center gap-1.5">
-                                                            <span className="truncate" title={typeLabel(lead.type)}>
-                                                                {typeLabel(lead.type)}
-                                                            </span>
-                                                            <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[9px] font-bold uppercase tracking-wider shrink-0">
-                                                                Audit
-                                                            </span>
-                                                        </div>
-                                                        {getDistinctSourceSubtext(lead.type, lead.source) ? (
-                                                            <div
-                                                                className="text-[10px] font-medium text-[#94A3B8] truncate mt-0.5"
-                                                                title={lead.source || undefined}
-                                                            >
-                                                                {lead.source}
-                                                            </div>
-                                                        ) : null}
-                                                    </td>
-                                                    <td className="px-3 py-2.5 align-top">
-                                                        {badge ? (
-                                                            <span
-                                                                className={cn(
-                                                                    'inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border',
-                                                                    badge.className
-                                                                )}
-                                                                title={lead.status || undefined}
-                                                            >
-                                                                {badge.label}
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-xs text-[#94A3B8]">—</span>
-                                                        )}
-                                                        {(() => {
-                                                            const note = getCleanSalesNote(lead);
-                                                            if (!note) return null;
-                                                            return (
-                                                                <div
-                                                                    className="flex items-start gap-1 mt-1 max-w-[200px]"
-                                                                    title={note}
-                                                                >
-                                                                    <MessageSquare className="w-2.5 h-2.5 text-indigo-400 shrink-0 mt-0.5" />
-                                                                    <span className="text-[10px] text-slate-600 leading-tight line-clamp-3 break-words">
-                                                                        {note}
-                                                                    </span>
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                        {lead.assignedAgentName && (
-                                                            <div className="text-[10px] text-indigo-600 font-semibold mt-1 truncate max-w-[180px]">
-                                                                👤 {lead.assignedAgentName}
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-3 py-2.5 text-sm font-semibold text-[#0F172A] max-w-0">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setViewingLeadDetails(lead)}
-                                                            title={title !== '—' ? title : undefined}
-                                                            className="block w-full text-left truncate group-hover:font-bold hover:text-[#D97706]"
-                                                        >
-                                                            {title}
-                                                        </button>
-                                                    </td>
-                                                    <td
-                                                        className="px-3 py-2.5 text-sm text-[#334155] truncate"
-                                                        title={lead.email || undefined}
-                                                    >
-                                                        {lead.email || '—'}
-                                                    </td>
-                                                    <td className="px-3 py-2.5 text-sm font-bold text-[#0F172A] whitespace-nowrap">
-                                                        {lead.scoreTotal != null ? `${lead.scoreTotal}/100` : '—'}
-                                                    </td>
-                                                    <td className="px-3 py-2.5 whitespace-nowrap">
-                                                        {lead.reportUrl ? (
-                                                            <a
-                                                                href={lead.reportUrl}
-                                                                target="_blank"
-                                                                rel="noreferrer"
-                                                                className="inline-flex items-center gap-1 text-xs font-bold text-[#F59E0B] hover:underline"
-                                                            >
-                                                                Open <ExternalLink className="w-3.5 h-3.5" />
-                                                            </a>
-                                                        ) : (
-                                                            <span className="text-xs text-[#94A3B8]">—</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                                                        <div className="flex items-center justify-end gap-1.5">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setViewingLeadDetails(lead)}
-                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg transition-colors shadow-2xs"
-                                                                title="View lead details & observations"
-                                                            >
-                                                                <Eye className="w-3.5 h-3.5 text-indigo-600" />
-                                                                <span>View Details</span>
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setActiveLead(lead)}
-                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-xs font-bold rounded-lg transition-colors shadow-2xs"
-                                                                title="Manage tasks and call logs"
-                                                            >
-                                                                <CheckSquare className="w-3.5 h-3.5 text-[#D97706]" />
-                                                                <span>Manage Tasks</span>
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
+                                             const badge = statusBadge(lead.status);
+                                             const title = displayName(lead);
+                                             const isSelected = selectedLeadIds.has(lead.id);
+                                             return (
+                                                 <tr
+                                                     key={lead.id}
+                                                     onClick={(e) => {
+                                                         if ((e.target as HTMLElement).closest('a, button, input')) return;
+                                                         setViewingLeadDetails(lead);
+                                                     }}
+                                                     className={cn(
+                                                         "group cursor-pointer transition-colors",
+                                                         isSelected ? "bg-amber-50/60 hover:bg-amber-50/90" : "hover:bg-slate-50/80"
+                                                     )}
+                                                 >
+                                                     <td className="px-3 py-2.5 align-middle" onClick={(e) => e.stopPropagation()}>
+                                                         <input
+                                                             type="checkbox"
+                                                             checked={isSelected}
+                                                             onChange={(e) => handleToggleLeadSelect(lead.id, e as any)}
+                                                             className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                                                         />
+                                                     </td>
+                                                     <td className="px-3 py-2.5 text-xs whitespace-nowrap">
+                                                         {(() => {
+                                                             const { date, time } = formatDateParts(lead.createdAt);
+                                                             return (
+                                                                 <div>
+                                                                     <div className="font-medium text-slate-700">{date}</div>
+                                                                     {time ? <div className="text-[10px] text-[#94A3B8] mt-0.5">{time}</div> : null}
+                                                                 </div>
+                                                             );
+                                                         })()}
+                                                     </td>
+                                                     <td className="px-3 py-2.5 text-xs font-semibold text-[#334155]">
+                                                         <div>
+                                                             <span className="truncate max-w-[140px] block" title={typeLabel(lead.type)}>
+                                                                 {typeLabel(lead.type)}
+                                                             </span>
+                                                         </div>
+                                                         {getDistinctSourceSubtext(lead.type, lead.source) ? (
+                                                             <div
+                                                                 className="text-[10px] font-medium text-[#94A3B8] truncate max-w-[120px] mt-0.5"
+                                                                 title={lead.source || undefined}
+                                                             >
+                                                                 {lead.source}
+                                                             </div>
+                                                         ) : null}
+                                                     </td>
+                                                     <td className="px-3 py-2.5 align-top">
+                                                         <button
+                                                             type="button"
+                                                             onClick={(e) => {
+                                                                 e.stopPropagation();
+                                                                 setSelectedStatusLead(lead);
+                                                             }}
+                                                             className={cn(
+                                                                 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer hover:shadow-xs hover:scale-105 transition-all text-left group/badge',
+                                                                 badge ? badge.className : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                                                             )}
+                                                             title="Click to view full status history timeline"
+                                                         >
+                                                             <span>{badge ? badge.label : 'New'}</span>
+                                                             <History className="w-2.5 h-2.5 opacity-60 group-hover/badge:opacity-100 shrink-0" />
+                                                         </button>
+                                                         <div
+                                                             className="flex items-center gap-1 text-[10px] text-slate-400 font-medium mt-1 whitespace-nowrap"
+                                                             title="Date when status was last updated"
+                                                         >
+                                                             <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                                             <span>{fmtDate(lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt)}</span>
+                                                         </div>
+                                                         {(() => {
+                                                             const note = getCleanSalesNote(lead);
+                                                             if (!note) return null;
+                                                             return (
+                                                                 <div
+                                                                     className="flex items-start gap-1 mt-1 max-w-[200px]"
+                                                                     title={note}
+                                                                 >
+                                                                     <MessageSquare className="w-2.5 h-2.5 text-indigo-400 shrink-0 mt-0.5" />
+                                                                     <span className="text-[10px] text-slate-600 leading-tight line-clamp-3 break-words">
+                                                                         {note}
+                                                                     </span>
+                                                                 </div>
+                                                             );
+                                                         })()}
+                                                     </td>
+                                                     <td className="px-3 py-2.5 text-sm font-semibold text-[#0F172A] overflow-hidden">
+                                                         <div className="w-full min-w-0 pr-1.5">
+                                                             <button
+                                                                 type="button"
+                                                                 onClick={() => setViewingLeadDetails(lead)}
+                                                                 title={title !== '—' ? title : undefined}
+                                                                 className="block text-left truncate w-full group-hover:font-bold hover:text-[#D97706]"
+                                                             >
+                                                                 {title}
+                                                             </button>
+                                                             {lead.address ? (
+                                                                 <div className="text-[11px] font-normal text-[#64748B] truncate w-full mt-0.5" title={lead.address}>
+                                                                     {lead.address}
+                                                                 </div>
+                                                             ) : null}
+                                                         </div>
+                                                     </td>
+                                                     <td className="px-3 py-2.5 text-xs text-[#334155] overflow-hidden">
+                                                         <div className="space-y-1 w-full min-w-0">
+                                                             {lead.phone ? (
+                                                                 <a
+                                                                     href={`tel:${lead.phone}`}
+                                                                     className="flex items-center gap-1.5 font-semibold text-slate-800 hover:text-indigo-600 w-full min-w-0"
+                                                                     title={lead.phone}
+                                                                 >
+                                                                     <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                                                                     <span className="truncate">{lead.phone}</span>
+                                                                 </a>
+                                                             ) : null}
+                                                             {lead.email ? (
+                                                                 <a
+                                                                     href={`mailto:${lead.email}`}
+                                                                     className="flex items-center gap-1.5 text-[#64748B] hover:text-indigo-600 w-full min-w-0"
+                                                                     title={lead.email}
+                                                                 >
+                                                                     <Mail className="w-3 h-3 text-slate-400 shrink-0" />
+                                                                     <span className="truncate">{lead.email}</span>
+                                                                 </a>
+                                                             ) : null}
+                                                             {lead.website ? (
+                                                                 <a
+                                                                     href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
+                                                                     target="_blank"
+                                                                     rel="noreferrer"
+                                                                     className="flex items-center gap-1.5 text-[11px] text-indigo-600 hover:underline w-full min-w-0"
+                                                                     title={lead.website}
+                                                                 >
+                                                                     <Globe className="w-3 h-3 text-indigo-400 shrink-0" />
+                                                                     <span className="truncate">{lead.website.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                                                                 </a>
+                                                             ) : null}
+                                                             {!lead.phone && !lead.email && !lead.website && <span className="text-[#94A3B8]">—</span>}
+                                                         </div>
+                                                     </td>
+                                                     <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                                                         {lead.scoreTotal != null ? (
+                                                             <div className="space-y-1">
+                                                                 <span className={cn(
+                                                                     'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border shadow-2xs',
+                                                                     lead.scoreTotal >= 70 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                                                     lead.scoreTotal >= 40 ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                                                     'bg-rose-50 text-rose-700 border-rose-200'
+                                                                 )}>
+                                                                     Score: {lead.scoreTotal}/100
+                                                                 </span>
+                                                                 {lead.reportUrl ? (
+                                                                     <div>
+                                                                         <a
+                                                                             href={lead.reportUrl}
+                                                                             target="_blank"
+                                                                             rel="noreferrer"
+                                                                             className="inline-flex items-center gap-1 text-[10px] font-bold text-[#F59E0B] hover:underline"
+                                                                         >
+                                                                             Report <ExternalLink className="w-2.5 h-2.5" />
+                                                                         </a>
+                                                                     </div>
+                                                                 ) : null}
+                                                             </div>
+                                                         ) : lead.reportUrl ? (
+                                                             <a
+                                                                 href={lead.reportUrl}
+                                                                 target="_blank"
+                                                                 rel="noreferrer"
+                                                                 className="inline-flex items-center gap-1 text-xs font-bold text-[#F59E0B] hover:underline"
+                                                             >
+                                                                 Open Report <ExternalLink className="w-3 h-3" />
+                                                             </a>
+                                                         ) : (
+                                                             <span className="text-xs text-[#94A3B8]">—</span>
+                                                         )}
+                                                     </td>
+                                                     <td className="px-3 py-2.5 whitespace-nowrap">
+                                                         {lead.assignedAgentName ? (
+                                                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200/80 text-indigo-700 font-semibold text-xs" title={`Assigned to ${lead.assignedAgentName}`}>
+                                                                 <User className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                                                 <span className="truncate max-w-[100px]">{lead.assignedAgentName}</span>
+                                                             </span>
+                                                         ) : (
+                                                             <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-500 text-[11px] font-medium">
+                                                                 Unassigned
+                                                             </span>
+                                                         )}
+                                                     </td>
+                                                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                                         <div className="flex items-center justify-end gap-1.5">
+                                                             <button
+                                                                 type="button"
+                                                                 onClick={() => setViewingLeadDetails(lead)}
+                                                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg transition-colors shadow-2xs shrink-0"
+                                                                 title="View lead details & observations"
+                                                             >
+                                                                 <Eye className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                                                 <span>View Details</span>
+                                                             </button>
+                                                             <button
+                                                                 type="button"
+                                                                 onClick={() => setActiveLead(lead)}
+                                                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-xs font-bold rounded-lg transition-colors shadow-2xs shrink-0"
+                                                                 title="Assign tasks & manage CRM notes"
+                                                             >
+                                                                 <CheckSquare className="w-3.5 h-3.5 text-[#D97706] shrink-0" />
+                                                                 <span>Assign Tasks</span>
+                                                             </button>
+                                                             <button
+                                                                 type="button"
+                                                                 onClick={() => handleDeleteSingleLead(lead.id, title)}
+                                                                 className="inline-flex items-center justify-center p-1.5 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors shrink-0 shadow-2xs"
+                                                                 title="Delete this lead"
+                                                                 aria-label="Delete this lead"
+                                                             >
+                                                                 <Trash2 className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                                                             </button>
+                                                         </div>
+                                                     </td>
+                                                 </tr>
+                                             );
+                                         })}
+                                     </tbody>
+                                 </table>
                             ) : (
                                 /* 2. SPREADSHEET / ADDED LEADS DETAILED COLUMNS VIEW */
-                                <table className="w-full text-left text-sm min-w-[1400px]">
+                                <table className="w-full text-left text-sm min-w-[1360px] table-fixed">
+                                    <colgroup>
+                                        <col className="w-[38px]" />
+                                        <col className="w-[105px]" />
+                                        <col className="w-[125px]" />
+                                        <col className="w-[160px]" />
+                                        <col className="w-[230px]" />
+                                        <col className="w-[185px]" />
+                                        <col className="w-[110px]" />
+                                        <col className="w-[135px]" />
+                                        <col className="w-[272px]" />
+                                    </colgroup>
                                     <thead>
                                         <tr className="border-b border-[#E2E8F0] text-[10px] uppercase tracking-wide text-[#64748B] bg-slate-50/50">
-                                            <th className="px-3 py-2.5 font-bold w-[85px]">Date</th>
-                                            <th className="px-3 py-2.5 font-bold w-[120px]">Type & Source</th>
-                                            <th className="px-3 py-2.5 font-bold min-w-[170px] w-[190px]">Status & Notes</th>
-                                            <th className="px-3 py-2.5 font-bold min-w-[160px]">Name / Business</th>
-                                            <th className="px-3 py-2.5 font-bold min-w-[140px]">Contact Info</th>
-                                            <th className="px-3 py-2.5 font-bold min-w-[130px]">Business Category</th>
-                                            <th className="px-3 py-2.5 font-bold min-w-[130px]">Website / Domain</th>
-                                            <th className="px-3 py-2.5 font-bold min-w-[130px]">Opportunity</th>
-                                            <th className="px-3 py-2.5 font-bold min-w-[150px]">GBP Observation</th>
-                                            <th className="px-3 py-2.5 font-bold min-w-[150px]">AI Visibility</th>
-                                            <th className="px-3 py-2.5 font-bold min-w-[150px]">Conclusion</th>
-                                            <th className="px-3 py-2.5 font-bold text-right min-w-[200px]">CRM & Actions</th>
+                                            <th className="px-3 py-2.5 font-bold">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isAllPageSelected}
+                                                    onChange={handleToggleSelectAllPage}
+                                                    className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                                                    title="Select / Deselect all on this page"
+                                                />
+                                            </th>
+                                            <th className="px-3 py-2.5 font-bold">Date</th>
+                                            <th className="px-3 py-2.5 font-bold">Type & Source</th>
+                                            <th className="px-3 py-2.5 font-bold">Status & Notes</th>
+                                            <th className="px-3 py-2.5 font-bold">Name / Business</th>
+                                            <th className="px-3 py-2.5 font-bold">Contact Info</th>
+                                            <th className="px-3 py-2.5 font-bold text-center">Opportunity</th>
+                                            <th className="px-3 py-2.5 font-bold">Assigned To</th>
+                                            <th className="px-3 py-2.5 font-bold text-right">CRM & Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-[#F1F5F9]">
                                         {pageLeads.map((lead) => {
                                             const badge = statusBadge(lead.status);
                                             const title = displayName(lead);
-                                            const isAdded = isLeadAdded(lead);
                                             const oppLevel = String(lead.opportunityLevel || '').toLowerCase();
-                                            const industryVal = lead.industry || lead.serviceLabel || lead.service;
+                                            const isSelected = selectedLeadIds.has(lead.id);
 
                                             return (
                                                 <tr
                                                     key={lead.id}
                                                     onClick={(e) => {
-                                                        if ((e.target as HTMLElement).closest('a, button')) return;
+                                                        if ((e.target as HTMLElement).closest('a, button, input')) return;
                                                         setViewingLeadDetails(lead);
                                                     }}
-                                                    className="group hover:bg-slate-50/80 cursor-pointer transition-colors"
+                                                    className={cn(
+                                                        "group cursor-pointer transition-colors",
+                                                        isSelected ? "bg-amber-50/60 hover:bg-amber-50/90" : "hover:bg-slate-50/80"
+                                                    )}
                                                 >
-                                                    <td className="px-3 py-2.5 text-xs text-[#64748B] whitespace-nowrap">
-                                                        {fmtDate(lead.createdAt)}
+                                                    <td className="px-3 py-2.5 align-middle" onClick={(e) => e.stopPropagation()}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            onChange={(e) => handleToggleLeadSelect(lead.id, e as any)}
+                                                            className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                                                        />
+                                                    </td>
+                                                    <td className="px-3 py-2.5 text-xs whitespace-nowrap">
+                                                        {(() => {
+                                                            const { date, time } = formatDateParts(lead.createdAt);
+                                                            return (
+                                                                <div>
+                                                                    <div className="font-medium text-slate-700">{date}</div>
+                                                                    {time ? <div className="text-[10px] text-[#94A3B8] mt-0.5">{time}</div> : null}
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </td>
                                                     <td className="px-3 py-2.5 text-xs font-semibold text-[#334155]">
-                                                        <div className="flex items-center gap-1.5">
-                                                            <span className="truncate max-w-[90px]" title={typeLabel(lead.type)}>
+                                                        <div>
+                                                            <span className="truncate max-w-[140px] block" title={typeLabel(lead.type)}>
                                                                 {typeLabel(lead.type)}
                                                             </span>
-                                                            {isAdded ? (
-                                                                <span className="px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[9px] font-bold uppercase tracking-wider shrink-0">
-                                                                    Added
-                                                                </span>
-                                                            ) : (
-                                                                <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[9px] font-bold uppercase tracking-wider shrink-0">
-                                                                    Audit
-                                                                </span>
-                                                            )}
                                                         </div>
                                                         {getDistinctSourceSubtext(lead.type, lead.source) ? (
                                                             <div
@@ -691,19 +823,28 @@ export default function AdminGrowthAuditLeads() {
                                                         ) : null}
                                                     </td>
                                                     <td className="px-3 py-2.5 align-top">
-                                                        {badge ? (
-                                                            <span
-                                                                className={cn(
-                                                                    'inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border',
-                                                                    badge.className
-                                                                )}
-                                                                title={lead.status || undefined}
-                                                            >
-                                                                {badge.label}
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-xs text-[#94A3B8]">—</span>
-                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setSelectedStatusLead(lead);
+                                                            }}
+                                                            className={cn(
+                                                                'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer hover:shadow-xs hover:scale-105 transition-all text-left group/badge',
+                                                                badge ? badge.className : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                                                            )}
+                                                            title="Click to view full status history timeline"
+                                                        >
+                                                            <span>{badge ? badge.label : 'New'}</span>
+                                                            <History className="w-2.5 h-2.5 opacity-60 group-hover/badge:opacity-100 shrink-0" />
+                                                        </button>
+                                                        <div
+                                                            className="flex items-center gap-1 text-[10px] text-slate-400 font-medium mt-1 whitespace-nowrap"
+                                                            title="Date when status was last updated"
+                                                        >
+                                                            <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                                            <span>{fmtDate(lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt)}</span>
+                                                        </div>
                                                         {(() => {
                                                             const note = getCleanSalesNote(lead);
                                                             if (!note) return null;
@@ -719,157 +860,115 @@ export default function AdminGrowthAuditLeads() {
                                                                 </div>
                                                             );
                                                         })()}
-                                                        {lead.assignedAgentName && (
-                                                            <div className="text-[10px] text-indigo-600 font-semibold mt-1 truncate max-w-[180px]">
-                                                                👤 {lead.assignedAgentName}
-                                                            </div>
-                                                        )}
                                                     </td>
-                                                    <td className="px-3 py-2.5 text-sm font-semibold text-[#0F172A]">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setViewingLeadDetails(lead)}
-                                                            title={title !== '—' ? title : undefined}
-                                                            className="block text-left truncate max-w-[220px] group-hover:font-bold hover:text-[#D97706]"
-                                                        >
-                                                            {title}
-                                                        </button>
-                                                        {lead.address ? (
-                                                            <div className="text-[11px] font-normal text-[#64748B] truncate max-w-[220px] mt-0.5">
-                                                                {lead.address}
-                                                            </div>
-                                                        ) : null}
+                                                    <td className="px-3 py-2.5 text-sm font-semibold text-[#0F172A] overflow-hidden">
+                                                        <div className="w-full min-w-0 pr-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setViewingLeadDetails(lead)}
+                                                                title={title !== '—' ? title : undefined}
+                                                                className="block text-left truncate w-full group-hover:font-bold hover:text-[#D97706]"
+                                                            >
+                                                                {title}
+                                                            </button>
+                                                            {lead.address ? (
+                                                                <div className="text-[11px] font-normal text-[#64748B] truncate w-full mt-0.5" title={lead.address}>
+                                                                    {lead.address}
+                                                                </div>
+                                                            ) : null}
+                                                        </div>
                                                     </td>
-                                                    <td className="px-3 py-2.5 text-xs text-[#334155]">
-                                                        <div className="space-y-0.5">
+                                                    <td className="px-3 py-2.5 text-xs text-[#334155] overflow-hidden">
+                                                        <div className="space-y-1 w-full min-w-0">
                                                             {lead.phone ? (
                                                                 <a
                                                                     href={`tel:${lead.phone}`}
-                                                                    className="inline-flex items-center gap-1 font-semibold text-slate-800 hover:text-indigo-600 truncate max-w-[160px]"
+                                                                    className="flex items-center gap-1.5 font-semibold text-slate-800 hover:text-indigo-600 w-full min-w-0"
                                                                     title={lead.phone}
                                                                 >
                                                                     <Phone className="w-3 h-3 text-slate-400 shrink-0" />
-                                                                    <span>{lead.phone}</span>
+                                                                    <span className="truncate">{lead.phone}</span>
                                                                 </a>
                                                             ) : null}
                                                             {lead.email ? (
                                                                 <a
                                                                     href={`mailto:${lead.email}`}
-                                                                    className="inline-flex items-center gap-1 text-[#64748B] hover:text-indigo-600 truncate max-w-[160px]"
+                                                                    className="flex items-center gap-1.5 text-[#64748B] hover:text-indigo-600 w-full min-w-0"
                                                                     title={lead.email}
                                                                 >
                                                                     <Mail className="w-3 h-3 text-slate-400 shrink-0" />
-                                                                    <span>{lead.email}</span>
+                                                                    <span className="truncate">{lead.email}</span>
                                                                 </a>
                                                             ) : null}
-                                                            {!lead.phone && !lead.email && <span className="text-[#94A3B8]">—</span>}
+                                                            {lead.website ? (
+                                                                <a
+                                                                    href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="flex items-center gap-1.5 text-[11px] text-indigo-600 hover:underline w-full min-w-0"
+                                                                    title={lead.website}
+                                                                >
+                                                                    <Globe className="w-3 h-3 text-indigo-400 shrink-0" />
+                                                                    <span className="truncate">{lead.website.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                                                                </a>
+                                                            ) : null}
+                                                            {!lead.phone && !lead.email && !lead.website && <span className="text-[#94A3B8]">—</span>}
                                                         </div>
                                                     </td>
-                                                    <td className="px-3 py-2.5 text-xs text-[#334155]">
-                                                        {industryVal ? (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 text-xs font-medium max-w-[140px] truncate" title={industryVal}>
-                                                                {industryVal}
+                                                    <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                                                        {lead.opportunityLevel ? (
+                                                            <span className={cn(
+                                                                'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border shadow-2xs',
+                                                                oppLevel === 'high' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                                                oppLevel === 'low' ? 'bg-slate-100 text-slate-600 border-slate-200' :
+                                                                'bg-amber-50 text-amber-700 border-amber-200'
+                                                            )}>
+                                                                {lead.opportunityLevel}
                                                             </span>
                                                         ) : (
-                                                            <span className="text-[#94A3B8]">—</span>
+                                                            <span className="text-[#94A3B8] text-xs">—</span>
                                                         )}
                                                     </td>
-                                                    <td className="px-3 py-2.5 text-xs text-[#334155]">
-                                                        {lead.website ? (
-                                                            <a
-                                                                href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
-                                                                target="_blank"
-                                                                rel="noreferrer"
-                                                                className="inline-flex items-center gap-1 font-medium text-indigo-600 hover:underline max-w-[140px] truncate"
-                                                                title={lead.website}
-                                                            >
-                                                                <Globe className="w-3 h-3 text-indigo-400 shrink-0" />
-                                                                <span className="truncate">{lead.website.replace(/^https?:\/\/(www\.)?/, '')}</span>
-                                                            </a>
+                                                    <td className="px-3 py-2.5 whitespace-nowrap">
+                                                        {lead.assignedAgentName ? (
+                                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200/80 text-indigo-700 font-semibold text-xs" title={`Assigned to ${lead.assignedAgentName}`}>
+                                                                <User className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                                                <span className="truncate max-w-[100px]">{lead.assignedAgentName}</span>
+                                                            </span>
                                                         ) : (
-                                                            <span className="text-[#94A3B8]">—</span>
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-500 text-[11px] font-medium shrink-0">
+                                                                Unassigned
+                                                            </span>
                                                         )}
                                                     </td>
-                                                    {/* 1. Opportunity Column */}
-                                                    <td className="px-3 py-2.5 text-xs text-[#334155]">
-                                                        <div className="space-y-1 max-w-[160px]">
-                                                            {lead.opportunityLevel && (
-                                                                <span className={cn(
-                                                                    'inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold uppercase tracking-wider',
-                                                                    oppLevel === 'high' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                                                                    oppLevel === 'low' ? 'bg-slate-100 text-slate-600 border border-slate-200' :
-                                                                    'bg-amber-50 text-amber-700 border border-amber-200'
-                                                                )}>
-                                                                    {lead.opportunityLevel}
-                                                                </span>
-                                                            )}
-                                                            {lead.leadOpportunity ? (
-                                                                <div className="text-[11px] text-[#475569] font-medium line-clamp-2" title={lead.leadOpportunity}>
-                                                                    {lead.leadOpportunity}
-                                                                </div>
-                                                            ) : !lead.opportunityLevel ? (
-                                                                <span className="text-[#94A3B8]">—</span>
-                                                            ) : null}
-                                                        </div>
-                                                    </td>
-                                                    {/* 2. GBP Observation Column */}
-                                                    <td className="px-3 py-2.5 text-xs text-[#334155]">
-                                                        {lead.gbpObservation ? (
-                                                            <div className="text-[11px] text-[#475569] line-clamp-2 max-w-[180px]" title={lead.gbpObservation}>
-                                                                {lead.gbpObservation}
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-[#94A3B8]">—</span>
-                                                        )}
-                                                    </td>
-                                                    {/* 3. AI Visibility Column */}
-                                                    <td className="px-3 py-2.5 text-xs text-[#334155]">
-                                                        {lead.aiVisibilityObservation ? (
-                                                            <div className="text-[11px] text-[#475569] line-clamp-2 max-w-[180px]" title={lead.aiVisibilityObservation}>
-                                                                {lead.aiVisibilityObservation}
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-[#94A3B8]">—</span>
-                                                        )}
-                                                    </td>
-                                                    {/* 4. Conclusion Column */}
-                                                    <td className="px-3 py-2.5 text-xs text-[#334155]">
-                                                        {(lead.notes || (lead as any).conclusion || (lead as any).auditConclusion) ? (
-                                                            <div className="text-[11px] text-[#475569] line-clamp-2 max-w-[180px]" title={lead.notes || (lead as any).conclusion || (lead as any).auditConclusion}>
-                                                                {lead.notes || (lead as any).conclusion || (lead as any).auditConclusion}
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-[#94A3B8]">—</span>
-                                                        )}
-                                                    </td>
-                                                    {/* Actions */}
                                                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
                                                         <div className="flex items-center justify-end gap-1.5">
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setViewingLeadDetails(lead)}
-                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg transition-colors shadow-2xs"
-                                                                title="View lead details & spreadsheet observations"
+                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg transition-colors shadow-2xs shrink-0"
+                                                                title="View lead details & observations"
                                                             >
-                                                                <Eye className="w-3.5 h-3.5 text-indigo-600" />
+                                                                <Eye className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                                                                 <span>View Details</span>
                                                             </button>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setActiveLead(lead)}
-                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-xs font-bold rounded-lg transition-colors shadow-2xs"
+                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-xs font-bold rounded-lg transition-colors shadow-2xs shrink-0"
                                                                 title="Assign tasks & manage CRM notes"
                                                             >
-                                                                <CheckSquare className="w-3.5 h-3.5 text-[#D97706]" />
+                                                                <CheckSquare className="w-3.5 h-3.5 text-[#D97706] shrink-0" />
                                                                 <span>Assign Tasks</span>
                                                             </button>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => handleDeleteSingleLead(lead.id, title)}
-                                                                className="inline-flex items-center p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 border border-slate-200 hover:border-red-200 rounded-lg transition-colors"
+                                                                className="inline-flex items-center justify-center p-1.5 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors shrink-0 shadow-2xs"
                                                                 title="Delete this lead"
+                                                                aria-label="Delete this lead"
                                                             >
-                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                                <Trash2 className="w-3.5 h-3.5 text-red-600 shrink-0" />
                                                             </button>
                                                         </div>
                                                     </td>
@@ -969,6 +1068,72 @@ export default function AdminGrowthAuditLeads() {
                 }}
                 createLeadHandler={createAdminCrmLead}
             />
+
+            {/* Floating Bulk Actions Toolbar */}
+            {selectedLeadIds.size > 0 && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 text-white backdrop-blur-md px-5 py-3 rounded-2xl shadow-2xl border border-slate-700/80 flex items-center gap-3.5 animate-in slide-in-from-bottom-5 duration-200">
+                    <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-amber-500 text-slate-950 font-black text-xs flex items-center justify-center shadow-xs">
+                            {selectedLeadIds.size}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-200 whitespace-nowrap">
+                            {selectedLeadIds.size === 1 ? 'lead selected' : 'leads selected'}
+                        </span>
+                    </div>
+
+                    <div className="h-5 w-px bg-slate-700/80 shrink-0" />
+
+                    <button
+                        type="button"
+                        onClick={() => setIsBulkAssignModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-sm whitespace-nowrap"
+                    >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        <span>Assign to Telecaller & Create Tasks</span>
+                    </button>
+
+                    <div className="h-5 w-px bg-slate-700/80 shrink-0" />
+
+                    <button
+                        type="button"
+                        onClick={() => setSelectedLeadIds(new Set())}
+                        className="text-xs font-semibold text-slate-400 hover:text-white transition-colors whitespace-nowrap px-1"
+                    >
+                        Clear
+                    </button>
+                </div>
+            )}
+
+            {/* Bulk Assign & Task Creation Modal */}
+            <BulkAssignTasksModal
+                isOpen={isBulkAssignModalOpen}
+                leadIds={Array.from(selectedLeadIds)}
+                salesAgents={salesAgents}
+                onClose={() => setIsBulkAssignModalOpen(false)}
+                onSuccess={async (res) => {
+                    setBulkSuccessToast(res.message);
+                    setSelectedLeadIds(new Set());
+                    await load();
+                    setTimeout(() => setBulkSuccessToast(null), 4000);
+                }}
+            />
+
+            {/* Lead Status History Modal */}
+            {selectedStatusLead && (
+                <LeadStatusHistoryModal
+                    isOpen={Boolean(selectedStatusLead)}
+                    leadId={selectedStatusLead.id}
+                    leadName={displayName(selectedStatusLead)}
+                    currentStatus={selectedStatusLead.status || 'new'}
+                    initialNote={getCleanSalesNote(selectedStatusLead)}
+                    initialDate={selectedStatusLead.latestActivity?.createdAt || selectedStatusLead.updatedAt || selectedStatusLead.createdAt}
+                    authorName={selectedStatusLead.latestActivity?.authorName || (selectedStatusLead as any).assignedAgentName}
+                    onClose={() => setSelectedStatusLead(null)}
+                    onStatusUpdated={async () => {
+                        await load();
+                    }}
+                />
+            )}
         </div>
     );
 }

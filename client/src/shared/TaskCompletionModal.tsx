@@ -70,7 +70,7 @@ export default function TaskCompletionModal({
         }
         return isCompleting ? 'completed' : 'pending';
     });
-    const [statusNotes, setStatusNotes] = useState<string>(initialNotes || '');
+    const [statusNotes, setStatusNotes] = useState<string>('');
 
     useEffect(() => {
         if (isOpen) {
@@ -79,9 +79,9 @@ export default function TaskCompletionModal({
             } else {
                 setSelectedStatus(isCompleting ? 'completed' : 'pending');
             }
-            setStatusNotes(initialNotes || '');
+            setStatusNotes('');
         }
-    }, [isOpen, currentStatus, initialNotes, isCompleting]);
+    }, [isOpen, currentStatus, isCompleting]);
 
     if (!isOpen) return null;
 
@@ -276,6 +276,13 @@ export default function TaskCompletionModal({
                         </span>
                         <span className="text-[9px] text-slate-400 font-medium">Visible to Admin</span>
                     </label>
+
+                    {initialNotes && String(initialNotes).trim() && (
+                        <div className="text-[10px] text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-lg border border-slate-200/60 flex items-start gap-1">
+                            <span className="font-bold text-slate-600 shrink-0">Previous note:</span>
+                            <span className="truncate italic text-slate-600">"{initialNotes}"</span>
+                        </div>
+                    )}
 
                     <textarea
                         value={statusNotes}
