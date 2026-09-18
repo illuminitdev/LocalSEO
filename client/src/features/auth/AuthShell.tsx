@@ -199,25 +199,26 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
                             }}
                         >
                             Your business<br />online, locally
+                            {}
                             <svg
-                                width="52"
-                                height="40"
-                                viewBox="0 0 52 40"
+                                width="40"
+                                height="30"
+                                viewBox="0 0 40 30"
                                 fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                                aria-hidden
-                                style={{ display: 'block', marginTop: 6, marginLeft: 'auto' }}
+                                style={{ display: 'block', marginTop: 2, marginLeft: 'auto' }}
                             >
                                 <path
-                                    d="M4 6C12 8 22 20 34 28C36.5 29.5 39 30.5 42 31"
+                                    d="M4 2C12 14 24 20 33 15.5"
                                     stroke="#FF6A00"
-                                    strokeWidth="2.25"
+                                    strokeWidth="1.5"
                                     strokeLinecap="round"
-                                    fill="none"
                                 />
                                 <path
-                                    d="M36.2 24.8L45.5 32.2L35.4 34.6L36.2 24.8Z"
-                                    fill="#FF6A00"
+                                    d="M31.5 11.5L36.5 16.2L30.5 20.8"
+                                    stroke="#FF6A00"
+                                    strokeWidth="1.5"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
                                 />
                             </svg>
                         </div>
