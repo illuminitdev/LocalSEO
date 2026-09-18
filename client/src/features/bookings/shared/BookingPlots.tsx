@@ -74,7 +74,9 @@ export default function BookingPlots() {
     const [addingService, setAddingService] = useState(false);
     const [linked, setLinked] = useState(false);
     const [linkedBusiness, setLinkedBusiness] = useState<any>(null);
-    const [filter, setFilter] = useState<'upcoming' | 'requests' | 'active' | 'past' | 'cancelled' | 'food'>('upcoming');
+    const [filter, setFilter] = useState<'upcoming' | 'requests' | 'active' | 'past' | 'cancelled' | 'food'>(
+        () => (searchParams.get('filter') === 'food' ? 'food' : 'upcoming')
+    );
     const [copied, setCopied] = useState(false);
     const [busy, setBusy] = useState('');
     const [payDialog, setPayDialog] = useState<{ id: string; amountPounds: string } | null>(null);
