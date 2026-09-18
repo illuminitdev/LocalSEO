@@ -28,16 +28,10 @@ function pageTitle(pathname: string) {
     if (pathname.startsWith('/admin/users')) {
         return { title: 'User Management', subtitle: 'Create and manage system users.' };
     }
-    if (pathname.startsWith('/admin/full-audits/new')) {
-        return {
-            title: 'New full audit',
-            subtitle: 'Run a deep crawl — Maps/GBP lookup, website score, shareable report.'
-        };
-    }
     if (pathname.startsWith('/admin/full-audits')) {
         return {
             title: 'Full Audit',
-            subtitle: 'Deep / fullcrawl history from the shared ZappSites audits table.'
+            subtitle: 'Create deep crawls and manage shareable report history.'
         };
     }
     if (pathname.startsWith('/admin/growth-audit-leads')) {
