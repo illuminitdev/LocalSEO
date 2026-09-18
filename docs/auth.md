@@ -14,14 +14,14 @@ None for login/account. Entitlements load after auth.
 
 | Page | Path |
 |------|------|
-| Login | `client/src/pages/Login.tsx` → `/login` |
-| Forgot password | `client/src/pages/ForgotPassword.tsx` |
-| Reset password | `client/src/pages/ResetPassword.tsx` |
-| Account settings | `client/src/pages/Account.tsx` → `/account` |
+| Login | `client/src/features/auth/Login.tsx` → `/login` |
+| Forgot password | `client/src/features/auth/PasswordReset.tsx` → `/forgot-password` |
+| Reset password | `client/src/features/auth/PasswordReset.tsx` → `/reset-password` |
+| Account settings | `client/src/features/account/Account.tsx` → `/account` |
 
-Auth helpers: `client/src/lib/auth.ts`  
-Entitlements context: `client/src/context/EntitlementsContext.tsx`  
-Route guard: `client/src/components/RequireAuth.tsx`
+Auth helpers: `client/src/features/auth/auth.ts`  
+Entitlements context: `client/src/shared/EntitlementsContext.tsx`  
+Route guard: `client/src/shared/AuthGuards.tsx`
 
 ## Backend connection
 

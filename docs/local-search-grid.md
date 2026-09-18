@@ -12,7 +12,7 @@ Plans: `local-growth`, `complete-growth-system`.
 
 ## Frontend
 
-`client/src/pages/RankTracker.tsx` → `/rank-tracker`
+`client/src/features/visibility/RankTracker.tsx` → `/rank-tracker`
 
 - `POST /api/ai/gap-analysis` `{ keyword }`
 - `POST /api/dashboard/activity` on success

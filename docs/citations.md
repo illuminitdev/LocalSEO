@@ -10,7 +10,7 @@ Generates an AI-assisted **citation / directory checklist** for the connected bu
 
 ## Frontend
 
-`client/src/pages/Citations.tsx` → `/citations`
+`client/src/features/local-presence/Citations.tsx` → `/citations`
 
 - `POST /api/ai/citations` with `{}` (uses connected business context on the server)
 - `POST /api/dashboard/activity` after success
