@@ -2,6 +2,11 @@ import { query } from './db';
 import { newManageToken } from './authTokens';
 import { applicationFeeAmount, stripeAccountOpts } from './stripeConnect';
 import { isRestaurantOrg, listMenuItems } from './orgMenu';
+import {
+    ensureClientForPayment,
+    upsertPaymentDocument,
+    getPaymentDocumentBySource
+} from './paymentDocuments';
 
 function frontendOrigin() {
     return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -19,29 +24,97 @@ const HOST_STATUSES = new Set([
 export async function confirmFoodOrderPayment({
     foodOrderId,
     stripeSessionId,
-    paymentIntentId
+    paymentIntentId,
+    paymentMethodBrand,
+    paymentMethodLast4
 }: {
     foodOrderId: string;
     stripeSessionId?: string | null;
     paymentIntentId?: string | null;
+    paymentMethodBrand?: string;
+    paymentMethodLast4?: string;
 }) {
     const { rows } = await query(`SELECT * FROM food_orders WHERE id = $1`, [foodOrderId]);
     const order = rows[0];
     if (!order) return null;
-    if (order.status !== 'pending_payment' && order.paid_at) {
-        return loadFoodOrderById(order.id);
+    const alreadyPaid = order.status !== 'pending_payment' && order.paid_at;
+    if (!alreadyPaid) {
+        await query(
+            `UPDATE food_orders SET
+               status = 'paid',
+               paid_at = COALESCE(paid_at, NOW()),
+               stripe_session_id = COALESCE($2, stripe_session_id),
+               stripe_payment_intent_id = COALESCE($3, stripe_payment_intent_id),
+               updated_at = NOW()
+             WHERE id = $1`,
+            [foodOrderId, stripeSessionId || null, paymentIntentId ? String(paymentIntentId) : null]
+        );
     }
-    await query(
-        `UPDATE food_orders SET
-           status = 'paid',
-           paid_at = COALESCE(paid_at, NOW()),
-           stripe_session_id = COALESCE($2, stripe_session_id),
-           stripe_payment_intent_id = COALESCE($3, stripe_payment_intent_id),
-           updated_at = NOW()
-         WHERE id = $1`,
-        [foodOrderId, stripeSessionId || null, paymentIntentId ? String(paymentIntentId) : null]
-    );
-    return loadFoodOrderById(foodOrderId);
+
+    const loaded = await loadFoodOrderById(foodOrderId);
+    if (!loaded) return null;
+
+    try {
+        const { rows: orgRows } = await query(
+            `SELECT id, name, slug, currency FROM organizations WHERE id = $1`,
+            [loaded.org_id]
+        );
+        const org = orgRows[0];
+        let clientId = loaded.client_id || null;
+        if (!clientId) {
+            const client = await ensureClientForPayment({
+                orgId: loaded.org_id,
+                name: loaded.customer_name,
+                email: loaded.customer_email,
+                phone: loaded.customer_phone,
+                address: loaded.delivery_address
+            });
+            clientId = client.id;
+            await query(`UPDATE food_orders SET client_id = $1, updated_at = NOW() WHERE id = $2`, [
+                clientId,
+                loaded.id
+            ]);
+            loaded.client_id = clientId;
+        }
+
+        const lineItems = (loaded.items || []).map((i: any) => ({
+            description: `${i.name}${i.quantity > 1 ? ` × ${i.quantity}` : ''}`,
+            amountCents: Number(i.lineTotalCents) || 0,
+            quantity: Number(i.quantity) || 1
+        }));
+        if (Number(loaded.delivery_fee_cents) > 0) {
+            lineItems.push({
+                description: 'Delivery fee',
+                amountCents: Number(loaded.delivery_fee_cents) || 0,
+                quantity: 1
+            });
+        }
+
+        const paymentDocument = await upsertPaymentDocument({
+            orgId: loaded.org_id,
+            clientId,
+            sourceType: 'food_order',
+            sourceId: loaded.id,
+            amountCents: Number(loaded.total_cents) || 0,
+            currency: loaded.currency || org?.currency || 'GBP',
+            paidAt: loaded.paid_at || new Date(),
+            paymentMethodBrand: paymentMethodBrand || '',
+            paymentMethodLast4: paymentMethodLast4 || '',
+            customerName: loaded.customer_name,
+            customerEmail: loaded.customer_email,
+            businessName: org?.name || '',
+            lineItems,
+            stripeSessionId: stripeSessionId || loaded.stripe_session_id,
+            stripePaymentIntentId: paymentIntentId || loaded.stripe_payment_intent_id
+        });
+        return { ...loaded, paymentDocument };
+    } catch (err: any) {
+        console.error('Food order payment document error:', err.message);
+        const paymentDocument = await getPaymentDocumentBySource('food_order', loaded.id).catch(
+            () => null
+        );
+        return { ...loaded, paymentDocument };
+    }
 }
 
 export async function loadFoodOrderById(id: string) {
@@ -98,6 +171,8 @@ export function publicFoodOrderPayload(order: any) {
         paidAt: order.paid_at,
         manageToken: order.manage_token,
         createdAt: order.created_at,
+        clientId: order.client_id || null,
+        paymentDocument: order.paymentDocument || null,
         items: order.items || []
     };
 }
@@ -110,7 +185,8 @@ export async function listFoodOrders(orgId: string, { limit = 50 } = {}) {
     const out = [];
     for (const row of rows) {
         const full = await attachItems(row);
-        out.push(publicFoodOrderPayload(full));
+        const doc = await getPaymentDocumentBySource('food_order', full.id).catch(() => null);
+        out.push(publicFoodOrderPayload({ ...full, paymentDocument: doc }));
     }
     return out;
 }
@@ -391,7 +467,7 @@ export async function verifyFoodOrderCheckout(stripeClient: any, sessionId: stri
     );
     const session = await stripeClient.checkout.sessions.retrieve(
         sessionId,
-        { expand: ['payment_intent'] },
+        { expand: ['payment_intent', 'payment_intent.payment_method'] },
         stripeAccountOpts(sessOrg[0]?.stripe_account_id)
     );
     const foodOrderId = session.metadata?.foodOrderId || sessOrg[0]?.food_order_id;
@@ -407,10 +483,18 @@ export async function verifyFoodOrderCheckout(stripeClient: any, sessionId: stri
     }
     const pi = session.payment_intent;
     const paymentIntentId = typeof pi === 'string' ? pi : pi?.id;
+    const { extractPaymentMethodFromStripe } = await import('./paymentDocuments');
+    const pm = await extractPaymentMethodFromStripe(
+        stripeClient,
+        session,
+        sessOrg[0]?.stripe_account_id
+    );
     const order = await confirmFoodOrderPayment({
         foodOrderId,
         stripeSessionId: session.id,
-        paymentIntentId
+        paymentIntentId,
+        paymentMethodBrand: pm.brand,
+        paymentMethodLast4: pm.last4
     });
     if (!order) {
         const err: any = new Error('Order not found');
@@ -421,5 +505,9 @@ export async function verifyFoodOrderCheckout(stripeClient: any, sessionId: stri
         `SELECT id, slug, name, phone, email, currency FROM organizations WHERE id = $1`,
         [order.org_id]
     );
-    return { order: publicFoodOrderPayload(order), org: orgRows[0] || null };
+    return {
+        order: publicFoodOrderPayload(order),
+        org: orgRows[0] || null,
+        paymentDocument: order.paymentDocument || null
+    };
 }

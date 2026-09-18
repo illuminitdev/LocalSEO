@@ -218,7 +218,7 @@ export function buildGeoChecklist(opts: {
       const s = statusFromBool(
         anyMeasured ? anyMentioned : null,
         `Mentioned in ${engines.filter((e) => e.mentioned).map((e) => e.label || e.engine).join(' / ') || 'AI'}`,
-        'Not mentioned in measured ChatGPT / Claude answers',
+        'Not mentioned in measured ChatGPT / Claude / Gemini answers',
         'AI answers not measured yet'
       );
       return item('geo_ai_1', 'Business mentioned in AI answers', s.status, s.evidence);

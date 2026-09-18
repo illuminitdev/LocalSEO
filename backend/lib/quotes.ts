@@ -381,7 +381,7 @@ export async function approveQuoteByToken(token: string, { stripeClient }: { str
                         metadata: { quoteId: quote.id, orgId: quote.org_id, kind: 'quote_deposit' }
                     },
                     metadata: { quoteId: quote.id, orgId: quote.org_id, kind: 'quote_deposit' },
-                    success_url: `${frontendOrigin()}/quote/${token}?paid=1`,
+                    success_url: `${frontendOrigin()}/quote/${token}?paid=1&session_id={CHECKOUT_SESSION_ID}`,
                     cancel_url: `${frontendOrigin()}/quote/${token}?cancelled=1`
                 },
                 stripeAccountOpts(quote.stripe_account_id)
@@ -417,10 +417,16 @@ export async function approveQuoteByToken(token: string, { stripeClient }: { str
     };
 }
 
-export async function confirmQuoteDeposit({ quoteId, stripeSessionId, paymentIntentId }: any) {
+export async function confirmQuoteDeposit({
+    quoteId,
+    stripeSessionId,
+    paymentIntentId,
+    paymentMethodBrand,
+    paymentMethodLast4
+}: any) {
     const { rows } = await query(
         `SELECT q.*, c.name AS client_name, c.email AS client_email, c.phone AS client_phone,
-                o.name AS org_name, o.currency AS org_currency
+                o.name AS org_name, o.currency AS org_currency, o.slug AS org_slug
          FROM quotes q
          JOIN clients c ON c.id = q.client_id
          JOIN organizations o ON o.id = q.org_id
@@ -430,27 +436,77 @@ export async function confirmQuoteDeposit({ quoteId, stripeSessionId, paymentInt
     );
     if (!rows.length) return null;
     let quote = rows[0];
-    if (quote.status === 'approved' && quote.deposit_paid) return quote;
-
-    await query(
-        `UPDATE quotes SET status = 'approved', deposit_paid = TRUE,
-             stripe_payment_intent_id = COALESCE($2, stripe_payment_intent_id),
-             responded_at = COALESCE(responded_at, NOW()), updated_at = NOW()
-         WHERE id = $1`,
-        [quote.id, paymentIntentId || null]
-    );
-    await cancelQuoteFollowUps(quote.client_id, quote.org_id);
-    quote = (await query(`SELECT q.*, c.name AS client_name, c.email AS client_email, c.phone AS client_phone
-                          FROM quotes q JOIN clients c ON c.id = q.client_id WHERE q.id = $1`, [quote.id])).rows[0];
-    if (!quote.booking_id) {
-        await createJobFromApprovedQuote(quote);
+    const alreadyPaid = quote.status === 'approved' && quote.deposit_paid;
+    if (!alreadyPaid) {
+        await query(
+            `UPDATE quotes SET status = 'approved', deposit_paid = TRUE,
+                 stripe_payment_intent_id = COALESCE($2, stripe_payment_intent_id),
+                 responded_at = COALESCE(responded_at, NOW()), updated_at = NOW()
+             WHERE id = $1`,
+            [quote.id, paymentIntentId || null]
+        );
+        await cancelQuoteFollowUps(quote.client_id, quote.org_id);
+        quote = (
+            await query(
+                `SELECT q.*, c.name AS client_name, c.email AS client_email, c.phone AS client_phone,
+                        o.name AS org_name, o.currency AS org_currency
+                 FROM quotes q
+                 JOIN clients c ON c.id = q.client_id
+                 JOIN organizations o ON o.id = q.org_id
+                 WHERE q.id = $1`,
+                [quote.id]
+            )
+        ).rows[0];
+        if (!quote.booking_id) {
+            await createJobFromApprovedQuote(quote);
+        }
+        const { fireZapierEvent } = await import('./zapier');
+        fireZapierEvent(quote.org_id, 'quote.approved', {
+            quoteId: quote.id,
+            title: quote.title,
+            totalCents: quote.total_cents,
+            bookingId: quote.booking_id || null
+        }).catch(() => {});
     }
-    const { fireZapierEvent } = await import('./zapier');
-    fireZapierEvent(quote.org_id, 'quote.approved', {
-        quoteId: quote.id,
-        title: quote.title,
-        totalCents: quote.total_cents,
-        bookingId: quote.booking_id || null
-    }).catch(() => {});
-    return quote;
+
+    let paymentDocument = null;
+    const depositCents = Number(quote.deposit_cents) || 0;
+    if (depositCents > 0 || quote.deposit_paid) {
+        try {
+            const { upsertPaymentDocument, getPaymentDocumentBySource } = await import(
+                './paymentDocuments'
+            );
+            paymentDocument = await upsertPaymentDocument({
+                orgId: quote.org_id,
+                clientId: quote.client_id,
+                sourceType: 'quote_deposit',
+                sourceId: quote.id,
+                amountCents: depositCents,
+                currency: quote.org_currency || 'GBP',
+                paidAt: new Date(),
+                paymentMethodBrand: paymentMethodBrand || '',
+                paymentMethodLast4: paymentMethodLast4 || '',
+                customerName: quote.client_name,
+                customerEmail: quote.client_email,
+                businessName: quote.org_name,
+                lineItems: [
+                    {
+                        description: `${quote.title || 'Quote'} — deposit`,
+                        amountCents: depositCents,
+                        quantity: 1
+                    }
+                ],
+                stripeSessionId: stripeSessionId || quote.stripe_session_id,
+                stripePaymentIntentId: paymentIntentId || quote.stripe_payment_intent_id
+            });
+        } catch (err: any) {
+            console.error('Quote payment document error:', err.message);
+            const { getPaymentDocumentBySource } = await import('./paymentDocuments');
+            paymentDocument = await getPaymentDocumentBySource('quote_deposit', quote.id).catch(
+                () => null
+            );
+        }
+    }
+
+    return { ...quote, paymentDocument };
 }

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiGet, apiPatch, cn, formatCents } from '../../../shared/utils';
+import { PaymentDocHostActions } from '../../payments/PaymentPaidCard';
+import type { PaymentDocument } from '../../payments/types';
 
 type FoodOrder = {
     id: string;
@@ -11,6 +13,8 @@ type FoodOrder = {
     pickupAt?: string | null;
     totalCents: number;
     items: { name: string; quantity: number; lineTotalCents: number }[];
+    paymentDocument?: PaymentDocument | null;
+    clientId?: string | null;
 };
 
 const NEXT: Record<string, { label: string; status: string }[]> = {
@@ -70,7 +74,9 @@ export default function FoodOrdersHostPanel() {
             <div className="flex items-center justify-between gap-2">
                 <div>
                     <h2 className="font-bold text-[#0F172A]">Food orders</h2>
-                    <p className="text-sm text-[#64748B]">Paid online orders — update status so guests can track delivery.</p>
+                    <p className="text-sm text-[#64748B]">
+                        Paid online orders — update status so guests can track delivery.
+                    </p>
                 </div>
                 <button type="button" onClick={load} className="text-xs font-bold text-[#F59E0B] underline">
                     Refresh
@@ -115,7 +121,9 @@ export default function FoodOrdersHostPanel() {
                                 >
                                     {order.status.replace(/_/g, ' ')}
                                 </span>
-                                <p className="font-black text-[#F59E0B] mt-1">{formatCents(order.totalCents)}</p>
+                                <p className="font-black text-[#F59E0B] mt-1">
+                                    {formatCents(order.totalCents)}
+                                </p>
                             </div>
                         </div>
                         <ul className="text-sm text-[#64748B] space-y-0.5">
@@ -125,6 +133,14 @@ export default function FoodOrdersHostPanel() {
                                 </li>
                             ))}
                         </ul>
+                        {order.paymentDocument && (
+                            <div className="pt-1">
+                                <p className="text-[10px] font-bold uppercase text-[#64748B] mb-1">
+                                    Invoice & receipt
+                                </p>
+                                <PaymentDocHostActions doc={order.paymentDocument} />
+                            </div>
+                        )}
                         {actions.length > 0 && (
                             <div className="flex flex-wrap gap-2 pt-1">
                                 {actions.map((a) => (

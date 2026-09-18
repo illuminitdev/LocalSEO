@@ -391,7 +391,7 @@ Return ONLY JSON:
   "geoFixes": {
     "title": "GEO: Google + AI visibility",
     "visualIntro": "one sentence about the MEASURED Google Local Pack query from localRank — tell the user to re-type that exact query to verify; do NOT invent other queries or AI Overview",
-    "verifyHint": "Cross-check: search the measured query on Google; ask ChatGPT / Claude the same text",
+    "verifyHint": "Cross-check: search the measured query on Google; ask ChatGPT / Claude / Gemini the same text",
     "queryCards": [
       {
         "query": "MUST equal gbpLookup.localRank.query exactly",
@@ -450,6 +450,8 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
               parsed.localSeoFixes.inconsistencies.length
             ? parsed.localSeoFixes.inconsistencies.slice(0, 5)
             : fallbacks.localSeoFixes.inconsistencies,
+        coreChecklist:
+          fallbacks.localSeoFixes.coreChecklist || parsed.localSeoFixes?.coreChecklist || null,
         actions: Array.isArray(parsed.localSeoFixes?.actions)
           ? parsed.localSeoFixes.actions.slice(0, 4)
           : fallbacks.localSeoFixes.actions

@@ -2,6 +2,11 @@ import { query } from './db';
 import { createCalendarEvent } from './googleCalendar';
 import { sendBookingConfirmationEmail, sendHostBookingNotification } from './bookingEmail';
 import { scheduleVisitReminder, issuePortalAccess } from './bookingReminders';
+import {
+    ensureClientForPayment,
+    upsertPaymentDocument,
+    getPaymentDocumentBySource
+} from './paymentDocuments';
 
 function frontendOrigin() {
     return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -22,7 +27,13 @@ async function getHostUserId(orgId: any) {
 }
 
 
-async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntentId }: any) {
+async function confirmBookingPayment({
+    bookingId,
+    stripeSessionId,
+    paymentIntentId,
+    paymentMethodBrand,
+    paymentMethodLast4
+}: any) {
     const { rows } = await query(
         `SELECT b.*, e.name AS event_name,
                 o.name AS org_name, o.slug AS org_slug, o.email AS org_email,
@@ -149,7 +160,58 @@ async function confirmBookingPayment({ bookingId, stripeSessionId, paymentIntent
         }).catch(() => {});
     }
 
-    return booking;
+    let paymentDocument = null;
+    const depositCents = Number(booking.deposit_cents) || 0;
+    if (depositCents > 0 || booking.deposit_paid) {
+        try {
+            let clientId = booking.client_id || null;
+            if (!clientId) {
+                const client = await ensureClientForPayment({
+                    orgId: booking.org_id,
+                    name: booking.customer_name,
+                    email: booking.customer_email,
+                    phone: booking.customer_phone,
+                    address: booking.customer_address
+                });
+                clientId = client.id;
+                await query(`UPDATE bookings SET client_id = $1, updated_at = NOW() WHERE id = $2`, [
+                    clientId,
+                    booking.id
+                ]);
+                booking.client_id = clientId;
+            }
+            paymentDocument = await upsertPaymentDocument({
+                orgId: booking.org_id,
+                clientId,
+                sourceType: 'booking_deposit',
+                sourceId: booking.id,
+                amountCents: depositCents,
+                currency: meta.org_currency || 'GBP',
+                paidAt: new Date(),
+                paymentMethodBrand: paymentMethodBrand || '',
+                paymentMethodLast4: paymentMethodLast4 || '',
+                customerName: booking.customer_name,
+                customerEmail: booking.customer_email,
+                businessName: meta.org_name,
+                lineItems: [
+                    {
+                        description: `${meta.event_name || 'Booking'} — deposit`,
+                        amountCents: depositCents,
+                        quantity: 1
+                    }
+                ],
+                stripeSessionId: stripeSessionId || booking.stripe_session_id,
+                stripePaymentIntentId: paymentIntentId || booking.stripe_payment_intent_id
+            });
+        } catch (err: any) {
+            console.error('Booking payment document error:', err.message);
+            paymentDocument = await getPaymentDocumentBySource('booking_deposit', booking.id).catch(
+                () => null
+            );
+        }
+    }
+
+    return { ...booking, event_name: meta.event_name, org_name: meta.org_name, org_currency: meta.org_currency, paymentDocument };
 }
 
 export { confirmBookingPayment };

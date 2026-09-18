@@ -16,6 +16,7 @@ import {
   captureOrganicLocalPackScreenshot,
   checkAiEngineMentions,
   fetchMapsLocalPack,
+  fetchOrganicBrandImages,
   findMatchingMapsItem,
   requireDataForSeoConfigured,
   type DataForSeoMapsItem
@@ -26,6 +27,29 @@ import {
   photoUrlsFromPlace
 } from '../lib/placesGbp.js';
 import { resolveSearchArea } from '../lib/searchArea.js';
+
+async function staticMapDataUrl(lat: number, lng: number): Promise<string | null> {
+  const key = String(process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '').trim();
+  if (!key || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  try {
+    const params = new URLSearchParams({
+      center: `${lat},${lng}`,
+      zoom: '16',
+      size: '600x400',
+      maptype: 'roadmap',
+      markers: `color:red|${lat},${lng}`,
+      key
+    });
+    const res = await fetch(`https://maps.googleapis.com/maps/api/staticmap?${params}`);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const ct = (res.headers.get('content-type') || 'image/png').split(';')[0];
+    if (!buf.length || !/^image\//i.test(ct)) return null;
+    return `data:${ct};base64,${buf.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
 
 interface RunWebsiteMessage {
   auditId: string;
@@ -54,25 +78,41 @@ async function imageUrlToDataUrl(url: string): Promise<string | null> {
   }
 }
 
-async function mergeGbpFromMapsHit(audit: any, hit: DataForSeoMapsItem) {
+async function mergeGbpFromMapsHit(
+  audit: any,
+  hit: DataForSeoMapsItem,
+  opts?: { searchPhotoUrls?: string[]; googleSearchUrl?: string }
+) {
   const prev = audit.gbpLookup || {};
   const place = hit.placeId ? await fetchPlaceDetailsById(hit.placeId) : null;
   const fromPlace = place ? gbpFieldsFromPlaceDetails(place) : null;
-  let photoUrls: string[] = Array.isArray(prev.photoUrls)
-    ? prev.photoUrls.filter(
-        (u: string) => String(u || '').startsWith('data:image/') || /^https?:\/\//i.test(String(u || ''))
-      )
-    : [];
 
-  if (place) {
-    const resolved = await photoUrlsFromPlace(place, 4);
-    if (resolved.length) photoUrls = resolved;
+  // Prefer Google Search brand images; fall back to one Places photo if Search returned none
+  let photoUrls: string[] = (opts?.searchPhotoUrls || []).filter((u) =>
+    String(u || '').startsWith('data:image/')
+  );
+  let photoSource: string | null = photoUrls.length ? 'google-search' : null;
+
+  if (!photoUrls.length && Array.isArray(prev.photoUrls) && prev.photoSource === 'google-search') {
+    photoUrls = prev.photoUrls.filter((u: string) => String(u || '').startsWith('data:image/'));
+    if (photoUrls.length) photoSource = 'google-search';
+  }
+
+  if (!photoUrls.length && place) {
+    const resolved = await photoUrlsFromPlace(place, 2);
+    for (const u of resolved) {
+      if (!photoUrls.includes(u)) photoUrls.push(u);
+    }
+    if (photoUrls.length) photoSource = 'places-or-maps';
   }
   if (!photoUrls.length && hit.mainImage) {
     const asData = await imageUrlToDataUrl(hit.mainImage);
-    photoUrls = asData ? [asData] : [hit.mainImage];
+    if (asData) {
+      photoUrls = [asData];
+      photoSource = 'places-or-maps';
+    }
   }
-  
+
   photoUrls = (
     await Promise.all(photoUrls.map(async (u) => (await imageUrlToDataUrl(u)) || u))
   ).filter((u) => String(u || '').startsWith('data:image/'));
@@ -96,6 +136,12 @@ async function mergeGbpFromMapsHit(audit: any, hit: DataForSeoMapsItem) {
   const mapsUrl = fromPlace?.mapsUrl || hit.mapsUrl || prev.mapsUrl || '';
   const latitude = fromPlace?.latitude ?? hit.lat ?? prev.latitude ?? null;
   const longitude = fromPlace?.longitude ?? hit.lng ?? prev.longitude ?? null;
+  const googleSearchUrl =
+    opts?.googleSearchUrl ||
+    prev.googleSearchUrl ||
+    (gbpName
+      ? `https://www.google.com/search?q=${encodeURIComponent(gbpName)}`
+      : '');
 
   audit.gbpLookup = {
     ...prev,
@@ -107,6 +153,7 @@ async function mergeGbpFromMapsHit(audit: any, hit: DataForSeoMapsItem) {
     phone,
     websiteOnGbp,
     mapsUrl,
+    googleSearchUrl,
     rating: fromPlace?.rating ?? hit.rating ?? prev.rating ?? null,
     reviewCount: fromPlace?.reviewCount ?? hit.reviewsCount ?? prev.reviewCount ?? null,
     placeId: fromPlace?.placeId || hit.placeId || prev.placeId || '',
@@ -116,12 +163,10 @@ async function mergeGbpFromMapsHit(audit: any, hit: DataForSeoMapsItem) {
     photosPresent: photoUrls.length > 0 || Boolean(fromPlace?.photosPresent) || hit.totalPhotos > 0,
     photoNames: fromPlace?.photoNames || prev.photoNames || [],
     photoUrls,
-    // Never reuse the main photo for "See outside" — Street View fills the gap when missing
+    photoSource: photoSource || prev.photoSource || null,
     outsideImageUrl:
       outsideDistinct ||
-      (prev.outsideImageUrl && prev.outsideImageUrl !== photoUrls[0]
-        ? prev.outsideImageUrl
-        : null),
+      (prev.outsideImageUrl && prev.outsideImageUrl !== photoUrls[0] ? prev.outsideImageUrl : null),
     evidence: `Matched Google Maps listing via DataForSEO: ${gbpName || hit.placeId}`,
     serviceQuery: prev.serviceQuery || null
   };
@@ -191,6 +236,39 @@ async function enrichFromDataForSeo(audit: any) {
     brandItems = brand.items;
   }
 
+  // Google Search (business name) images for KP collage — not Maps/Places photos
+  let searchPhotoUrls: string[] = [];
+  const googleSearchUrl = brandQuery
+    ? `https://www.google.com/search?q=${encodeURIComponent(brandQuery)}`
+    : businessName
+      ? `https://www.google.com/search?q=${encodeURIComponent(businessName)}`
+      : '';
+  if (brandQuery) {
+    try {
+      searchPhotoUrls = await fetchOrganicBrandImages({
+        keyword: brandQuery,
+        lat: typeof lat === 'number' ? lat : null,
+        lng: typeof lng === 'number' ? lng : null,
+        locationName: locationLabel || undefined,
+        limit: 3,
+        timeoutMs: 25000
+      });
+      // Retry with bare business name if location-qualified query returned nothing
+      if (!searchPhotoUrls.length && businessName && businessName !== brandQuery) {
+        searchPhotoUrls = await fetchOrganicBrandImages({
+          keyword: businessName,
+          lat: typeof lat === 'number' ? lat : null,
+          lng: typeof lng === 'number' ? lng : null,
+          locationName: locationLabel || undefined,
+          limit: 3,
+          timeoutMs: 25000
+        });
+      }
+    } catch (imgErr) {
+      console.warn('[auditWorker] organic brand images failed:', (imgErr as Error).message);
+    }
+  }
+
   const attachLocalRank = (items: DataForSeoMapsItem[], query: string) => {
     if (!items.length) return;
     const localRank = buildDeepLocalRank({
@@ -234,10 +312,27 @@ async function enrichFromDataForSeo(audit: any) {
       });
 
     if (hit) {
-      await mergeGbpFromMapsHit(audit, hit);
+      await mergeGbpFromMapsHit(audit, hit, { searchPhotoUrls, googleSearchUrl });
     } else {
       console.warn('[auditWorker] DataForSEO Maps: no GBP match for', businessName);
     }
+  } else if (searchPhotoUrls.length || googleSearchUrl) {
+    // GBP already present — still upgrade collage to Google Search images
+    const prev = audit.gbpLookup || {};
+    const merged = searchPhotoUrls.length ? [...searchPhotoUrls] : [];
+    const outsideDistinct = merged.find((u, i) => i > 0 && u !== merged[0]) || null;
+    audit.gbpLookup = {
+      ...prev,
+      ...(merged.length
+        ? {
+            photoUrls: merged,
+            photoSource: 'google-search',
+            photosPresent: true,
+            outsideImageUrl: outsideDistinct || null
+          }
+        : {}),
+      googleSearchUrl: googleSearchUrl || prev.googleSearchUrl || null
+    };
   }
 
   
@@ -297,6 +392,24 @@ async function enrichFromDataForSeo(audit: any) {
         localPackScreenshot: { ...localPackScreenshot, query: measuredQuery },
         mapsScreenshot: { ...mapsScreenshot, query: measuredQuery }
       };
+
+      // If Maps SERP screenshot missing, store a Static Map tile for the KP map image
+      const mapsShotOk =
+        mapsScreenshot?.dataUrl && String(mapsScreenshot.dataUrl).startsWith('data:image/');
+      if (!mapsShotOk && typeof lat === 'number' && typeof lng === 'number') {
+        const mapTile = await staticMapDataUrl(lat, lng);
+        if (mapTile) {
+          audit.gbpLookup = {
+            ...(audit.gbpLookup || {}),
+            mapImageUrl: mapTile
+          };
+        }
+      } else if (mapsShotOk) {
+        audit.gbpLookup = {
+          ...(audit.gbpLookup || {}),
+          mapImageUrl: mapsScreenshot.dataUrl
+        };
+      }
     } catch (shotErr) {
       const err = shotErr as Error;
       console.warn('[auditWorker] SERP screenshots failed:', err.message);
@@ -315,9 +428,15 @@ async function enrichFromDataForSeo(audit: any) {
           capturedAt: new Date().toISOString()
         }
       };
+      if (typeof lat === 'number' && typeof lng === 'number') {
+        const mapTile = await staticMapDataUrl(lat, lng);
+        if (mapTile) {
+          audit.gbpLookup = { ...(audit.gbpLookup || {}), mapImageUrl: mapTile };
+        }
+      }
     }
 
-    // ChatGPT + Claude with the same local prompt (cross-checkable)
+    // ChatGPT + Claude + Gemini with the same local prompt (cross-checkable)
     try {
       const aiEngineChecks = await checkAiEngineMentions({
         prompt: measuredQuery,

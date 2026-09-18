@@ -24,6 +24,7 @@ import { getBookingPreset, normalizeBookingIndustryId, resolveSalonServiceCatego
 import FoodOrderFlow from '../restaurants/FoodOrderFlow';
 import SalonBookingFlow from '../salons/SalonBookingFlow';
 import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
+import { PaymentPaidCard } from '../../payments/PaymentPaidCard';
 
 type Slot = { startAt: string; endAt: string; date: string; label: string };
 
@@ -1956,6 +1957,7 @@ export function BookSuccess() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [booking, setBooking] = useState<any>(null);
+    const [paymentDocument, setPaymentDocument] = useState<any>(null);
 
     useEffect(() => {
         if (!sessionId) {
@@ -1966,6 +1968,7 @@ export function BookSuccess() {
         apiGet(`/api/public/checkout/verify?session_id=${encodeURIComponent(sessionId)}`)
             .then((data) => {
                 setBooking(data.booking);
+                setPaymentDocument(data.paymentDocument || data.booking?.paymentDocument || null);
             })
             .catch((e) => setError(e.message || 'Could not confirm booking'))
             .finally(() => setLoading(false));
@@ -2000,6 +2003,33 @@ export function BookSuccess() {
     const when = new Date(booking.start_at).toLocaleString('en-GB');
     const icsUrl = `${API_BASE}/api/public/bookings/${booking.id}/calendar.ics`;
 
+    const footer = (
+        <div className="flex flex-col gap-2 text-center">
+            {booking.manage_token && (
+                <Link to={`/book/manage/${booking.manage_token}`} className="text-sm font-bold text-[#F59E0B]">
+                    Reschedule or cancel
+                </Link>
+            )}
+            <a href={icsUrl} className="inline-flex items-center justify-center gap-2 text-sm font-bold text-[#0F172A]">
+                <Download className="w-4 h-4" /> Add to calendar (.ics)
+            </a>
+            <p className="flex items-center justify-center gap-2 text-xs text-[#64748B]">
+                <Mail className="w-3.5 h-3.5" /> Confirmation sent to {booking.customer_email}
+            </p>
+            <p className="text-xs text-[#64748B] mt-1">
+                {booking.customer_name} · {when}
+            </p>
+        </div>
+    );
+
+    if (paymentDocument) {
+        return (
+            <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-6">
+                <PaymentPaidCard doc={paymentDocument} footer={footer} />
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-6">
             <div className="max-w-lg w-full bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-8 text-center">
@@ -2023,19 +2053,7 @@ export function BookSuccess() {
                         )}
                 </div>
 
-                <div className="mt-4 flex flex-col gap-2">
-                    {booking.manage_token && (
-                        <Link to={`/book/manage/${booking.manage_token}`} className="text-sm font-bold text-[#F59E0B]">
-                            Reschedule or cancel
-                        </Link>
-                    )}
-                    <a href={icsUrl} className="inline-flex items-center justify-center gap-2 text-sm font-bold text-[#0F172A]">
-                        <Download className="w-4 h-4" /> Add to calendar (.ics)
-                    </a>
-                    <p className="flex items-center justify-center gap-2 text-xs text-[#64748B]">
-                        <Mail className="w-3.5 h-3.5" /> Confirmation sent to {booking.customer_email}
-                    </p>
-                </div>
+                <div className="mt-4 flex flex-col gap-2">{footer}</div>
             </div>
         </div>
     );

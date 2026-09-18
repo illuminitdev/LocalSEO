@@ -247,13 +247,18 @@ export async function deleteFullAudit(id: string) {
 }
 
 
-export async function shareFullAuditEmail(id: string): Promise<{
+export async function shareFullAuditEmail(
+    id: string,
+    opts?: { email?: string }
+): Promise<{
     success: boolean;
     to: string;
     attached?: boolean;
     reportUrl?: string;
 }> {
-    return adminPost(`/api/admin/full-audits/${encodeURIComponent(id)}/share-email`, {});
+    const body: Record<string, unknown> = {};
+    if (opts?.email) body.email = opts.email;
+    return adminPost(`/api/admin/full-audits/${encodeURIComponent(id)}/share-email`, body);
 }
 
 
