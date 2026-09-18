@@ -112,41 +112,47 @@ export default function PlacesMap({
                 const center = { lat: pointList[0].lat, lng: pointList[0].lng };
                 const map = new maps.Map(containerRef.current, {
                     center,
-                    zoom: zoom ?? (pointList.length > 1 ? 12 : 15),
+                    zoom: zoom ?? (pointList.length > 1 ? 13 : 15),
                     mapTypeControl: false,
                     streetViewControl: false,
-                    fullscreenControl: false
+                    fullscreenControl: true,
+                    zoomControl: true,
+                    styles: [
+                        {
+                            featureType: 'poi',
+                            elementType: 'labels',
+                            stylers: [{ visibility: 'on' }]
+                        }
+                    ]
                 });
 
                 const bounds = new maps.LatLngBounds();
                 pointList.forEach((m, idx) => {
                     const pos = { lat: m.lat, lng: m.lng };
                     bounds.extend(pos);
-                    const fill = m.color || (m.highlight ? '#F59E0B' : '#64748B');
+                    const fill = m.color || (m.highlight ? '#FF8800' : '#F97316');
+                    const labelText = m.label !== undefined ? String(m.label) : String(idx + 1);
+
+                    const svgPin = encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" width="34" height="44" viewBox="0 0 34 44">
+  <path d="M17 0C7.61 0 0 7.61 0 17c0 12.8 17 27 17 27s17-14.2 17-27C34 7.61 26.39 0 17 0z" fill="${fill}" stroke="#ffffff" stroke-width="2"/>
+  <text x="17" y="22" font-size="14" font-weight="900" font-family="system-ui, -apple-system, sans-serif" fill="#ffffff" text-anchor="middle">${labelText}</text>
+</svg>
+                    `.trim());
+
                     new maps.Marker({
                         position: pos,
                         map,
-                        title: m.title || m.label || `Pin ${idx + 1}`,
-                        label: m.label
-                            ? {
-                                  text: String(m.label),
-                                  color: '#ffffff',
-                                  fontWeight: '700',
-                                  fontSize: '12px'
-                              }
-                            : undefined,
+                        title: m.title || `Stop ${labelText}`,
                         icon: {
-                            path: maps.SymbolPath.CIRCLE,
-                            scale: m.label ? 16 : 10,
-                            fillColor: fill,
-                            fillOpacity: 1,
-                            strokeColor: '#ffffff',
-                            strokeWeight: 2
+                            url: `data:image/svg+xml;charset=UTF-8,${svgPin}`,
+                            scaledSize: new maps.Size(34, 44),
+                            anchor: new maps.Point(17, 44)
                         }
                     });
                 });
                 if (pointList.length > 1) {
-                    map.fitBounds(bounds, 48);
+                    map.fitBounds(bounds, 50);
                 }
             })
             .catch(() => {
