@@ -149,11 +149,14 @@ async function loadDashboard(orgId: any) {
     const { rows: bookings } = await query(
         `SELECT b.*, e.name AS event_name, e.slug AS event_slug, e.category AS event_category,
                 i.status AS invoice_status, i.stripe_hosted_url AS invoice_url, i.amount_cents AS invoice_amount_cents,
-                c.name AS client_name, c.id AS linked_client_id
+                c.name AS client_name, c.id AS linked_client_id,
+                pd.id AS payment_document_id, pd.invoice_number AS payment_invoice_number,
+                pd.amount_cents AS payment_amount_cents, pd.currency AS payment_currency
          FROM bookings b
          JOIN event_types e ON e.id = b.event_type_id
          LEFT JOIN invoices i ON i.booking_id = b.id
          LEFT JOIN clients c ON c.id = b.client_id
+         LEFT JOIN payment_documents pd ON pd.source_type = 'booking_deposit' AND pd.source_id = b.id
          WHERE b.org_id = $1
          ORDER BY b.start_at DESC`,
         [orgId]
@@ -1090,6 +1093,44 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const detail = await getClientDetail((req as any).orgId, String(req.params.id));
             if (!detail) return res.status(404).json({ error: 'Client not found' });
             res.json(detail);
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    router.get('/payment-documents/:id', async (req: Request, res: Response) => {
+        try {
+            const { getPaymentDocumentById } = await import('../lib/paymentDocuments');
+            const doc = await getPaymentDocumentById((req as any).orgId, String(req.params.id));
+            if (!doc) return res.status(404).json({ error: 'Payment document not found' });
+            res.json({ paymentDocument: doc });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    router.get('/payment-documents', async (req: Request, res: Response) => {
+        try {
+            const { listPaymentDocumentsForOrg, getPaymentDocumentBySource } = await import(
+                '../lib/paymentDocuments'
+            );
+            const sourceType = String(req.query.source_type || '').trim();
+            const sourceId = String(req.query.source_id || '').trim();
+            if (sourceType && sourceId) {
+                const allowed = ['booking_deposit', 'food_order', 'quote_deposit'];
+                if (!allowed.includes(sourceType)) {
+                    return res.status(400).json({ error: 'Invalid source_type' });
+                }
+                const doc = await getPaymentDocumentBySource(sourceType as any, sourceId);
+                if (!doc || doc.orgId !== (req as any).orgId) {
+                    return res.status(404).json({ error: 'Payment document not found' });
+                }
+                return res.json({ paymentDocument: doc });
+            }
+            const docs = await listPaymentDocumentsForOrg((req as any).orgId, {
+                limit: Number(req.query.limit) || 100
+            });
+            res.json({ paymentDocuments: docs });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }

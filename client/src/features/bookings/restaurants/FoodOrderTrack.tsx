@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { apiGet, formatCents } from '../../../shared/utils';
+import { PaymentPaidCard } from '../../payments/PaymentPaidCard';
 
 const STATUS_STEPS_DELIVERY = ['paid', 'preparing', 'out_for_delivery', 'delivered'];
 const STATUS_STEPS_PICKUP = ['paid', 'preparing', 'ready', 'collected'];
@@ -136,11 +137,14 @@ export function FoodOrderSuccess() {
     const [params] = useSearchParams();
     const sessionId = params.get('session_id');
     const [error, setError] = useState('');
+    const [loading, setLoading] = useState(true);
     const [token, setToken] = useState('');
+    const [paymentDocument, setPaymentDocument] = useState<any>(null);
 
     useEffect(() => {
         if (!sessionId) {
             setError('Missing session');
+            setLoading(false);
             return;
         }
         apiGet(`/api/public/food-orders/checkout/verify?session_id=${encodeURIComponent(sessionId)}`)
@@ -148,18 +152,58 @@ export function FoodOrderSuccess() {
                 const t = data.order?.manageToken;
                 if (t) setToken(t);
                 else setError('Order not found');
+                setPaymentDocument(data.paymentDocument || data.order?.paymentDocument || null);
             })
-            .catch((e) => setError(e.message));
+            .catch((e) => setError(e.message))
+            .finally(() => setLoading(false));
     }, [sessionId]);
+
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center p-6 text-[#64748B]">
+                Confirming payment…
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="min-h-screen flex items-center justify-center p-6 text-red-600">{error}</div>
+        );
+    }
+
+    if (paymentDocument) {
+        return (
+            <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-6">
+                <PaymentPaidCard
+                    doc={paymentDocument}
+                    footer={
+                        token ? (
+                            <div className="text-center">
+                                <Link
+                                    to={`/book/food-order/${token}`}
+                                    className="inline-flex text-sm font-bold text-[#F59E0B]"
+                                >
+                                    Track your order →
+                                </Link>
+                            </div>
+                        ) : null
+                    }
+                />
+            </div>
+        );
+    }
 
     if (token) {
         window.location.replace(`/book/food-order/${token}`);
-        return <div className="min-h-screen flex items-center justify-center text-[#64748B]">Opening order…</div>;
+        return (
+            <div className="min-h-screen flex items-center justify-center text-[#64748B]">Opening order…</div>
+        );
     }
 
     return (
         <div className="min-h-screen flex items-center justify-center p-6 text-[#64748B]">
-            {error || 'Confirming payment…'}
+            Confirming payment…
         </div>
     );
 }

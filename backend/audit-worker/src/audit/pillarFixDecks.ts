@@ -1,5 +1,5 @@
 
-
+import { buildLocalSeoCoreChecklist } from './localSeoCoreChecklist.js';
 
 export function buildLocalSeoInconsistencies(audit) {
   const b = audit?.business || {};
@@ -164,6 +164,7 @@ export function fallbackPillarDecks(audit) {
       title: 'Local SEO: The Fixes',
       takeaway: `Standardise Name, Address and Phone across Google and the website so ${name} builds trust in ${city}.`,
       inconsistencies: buildLocalSeoInconsistencies(audit),
+      coreChecklist: buildLocalSeoCoreChecklist(audit),
       actions:
         toActions(localFails, 'Medium').length > 0
           ? toActions(localFails, 'Medium')
@@ -244,8 +245,8 @@ export function fallbackPillarDecks(audit) {
       title: 'GEO: Google + AI visibility',
       visualIntro:
         'Optimising a business/entity to be mentioned or recommended in generative AI/search experiences such as Google AI Overviews, ChatGPT, Perplexity, etc.',
-      goalLine: `Win the measured query “${measuredQuery}” on Google Local Pack and get cited in ChatGPT / Claude answers.`,
-      verifyHint: `Cross-check: search “${measuredQuery}” on Google, and ask ChatGPT / Claude the same text.`,
+      goalLine: `Win the measured query “${measuredQuery}” on Google Local Pack and get cited in ChatGPT / Claude / Gemini answers.`,
+      verifyHint: `Cross-check: search “${measuredQuery}” on Google, and ask ChatGPT / Claude / Gemini the same text.`,
       queryCards: mapsResults.length
         ? [
             {

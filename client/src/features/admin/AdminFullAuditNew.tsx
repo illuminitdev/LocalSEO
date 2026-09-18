@@ -75,6 +75,10 @@ export default function AdminFullAuditNew() {
             setError('Business name and address are required');
             return;
         }
+        if (!form.email.trim() || !form.email.includes('@')) {
+            setError('A valid company email is required so you can share the report');
+            return;
+        }
 
         const resolved = resolveAuditService({
             serviceId: form.serviceId,
@@ -113,7 +117,13 @@ export default function AdminFullAuditNew() {
             const jobId = res.data?.jobId;
 
             if (res.data?.status === 'complete' && auditIdOut) {
-                navigate('/admin/full-audits', { replace: true });
+                navigate('/admin/full-audits', {
+                    replace: true,
+                    state: {
+                        auditReady: true,
+                        businessName: form.businessName.trim()
+                    }
+                });
                 return;
             }
             if (!jobId || !auditIdOut) {
@@ -146,7 +156,14 @@ export default function AdminFullAuditNew() {
                 }
                 if (st === 'complete') {
                     setStepIndex(CRAWL_STEPS.length - 1);
-                    navigate('/admin/full-audits', { replace: true });
+                    // Stay in admin list — do not auto-open the public report page
+                    navigate('/admin/full-audits', {
+                        replace: true,
+                        state: {
+                            auditReady: true,
+                            businessName: form.businessName.trim()
+                        }
+                    });
                     return;
                 }
                 if (st === 'failed') {
@@ -158,7 +175,13 @@ export default function AdminFullAuditNew() {
                         const auditRes = await fetchFullAudit(auditIdOut);
                         if (auditRes.data?.published) {
                             setStepIndex(CRAWL_STEPS.length - 1);
-                            navigate('/admin/full-audits', { replace: true });
+                            navigate('/admin/full-audits', {
+                                replace: true,
+                                state: {
+                                    auditReady: true,
+                                    businessName: form.businessName.trim()
+                                }
+                            });
                             return;
                         }
                     } catch {
@@ -189,7 +212,8 @@ export default function AdminFullAuditNew() {
                     <h2 className="text-lg font-bold text-[#0F172A]">New full audit</h2>
                     <p className="text-sm text-[#64748B] mt-1">
                         Enter business details — we look up Google Maps / GBP, crawl the website, score Local SEO +
-                        AEO + GEO, then return you to the list so you can open the shareable report.
+                        AEO + GEO, then return you to the list. The report is not opened automatically; use Open
+                        report when you&apos;re ready.
                     </p>
                 </div>
 
@@ -318,11 +342,13 @@ export default function AdminFullAuditNew() {
                             />
                         </label>
                         <label className="block text-sm font-semibold text-[#0F172A]">
-                            Email
+                            Email *
                             <input
                                 type="email"
+                                required
                                 value={form.email}
                                 onChange={(e) => setForm({ ...form, email: e.target.value })}
+                                placeholder="company@example.com"
                                 className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
                             />
                         </label>

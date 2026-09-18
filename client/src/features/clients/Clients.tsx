@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Search, UserRound, Calendar, FileText } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiDelete, cn, formatCents, restrictPhoneInput } from '../../shared/utils';
+import { PaymentDocHostActions } from '../payments/PaymentPaidCard';
+import type { PaymentDocument } from '../payments/types';
+import { formatPaidDate } from '../payments/types';
 
 type ClientRow = {
     id: string;
@@ -335,6 +338,7 @@ function ClientDetail() {
 
     const bookings = data?.bookings || [];
     const quotes = data?.quotes || [];
+    const paymentDocuments: PaymentDocument[] = data?.paymentDocuments || [];
     const invoices = useMemo(() => {
         const fromApi = data?.invoices || [];
         if (fromApi.length) return fromApi;
@@ -607,20 +611,49 @@ function ClientDetail() {
                 </div>
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4">
                     <h2 className="text-xs font-bold uppercase text-[#64748B] flex items-center gap-1.5 mb-3">
-                        <FileText className="w-3.5 h-3.5" /> Invoices
+                        <FileText className="w-3.5 h-3.5" /> Invoices & receipts
                     </h2>
-                    {!invoices.length ? (
+                    {!invoices.length && !paymentDocuments.length ? (
                         <p className="text-sm text-[#64748B]">
-                            No invoices yet. Saving client details does not create an invoice — mark a job done or use
-                            Invoice on the booking board after a completed job.
+                            No invoices or receipts yet. Paid deposits and food orders appear here after
+                            checkout; balance invoices appear after you mark a job done on the booking board.
                         </p>
                     ) : (
-                        <ul className="space-y-2">
+                        <ul className="space-y-3">
+                            {paymentDocuments.map((doc) => (
+                                <li
+                                    key={doc.id}
+                                    className="rounded-xl border border-[#F1F5F9] px-3 py-2 text-sm space-y-2"
+                                >
+                                    <div className="flex justify-between gap-2">
+                                        <div>
+                                            <p className="font-bold text-[#0F172A]">
+                                                {formatCents(doc.amountCents, doc.currency)}
+                                            </p>
+                                            <p className="text-xs text-[#64748B]">
+                                                {doc.invoiceNumber} · {doc.sourceType.replace(/_/g, ' ')} ·{' '}
+                                                {formatPaidDate(doc.paidAt)}
+                                            </p>
+                                        </div>
+                                        <span className="text-[10px] font-bold uppercase text-emerald-700">
+                                            {doc.status}
+                                        </span>
+                                    </div>
+                                    <PaymentDocHostActions doc={doc} />
+                                </li>
+                            ))}
                             {invoices.map((inv: any) => (
-                                <li key={inv.id} className="rounded-xl border border-[#F1F5F9] px-3 py-2 text-sm flex justify-between gap-2">
+                                <li
+                                    key={inv.id}
+                                    className="rounded-xl border border-[#F1F5F9] px-3 py-2 text-sm flex justify-between gap-2"
+                                >
                                     <div>
-                                        <p className="font-bold text-[#0F172A]">{formatCents(inv.amount_cents)}</p>
-                                        <p className="text-xs text-[#64748B]">{inv.status}</p>
+                                        <p className="font-bold text-[#0F172A]">
+                                            {formatCents(inv.amount_cents)}
+                                        </p>
+                                        <p className="text-xs text-[#64748B]">
+                                            Balance invoice · {inv.status}
+                                        </p>
                                     </div>
                                     {inv.stripe_hosted_url && (
                                         <a

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
     CheckSquare,
     ChevronLeft,
@@ -51,6 +51,7 @@ function auditToLeadRef(a: FullAuditListItem): GrowthAuditLeadRef {
 
 export default function AdminFullAudits() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [audits, setAudits] = useState<FullAuditListItem[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
     const [activeLead, setActiveLead] = useState<GrowthAuditLeadRef | null>(null);
@@ -81,6 +82,13 @@ export default function AdminFullAudits() {
         load();
     }, [load]);
 
+    useEffect(() => {
+        const state = location.state as { auditReady?: boolean; businessName?: string } | null;
+        if (!state?.auditReady) return;
+        navigate(location.pathname, { replace: true, state: null });
+        window.alert('Report ready');
+    }, [location.state, location.pathname, navigate]);
+
     const totalPages = Math.max(1, Math.ceil(audits.length / PAGE_SIZE));
     const safePage = Math.min(page, totalPages);
     const pageAudits = useMemo(() => {
@@ -100,20 +108,23 @@ export default function AdminFullAudits() {
     };
 
     const onShare = async (a: FullAuditListItem) => {
-        if (!a.email) {
-            setError('This audit has no company email to share with.');
-            return;
-        }
         if (!a.published) {
             setError('Publish the audit before emailing the PDF report.');
             return;
         }
+        let email = String(a.email || '').trim();
+        if (!email || !email.includes('@')) {
+            const entered = window.prompt(
+                'This audit has no company email. Enter the email address to send the PDF report to:'
+            );
+            email = String(entered || '').trim();
+            if (!email || !email.includes('@')) {
+                setError('A valid company email is required to share the report.');
+                return;
+            }
+        }
         const biz = a.businessName || 'this business';
-        if (
-            !window.confirm(
-                `Email the audit report PDF to ${a.email} for “${biz}”?`
-            )
-        ) {
+        if (!window.confirm(`Email the audit report PDF to ${email} for “${biz}”?`)) {
             return;
         }
         setBusyId(a.id);
@@ -121,7 +132,7 @@ export default function AdminFullAudits() {
         setError('');
         setMessage('');
         try {
-            const res = await shareFullAuditEmail(a.id);
+            const res = await shareFullAuditEmail(a.id, { email });
             setMessage(
                 res.attached === false
                     ? `Report emailed to ${res.to} (link only — PDF was too large to attach).`
@@ -215,7 +226,7 @@ export default function AdminFullAudits() {
                     {pageAudits.map((a) => {
                         const share = a.shareUrl || a.reportUrl || '';
                         const busy = busyId === a.id;
-                        const canShare = Boolean(a.email && a.published);
+                        const canShare = Boolean(a.published);
                         return (
                             <li
                                 key={a.id}
@@ -286,13 +297,17 @@ export default function AdminFullAudits() {
                                         disabled={busy || !canShare}
                                         onClick={() => onShare(a)}
                                         className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-[#E2E8F0] bg-white text-[#64748B] hover:text-[#D97706] hover:border-[#FDE68A] hover:bg-[#FFFBEB] disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-[#64748B]"
-                                        aria-label={`Email report to ${a.email || 'company'}`}
+                                        aria-label={
+                                            a.email
+                                                ? `Email report to ${a.email}`
+                                                : 'Email report (enter address)'
+                                        }
                                         title={
-                                            !a.email
-                                                ? 'No company email on this audit'
-                                                : !a.published
-                                                  ? 'Publish before sharing'
-                                                  : `Email report to ${a.email}`
+                                            !a.published
+                                                ? 'Publish before sharing'
+                                                : a.email
+                                                  ? `Email report to ${a.email}`
+                                                  : 'Email report — you’ll be asked for an address'
                                         }
                                     >
                                         <Share2

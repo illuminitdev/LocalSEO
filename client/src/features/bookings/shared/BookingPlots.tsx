@@ -7,6 +7,7 @@ import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
 import BookingSettingsPanel from './BookingSettings';
 import FoodOrdersHostPanel from '../restaurants/FoodOrdersHostPanel';
 import { normalizeBookingIndustryId } from './bookingIndustryPresets';
+import { HostPaymentDocDownloads } from '../../payments/HostPaymentDocDownloads';
 
 function intakeAnswersList(raw: unknown): { key: string; label: string; value: string }[] {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
@@ -853,6 +854,9 @@ export default function BookingPlots() {
                                                 )}
                                             {b.invoice_url && (
                                                 <a href={b.invoice_url} target="_blank" rel="noreferrer" className="text-xs font-bold px-3 py-1.5 rounded-lg border border-[#E2E8F0]">View invoice</a>
+                                            )}
+                                            {b.payment_document_id && (
+                                                <HostPaymentDocDownloads documentId={b.payment_document_id} />
                                             )}
                                             {(b.status === 'confirmed' || b.job_status === 'requested' || b.job_status === 'scheduled' || b.job_status === 'in_progress') &&
                                                 b.status !== 'cancelled' &&

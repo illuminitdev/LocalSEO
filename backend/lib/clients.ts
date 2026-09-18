@@ -156,10 +156,12 @@ export async function getClientDetail(orgId: string, clientId: string) {
     );
     const { rows: bookings } = await query(
         `SELECT b.*, e.name AS event_name, e.slug AS event_slug,
-                i.status AS invoice_status, i.stripe_hosted_url AS invoice_url, i.amount_cents AS invoice_amount_cents
+                i.status AS invoice_status, i.stripe_hosted_url AS invoice_url, i.amount_cents AS invoice_amount_cents,
+                pd.id AS payment_document_id, pd.invoice_number AS payment_invoice_number
          FROM bookings b
          LEFT JOIN event_types e ON e.id = b.event_type_id
          LEFT JOIN invoices i ON i.booking_id = b.id
+         LEFT JOIN payment_documents pd ON pd.source_type = 'booking_deposit' AND pd.source_id = b.id
          WHERE b.client_id = $1 AND b.org_id = $2
          ORDER BY b.start_at DESC`,
         [clientId, orgId]
@@ -178,7 +180,9 @@ export async function getClientDetail(orgId: string, clientId: string) {
          ORDER BY updated_at DESC`,
         [clientId, orgId]
     );
-    return { client, properties, bookings, invoices, quotes };
+    const { listPaymentDocumentsForClient } = await import('./paymentDocuments');
+    const paymentDocuments = await listPaymentDocumentsForClient(orgId, clientId);
+    return { client, properties, bookings, invoices, quotes, paymentDocuments };
 }
 
 export async function addClientProperty(
@@ -292,6 +296,15 @@ export async function mergeClients(orgId: string, keepClientId: string, mergeCli
         orgId
     ]);
     await query(`UPDATE invoices SET client_id = $1 WHERE client_id = $2`, [keepClientId, mergeClientId]);
+    await query(`UPDATE payment_documents SET client_id = $1 WHERE client_id = $2`, [
+        keepClientId,
+        mergeClientId
+    ]);
+    await query(`UPDATE food_orders SET client_id = $1 WHERE client_id = $2 AND org_id = $3`, [
+        keepClientId,
+        mergeClientId,
+        orgId
+    ]);
     await query(
         `UPDATE client_portal_tokens SET client_id = $1 WHERE client_id = $2`,
         [keepClientId, mergeClientId]

@@ -312,6 +312,10 @@ export function publicReportView(audit: AuditRecord | null) {
           rating: (audit.gbpLookup as Record<string, unknown>).rating,
           reviewCount: (audit.gbpLookup as Record<string, unknown>).reviewCount,
           mapsUrl: (audit.gbpLookup as Record<string, unknown>).mapsUrl,
+          googleSearchUrl: (() => {
+            const u = String((audit.gbpLookup as Record<string, unknown>).googleSearchUrl || '').trim();
+            return u.startsWith('https://www.google.com/search') ? u : null;
+          })(),
           placeId: (audit.gbpLookup as Record<string, unknown>).placeId || null,
           photosPresent: (audit.gbpLookup as Record<string, unknown>).photosPresent ?? null,
           photoNames: (audit.gbpLookup as Record<string, unknown>).photoNames || [],
@@ -324,6 +328,11 @@ export function publicReportView(audit: AuditRecord | null) {
             const u = String((audit.gbpLookup as Record<string, unknown>).outsideImageUrl || '');
             return u.startsWith('data:image/') ? u : null;
           })(),
+          mapImageUrl: (() => {
+            const u = String((audit.gbpLookup as Record<string, unknown>).mapImageUrl || '');
+            return u.startsWith('data:image/') ? u : null;
+          })(),
+          photoSource: (audit.gbpLookup as Record<string, unknown>).photoSource || null,
           latitude: (audit.gbpLookup as Record<string, unknown>).latitude ?? null,
           longitude: (audit.gbpLookup as Record<string, unknown>).longitude ?? null,
           primaryTypeDisplayName:

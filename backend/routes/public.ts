@@ -267,20 +267,30 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const orgRow = await loadOrgByBookingSession(sessionId);
             const session = await stripeClient.checkout.sessions.retrieve(
                 sessionId,
-                {},
+                { expand: ['payment_intent', 'payment_intent.payment_method'] },
                 stripeAccountOpts(orgRow?.stripe_account_id)
             );
             if (session.payment_status !== 'paid') return res.status(402).json({ error: 'Payment not completed' });
 
+            const { extractPaymentMethodFromStripe } = await import('../lib/paymentDocuments');
+            const pm = await extractPaymentMethodFromStripe(
+                stripeClient,
+                session,
+                orgRow?.stripe_account_id
+            );
+
             const booking = await confirmBookingPayment({
                 bookingId: session.metadata?.bookingId,
                 stripeSessionId: sessionId,
-                paymentIntentId: session.payment_intent
+                paymentIntentId: session.payment_intent,
+                paymentMethodBrand: pm.brand,
+                paymentMethodLast4: pm.last4
             });
             if (!booking) return res.status(404).json({ error: 'Booking not found' });
 
             res.json({
                 booking,
+                paymentDocument: booking.paymentDocument || null,
                 manageUrl: `${frontendOrigin()}/book/manage/${booking.manage_token}`
             });
         } catch (err: any) {
@@ -349,18 +359,33 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             );
             const session = await stripeClient.checkout.sessions.retrieve(
                 sessionId,
-                {},
+                { expand: ['payment_intent', 'payment_intent.payment_method'] },
                 stripeAccountOpts(orgRows[0]?.stripe_account_id)
             );
+            let paymentDocument = null;
             if (session.payment_status === 'paid') {
-                await confirmQuoteDeposit({
+                const { extractPaymentMethodFromStripe } = await import('../lib/paymentDocuments');
+                const pm = await extractPaymentMethodFromStripe(
+                    stripeClient,
+                    session,
+                    orgRows[0]?.stripe_account_id
+                );
+                const confirmed = await confirmQuoteDeposit({
                     quoteId: quote.id,
                     stripeSessionId: sessionId,
-                    paymentIntentId: session.payment_intent
+                    paymentIntentId: session.payment_intent,
+                    paymentMethodBrand: pm.brand,
+                    paymentMethodLast4: pm.last4
                 });
+                paymentDocument = confirmed?.paymentDocument || null;
             }
             const data = await loadQuoteByToken(quote.public_token);
-            res.json({ quote: data?.quote, lineItems: data?.lineItems, paymentStatus: session.payment_status });
+            res.json({
+                quote: data?.quote,
+                lineItems: data?.lineItems,
+                paymentStatus: session.payment_status,
+                paymentDocument
+            });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }

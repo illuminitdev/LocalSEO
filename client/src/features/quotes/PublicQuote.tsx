@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { apiGet, apiPost, formatCents } from '../../shared/utils';
+import { PaymentPaidCard } from '../payments/PaymentPaidCard';
 
 export default function PublicQuote() {
     const { token } = useParams();
@@ -11,6 +12,7 @@ export default function PublicQuote() {
     const [error, setError] = useState('');
     const [info, setInfo] = useState('');
     const [busy, setBusy] = useState(false);
+    const [paymentDocument, setPaymentDocument] = useState<any>(null);
 
     const load = async () => {
         if (!token) return;
@@ -29,15 +31,28 @@ export default function PublicQuote() {
 
     useEffect(() => {
         load();
-        
     }, [token]);
 
     useEffect(() => {
-        if (searchParams.get('paid') === '1' && token) {
-            setInfo('Payment received — refreshing quote…');
-            load().then(() => setInfo('Quote approved and deposit paid. Thank you!'));
-        }
-        
+        if (searchParams.get('paid') !== '1' || !token) return;
+        const sessionId = searchParams.get('session_id') || '';
+        setInfo('Payment received — confirming…');
+        const run = async () => {
+            try {
+                if (sessionId) {
+                    const verified = await apiGet(
+                        `/api/public/quotes/checkout/verify?session_id=${encodeURIComponent(sessionId)}`
+                    );
+                    if (verified.paymentDocument) setPaymentDocument(verified.paymentDocument);
+                }
+                await load();
+                setInfo('Quote approved and deposit paid. Thank you!');
+            } catch {
+                await load();
+                setInfo('Quote approved and deposit paid. Thank you!');
+            }
+        };
+        run();
     }, [searchParams, token]);
 
     const approve = async () => {
@@ -78,8 +93,12 @@ export default function PublicQuote() {
         }
     };
 
-    if (loading) {
-        return <div className="min-h-screen flex items-center justify-center font-bold text-[#64748B]">Loading quote…</div>;
+    if (loading && !data) {
+        return (
+            <div className="min-h-screen flex items-center justify-center font-bold text-[#64748B]">
+                Loading quote…
+            </div>
+        );
     }
 
     if (error && !data) {
@@ -94,19 +113,40 @@ export default function PublicQuote() {
     const currency = q.currency || 'GBP';
     const canRespond = q.status === 'sent';
 
+    if (paymentDocument && searchParams.get('paid') === '1') {
+        return (
+            <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-6">
+                <PaymentPaidCard
+                    doc={paymentDocument}
+                    footer={
+                        <p className="text-center text-sm text-[#64748B]">
+                            Quote <strong className="text-[#0F172A]">{q.title}</strong> approved. The
+                            business will follow up to schedule the work.
+                        </p>
+                    }
+                />
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen bg-[#F8FAFC] py-8 px-4">
             <div className="max-w-xl mx-auto space-y-4">
                 <div className="bg-[#0F172A] text-white rounded-2xl px-5 py-5">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-[#F59E0B]">{q.businessName}</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-[#F59E0B]">
+                        {q.businessName}
+                    </p>
                     <h1 className="text-2xl font-black mt-1">{q.title}</h1>
                     <p className="text-sm text-white/70 mt-1">
-                        For {q.clientName} · <span className="uppercase text-xs font-bold">{q.status}</span>
+                        For {q.clientName} ·{' '}
+                        <span className="uppercase text-xs font-bold">{q.status}</span>
                     </p>
                 </div>
 
                 {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
-                {info && <p className="text-sm text-emerald-800 bg-emerald-50 rounded-xl px-4 py-2">{info}</p>}
+                {info && (
+                    <p className="text-sm text-emerald-800 bg-emerald-50 rounded-xl px-4 py-2">{info}</p>
+                )}
 
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl p-4 space-y-3">
                     <ul className="divide-y divide-[#F1F5F9]">
@@ -135,7 +175,9 @@ export default function PublicQuote() {
                         </p>
                     )}
                     {q.expiryDate && (
-                        <p className="text-xs text-[#64748B]">Valid until {String(q.expiryDate).slice(0, 10)}</p>
+                        <p className="text-xs text-[#64748B]">
+                            Valid until {String(q.expiryDate).slice(0, 10)}
+                        </p>
                     )}
                     {q.notes && <p className="text-sm text-[#64748B] whitespace-pre-wrap">{q.notes}</p>}
                 </div>

@@ -152,13 +152,14 @@ router.post('/full-audits/:id/share-email', requireAdmin, async (req: Request, r
             audit.business && typeof audit.business === 'object'
                 ? (audit.business as Record<string, unknown>)
                 : {};
-        const email = String(business.email || audit.email || '')
+        const bodyEmail = String((req.body as { email?: string } | undefined)?.email || '')
             .trim()
             .toLowerCase();
+        const email = (bodyEmail || String(business.email || audit.email || '').trim()).toLowerCase();
         if (!email || !email.includes('@')) {
             return res.status(400).json({
                 success: false,
-                error: 'This audit has no company email to share with.'
+                error: 'This audit has no company email to share with. Enter an email and try again.'
             });
         }
 
