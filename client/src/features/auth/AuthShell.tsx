@@ -208,13 +208,13 @@ export default function AuthShell({ children, title, subtitle, showLegalFooter =
                                 style={{ display: 'block', marginTop: 2, marginLeft: 'auto' }}
                             >
                                 <path
-                                    d="M4 2C12 14 24 20 36 16"
+                                    d="M4 2C12 14 24 20 33 15.5"
                                     stroke="#FF6A00"
                                     strokeWidth="1.5"
                                     strokeLinecap="round"
                                 />
                                 <path
-                                    d="M32 12l4 4-5 2"
+                                    d="M31.5 11.5L36.5 16.2L30.5 20.8"
                                     stroke="#FF6A00"
                                     strokeWidth="1.5"
                                     strokeLinecap="round"
