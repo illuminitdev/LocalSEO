@@ -3,35 +3,27 @@ import { Link, useSearchParams } from 'react-router-dom';
 import {
     ArrowLeft,
     Calendar,
-    CalendarDays,
     Check,
     CheckCircle2,
-    ChevronDown,
-    ChevronRight,
     Clock,
     Copy,
     ExternalLink,
     FileText,
-    Globe,
     Link2,
     LogIn,
     Mail,
     MapPin,
-    MessageSquare,
     MoreHorizontal,
     MoreVertical,
     Play,
     Plus,
     QrCode,
     Receipt,
-    Send,
-    Share2,
-    Smartphone,
     Store,
     Trash2,
     User,
     Wallet,
-    Wrench
+    X
 } from 'lucide-react';
 import { apiGet, apiPost, formatCents, cn, restrictPhoneInput } from '../../../shared/utils';
 import { setBookingOrgSlug } from './bookingUtils';
@@ -170,7 +162,6 @@ export default function BookingPlots() {
     const [showServiceDropdown, setShowServiceDropdown] = useState(false);
     const [activeMenuJobId, setActiveMenuJobId] = useState<string | null>(null);
     const [showQrModal, setShowQrModal] = useState(false);
-    const [showAllJobs, setShowAllJobs] = useState(true);
     const [downloadingDoc, setDownloadingDoc] = useState<PaymentDocument | null>(null);
 
     const [manualForm, setManualForm] = useState({
@@ -346,23 +337,6 @@ export default function BookingPlots() {
         await navigator.clipboard.writeText(hostUrl);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
-    };
-
-    const handleShare = async () => {
-        if (!hostUrl) return;
-        if (navigator.share) {
-            try {
-                await navigator.share({
-                    title: displayName,
-                    text: `Book an appointment with ${displayName}`,
-                    url: hostUrl
-                });
-                return;
-            } catch {
-                // User dismissed or fallback
-            }
-        }
-        setShowShareModal(true);
     };
 
     const completeSetup = async (form: SetupForm) => {

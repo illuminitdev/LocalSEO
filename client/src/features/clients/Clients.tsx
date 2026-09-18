@@ -4,30 +4,20 @@ import {
     ArrowLeft,
     Briefcase,
     Calendar,
-    Check,
-    ChevronDown,
     ChevronLeft,
     ChevronRight,
     FileText,
     Filter,
-    Mail,
-    MapPin,
-    MoreHorizontal,
     MoreVertical,
-    Phone,
     Plus,
     Search,
     Trash2,
     User,
-    UserPlus,
     UserRound,
     Users,
     Wallet
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiDelete, cn, formatCents, restrictPhoneInput } from '../../shared/utils';
-import { PaymentDocHostActions } from '../payments/PaymentPaidCard';
-import type { PaymentDocument } from '../payments/types';
-import { formatPaidDate } from '../payments/types';
 
 type ClientRow = {
     id: string;
@@ -522,7 +512,13 @@ function ClientsList() {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {!filteredClients.length ? (
+                            {loading ? (
+                                <tr>
+                                    <td colSpan={8} className="py-12 text-center text-slate-400 font-semibold text-sm">
+                                        Loading clients…
+                                    </td>
+                                </tr>
+                            ) : !filteredClients.length ? (
                                 <tr>
                                     <td colSpan={8} className="py-12 text-center text-slate-400">
                                         <UserRound className="w-10 h-10 mx-auto text-slate-300 mb-2" />
@@ -759,7 +755,7 @@ function ClientDetail() {
         );
     }
 
-    const { client, properties = [], bookings = [], invoices = [], quotes = [] } = data;
+    const { client, properties = [], bookings = [] } = data;
 
     return (
         <div className="w-full space-y-5">
