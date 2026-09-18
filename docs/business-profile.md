@@ -14,8 +14,8 @@ Plans: `local-presence`, `local-growth`, `complete-growth-system`.
 
 | UI | Path |
 |----|------|
-| Profile audit page | `client/src/pages/ProfileAudit.tsx` → `/profile` |
-| Places search modal/panel | `client/src/components/GroundingModal.tsx`, `GroundingPanel.tsx` |
+| Profile audit page | `client/src/features/local-presence/ProfileAudit.tsx` → `/profile` |
+| Places search modal | `client/src/features/dashboard/GroundingModal.tsx` |
 
 Flow:
 

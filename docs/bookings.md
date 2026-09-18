@@ -27,16 +27,16 @@ Plans: `booking-solo`, `booking-solo-plus`, `booking-pro`, `complete-growth-syst
 
 | UI | Path |
 |----|------|
-| Booking board | `client/src/features/bookings/BookingPlots.tsx` → `/booking` |
+| Booking board | `client/src/features/bookings/shared/BookingPlots.tsx` → `/booking` |
 | Clients CRM | `client/src/features/clients/Clients.tsx` → `/clients`, `/clients/:id` |
 | Quotes | `client/src/features/quotes/Quotes.tsx` → `/quotes`, `/quotes/new`, `/quotes/:id` |
 | Public quote | `client/src/features/quotes/PublicQuote.tsx` → `/quote/:token` |
-| Schedule settings panel | `client/src/features/bookings/BookingSettings.tsx` |
+| Schedule settings panel | `client/src/features/bookings/shared/BookingSettings.tsx` |
 | Dedicated settings route | `/booking/settings` → redirect to `?panel=settings` |
-| Public host / event | `client/src/features/bookings/PublicBooking.tsx` → `/book/:hostSlug`… |
+| Public host / event | `client/src/features/bookings/shared/PublicBooking.tsx` → `/book/:hostSlug`… |
 | Success / ICS | same module — BookSuccess |
 | Manage booking | same module — BookManage |
-| Client hub | `client/src/features/bookings/ClientPortal.tsx` → `/book/portal/:token` |
+| Client hub | `client/src/features/bookings/shared/ClientPortal.tsx` → `/book/portal/:token` |
 
 ## Backend connection
 

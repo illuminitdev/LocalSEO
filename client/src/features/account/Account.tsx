@@ -16,7 +16,10 @@ import {
     Settings,
     Image as ImageIcon,
     Eye,
-    EyeOff
+    EyeOff,
+    UploadCloud,
+    Calendar,
+    Upload
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, cn } from '../../shared/utils';
 import { clearToken, setMustChangePassword } from '../auth/auth';
@@ -133,7 +136,6 @@ export default function Account() {
     const [profileMsg, setProfileMsg] = useState('');
     const [profileErr, setProfileErr] = useState('');
     const [profileBusy, setProfileBusy] = useState(false);
-    const [editingProfile, setEditingProfile] = useState(false);
     const [showPasswordForm, setShowPasswordForm] = useState(forcePassword);
 
     const [org, setOrg] = useState<OrgForm>({
@@ -300,7 +302,6 @@ export default function Account() {
             }));
 
             setProfileMsg('Profile saved.');
-            setEditingProfile(false);
         } catch (err: any) {
             setProfileErr(err.message);
         } finally {
@@ -505,32 +506,34 @@ export default function Account() {
     };
 
     return (
-        <div className="max-w-4xl mx-auto pb-12 animate-in fade-in duration-500">
-            <div className="mb-6 flex items-start gap-4">
+        <div className="max-w-5xl mx-auto pb-4 animate-in fade-in duration-500">
+            {/* ── Page Header ── */}
+            <div className="mb-4 flex items-center gap-3.5">
                 <div
-                    className="h-12 w-12 rounded-2xl text-white flex items-center justify-center shrink-0 shadow-md"
-                    style={{ background: 'var(--brand-secondary)' }}
+                    className="h-11 w-11 rounded-2xl text-white flex items-center justify-center shrink-0 shadow-sm"
+                    style={{ background: '#0F172A' }}
                 >
                     <Settings className="w-5 h-5" strokeWidth={2} />
                 </div>
                 <div>
-                    <h1 className="text-3xl font-black tracking-tight text-[#0F172A]">Settings</h1>
-                    <p className="mt-1 text-sm text-[#64748B]">Manage your account profile, branding, and security.</p>
+                    <h1 className="text-2xl font-black tracking-tight text-[#0F172A]">Settings</h1>
+                    <p className="text-xs text-[#64748B]">Manage your account profile, branding, and security.</p>
                 </div>
             </div>
 
             {mustChangePassword && (
-                <p className="mb-5 text-sm text-amber-950 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl px-4 py-3 shadow-sm">
+                <p className="mb-3 text-xs text-amber-950 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl px-4 py-2.5 shadow-sm">
                     Please change your temporary password when you can — open Account security.
                 </p>
             )}
 
             {loadError && (
-                <p className="mb-5 text-sm text-red-700 bg-red-50 border border-red-100 rounded-2xl px-4 py-3">{loadError}</p>
+                <p className="mb-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5">{loadError}</p>
             )}
 
+            {/* ── Tab Navigation ── */}
             <nav
-                className="mb-6 flex flex-wrap gap-1 rounded-2xl border border-[#E2E8F0]/90 bg-[#F1F5F9]/70 p-1.5 backdrop-blur-sm"
+                className="mb-4 flex flex-wrap items-center gap-1 rounded-2xl border border-[#E2E8F0] bg-white p-1.5 shadow-sm"
                 aria-label="Account sections"
             >
                 {visibleNav.map((item) => {
@@ -542,164 +545,187 @@ export default function Account() {
                             type="button"
                             onClick={() => selectSection(item.id)}
                             className={cn(
-                                'inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all min-h-[40px]',
+                                'inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all min-h-[38px]',
                                 active
-                                    ? 'text-white shadow-[0_8px_18px_-10px_rgba(15,23,42,0.55)]'
-                                    : 'text-[#64748B] hover:text-[#0F172A] hover:bg-white/80'
+                                    ? 'text-white shadow-sm'
+                                    : 'text-[#64748B] hover:text-[#0F172A] hover:bg-[#F8FAFC]'
                             )}
-                            style={active ? { background: 'var(--brand-primary)' } : undefined}
+                            style={active ? { background: 'var(--brand-primary, #F59E0B)' } : undefined}
                         >
-                            <Icon className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+                            <Icon className="w-4 h-4 shrink-0" strokeWidth={active ? 2 : 1.75} />
                             <span className="whitespace-nowrap">{item.label}</span>
                         </button>
                     );
                 })}
             </nav>
 
+            {/* ── Active Tab Content ── */}
             <div className="min-w-0">
                 {activeSection === 'profile' && (
                 <section
                     id="profile"
-                    className="rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_10px_40px_-18px_rgba(15,23,42,0.2)] overflow-hidden"
+                    className="relative rounded-3xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden"
                 >
-                    <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr]">
-                        <div className="p-6 border-b lg:border-b-0 lg:border-r border-[#E2E8F0] bg-[#F8FAFC]/80 flex flex-col">
-                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#94A3B8] flex items-center gap-1.5 mb-5">
-                                <UserRound className="w-3.5 h-3.5" /> Profile
-                            </p>
-                            <div className="flex items-start gap-4 mb-5">
+                    {/* Soft decorative background shapes matching design */}
+                    <div className="absolute -top-12 -left-12 w-44 h-44 rounded-full bg-amber-100/50 blur-2xl pointer-events-none" />
+                    <div className="absolute -bottom-10 -left-10 w-36 h-36 rounded-full bg-amber-200/40 blur-2xl pointer-events-none" />
+                    <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full bg-amber-100/40 blur-2xl pointer-events-none" />
+                    <div className="absolute -bottom-12 -right-12 w-44 h-44 rounded-full bg-blue-100/40 blur-2xl pointer-events-none" />
+
+                    <div className="relative z-10 grid grid-cols-1 md:grid-cols-[280px_1fr]">
+                        {/* ── Left: Avatar card ── */}
+                        <div className="p-6 border-b md:border-b-0 md:border-r border-[#F1F5F9] flex flex-col items-center justify-center text-center">
+                            {/* Avatar with camera overlay */}
+                            <div className="relative mb-3 group">
                                 {avatarUrl ? (
                                     <img
                                         src={avatarUrl}
                                         alt=""
-                                        className="h-20 w-20 rounded-full object-cover border-2 border-white shadow-md shrink-0"
+                                        className="h-24 w-24 rounded-full object-cover border-[3px] shadow-md"
+                                        style={{ borderColor: 'var(--brand-primary, #F59E0B)' }}
                                     />
                                 ) : (
                                     <div
-                                        className="h-20 w-20 rounded-full text-white flex items-center justify-center text-2xl font-black shadow-md shrink-0"
-                                        style={{ background: 'var(--brand-primary)' }}
+                                        className="h-24 w-24 rounded-full text-white flex items-center justify-center text-3xl font-black shadow-md"
+                                        style={{ background: 'var(--brand-primary, #F59E0B)' }}
                                     >
                                         {(displayName || email || 'U').charAt(0).toUpperCase()}
                                     </div>
                                 )}
-                                <div className="min-w-0 pt-1">
-                                    <p className="text-sm font-bold text-[#0F172A]">Profile Picture</p>
-                                    <label className="mt-2 inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-bold text-[#0F172A] cursor-pointer hover:bg-[#F8FAFC]">
-                                        <Camera className="w-3.5 h-3.5" />
-                                        {avatarBusy ? 'Uploading…' : 'Upload Picture'}
-                                        <input
-                                            type="file"
-                                            accept="image/jpeg,image/png,image/webp,image/gif"
-                                            className="hidden"
-                                            disabled={avatarBusy}
-                                            onChange={async (e) => {
-                                                const file = e.target.files?.[0];
-                                                if (!file) return;
-                                                if (file.size > 5 * 1024 * 1024) {
-                                                    setProfileErr('Maximum size is 5MB.');
-                                                    e.target.value = '';
-                                                    return;
-                                                }
-                                                await uploadAvatar(file);
+                                <label
+                                    className="absolute bottom-0 right-0 h-7 w-7 rounded-full text-white flex items-center justify-center cursor-pointer shadow-md border-2 border-white transition-transform hover:scale-110"
+                                    style={{ background: '#0F172A' }}
+                                    title="Change photo"
+                                >
+                                    <Camera className="w-3.5 h-3.5" strokeWidth={2.5} />
+                                    <input
+                                        type="file"
+                                        accept="image/jpeg,image/png,image/webp,image/gif"
+                                        className="hidden"
+                                        disabled={avatarBusy}
+                                        onChange={async (e) => {
+                                            const file = e.target.files?.[0];
+                                            if (!file) return;
+                                            if (file.size > 5 * 1024 * 1024) {
+                                                setProfileErr('Maximum size is 5MB.');
                                                 e.target.value = '';
-                                            }}
-                                        />
-                                    </label>
-                                    <p className="mt-2 text-[11px] text-[#94A3B8] leading-snug">
-                                        JPG or PNG only. Maximum size 5MB.
-                                    </p>
-                                </div>
+                                                return;
+                                            }
+                                            await uploadAvatar(file);
+                                            e.target.value = '';
+                                        }}
+                                    />
+                                </label>
                             </div>
-                            <span className="inline-flex items-center gap-1.5 self-start rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-800 mb-4">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                Host account
+
+                            {/* Name + email */}
+                            <p className="text-base font-black text-[#0F172A] leading-tight">{displayName || 'Karun'}</p>
+                            <p className="text-xs text-[#64748B] mt-1 break-all max-w-[220px] leading-relaxed">{email}</p>
+
+                            {/* Badge */}
+                            <span className="inline-flex items-center gap-1.5 mt-3 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide bg-[#F0FDF4] text-[#16A34A] border border-[#DCFCE7]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A]" />
+                                HOST ACCOUNT
                             </span>
-                            {profileErr && <p className="text-xs text-red-600 mb-2">{profileErr}</p>}
-                            {profileMsg && <p className="text-xs text-emerald-700 mb-2">{profileMsg}</p>}
-                            <button
-                                type="button"
-                                onClick={() => setEditingProfile((v) => !v)}
-                                className="mt-auto w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm font-bold text-[#0F172A] hover:bg-white"
-                            >
-                                <Pencil className="w-4 h-4" />
-                                {editingProfile ? 'Cancel edit' : 'Edit Profile'}
-                            </button>
+
+                            {/* Upload hint */}
+                            <p className="mt-4 text-[11px] text-[#94A3B8] leading-snug">
+                                JPG or PNG only.<br />Maximum size 5MB.
+                            </p>
+
+                            {/* Change photo button */}
+                            <label className="mt-3 inline-flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-4 py-2 text-xs font-bold text-[#0F172A] cursor-pointer hover:bg-[#F8FAFC] transition-colors shadow-sm">
+                                <Pencil className="w-3.5 h-3.5" />
+                                {avatarBusy ? 'Uploading…' : 'Change photo'}
+                                <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp,image/gif"
+                                    className="hidden"
+                                    disabled={avatarBusy}
+                                    onChange={async (e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file) return;
+                                        if (file.size > 5 * 1024 * 1024) {
+                                            setProfileErr('Maximum size is 5MB.');
+                                            e.target.value = '';
+                                            return;
+                                        }
+                                        await uploadAvatar(file);
+                                        e.target.value = '';
+                                    }}
+                                />
+                            </label>
+
+                            {profileErr && <p className="text-xs text-red-600 mt-2">{profileErr}</p>}
+                            {profileMsg && <p className="text-xs text-emerald-700 mt-2">{profileMsg}</p>}
                         </div>
 
-                        <div className="p-6 sm:p-8">
-                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#94A3B8] mb-5">
-                                Personal information
-                            </p>
-                            {!editingProfile ? (
+                        {/* ── Right: Personal information ── */}
+                        <form onSubmit={saveProfile} className="p-6 sm:p-7 flex flex-col justify-between">
+                            <div>
+                                <div className="flex items-center gap-2.5 mb-1">
+                                    <UserRound className="w-4 h-4 text-[#0F172A]" strokeWidth={2.5} />
+                                    <h2 className="text-base font-black tracking-tight text-[#0F172A]">Personal Information</h2>
+                                </div>
+                                <p className="text-xs text-[#64748B] mb-5 ml-6.5">Update your basic details and contact information.</p>
+
                                 <div className="space-y-3">
-                                    <div className="rounded-xl border border-[#E2E8F0] px-4 py-3 flex items-center gap-3">
+                                    {/* Name field */}
+                                    <div className="rounded-xl border border-[#E2E8F0] px-4 py-2.5 flex items-center gap-3 bg-white focus-within:border-[var(--brand-primary,#F59E0B)] focus-within:ring-2 focus-within:ring-amber-500/15 transition-all shadow-sm">
                                         <UserRound className="w-4 h-4 text-[#94A3B8] shrink-0" />
-                                        <div className="min-w-0">
+                                        <div className="min-w-0 flex-1">
                                             <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Name</p>
-                                            <p className="text-sm font-bold text-[#0F172A] truncate">{displayName || '—'}</p>
+                                            <input
+                                                type="text"
+                                                required
+                                                value={displayName}
+                                                onChange={(e) => setDisplayName(e.target.value)}
+                                                className="w-full text-sm font-semibold text-[#0F172A] bg-transparent border-0 p-0 focus:outline-none placeholder:text-[#CBD5E1]"
+                                                placeholder="Your name"
+                                            />
                                         </div>
                                     </div>
-                                    <div className="rounded-xl border border-[#E2E8F0] px-4 py-3 flex items-center gap-3">
+
+                                    {/* Email field (read-only) */}
+                                    <div className="rounded-xl border border-[#E2E8F0] px-4 py-2.5 flex items-center gap-3 bg-[#FAFBFC] shadow-sm">
                                         <Mail className="w-4 h-4 text-[#94A3B8] shrink-0" />
-                                        <div className="min-w-0">
+                                        <div className="min-w-0 flex-1">
                                             <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Email</p>
-                                            <p className="text-sm font-bold text-[#0F172A] truncate">{email || '—'}</p>
+                                            <p className="text-sm font-semibold text-[#0F172A] truncate">{email || '—'}</p>
                                         </div>
                                     </div>
-                                    <div className="rounded-xl border border-[#E2E8F0] px-4 py-3 flex items-center gap-3">
+
+                                    {/* Phone field */}
+                                    <div className="rounded-xl border border-[#E2E8F0] px-4 py-2.5 flex items-center gap-3 bg-white focus-within:border-[var(--brand-primary,#F59E0B)] focus-within:ring-2 focus-within:ring-amber-500/15 transition-all shadow-sm">
                                         <Phone className="w-4 h-4 text-[#94A3B8] shrink-0" />
-                                        <div className="min-w-0">
+                                        <div className="min-w-0 flex-1">
                                             <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Phone</p>
-                                            <p className="text-sm font-bold text-[#0F172A] truncate">{org.phone || '—'}</p>
+                                            <input
+                                                type="tel"
+                                                value={org.phone}
+                                                onChange={(e) => setOrg((o) => ({ ...o, phone: e.target.value }))}
+                                                className="w-full text-sm font-semibold text-[#0F172A] bg-transparent border-0 p-0 focus:outline-none placeholder:text-[#CBD5E1]"
+                                                placeholder="— —"
+                                                autoComplete="tel"
+                                            />
                                         </div>
                                     </div>
                                 </div>
-                            ) : (
-                                <form onSubmit={saveProfile} className="space-y-4 max-w-md">
-                                    <label className="block text-sm font-semibold text-[#334155]">
-                                        Full name
-                                        <input
-                                            type="text"
-                                            required
-                                            value={displayName}
-                                            onChange={(e) => setDisplayName(e.target.value)}
-                                            className={fieldClass}
-                                            placeholder="Your name"
-                                        />
-                                    </label>
-                                    <label className="block text-sm font-semibold text-[#334155]">
-                                        Email
-                                        <input
-                                            type="email"
-                                            value={email}
-                                            disabled
-                                            className={`${fieldClass} bg-[#F1F5F9] text-[#64748B] cursor-not-allowed`}
-                                        />
-                                        <span className="mt-1.5 block text-xs text-[#94A3B8]">
-                                            Email is used to sign in and cannot be changed here.
-                                        </span>
-                                    </label>
-                                    <label className="block text-sm font-semibold text-[#334155]">
-                                        Phone
-                                        <input
-                                            type="tel"
-                                            value={org.phone}
-                                            onChange={(e) => setOrg((o) => ({ ...o, phone: e.target.value }))}
-                                            className={fieldClass}
-                                            placeholder="Mobile or business number"
-                                            autoComplete="tel"
-                                        />
-                                    </label>
-                                    <button
-                                        type="submit"
-                                        disabled={profileBusy}
-                                        className="px-5 py-2.5 rounded-xl bg-[#0F172A] text-white text-sm font-bold hover:bg-[#1E293B] disabled:opacity-55"
-                                    >
-                                        {profileBusy ? 'Saving…' : 'Save profile'}
-                                    </button>
-                                </form>
-                            )}
-                        </div>
+                            </div>
+
+                            {/* Save changes button */}
+                            <div className="mt-5 pt-2">
+                                <button
+                                    type="submit"
+                                    disabled={profileBusy}
+                                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-xs font-bold shadow-sm hover:shadow transition-all disabled:opacity-55"
+                                    style={{ background: 'var(--brand-primary, #F59E0B)' }}
+                                >
+                                    <Check className="w-4 h-4" strokeWidth={2.5} />
+                                    {profileBusy ? 'Saving…' : 'Save changes'}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </section>
                 )}
@@ -954,40 +980,38 @@ export default function Account() {
                 {activeSection === 'branding' && (
                 <div
                     id="branding"
-                    className="rounded-2xl border border-[#E2E8F0] bg-white p-5 sm:p-6 shadow-[0_10px_30px_-20px_rgba(15,23,42,0.35)]"
+                    className="rounded-3xl border border-[#E2E8F0] bg-white p-6 shadow-sm animate-in fade-in duration-300"
                     style={orgBrandStyle({ brandPrimary, brandSecondary })}
                 >
-                    <div className="mb-6">
+                    <div className="mb-4">
                         <h2 className="text-base font-black text-[#0F172A]">Branding</h2>
-                        <p className="text-xs text-[#64748B] mt-1">
+                        <p className="text-xs text-[#64748B] mt-0.5">
                             Logo and colors for sidebar, booking page, and client hub.
                         </p>
                     </div>
 
-                    {brandErr && <p className="mb-3 text-sm text-red-700">{brandErr}</p>}
-                    {brandMsg && <p className="mb-3 text-sm text-emerald-700">{brandMsg}</p>}
+                    {brandErr && <p className="mb-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{brandErr}</p>}
+                    {brandMsg && <p className="mb-3 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">{brandMsg}</p>}
 
-                    <form onSubmit={saveBranding} className="space-y-6">
-                        <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]/80 p-4">
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-3">
-                                Logo
-                            </p>
-                            <div className="flex items-center gap-4">
-                                <div className="h-16 w-16 rounded-xl border border-[#E2E8F0] bg-white overflow-hidden flex items-center justify-center shrink-0">
-                                    {logoUrl ? (
-                                        <img
-                                            src={logoUrl}
-                                            alt="Business logo"
-                                            className="h-12 w-12 object-contain"
-                                        />
-                                    ) : (
-                                        <ImageIcon className="w-5 h-5 text-[#CBD5E1]" />
-                                    )}
-                                </div>
-                                <div className="flex flex-wrap gap-2 min-w-0">
-                                    <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:bg-[#F1F5F9] cursor-pointer">
-                                        <Camera className="w-3.5 h-3.5" />
-                                        {logoBusy ? 'Uploading…' : logoUrl ? 'Change logo' : 'Upload logo'}
+                    <form onSubmit={saveBranding} className="space-y-4">
+                        {/* ── Logo Section ── */}
+                        <div>
+                            <p className="text-xs font-bold text-[#0F172A] mb-2">Logo</p>
+                            <div className="grid grid-cols-1 md:grid-cols-[1.5fr_1fr] gap-4">
+                                {/* Upload dropzone */}
+                                <div className="border border-dashed border-[#CBD5E1] bg-[#F8FAFC]/60 rounded-2xl p-5 flex items-center justify-between gap-4 transition-colors hover:border-[#94A3B8]">
+                                    <div className="flex items-center gap-3.5">
+                                        <div className="w-10 h-10 rounded-xl bg-white border border-[#E2E8F0] flex items-center justify-center text-[#64748B] shrink-0 shadow-sm">
+                                            <UploadCloud className="w-5 h-5 text-[#64748B]" />
+                                        </div>
+                                        <div>
+                                            <p className="text-xs font-bold text-[#0F172A]">Drag and drop your logo here</p>
+                                            <p className="text-[10px] text-[#94A3B8] mt-0.5">PNG or JPG (max 5MB)</p>
+                                        </div>
+                                    </div>
+                                    <label className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:bg-[#F8FAFC] shadow-sm cursor-pointer shrink-0 transition-all">
+                                        <Upload className="w-3.5 h-3.5" />
+                                        {logoBusy ? 'Uploading…' : 'Upload logo'}
                                         <input
                                             type="file"
                                             accept="image/jpeg,image/png,image/webp,image/gif"
@@ -1000,12 +1024,21 @@ export default function Account() {
                                             }}
                                         />
                                     </label>
+                                </div>
+
+                                {/* Logo display */}
+                                <div className="rounded-2xl border border-[#F1F5F9] bg-[#FAFAFA] p-4 flex items-center justify-center min-h-[80px] relative group">
+                                    {logoUrl ? (
+                                        <img src={logoUrl} alt="Business logo" className="max-h-12 max-w-[180px] object-contain" />
+                                    ) : (
+                                        <img src="/localseo.png" alt="Local SEO" className="max-h-12 max-w-[180px] object-contain opacity-75" />
+                                    )}
                                     {logoUrl && (
                                         <button
                                             type="button"
                                             disabled={logoBusy}
                                             onClick={() => void clearLogo()}
-                                            className="px-3 py-2 rounded-xl border border-[#E2E8F0] bg-white text-xs font-bold text-[#64748B] hover:bg-[#F1F5F9] disabled:opacity-50"
+                                            className="absolute top-2 right-2 text-[10px] font-bold text-[#94A3B8] hover:text-red-600 bg-white/90 rounded-md px-1.5 py-0.5 border border-[#E2E8F0] shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
                                         >
                                             Remove
                                         </button>
@@ -1014,98 +1047,147 @@ export default function Account() {
                             </div>
                         </div>
 
-                        <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]/80 p-4">
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-3">
-                                Colors
-                            </p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg">
-                                <label className="block text-xs font-bold text-[#64748B]">
-                                    Primary
-                                    <div className="mt-1.5 flex items-center gap-2">
-                                        <span className="inline-flex h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[#E2E8F0] bg-white shadow-sm transition hover:shadow-md hover:ring-2 hover:ring-[color-mix(in_srgb,var(--brand-primary)_35%,transparent)] hover:ring-offset-2">
+                        {/* ── Colors Section ── */}
+                        <div>
+                            <p className="text-xs font-bold text-[#0F172A] mb-2">Colors</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 rounded-2xl border border-[#E2E8F0]/80 bg-white p-4">
+                                {/* Primary color */}
+                                <div>
+                                    <p className="text-xs font-semibold text-[#64748B] mb-2">Primary</p>
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <label className="relative inline-flex h-9 w-9 shrink-0 cursor-pointer rounded-full shadow-sm ring-2 ring-offset-2 ring-transparent transition hover:scale-105 overflow-hidden">
+                                            <span
+                                                className="w-full h-full rounded-full"
+                                                style={{ background: normalizeBrandHex(brandPrimary, DEFAULT_BRAND_PRIMARY) }}
+                                            />
                                             <input
                                                 type="color"
                                                 value={normalizeBrandHex(brandPrimary, DEFAULT_BRAND_PRIMARY)}
                                                 onChange={(e) => setBrandPrimary(e.target.value.toUpperCase())}
-                                                className="brand-color-swatch h-full w-full cursor-pointer border-0 bg-transparent p-0"
+                                                className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
                                             />
-                                        </span>
+                                        </label>
                                         <input
                                             type="text"
                                             value={brandPrimary}
                                             onChange={(e) => setBrandPrimary(e.target.value)}
-                                            className="w-28 rounded-xl border border-[#E2E8F0] bg-white px-2.5 py-2 text-sm font-mono text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)]"
+                                            className="w-28 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-xs font-bold font-mono text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)]"
                                             placeholder="#F59E0B"
                                             maxLength={7}
                                         />
                                     </div>
-                                </label>
-                                <label className="block text-xs font-bold text-[#64748B]">
-                                    Secondary
-                                    <div className="mt-1.5 flex items-center gap-2">
-                                        <span className="inline-flex h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[#E2E8F0] bg-white shadow-sm transition hover:shadow-md hover:ring-2 hover:ring-[color-mix(in_srgb,var(--brand-primary)_35%,transparent)] hover:ring-offset-2">
+                                    {/* Preset Palette */}
+                                    <div className="flex items-center gap-2">
+                                        {['#F59E0B', '#F97316', '#0F172A', '#475569', '#94A3B8', '#CBD5E1'].map((c) => {
+                                            const isSelected = brandPrimary.toUpperCase() === c.toUpperCase();
+                                            return (
+                                                <button
+                                                    key={c}
+                                                    type="button"
+                                                    onClick={() => setBrandPrimary(c)}
+                                                    className={cn(
+                                                        'w-6 h-6 rounded-full transition-transform hover:scale-110 relative',
+                                                        isSelected && 'ring-2 ring-offset-2 ring-amber-500 scale-110'
+                                                    )}
+                                                    style={{ background: c }}
+                                                    title={c}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Secondary color */}
+                                <div>
+                                    <p className="text-xs font-semibold text-[#64748B] mb-2">Secondary</p>
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <label className="relative inline-flex h-9 w-9 shrink-0 cursor-pointer rounded-full shadow-sm ring-2 ring-offset-2 ring-transparent transition hover:scale-105 overflow-hidden">
+                                            <span
+                                                className="w-full h-full rounded-full"
+                                                style={{ background: normalizeBrandHex(brandSecondary, DEFAULT_BRAND_SECONDARY) }}
+                                            />
                                             <input
                                                 type="color"
                                                 value={normalizeBrandHex(brandSecondary, DEFAULT_BRAND_SECONDARY)}
                                                 onChange={(e) => setBrandSecondary(e.target.value.toUpperCase())}
-                                                className="brand-color-swatch h-full w-full cursor-pointer border-0 bg-transparent p-0"
+                                                className="opacity-0 absolute inset-0 w-full h-full cursor-pointer"
                                             />
-                                        </span>
+                                        </label>
                                         <input
                                             type="text"
                                             value={brandSecondary}
                                             onChange={(e) => setBrandSecondary(e.target.value)}
-                                            className="w-28 rounded-xl border border-[#E2E8F0] bg-white px-2.5 py-2 text-sm font-mono text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)]"
+                                            className="w-28 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-xs font-bold font-mono text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)]"
                                             placeholder="#0F172A"
                                             maxLength={7}
                                         />
                                     </div>
-                                </label>
+                                    {/* Preset Palette */}
+                                    <div className="flex items-center gap-2">
+                                        {['#0F172A', '#1E293B', '#334155', '#475569', '#64748B', '#94A3B8'].map((c) => {
+                                            const isSelected = brandSecondary.toUpperCase() === c.toUpperCase();
+                                            return (
+                                                <button
+                                                    key={c}
+                                                    type="button"
+                                                    onClick={() => setBrandSecondary(c)}
+                                                    className={cn(
+                                                        'w-6 h-6 rounded-full transition-transform hover:scale-110 relative',
+                                                        isSelected && 'ring-2 ring-offset-2 ring-slate-800 scale-110'
+                                                    )}
+                                                    style={{ background: c }}
+                                                    title={c}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
+                        {/* ── Preview Section ── */}
                         <div>
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-2">
-                                Preview
-                            </p>
+                            <p className="text-xs font-bold text-[#0F172A] mb-2">Preview</p>
                             <div
-                                className="rounded-xl px-4 py-3.5 text-white flex items-center gap-3"
-                                style={{ background: 'var(--brand-secondary)' }}
+                                className="rounded-2xl px-5 py-3 text-white flex items-center justify-between shadow-sm transition-all"
+                                style={{ background: normalizeBrandHex(brandSecondary, DEFAULT_BRAND_SECONDARY) }}
                             >
-                                {logoUrl ? (
-                                    <img
-                                        src={logoUrl}
-                                        alt=""
-                                        className="h-8 w-8 rounded-lg object-contain bg-white/10 p-0.5 shrink-0"
-                                    />
-                                ) : null}
-                                <div className="min-w-0 flex-1">
-                                    <p
-                                        className="text-[10px] font-bold uppercase tracking-widest"
-                                        style={{ color: 'var(--brand-primary)' }}
-                                    >
-                                        Preview
-                                    </p>
-                                    <p className="text-sm font-black truncate">{org.name || 'Your business'}</p>
+                                <div className="flex items-center gap-3 min-w-0">
+                                    {logoUrl ? (
+                                        <img src={logoUrl} alt="" className="h-8 w-8 rounded-lg object-contain bg-white/10 p-0.5 shrink-0" />
+                                    ) : (
+                                        <div
+                                            className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0"
+                                            style={{ color: normalizeBrandHex(brandPrimary, DEFAULT_BRAND_PRIMARY) }}
+                                        >
+                                            <Building2 className="w-6 h-6" />
+                                        </div>
+                                    )}
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-black tracking-tight truncate">{org.name || 'Dr Carmen Aesthetics'}</p>
+                                        <p className="text-[10px] text-white/70 truncate mt-0.5">{org.tradeType || 'Skin · Hair · Wellness'}</p>
+                                    </div>
                                 </div>
                                 <span
-                                    className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold"
+                                    className="shrink-0 rounded-xl px-3.5 py-1.5 text-xs font-bold flex items-center gap-1.5 shadow-sm"
                                     style={{
-                                        background: 'var(--brand-primary)',
-                                        color: 'var(--brand-secondary)'
+                                        background: normalizeBrandHex(brandPrimary, DEFAULT_BRAND_PRIMARY),
+                                        color: '#0F172A'
                                     }}
                                 >
+                                    <Calendar className="w-3.5 h-3.5" />
                                     Book now
                                 </span>
                             </div>
                         </div>
 
-                        <div className="flex flex-wrap gap-2 pt-1">
+                        {/* ── Action Buttons ── */}
+                        <div className="flex items-center gap-2.5 pt-1">
                             <button
                                 type="submit"
                                 disabled={brandBusy || logoBusy}
-                                className="px-4 py-2.5 rounded-xl text-white text-sm font-bold disabled:opacity-55"
-                                style={{ background: 'var(--brand-primary)' }}
+                                className="px-6 py-2.5 rounded-xl text-white text-xs font-bold shadow-sm hover:shadow transition-all disabled:opacity-50 cursor-pointer"
+                                style={{ background: 'var(--brand-primary, #F59E0B)' }}
                             >
                                 {brandBusy ? 'Saving…' : 'Save'}
                             </button>
@@ -1113,7 +1195,7 @@ export default function Account() {
                                 type="button"
                                 disabled={brandBusy || logoBusy}
                                 onClick={() => void resetBranding()}
-                                className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B] hover:bg-[#F8FAFC] disabled:opacity-55"
+                                className="px-6 py-2.5 rounded-xl border border-[#E2E8F0] bg-white text-xs font-bold text-[#64748B] hover:text-[#0F172A] hover:bg-[#F8FAFC] transition-all disabled:opacity-50 cursor-pointer"
                             >
                                 Reset
                             </button>

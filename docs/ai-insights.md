@@ -12,7 +12,7 @@ Plans: `local-growth`, `complete-growth-system`.
 
 ## Frontend
 
-`client/src/pages/ReportGenerator.tsx` → `/report`
+`client/src/features/report/ReportGenerator.tsx` → `/report`
 
 1. `GET /api/dashboard/stats`
 2. `POST /api/ai/strategy-report` with stats payload

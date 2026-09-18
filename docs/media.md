@@ -10,7 +10,7 @@ Generates category-based **photo / media suggestions** (AI images) to improve GB
 
 ## Frontend
 
-`client/src/pages/MediaOptimization.tsx` → `/media`
+`client/src/features/local-presence/MediaOptimization.tsx` → `/media`
 
 - `POST /api/ai/media-generate` `{ category }`
 - `POST /api/dashboard/activity` on success

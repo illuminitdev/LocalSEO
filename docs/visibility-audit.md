@@ -10,9 +10,9 @@ Runs a **GBP/Maps-first** free audit (score out of 100) from Local Search Grid: 
 
 ## Frontend
 
-- Entry: `client/src/pages/RankTracker.tsx` (`/rank-tracker`) — CTA + form + progress
-- Report: `client/src/pages/VisibilityAuditReport.tsx` (`/visibility-audit/report`) — reads `sessionStorage`
-- Map: `client/src/components/PlacesMap.tsx` with multi-markers when `VITE_GOOGLE_MAPS_JS_KEY` is set
+- Entry: `client/src/features/visibility/RankTracker.tsx` (`/rank-tracker`) — CTA + form + progress
+- Report: `client/src/features/visibility/VisibilityAuditReport.tsx` (`/visibility-audit/report`) — reads `sessionStorage`
+- Map: `client/src/shared/PlacesMap.tsx` with multi-markers when `VITE_GOOGLE_MAPS_JS_KEY` is set
 
 ## Backend
 

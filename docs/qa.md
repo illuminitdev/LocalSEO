@@ -10,7 +10,7 @@ Drafts answers to **Google Business Profile Q&A**-style questions using a knowle
 
 ## Frontend
 
-`client/src/pages/QAAutoResponder.tsx` → `/qa`
+`client/src/features/local-presence/ReviewsAndQA.tsx` (export `QAAutoResponder`) → `/qa`
 
 - `POST /api/ai/qa-answer` `{ question, kb }`
 - `POST /api/dashboard/activity` when saving/logging

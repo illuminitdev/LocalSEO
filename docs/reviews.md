@@ -10,7 +10,7 @@ Shows reviews from the **connected business** snapshot and drafts AI **reply sug
 
 ## Frontend
 
-`client/src/pages/ReviewManagement.tsx` → `/reviews`
+`client/src/features/local-presence/ReviewsAndQA.tsx` (export `ReviewManagement`) → `/reviews`
 
 | Action | API |
 |--------|-----|

@@ -10,7 +10,7 @@ Helps create **Google Business Profile post** copy (and optional AI images) for 
 
 ## Frontend
 
-`client/src/pages/PostAutomation.tsx` → `/posts`
+`client/src/features/local-presence/PostAutomation.tsx` → `/posts`
 
 | Action | API |
 |--------|-----|
