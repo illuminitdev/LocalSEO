@@ -1511,8 +1511,8 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                         <div>
                             <h2 className="font-bold text-[#0F172A]">Reminders</h2>
                             <p className="text-sm text-[#64748B] mt-1">
-                                Automated email and optional outbound SMS (Amazon SNS) for visits, requests, post-job,
-                                invoices, and quotes. Customer replies are not received via SNS.
+                                Automated email and optional outbound SMS for visits, requests, post-job,
+                                invoices, and quotes.
                             </p>
                         </div>
                         <label className="flex items-center gap-2 text-sm font-bold text-[#0F172A]">
@@ -1529,7 +1529,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                 checked={Boolean(org.sms_enabled)}
                                 onChange={(e) => setOrg((o: any) => ({ ...o, sms_enabled: e.target.checked }))}
                             />
-                            Also send outbound SMS via AWS SNS when the client has a phone
+                            Also send outbound SMS when the client has a phone
                         </label>
                         <label className="block text-xs font-bold uppercase text-[#64748B]">
                             Visit reminder (hours before start)
