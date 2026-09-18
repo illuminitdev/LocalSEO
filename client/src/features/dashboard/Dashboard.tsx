@@ -1,12 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
     ArrowRight,
-    MapPin,
-    Building2,
-    Star,
     CalendarClock,
-    Search,
     Users,
     CalendarDays,
     Mail,
@@ -16,11 +12,7 @@ import {
     DollarSign,
     MessageSquare,
     Link as LinkIcon,
-    ArrowUp,
-    ArrowDown,
-    ChevronRight,
-    TrendingUp,
-    Store
+    ChevronRight
 } from 'lucide-react';
 import { apiGet, formatCents } from '../../shared/utils';
 import GroundingModal from './GroundingModal';
@@ -51,10 +43,8 @@ type BookingOverview = {
 };
 
 export default function Dashboard() {
-    const navigate = useNavigate();
     const [userName, setUserName] = useState('');
     const [data, setData] = useState<BookingOverview | null>(null);
-    const [business, setBusiness] = useState<any>(null);
     const [locationModalOpen, setLocationModalOpen] = useState(false);
     const { hasFeature } = useEntitlements();
     const hasLocalPresence = hasFeature('local_presence');
@@ -72,7 +62,7 @@ export default function Dashboard() {
             .catch(() => {});
 
         if (hasLocalPresence) {
-            apiGet('/api/business').then(setBusiness).catch(() => {});
+            apiGet('/api/business').catch(() => {});
         }
     }, [hasLocalPresence]);
 

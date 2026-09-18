@@ -1,25 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
     Building2,
     MapPin,
-    Search,
     Shield,
     CreditCard,
     UserRound,
-    Check,
-    Pencil,
-    Camera,
-    Mail,
-    Phone,
-    Key,
-    Settings,
-    Image as ImageIcon,
-    Eye,
-    EyeOff,
-    UploadCloud,
-    Calendar,
-    Upload
+    Image as ImageIcon
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, cn } from '../../shared/utils';
 import { clearToken, setMustChangePassword } from '../auth/auth';

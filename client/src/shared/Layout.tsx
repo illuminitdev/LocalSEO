@@ -17,7 +17,6 @@ import {
     MessageSquare,
     Megaphone,
     Wallet,
-    CalendarDays,
     Wrench,
     LogOut,
     Menu,
