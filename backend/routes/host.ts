@@ -268,6 +268,21 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
+    router.get('/overview', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) {
+                return res.status(400).json({ error: 'Complete setup first' });
+            }
+            const { hostBookingOverview } = await import('../lib/hostOverview');
+            const overview = await hostBookingOverview((req as any).orgId);
+            if (!overview) return res.status(404).json({ error: 'Organization not found' });
+            res.json(overview);
+        } catch (err: any) {
+            console.error('Host overview error:', err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
     router.get('/stripe/status', async (req: Request, res: Response) => {
         try {
             if (!(req as any).orgId) return res.status(400).json({ error: 'No booking organization' });
