@@ -2,6 +2,13 @@ import { Router, Request, Response } from 'express';
 import { requireSalesAgent } from '../middleware/auth';
 import { comparePassword, hashPassword } from '../lib/authTokens';
 import { query } from '../lib/db';
+import { sendFullAuditShareEmail } from '../lib/bookingEmail';
+import {
+    proxyZappSitesOps,
+    proxyZappSitesPdf,
+    reportShareUrl,
+    zappSitesOrigin as zappSitesOriginFromProxy
+} from '../lib/zappSitesAuditProxy';
 import {
     CALL_OUTCOMES,
     getAssignedLead,
@@ -22,17 +29,77 @@ const router = Router();
 router.use(requireSalesAgent);
 
 function zappSitesOrigin() {
-    const fromEnv = String(process.env.ZAPP_SITES_ORIGIN || '').trim().replace(/\/$/, '');
-    if (fromEnv) return fromEnv;
-    const stage = (process.env.STAGE || 'dev').toLowerCase();
-    return stage === 'prod' ? 'https://www.zappsites.com' : 'https://staging.zappsites.com';
+    return zappSitesOriginFromProxy();
+}
+
+function reportUrlFromSharePath(sharePath: string | null, auditId: string | null) {
+    if (sharePath) {
+        const origin = zappSitesOrigin();
+        return `${origin}${sharePath.startsWith('/') ? '' : '/'}${sharePath}`;
+    }
+    if (auditId) return reportShareUrl(auditId);
+    return null;
+}
+
+function metaFromZappAudit(auditId: string, audit: Record<string, unknown>) {
+    const business =
+        audit.business && typeof audit.business === 'object'
+            ? (audit.business as Record<string, unknown>)
+            : {};
+    const scoreObj =
+        audit.score && typeof audit.score === 'object'
+            ? (audit.score as { total?: number })
+            : null;
+    const scoreRaw =
+        (audit.totalScore as number | null | undefined) ?? scoreObj?.total ?? null;
+    return {
+        id: auditId,
+        businessName: String(
+            business.businessName ||
+                business.name ||
+                audit.businessName ||
+                'Lead'
+        ).trim(),
+        phone: String(business.phone || audit.phone || '').trim(),
+        email: String(business.email || audit.email || '')
+            .trim()
+            .toLowerCase(),
+        website: String(business.website || audit.website || '').trim(),
+        address: String(business.address || audit.address || '').trim(),
+        city: String(business.city || audit.city || '').trim(),
+        scoreTotal:
+            scoreRaw != null && Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw) : null,
+        auditId,
+        reportUrl: reportShareUrl(auditId),
+        source: 'full_audit'
+    };
+}
+
+async function fetchZappAuditMeta(auditId: string) {
+    try {
+        const detail = await proxyZappSitesOps(
+            'GET',
+            `/api/ops/audits/${encodeURIComponent(auditId)}`
+        );
+        if (detail.status >= 400 || !detail.json || typeof detail.json !== 'object') {
+            return null;
+        }
+        const body = detail.json as {
+            success?: boolean;
+            data?: Record<string, unknown>;
+        };
+        const audit = (body.data || {}) as Record<string, unknown>;
+        if (!audit.id && body.success === false) return null;
+        return metaFromZappAudit(auditId, audit);
+    } catch {
+        return null;
+    }
 }
 
 /** Helper to extract lead details from submissions + audits or sales_leads */
 async function fetchLeadMetadataMap(leadIds: string[]) {
     if (!leadIds.length) return new Map<string, any>();
     const map = new Map<string, any>();
-    const origin = zappSitesOrigin();
 
     
     try {
@@ -50,6 +117,8 @@ async function fetchLeadMetadataMap(leadIds: string[]) {
             const auditData = row.audit_data && typeof row.audit_data === 'object' ? row.audit_data : {};
             const business = auditData.business && typeof auditData.business === 'object' ? auditData.business : {};
             const sharePath = String(payload.sharePath || '').trim() || null;
+            const auditId =
+                String(payload.auditId || row.audit_id || '').trim() || null;
             const scoreRaw = payload.scoreTotal ?? auditData.scoreTotal ?? auditData.score?.total ?? null;
 
             map.set(String(row.id), {
@@ -61,7 +130,8 @@ async function fetchLeadMetadataMap(leadIds: string[]) {
                 address: String(payload.address || business.address || '').trim(),
                 city: String(payload.city || business.city || '').trim(),
                 scoreTotal: scoreRaw != null && Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw) : null,
-                reportUrl: sharePath ? `${origin}${sharePath.startsWith('/') ? '' : '/'}${sharePath}` : null,
+                auditId,
+                reportUrl: reportUrlFromSharePath(sharePath, auditId),
                 source: String(payload.source || 'growth_audit').trim()
             });
         }
@@ -95,6 +165,7 @@ async function fetchLeadMetadataMap(leadIds: string[]) {
                     notes: row.notes || '',
                     status: row.status || 'new',
                     scoreTotal: null,
+                    auditId: null,
                     reportUrl: null,
                     source: row.source || 'sales_lead'
                 });
@@ -102,7 +173,111 @@ async function fetchLeadMetadataMap(leadIds: string[]) {
         } catch {}
     }
 
+    // Full-audit CRM leads: lead_id is the ZappSites audit UUID (not a submission / sales_lead)
+    const stillMissing = leadIds.filter((id) => !map.has(id));
+    if (stillMissing.length) {
+        // Prefer local audits cache when present, then fill gaps from ZappSites ops
+        try {
+            const { rows: auditRows } = await query(
+                `SELECT id, data FROM audits WHERE id::text = ANY($1::text[])`,
+                [stillMissing]
+            );
+            for (const row of auditRows) {
+                const data = row.data && typeof row.data === 'object' ? row.data : {};
+                const business =
+                    data.business && typeof data.business === 'object' ? data.business : {};
+                const auditId = String(row.id);
+                const scoreRaw = data.scoreTotal ?? data.totalScore ?? data.score?.total ?? null;
+                map.set(auditId, {
+                    id: auditId,
+                    businessName: String(
+                        business.businessName || business.name || data.businessName || 'Lead'
+                    ).trim(),
+                    phone: String(business.phone || data.phone || '').trim(),
+                    email: String(business.email || data.email || '').trim().toLowerCase(),
+                    website: String(business.website || data.website || '').trim(),
+                    address: String(business.address || data.address || '').trim(),
+                    city: String(business.city || data.city || '').trim(),
+                    scoreTotal:
+                        scoreRaw != null && Number.isFinite(Number(scoreRaw))
+                            ? Number(scoreRaw)
+                            : null,
+                    auditId,
+                    reportUrl: reportShareUrl(auditId),
+                    source: 'full_audit'
+                });
+            }
+        } catch {}
+
+        const needZapp = stillMissing.filter((id) => {
+            const existing = map.get(id);
+            if (!existing) return true;
+            // Local row exists but contact fields empty — hydrate from ZappSites
+            return !existing.email && !existing.phone && !existing.website;
+        });
+
+        if (needZapp.length) {
+            const results = await Promise.all(
+                needZapp.map(async (id) => ({ id, meta: await fetchZappAuditMeta(id) }))
+            );
+            for (const { id, meta } of results) {
+                if (meta) {
+                    map.set(id, meta);
+                } else if (!map.has(id)) {
+                    map.set(id, {
+                        id,
+                        businessName: 'Lead',
+                        phone: '',
+                        email: '',
+                        website: '',
+                        address: '',
+                        city: '',
+                        scoreTotal: null,
+                        auditId: id,
+                        reportUrl: reportShareUrl(id),
+                        source: 'full_audit'
+                    });
+                }
+            }
+        }
+
+        for (const id of stillMissing.filter((lid) => !map.has(lid))) {
+            map.set(id, {
+                id,
+                businessName: 'Lead',
+                phone: '',
+                email: '',
+                website: '',
+                address: '',
+                city: '',
+                scoreTotal: null,
+                auditId: id,
+                reportUrl: reportShareUrl(id),
+                source: 'full_audit'
+            });
+        }
+    }
+
     return map;
+}
+
+async function agentCanShareAudit(agentId: string, auditId: string): Promise<boolean> {
+    const { rows } = await query(
+        `SELECT 1
+         FROM lead_tasks t
+         WHERE t.assigned_to_user_id = $1
+           AND (
+             t.lead_id = $2
+             OR EXISTS (
+               SELECT 1 FROM submissions s
+               WHERE s.id::text = t.lead_id
+                 AND s.payload->>'auditId' = $2
+             )
+           )
+         LIMIT 1`,
+        [agentId, auditId]
+    );
+    return rows.length > 0;
 }
 
 router.get('/me', async (req: Request, res: Response) => {
@@ -237,6 +412,7 @@ router.get('/tasks', async (req: Request, res: Response) => {
                 leadCity: meta.city || '',
                 leadScoreTotal: meta.scoreTotal ?? null,
                 leadReportUrl: meta.reportUrl || null,
+                leadAuditId: meta.auditId || null,
                 leadSource: meta.source || ''
             };
         });
@@ -459,6 +635,7 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
             address: '',
             city: '',
             scoreTotal: null,
+            auditId: null,
             reportUrl: null,
             source: ''
         };
@@ -818,7 +995,10 @@ router.get('/leads', async (req: Request, res: Response) => {
                     leadOpportunity: meta.leadOpportunity || '',
                     opportunityLevel: meta.opportunityLevel || 'medium',
                     isCustomer: false,
-                    nextFollowUpAt: null
+                    nextFollowUpAt: null,
+                    scoreTotal: meta.scoreTotal ?? null,
+                    auditId: meta.auditId || null,
+                    reportUrl: meta.reportUrl || null
                 });
             }
         }
@@ -1045,6 +1225,128 @@ router.get('/industries', async (req: Request, res: Response) => {
     } catch (err: any) {
         console.error('Sales get industries error:', err);
         res.status(500).json({ error: err.message || 'Failed to load industries' });
+    }
+});
+
+router.post('/full-audits/:auditId/share-email', async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const auditId = String(req.params.auditId || '').trim();
+        if (!auditId) {
+            return res.status(400).json({ success: false, error: 'Missing audit id' });
+        }
+
+        const agentId = String((req as any).user?.id || '');
+        const allowed = await agentCanShareAudit(agentId, auditId);
+        if (!allowed) {
+            return res.status(403).json({
+                success: false,
+                error: 'You can only email audit reports for leads assigned to you.'
+            });
+        }
+
+        const detail = await proxyZappSitesOps('GET', `/api/ops/audits/${encodeURIComponent(auditId)}`);
+        if (detail.status >= 400 || !detail.json || typeof detail.json !== 'object') {
+            return res.status(detail.status || 502).json(
+                detail.json && typeof detail.json === 'object'
+                    ? detail.json
+                    : { success: false, error: 'Failed to load audit' }
+            );
+        }
+        const body = detail.json as { success?: boolean; data?: Record<string, unknown>; error?: string };
+        const audit = (body.data || {}) as Record<string, unknown>;
+        if (!audit.id && !body.success) {
+            return res.status(detail.status || 404).json({
+                success: false,
+                error: body.error || 'Audit not found'
+            });
+        }
+
+        const business =
+            audit.business && typeof audit.business === 'object'
+                ? (audit.business as Record<string, unknown>)
+                : {};
+        const bodyEmail = String((req.body as { email?: string } | undefined)?.email || '')
+            .trim()
+            .toLowerCase();
+        const email = (bodyEmail || String(business.email || audit.email || '').trim()).toLowerCase();
+        if (!email || !email.includes('@')) {
+            return res.status(400).json({
+                success: false,
+                error: 'This audit has no company email to share with. Enter an email and try again.'
+            });
+        }
+
+        const published = Boolean(audit.published ?? business.published);
+        if (!published) {
+            return res.status(400).json({
+                success: false,
+                error: 'Publish the audit before emailing the PDF report.'
+            });
+        }
+
+        const businessName = String(
+            business.businessName || audit.businessName || 'there'
+        ).trim();
+        const website = String(business.website || audit.website || '').trim();
+        const scoreObj =
+            audit.score && typeof audit.score === 'object'
+                ? (audit.score as { total?: number })
+                : null;
+        const scoreRaw =
+            (audit.totalScore as number | null | undefined) ?? scoreObj?.total ?? null;
+        const score =
+            scoreRaw != null && Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw) : null;
+        const reportUrl = reportShareUrl(auditId);
+
+        const pdfResult = await proxyZappSitesPdf(auditId);
+        if (!pdfResult.buffer || pdfResult.status !== 200) {
+            const errBody =
+                pdfResult.json && typeof pdfResult.json === 'object'
+                    ? (pdfResult.json as { error?: string })
+                    : null;
+            return res.status(pdfResult.status || 502).json({
+                success: false,
+                error: errBody?.error || 'Could not load the audit PDF to attach.'
+            });
+        }
+
+        const safeName =
+            businessName
+                .replace(/[^a-z0-9]+/gi, '-')
+                .replace(/^-|-$/g, '')
+                .slice(0, 40)
+                .toLowerCase() || 'audit';
+
+        const result = await sendFullAuditShareEmail({
+            to: email,
+            businessName,
+            website,
+            score,
+            reportUrl,
+            pdfBuffer: pdfResult.buffer,
+            pdfFilename: `zappsites-audit-${safeName}.pdf`
+        });
+
+        if (!result.sent) {
+            return res.status(502).json({
+                success: false,
+                error: 'Email could not be delivered via SES. Check sender identity and try again.'
+            });
+        }
+
+        return res.json({
+            success: true,
+            to: email,
+            attached: result.attached,
+            reportUrl
+        });
+    } catch (err: any) {
+        console.error('Sales full-audit share-email error:', err);
+        res.status(502).json({
+            success: false,
+            error: err.message || 'Failed to email audit report'
+        });
     }
 });
 

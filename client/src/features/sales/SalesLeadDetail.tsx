@@ -29,7 +29,8 @@ import {
     type SalesTaskStatus,
     fetchSalesLeadCrm,
     updateSalesTask,
-    convertLeadToCustomer
+    convertLeadToCustomer,
+    confirmAndShareFullAuditEmail
 } from './salesApi';
 import { cn } from '../../shared/utils';
 import {
@@ -50,6 +51,7 @@ export default function SalesLeadDetail() {
     const [converting, setConverting] = useState(false);
     const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
     const [showLeadHistoryModal, setShowLeadHistoryModal] = useState(false);
+    const [sharingAudit, setSharingAudit] = useState(false);
 
     const loadLead = useCallback(async () => {
         if (!id) return;
@@ -123,6 +125,31 @@ export default function SalesLeadDetail() {
         }
     };
 
+    const handleEmailAuditPdf = async () => {
+        const auditId = String(lead?.auditId || '').trim();
+        if (!auditId) return;
+        setSharingAudit(true);
+        setError('');
+        setMsg('');
+        try {
+            const res = await confirmAndShareFullAuditEmail({
+                auditId,
+                businessName: lead?.businessName,
+                email: lead?.email
+            });
+            if (!res) return;
+            setMsg(
+                res.attached === false
+                    ? `Report emailed to ${res.to} (link only — PDF was too large to attach).`
+                    : `Report emailed to ${res.to}.`
+            );
+        } catch (err: any) {
+            setError(err.message || 'Could not email audit report');
+        } finally {
+            setSharingAudit(false);
+        }
+    };
+
     if (loading && !lead) {
         return (
             <div className="p-12 text-center text-[#64748B]">
@@ -188,6 +215,22 @@ export default function SalesLeadDetail() {
                             <ArrowUpRight className="w-3.5 h-3.5" />
                         </a>
                     )}
+                    {lead.auditId ? (
+                        <button
+                            type="button"
+                            onClick={handleEmailAuditPdf}
+                            disabled={sharingAudit}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-900 hover:bg-amber-100 text-xs font-bold rounded-xl transition-colors shadow-2xs disabled:opacity-50"
+                            title={
+                                lead.email
+                                    ? `Email PDF to ${lead.email}`
+                                    : 'Email PDF report to business'
+                            }
+                        >
+                            <Mail className={cn('w-3.5 h-3.5', sharingAudit && 'animate-pulse')} />
+                            <span>{sharingAudit ? 'Sending…' : 'Email PDF'}</span>
+                        </button>
+                    ) : null}
                 </div>
             </div>
 
