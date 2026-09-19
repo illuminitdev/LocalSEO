@@ -27,6 +27,7 @@ export interface SalesLeadTask {
     leadCity?: string;
     leadScoreTotal?: number | null;
     leadReportUrl?: string | null;
+    leadAuditId?: string | null;
     leadSource?: string;
 }
 
@@ -73,6 +74,7 @@ export interface SalesUnifiedLead {
     notes?: string;
     status?: string;
     scoreTotal?: number | null;
+    auditId?: string | null;
     reportUrl?: string | null;
     source?: string;
     assignedTo?: string | null;
@@ -219,5 +221,38 @@ export async function fetchSalesCustomers(params: {
 export async function fetchSalesIndustries(): Promise<Array<{ name: string; count: number }>> {
     const res = await apiGet('/api/sales/industries');
     return res.industries || [];
+}
+
+export async function shareFullAuditEmail(
+    auditId: string,
+    opts?: { email?: string }
+): Promise<{ success: boolean; to: string; attached?: boolean; reportUrl?: string }> {
+    const body: { email?: string } = {};
+    if (opts?.email) body.email = opts.email;
+    return apiPost(`/api/sales/full-audits/${encodeURIComponent(auditId)}/share-email`, body);
+}
+
+/** Prompt + confirm, then email the full-audit PDF. Returns null if the user cancels. */
+export async function confirmAndShareFullAuditEmail(opts: {
+    auditId: string;
+    businessName?: string | null;
+    email?: string | null;
+}): Promise<{ to: string; attached?: boolean } | null> {
+    let email = String(opts.email || '').trim();
+    if (!email || !email.includes('@')) {
+        const entered = window.prompt(
+            'This audit has no company email. Enter the email address to send the PDF report to:'
+        );
+        email = String(entered || '').trim();
+        if (!email || !email.includes('@')) {
+            throw new Error('A valid company email is required to share the report.');
+        }
+    }
+    const biz = opts.businessName || 'this business';
+    if (!window.confirm(`Email the audit report PDF to ${email} for “${biz}”?`)) {
+        return null;
+    }
+    const res = await shareFullAuditEmail(opts.auditId, { email });
+    return { to: res.to, attached: res.attached };
 }
 

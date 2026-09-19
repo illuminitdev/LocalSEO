@@ -19,7 +19,8 @@ import {
     RotateCcw,
     XCircle,
     FileText,
-    History
+    History,
+    Mail
 } from 'lucide-react';
 import TaskCompletionModal, { type CrmTaskStatus } from '../../shared/TaskCompletionModal';
 import LeadStatusHistoryModal from '../admin/LeadStatusHistoryModal';
@@ -34,7 +35,8 @@ import {
     updateSalesTask,
     fetchSalesSummary,
     fetchSalesLeads,
-    fetchSalesIndustries
+    fetchSalesIndustries,
+    confirmAndShareFullAuditEmail
 } from './salesApi';
 import { cn } from '../../shared/utils';
 
@@ -107,12 +109,14 @@ export default function SalesQueue() {
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask; isCompleting: boolean } | null>(null);
     const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
     const [modalLoading, setModalLoading] = useState(false);
+    const [sharingAuditId, setSharingAuditId] = useState('');
 
     
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [priorityFilter, setPriorityFilter] = useState<string>('all');
     const [typeFilter, setTypeFilter] = useState<string>('all');
     const [creatorFilter, setCreatorFilter] = useState<string>('all');
+    const [leadKindFilter, setLeadKindFilter] = useState<'all' | 'full_audit' | 'leads'>('all');
     const [dueTodayOnly, setDueTodayOnly] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
@@ -193,7 +197,39 @@ export default function SalesQueue() {
         }
     };
 
+    const handleEmailAuditPdf = async (task: SalesLeadTask, e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const auditId = String(task.leadAuditId || '').trim();
+        if (!auditId) return;
+        setSharingAuditId(auditId);
+        setError('');
+        try {
+            const res = await confirmAndShareFullAuditEmail({
+                auditId,
+                businessName: task.leadBusinessName,
+                email: task.leadEmail
+            });
+            if (!res) return;
+            setSuccessToast(
+                res.attached === false
+                    ? `Report emailed to ${res.to} (link only — PDF was too large to attach).`
+                    : `Report emailed to ${res.to}.`
+            );
+            setTimeout(() => setSuccessToast(null), 4000);
+        } catch (err: any) {
+            setError(err.message || 'Could not email audit report');
+        } finally {
+            setSharingAuditId('');
+        }
+    };
+
+    const isFullAuditTask = (t: SalesLeadTask) =>
+        String(t.leadSource || '').toLowerCase() === 'full_audit';
+
     const filteredTasks = tasks.filter((t) => {
+        if (leadKindFilter === 'full_audit' && !isFullAuditTask(t)) return false;
+        if (leadKindFilter === 'leads' && isFullAuditTask(t)) return false;
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
         return (
@@ -204,6 +240,9 @@ export default function SalesQueue() {
             (t.notes && t.notes.toLowerCase().includes(q))
         );
     });
+
+    const fullAuditTaskCount = tasks.filter(isFullAuditTask).length;
+    const leadsTaskCount = tasks.length - fullAuditTaskCount;
 
     return (
         <div className="space-y-6 max-w-6xl mx-auto pb-12 animate-in fade-in duration-300">
@@ -409,6 +448,19 @@ export default function SalesQueue() {
                                 <option value="admin">🛡️ Assigned by Admin</option>
                                 <option value="self">👤 Self Created</option>
                             </select>
+
+                            <select
+                                value={leadKindFilter}
+                                onChange={(e) =>
+                                    setLeadKindFilter(e.target.value as 'all' | 'full_audit' | 'leads')
+                                }
+                                className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
+                                title="Filter by lead type"
+                            >
+                                <option value="all">All Types ({tasks.length})</option>
+                                <option value="full_audit">Full Audits ({fullAuditTaskCount})</option>
+                                <option value="leads">Leads ({leadsTaskCount})</option>
+                            </select>
                         </div>
 
                         <button
@@ -589,6 +641,28 @@ export default function SalesQueue() {
                                                             <ArrowUpRight className="w-3 h-3" />
                                                         </a>
                                                     )}
+                                                    {task.leadAuditId ? (
+                                                        <button
+                                                            type="button"
+                                                            disabled={sharingAuditId === task.leadAuditId}
+                                                            onClick={(e) => handleEmailAuditPdf(task, e)}
+                                                            className="text-[11px] font-bold text-amber-800 hover:text-amber-950 flex items-center gap-0.5 px-2 py-0.5 bg-amber-50 border border-amber-200 rounded-lg disabled:opacity-50"
+                                                            title={
+                                                                task.leadEmail
+                                                                    ? `Email PDF to ${task.leadEmail}`
+                                                                    : 'Email PDF report to business'
+                                                            }
+                                                        >
+                                                            <Mail
+                                                                className={cn(
+                                                                    'w-3 h-3',
+                                                                    sharingAuditId === task.leadAuditId &&
+                                                                        'animate-pulse'
+                                                                )}
+                                                            />
+                                                            Email PDF
+                                                        </button>
+                                                    ) : null}
                                                     <Link
                                                         to={`/sales/leads/${encodeURIComponent(task.leadId)}`}
                                                         className="text-[11px] font-bold text-[#0F172A] hover:bg-[#F1F5F9] px-2.5 py-1 bg-white border border-[#E2E8F0] rounded-lg inline-flex items-center gap-1 shadow-2xs"
