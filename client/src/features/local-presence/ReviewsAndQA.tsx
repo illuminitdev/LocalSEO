@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-    AlertTriangle,
     CheckCircle2,
     Database,
-    HelpCircle,
     Save,
     Wand2,
     Star,

@@ -87,12 +87,6 @@ export default function Dashboard() {
         planId === 'website-essential' ||
         (hasLocalSeo && !hasBookings);
 
-    // 3. Hybrid plan: complete-growth-system (both Local SEO + Bookings)
-    const isHybridPlan =
-        planId === 'complete-growth-system' ||
-        (hasBookings && hasLocalSeo) ||
-        (!isBookingPlan && !isLocalSeoPlan);
-
     useEffect(() => {
         apiGet('/api/auth/me')
             .then((res) => {

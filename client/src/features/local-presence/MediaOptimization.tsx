@@ -5,7 +5,6 @@ import {
     MapPin,
     Tag as TagIcon,
     CheckCircle2,
-    AlertCircle,
     Building,
     Home,
     Users,

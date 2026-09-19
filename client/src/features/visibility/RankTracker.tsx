@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-    Map,
-    Users,
     Wand2,
-    TrendingUp,
-    TrendingDown,
     Loader2,
     X,
     FileText,
@@ -14,12 +10,11 @@ import {
     ListOrdered,
     Search,
     BarChart3,
-    AlertCircle,
-    Radar
+    AlertCircle
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity, updateDashboardStats } from '../../shared/utils';
 import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
-import PlacesMap, { geoGridMarkers, geocodeAddress, mapsJsConfigured, type MapMarker } from '../../shared/PlacesMap';
+import PlacesMap, { geoGridMarkers, geocodeAddress, type MapMarker } from '../../shared/PlacesMap';
 import {
     PRIMARY_SERVICES,
     loadVisibilityAuditReport,
@@ -631,12 +626,14 @@ export default function RankTracker() {
                         </div>
                     </div>
 
-                    <div className="mt-2 bg-amber-50/90 border border-amber-200/60 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-900">
-                        <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-                        <p className="leading-snug">
-                            Score is saved, but the full report is only in this browser session. Re-run the audit to regenerate the detailed report.
-                        </p>
-                    </div>
+                    {!hasAuditReport && (
+                        <div className="mt-2 bg-amber-50/90 border border-amber-200/60 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-900">
+                            <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                            <p className="leading-snug">
+                                Score is saved, but the full report is only in this browser session. Re-run the audit to regenerate the detailed report.
+                            </p>
+                        </div>
+                    )}
                 </div>
 
                 {/* Right Card: Ranking Keywords */}
