@@ -2,19 +2,41 @@ import { useEffect, useState } from 'react';
 import {
     Wand2,
     Save,
+    ShieldAlert,
     CheckCircle2,
     Pencil,
     MapPin,
     Phone,
     Clock,
     Globe,
+    Tag,
+    ExternalLink,
+    Info,
     X,
     Loader2
 } from 'lucide-react';
-import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
+import { apiGet, apiPost, logDashboardActivity, updateDashboardStats } from '../../shared/utils';
 import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
 
 const REQUIRED_FIELDS = ['name', 'category', 'address', 'phone'] as const;
+
+const DEFAULT_SCHEDULE = [
+    { day: 'Monday', time: '5:00 – 10:30 PM' },
+    { day: 'Tuesday', time: '5:00 – 10:30 PM' },
+    { day: 'Wednesday', time: '5:00 – 10:30 PM' },
+    { day: 'Thursday', time: '5:00 – 10:30 PM' },
+    { day: 'Friday', time: '5:00 – 10:30 PM' },
+    { day: 'Saturday', time: '12:00 – 2:00 PM, 5:00 – 10:30 PM' },
+    { day: 'Sunday', time: '12:00 – 2:00 PM, 5:00 – 10:30 PM' }
+];
+const DEFAULT_ATTRIBUTES = [
+    'south_indian_restaurant',
+    'indian_restaurant',
+    'restaurant',
+    'food',
+    'point_of_interest',
+    'establishment'
+];
 
 const INITIAL_PROFILE = {
     name: 'Sravs Kitchen',

@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
+    Map,
+    Users,
     Wand2,
+    TrendingUp,
+    TrendingDown,
     Loader2,
     X,
     FileText,
@@ -10,11 +14,12 @@ import {
     ListOrdered,
     Search,
     BarChart3,
-    AlertCircle
+    AlertCircle,
+    Radar
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity, updateDashboardStats } from '../../shared/utils';
 import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
-import PlacesMap, { geoGridMarkers, geocodeAddress, type MapMarker } from '../../shared/PlacesMap';
+import PlacesMap, { geoGridMarkers, geocodeAddress, mapsJsConfigured, type MapMarker } from '../../shared/PlacesMap';
 import {
     PRIMARY_SERVICES,
     loadVisibilityAuditReport,
