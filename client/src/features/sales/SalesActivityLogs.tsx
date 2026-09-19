@@ -143,8 +143,6 @@ export default function SalesActivityLogs() {
         }
     };
 
-    const currentSelectedLead = leads.find((l) => l.id === selectedLeadId);
-
     const filteredActivities = useMemo(() => {
         return activities.filter((a) => {
             if (!searchQuery.trim()) return true;
