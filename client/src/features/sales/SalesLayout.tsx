@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, LogOut, Menu, UserRound, X, Bell, CheckSquare, PhoneCall, Award } from 'lucide-react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, LogOut, Menu, UserRound, X, Bell, CheckSquare, PhoneCall, Users, CheckCheck, Clock, Shield } from 'lucide-react';
 import { apiGet, cn } from '../../shared/utils';
 import { clearToken } from '../auth/auth';
 
@@ -13,7 +13,7 @@ const NAV_GROUPS = [
         section: 'WORK & PIPELINE',
         items: [
             { name: 'Dashboard', to: '/sales', icon: LayoutDashboard, end: true },
-            { name: 'Customers', to: '/sales/customers', icon: Award, end: true },
+            { name: 'Customers', to: '/sales/customers', icon: Users, end: true },
             { name: 'Tasks', to: '/sales/tasks', icon: CheckSquare, end: true },
             { name: 'Self Reminders', to: '/sales/reminders', icon: Bell, end: true },
             { name: 'Call Logs', to: '/sales/calls', icon: PhoneCall, end: true }
@@ -25,32 +25,18 @@ const NAV_GROUPS = [
     }
 ];
 
-function pageTitle(pathname: string) {
-    if (pathname.startsWith('/sales/customers')) {
-        return { title: 'Customers Directory', subtitle: 'View converted accounts, manage client relationships, and track active customers.' };
-    }
-    if (pathname.startsWith('/sales/account')) {
-        return { title: 'Settings', subtitle: 'Manage your account profile and security.' };
-    }
-    if (pathname.startsWith('/sales/tasks')) {
-        return { title: 'Admin Tasks', subtitle: 'Tasks assigned to you by administrators. Review, execute, and mark completed.' };
-    }
-    if (pathname.startsWith('/sales/reminders')) {
-        return { title: 'Self Reminders', subtitle: 'Manage your follow-ups, scheduled calls, and personal work tasks.' };
-    }
-    if (pathname.startsWith('/sales/calls')) {
-        return { title: 'Call Logs & Activity', subtitle: 'Log customer conversations, track call dispositions, and view CRM communication history.' };
-    }
-    if (pathname.startsWith('/sales/leads/')) {
-        return { title: 'Lead', subtitle: 'Call, log outcome, and update status.' };
-    }
-    return { title: 'Dashboard', subtitle: 'Leads assigned to you. Call, log, follow up.' };
+interface SalesNotificationItem {
+    id: string;
+    title: string;
+    subtitle: string;
+    time: string;
+    type: 'due_task' | 'admin_task' | 'reminder';
+    link: string;
+    read: boolean;
 }
 
 export default function SalesLayout() {
     const navigate = useNavigate();
-    const location = useLocation();
-    const heading = pageTitle(location.pathname);
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [avatarUrl, setAvatarUrl] = useState('');
@@ -64,6 +50,105 @@ export default function SalesLayout() {
     });
     const [resizing, setResizing] = useState(false);
     const resizeRef = useRef<{ startX: number; startW: number } | null>(null);
+
+    // Notifications State & Dropdown
+    const [notifications, setNotifications] = useState<SalesNotificationItem[]>([]);
+    const [notifOpen, setNotifOpen] = useState(false);
+    const notifRef = useRef<HTMLDivElement | null>(null);
+
+    const loadNotifications = useCallback(async () => {
+        try {
+            const data = await apiGet('/api/sales/tasks');
+            const taskList = Array.isArray(data?.tasks) ? data.tasks : [];
+            const readSet = new Set<string>();
+            try {
+                const stored = localStorage.getItem('lp.sales.readNotifs');
+                if (stored) {
+                    JSON.parse(stored).forEach((id: string) => readSet.add(String(id)));
+                }
+            } catch {  }
+
+            const now = new Date();
+            const items: SalesNotificationItem[] = taskList
+                .filter((t: any) => t.status !== 'completed' && t.status !== 'cancelled')
+                .slice(0, 15)
+                .map((t: any) => {
+                    const isDueToday = t.dueDate && new Date(t.dueDate).toDateString() === now.toDateString();
+                    const isOverdue = t.dueDate && new Date(t.dueDate) < now;
+                    const type = isOverdue || isDueToday ? 'due_task' : t.createdByRole === 'admin' ? 'admin_task' : 'reminder';
+                    const timeLabel = isOverdue
+                        ? 'Overdue'
+                        : isDueToday
+                        ? 'Due Today'
+                        : t.dueDate
+                        ? new Date(t.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                        : 'Action required';
+
+                    return {
+                        id: String(t.id),
+                        title: t.title || 'Task reminder',
+                        subtitle: t.leadBusinessName ? `🏢 ${t.leadBusinessName}` : 'Assigned work item',
+                        time: timeLabel,
+                        type,
+                        link: t.leadId ? `/sales/leads/${encodeURIComponent(t.leadId)}` : '/sales',
+                        read: readSet.has(String(t.id))
+                    };
+                });
+
+            setNotifications(items);
+        } catch {  }
+    }, []);
+
+    useEffect(() => {
+        loadNotifications();
+    }, [loadNotifications, location.pathname]);
+
+    useEffect(() => {
+        if (!notifOpen) return;
+        const handleClickOutside = (e: MouseEvent) => {
+            if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+                setNotifOpen(false);
+            }
+        };
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setNotifOpen(false);
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [notifOpen]);
+
+    const markAllRead = () => {
+        const readIds = notifications.map((n) => n.id);
+        try {
+            const stored = localStorage.getItem('lp.sales.readNotifs');
+            const current = stored ? JSON.parse(stored) : [];
+            const combined = Array.from(new Set([...current, ...readIds]));
+            localStorage.setItem('lp.sales.readNotifs', JSON.stringify(combined));
+        } catch {  }
+        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    };
+
+    const handleNotificationClick = (item: SalesNotificationItem) => {
+        try {
+            const stored = localStorage.getItem('lp.sales.readNotifs');
+            const current = stored ? JSON.parse(stored) : [];
+            if (!current.includes(item.id)) {
+                current.push(item.id);
+                localStorage.setItem('lp.sales.readNotifs', JSON.stringify(current));
+            }
+        } catch {  }
+        setNotifications((prev) =>
+            prev.map((n) => (n.id === item.id ? { ...n, read: true } : n))
+        );
+        setNotifOpen(false);
+        navigate(item.link);
+    };
+
+    const unreadCount = notifications.filter((n) => !n.read).length;
 
     useEffect(() => {
         apiGet('/api/sales/me')
@@ -254,22 +339,143 @@ export default function SalesLayout() {
             )}
 
             <div className="flex-1 flex flex-col min-w-0 min-h-0">
-                <header className="shrink-0 sticky top-0 z-30 border-b border-[#E2E8F0] bg-white/95 backdrop-blur px-3 sm:px-5 lg:px-6 py-3 sm:py-4 safe-pt">
-                    <div className="flex items-start gap-3">
+                <header className="shrink-0 sticky top-0 z-30 border-b border-[#E2E8F0] bg-white/95 backdrop-blur px-3 sm:px-5 lg:px-6 py-2.5 sm:py-3 safe-pt">
+                    <div className="flex items-center justify-between lg:justify-end gap-4 min-h-[40px]">
                         <button
                             type="button"
-                            className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-xl border border-[#E2E8F0] bg-white text-[#0F172A] shrink-0"
+                            className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-xl border border-[#E2E8F0] bg-white text-[#0F172A] shrink-0 shadow-2xs hover:bg-[#F8FAFC]"
                             aria-label="Open menu"
                             aria-expanded={navOpen}
                             onClick={() => setNavOpen(true)}
                         >
                             <Menu className="w-5 h-5" />
                         </button>
-                        <div className="min-w-0 flex-1">
-                            <h1 className="text-lg sm:text-xl font-bold tracking-tight text-[#0F172A]">{heading.title}</h1>
-                            <p className="text-xs sm:text-sm text-[#64748B] mt-0.5 max-w-2xl leading-relaxed">
-                                {heading.subtitle}
-                            </p>
+
+                        {/* Notification Bell & Popover Box */}
+                        <div className="relative shrink-0" ref={notifRef}>
+                            <button
+                                type="button"
+                                onClick={() => setNotifOpen((prev) => !prev)}
+                                className="relative p-2.5 rounded-xl border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] text-[#64748B] hover:text-[#0F172A] transition-all shadow-2xs cursor-pointer flex items-center justify-center"
+                                title="Notifications"
+                            >
+                                <Bell className="w-4 h-4 text-slate-700" />
+                                <span
+                                    className={cn(
+                                        'absolute -top-1.5 -right-1.5 px-1.5 min-w-[18px] h-4.5 rounded-full text-[10px] font-black flex items-center justify-center border-2 border-white transition-all',
+                                        unreadCount > 0
+                                            ? 'bg-rose-500 text-white'
+                                            : 'bg-slate-200 text-slate-600'
+                                    )}
+                                >
+                                    {unreadCount}
+                                </span>
+                            </button>
+
+                            {notifOpen && (
+                                <div
+                                    className="absolute right-0 top-full mt-2 w-80 sm:w-96 rounded-2xl bg-white border border-[#E2E8F0] shadow-xl py-2 z-50 animate-in fade-in zoom-in-95 duration-150"
+                                >
+                                    {/* Header with Title & Mark All Read */}
+                                    <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-black text-slate-900">Notifications</span>
+                                            <span className={cn(
+                                                'px-2 py-0.5 rounded-full text-[10px] font-black',
+                                                unreadCount > 0 ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-slate-100 text-slate-600'
+                                            )}>
+                                                {unreadCount} {unreadCount === 1 ? 'new' : 'unread'}
+                                            </span>
+                                        </div>
+                                        {notifications.length > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={markAllRead}
+                                                className="text-xs font-bold text-orange-600 hover:text-orange-700 hover:bg-orange-50 px-2 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                                                title="Mark all notifications as read"
+                                            >
+                                                <CheckCheck className="w-3.5 h-3.5" />
+                                                <span>Mark all read</span>
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {/* Notifications List or 0 State */}
+                                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                                        {notifications.length === 0 || unreadCount === 0 ? (
+                                            <div className="py-8 px-4 text-center">
+                                                <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2">
+                                                    <Bell className="w-5 h-5 text-slate-400" />
+                                                </div>
+                                                <p className="text-sm font-bold text-slate-900">0 Notifications</p>
+                                                <p className="text-xs text-slate-500 mt-0.5">All caught up! No pending alerts or reminders.</p>
+                                            </div>
+                                        ) : (
+                                            notifications.map((notif) => (
+                                                <div
+                                                    key={notif.id}
+                                                    onClick={() => handleNotificationClick(notif)}
+                                                    className={cn(
+                                                        'p-3 px-4 hover:bg-slate-50 transition-colors cursor-pointer flex items-start justify-between gap-3',
+                                                        !notif.read ? 'bg-orange-50/20' : 'opacity-70'
+                                                    )}
+                                                >
+                                                    <div className="flex items-start gap-2.5 min-w-0">
+                                                        <div className={cn(
+                                                            'w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5',
+                                                            notif.type === 'due_task' ? 'bg-rose-50 text-rose-600' :
+                                                            notif.type === 'admin_task' ? 'bg-purple-50 text-purple-600' :
+                                                            'bg-amber-50 text-amber-600'
+                                                        )}>
+                                                            {notif.type === 'due_task' ? <Clock className="w-4 h-4" /> :
+                                                             notif.type === 'admin_task' ? <Shield className="w-4 h-4" /> :
+                                                             <Bell className="w-4 h-4" />}
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <p className={cn('text-xs font-bold text-slate-900 truncate', !notif.read && 'text-orange-950')}>
+                                                                {notif.title}
+                                                            </p>
+                                                            <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                                                                {notif.subtitle}
+                                                            </p>
+                                                            <span className="text-[10px] text-slate-400 font-medium">
+                                                                {notif.time}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    {!notif.read && (
+                                                        <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0 mt-1.5" />
+                                                    )}
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+
+                                    {/* Footer */}
+                                    <div className="border-t border-slate-100 px-4 py-2 bg-slate-50/60 rounded-b-2xl flex items-center justify-between">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setNotifOpen(false);
+                                                navigate('/sales/reminders');
+                                            }}
+                                            className="text-xs font-bold text-slate-600 hover:text-slate-900 transition-colors"
+                                        >
+                                            View Reminders & Tasks →
+                                        </button>
+                                        {unreadCount > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={markAllRead}
+                                                className="text-xs font-bold text-orange-600 hover:underline"
+                                            >
+                                                Clear All
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </header>

@@ -10,7 +10,6 @@ import {
     MapPin,
     Pencil,
     Phone,
-    Settings,
     Shield,
     UserRound
 } from 'lucide-react';
@@ -214,15 +213,10 @@ export default function SalesAccount() {
                 </div>
             )}
 
-            {}
-            <div className="mb-8 flex items-start gap-4">
-                <div className="h-12 w-12 rounded-2xl bg-[#0F172A] text-white flex items-center justify-center shrink-0 shadow-md">
-                    <Settings className="w-5 h-5" strokeWidth={2} />
-                </div>
-                <div>
-                    <h1 className="text-3xl font-black tracking-tight text-[#0F172A]">Settings</h1>
-                    <p className="mt-1 text-sm text-[#64748B]">Manage your account profile and security.</p>
-                </div>
+            {/* Page Header */}
+            <div className="mb-8">
+                <h1 className="text-xl sm:text-2xl font-black text-[#0F172A] tracking-tight">Settings</h1>
+                <p className="text-xs sm:text-sm text-[#64748B] mt-0.5">Manage your account profile and security.</p>
             </div>
 
             {}

@@ -422,7 +422,7 @@ router.get('/tasks', async (req: Request, res: Response) => {
             const share = shareInfoForAudit(shareMap, meta.auditId);
             return {
                 ...t,
-                leadBusinessName: meta.businessName || 'Lead',
+                leadBusinessName: t.leadId === 'general' ? '' : (meta.businessName || ''),
                 leadPhone: meta.phone || '',
                 leadEmail: meta.email || '',
                 leadWebsite: meta.website || '',
@@ -441,7 +441,7 @@ router.get('/tasks', async (req: Request, res: Response) => {
         res.json({ tasks: enrichedTasks });
     } catch (err: any) {
         console.error('Sales fetch tasks error:', err);
-        res.status(500).json({ error: err.message || 'Failed to fetch tasks' });
+        res.status(500).json({ error: 'Failed to fetch tasks.' });
     }
 });
 
@@ -460,9 +460,7 @@ router.post('/tasks', async (req: Request, res: Response) => {
             due_date = null
         } = req.body || {};
 
-        if (!lead_id) {
-            return res.status(400).json({ error: 'lead_id is required.' });
-        }
+        const effectiveLeadId = (lead_id && String(lead_id).trim()) ? String(lead_id).trim() : 'general';
         if (!title || !String(title).trim()) {
             return res.status(400).json({ error: 'Task title is required.' });
         }
@@ -493,7 +491,7 @@ router.post('/tasks', async (req: Request, res: Response) => {
                 created_by_role AS "createdByRole",
                 created_by_name AS "createdByName"
         `, [
-            lead_id,
+            effectiveLeadId,
             sanitizedTaskType,
             String(title).trim(),
             String(notes || '').trim(),

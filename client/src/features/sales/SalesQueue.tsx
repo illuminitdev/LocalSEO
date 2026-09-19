@@ -1,869 +1,802 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-    CheckCircle2,
-    Clock,
-    Phone,
-    RefreshCw,
-    Search,
     AlertCircle,
-    ChevronRight,
-    CheckSquare,
-    ListTodo,
-    Users,
-    ArrowUpRight,
-    X,
-    Shield,
-    User,
+    ArrowRight,
+    Bell,
+    Calendar,
     Check,
-    RotateCcw,
-    XCircle,
-    FileText,
-    History,
-    Mail
+    CheckCircle2,
+    ChevronDown,
+    ChevronRight,
+    Clock,
+    ListTodo,
+    Phone,
+    PhoneCall,
+    RefreshCw,
+    Users,
+    X
 } from 'lucide-react';
-import TaskCompletionModal, { type CrmTaskStatus } from '../../shared/TaskCompletionModal';
-import LeadStatusHistoryModal from '../admin/LeadStatusHistoryModal';
 import {
+    type SalesLeadActivity,
     type SalesLeadTask,
-    type SalesTaskPriority,
-    type SalesTaskStatus,
-    type SalesTaskType,
     type SalesSummaryMetrics,
     type SalesUnifiedLead,
-    fetchSalesTasks,
-    updateSalesTask,
-    fetchSalesSummary,
+    fetchSalesActivities,
+    fetchSalesCustomers,
     fetchSalesLeads,
-    fetchSalesIndustries,
-    confirmAndShareFullAuditEmail,
-    emailShareStatusLabel
+    fetchSalesSummary,
+    fetchSalesTasks
 } from './salesApi';
 import { cn } from '../../shared/utils';
 
-const TASK_TYPE_CONFIG: Record<SalesTaskType, { label: string; icon: string; bg: string; text: string }> = {
-    prepare_audit: { label: 'Prepare Audit', icon: '📊', bg: 'bg-indigo-50 border-indigo-200', text: 'text-indigo-700' },
-    follow_up_call: { label: 'Follow-Up Call', icon: '📞', bg: 'bg-amber-50 border-amber-200', text: 'text-amber-800' },
-    send_proposal: { label: 'Send Proposal', icon: '📄', bg: 'bg-blue-50 border-blue-200', text: 'text-blue-700' },
-    onboard_customer: { label: 'Onboard Customer', icon: '🚀', bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-800' },
-    custom: { label: 'Task', icon: '📌', bg: 'bg-slate-50 border-slate-200', text: 'text-slate-700' }
+type DateFilterMode = 'today' | 'tomorrow' | 'this_week' | 'all' | 'custom';
+
+function formatPillDate(d: Date): string {
+    const weekday = d.toLocaleDateString('en-GB', { weekday: 'short' });
+    const day = d.getDate();
+    const month = d.toLocaleDateString('en-GB', { month: 'short' });
+    const year = d.getFullYear();
+    const monthFormatted = month === 'Sep' ? 'Sept' : month;
+    return `${weekday}, ${day} ${monthFormatted} ${year}`;
+}
+
+const PRIORITY_DOT: Record<string, string> = {
+    urgent: 'bg-red-500',
+    high: 'bg-rose-500',
+    medium: 'bg-amber-500',
+    low: 'bg-slate-400'
 };
 
-const PRIORITY_BADGES: Record<SalesTaskPriority, { label: string; bg: string; text: string; dot: string }> = {
-    urgent: { label: 'Urgent', bg: 'bg-red-50 border-red-200', text: 'text-red-700', dot: 'bg-red-500' },
-    high: { label: 'High', bg: 'bg-orange-50 border-orange-200', text: 'text-orange-700', dot: 'bg-orange-500' },
-    medium: { label: 'Medium', bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700', dot: 'bg-amber-500' },
-    low: { label: 'Low', bg: 'bg-slate-50 border-slate-200', text: 'text-slate-600', dot: 'bg-slate-400' }
-};
-
-const STATUS_LABEL: Record<string, string> = {
-    new: 'New',
-    contacted: 'Contacted',
-    callback: 'Callback',
-    interested: 'Interested',
-    not_interested: 'Not interested',
-    converted: 'Converted'
-};
-
-function formatDueDate(dueStr?: string | null) {
+function formatDueLabel(dueStr?: string | null) {
     if (!dueStr) return null;
     const due = new Date(dueStr);
+    if (isNaN(due.getTime())) return null;
     const now = new Date();
     const isPast = due < now && due.toDateString() !== now.toDateString();
     const isToday = due.toDateString() === now.toDateString();
-
-    const formatted = due.toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
-
-    if (isPast) {
-        return { text: `Overdue (${formatted})`, style: 'text-red-700 bg-red-50 border-red-200 font-bold' };
-    }
+    if (isPast) return { text: 'Overdue', tone: 'text-rose-600 bg-rose-50 border-rose-200' };
     if (isToday) {
-        return { text: `Due Today (${due.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })})`, style: 'text-amber-900 bg-amber-50 border-amber-200 font-bold' };
+        return {
+            text: `Today ${due.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
+            tone: 'text-amber-700 bg-amber-50 border-amber-200'
+        };
     }
-    return { text: formatted, style: 'text-[#64748B] bg-[#F8FAFC] border-[#E2E8F0]' };
+    return {
+        text: due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        tone: 'text-slate-600 bg-slate-50 border-slate-200'
+    };
+}
+
+function formatRelativeTime(iso?: string | null) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const diffMs = Date.now() - d.getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 export default function SalesQueue() {
-    const [activeTab, setActiveTab] = useState<'tasks' | 'leads'>('tasks');
-    const [tasks, setTasks] = useState<SalesLeadTask[]>([]);
-    const [leads, setLeads] = useState<SalesUnifiedLead[]>([]);
-    const [industries, setIndustries] = useState<Array<{ name: string; count: number }>>([]);
-    const [selectedLeadIndustry, setSelectedLeadIndustry] = useState<string>('all');
     const [summary, setSummary] = useState<SalesSummaryMetrics>({
         pendingTasksCount: 0,
+        inProgressTasksCount: 0,
         dueTodayTasksCount: 0,
         callsTodayCount: 0,
         completedTasksCount: 0,
         leadsCount: 0
     });
-
+    const [allTasks, setAllTasks] = useState<SalesLeadTask[]>([]);
+    const [allCalls, setAllCalls] = useState<SalesLeadActivity[]>([]);
+    const [recentLeads, setRecentLeads] = useState<SalesUnifiedLead[]>([]);
+    const [customersCount, setCustomersCount] = useState(0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [successToast, setSuccessToast] = useState<string | null>(null);
 
-    
-    const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask; isCompleting: boolean } | null>(null);
-    const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
-    const [modalLoading, setModalLoading] = useState(false);
-    const [sharingAuditId, setSharingAuditId] = useState('');
+    // Date Filter State
+    const [dateFilter, setDateFilter] = useState<DateFilterMode>('today');
+    const [customDate, setCustomDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+    const [datePickerOpen, setDatePickerOpen] = useState(false);
+    const datePickerRef = useRef<HTMLDivElement | null>(null);
 
-    
-    const [statusFilter, setStatusFilter] = useState<string>('all');
-    const [priorityFilter, setPriorityFilter] = useState<string>('all');
-    const [typeFilter, setTypeFilter] = useState<string>('all');
-    const [creatorFilter, setCreatorFilter] = useState<string>('all');
-    const [leadKindFilter, setLeadKindFilter] = useState<'all' | 'full_audit' | 'leads'>('all');
-    const [dueTodayOnly, setDueTodayOnly] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
+    // Close date picker on click outside or escape key
+    useEffect(() => {
+        if (!datePickerOpen) return;
+        const handleClickOutside = (e: MouseEvent) => {
+            if (datePickerRef.current && !datePickerRef.current.contains(e.target as Node)) {
+                setDatePickerOpen(false);
+            }
+        };
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setDatePickerOpen(false);
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        document.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [datePickerOpen]);
 
     const loadData = useCallback(async () => {
         setLoading(true);
         setError('');
         try {
-            const [taskList, summaryData, leadsRes, indRes] = await Promise.all([
-                fetchSalesTasks({
-                    status: statusFilter !== 'all' ? statusFilter : undefined,
-                    priority: priorityFilter !== 'all' ? priorityFilter : undefined,
-                    taskType: typeFilter !== 'all' ? typeFilter : undefined,
-                    createdBy: creatorFilter !== 'all' ? creatorFilter : undefined,
-                    dueToday: dueTodayOnly
-                }),
+            const [summaryData, tasks, leads, activities, customers] = await Promise.all([
                 fetchSalesSummary().catch(() => ({
                     pendingTasksCount: 0,
+                    inProgressTasksCount: 0,
                     dueTodayTasksCount: 0,
                     callsTodayCount: 0,
                     completedTasksCount: 0,
                     leadsCount: 0
                 })),
-                fetchSalesLeads({
-                    industry: selectedLeadIndustry !== 'all' ? selectedLeadIndustry : undefined
-                }).catch(() => []),
-                fetchSalesIndustries().catch(() => [])
+                fetchSalesTasks().catch(() => [] as SalesLeadTask[]),
+                fetchSalesLeads().catch(() => [] as SalesUnifiedLead[]),
+                fetchSalesActivities().catch(() => [] as SalesLeadActivity[]),
+                fetchSalesCustomers().catch(() => [] as SalesUnifiedLead[])
             ]);
 
-            setTasks(taskList);
             setSummary(summaryData);
-            setLeads(leadsRes);
-            setIndustries(indRes);
+            setAllTasks(tasks);
+            setAllCalls(activities);
+            setRecentLeads(leads.filter((l) => !l.isCustomer).slice(0, 5));
+            setCustomersCount(customers.length);
         } catch (err: any) {
-            setError(err.message || 'Failed to load work queue');
+            setError(err.message || 'Failed to load dashboard overview');
         } finally {
             setLoading(false);
         }
-    }, [statusFilter, priorityFilter, typeFilter, creatorFilter, dueTodayOnly, selectedLeadIndustry]);
+    }, []);
 
     useEffect(() => {
         loadData();
     }, [loadData]);
 
-    const handleOpenToggleModal = (task: SalesLeadTask, e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const isCompleting = task.status !== 'completed';
-        setConfirmModalTask({ task, isCompleting });
-    };
-
-    const handleConfirmToggleStatus = async (chosenStatus?: CrmTaskStatus, statusNotes?: string) => {
-        if (!confirmModalTask) return;
-        const { task, isCompleting } = confirmModalTask;
-        setModalLoading(true);
-        setError('');
-        try {
-            const nextStatus: SalesTaskStatus = chosenStatus || (isCompleting ? 'completed' : 'pending');
-            await updateSalesTask(task.id, {
-                status: nextStatus,
-                notes: statusNotes !== undefined ? statusNotes : undefined
-            });
-            await loadData();
-            setSuccessToast(
-                nextStatus === 'completed'
-                    ? 'Task marked as completed! 🎉'
-                    : nextStatus === 'in_progress'
-                    ? 'Task marked as in progress ⏳'
-                    : nextStatus === 'cancelled'
-                    ? 'Task marked as cancelled ❌'
-                    : 'Task reopened and marked as pending'
-            );
-            setTimeout(() => setSuccessToast(null), 3500);
-            setConfirmModalTask(null);
-        } catch (err: any) {
-            setError(err.message || 'Could not update task');
-        } finally {
-            setModalLoading(false);
+    const pillLabel = useMemo(() => {
+        const now = new Date();
+        if (dateFilter === 'today') {
+            return formatPillDate(now);
         }
-    };
-
-    const handleEmailAuditPdf = async (task: SalesLeadTask, e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const auditId = String(task.leadAuditId || '').trim();
-        if (!auditId) return;
-        setSharingAuditId(auditId);
-        setError('');
-        try {
-            const res = await confirmAndShareFullAuditEmail({
-                auditId,
-                businessName: task.leadBusinessName,
-                email: task.leadEmail
-            });
-            if (!res) return;
-            setSuccessToast(
-                res.attached === false
-                    ? `Report emailed to ${res.to} (link only — PDF was too large to attach).`
-                    : `Report emailed to ${res.to}.`
-            );
-            setTimeout(() => setSuccessToast(null), 4000);
-            await loadData();
-        } catch (err: any) {
-            setError(err.message || 'Could not email audit report');
-        } finally {
-            setSharingAuditId('');
+        if (dateFilter === 'tomorrow') {
+            const tom = new Date(now);
+            tom.setDate(tom.getDate() + 1);
+            return `Tomorrow · ${tom.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}`;
         }
-    };
+        if (dateFilter === 'this_week') {
+            return 'Next 7 Days';
+        }
+        if (dateFilter === 'custom' && customDate) {
+            const parts = customDate.split('-');
+            if (parts.length === 3) {
+                const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                return formatPillDate(d);
+            }
+            return customDate;
+        }
+        return 'All Dates';
+    }, [dateFilter, customDate]);
 
-    const isFullAuditTask = (t: SalesLeadTask) =>
-        String(t.leadSource || '').toLowerCase() === 'full_audit';
+    // Dynamically filter open tasks by selected date filter
+    const displayedTasks = useMemo(() => {
+        const openTasks = allTasks.filter((t) => t.status === 'pending' || t.status === 'in_progress');
+        const now = new Date();
+        const todayStr = now.toISOString().slice(0, 10);
 
-    const filteredTasks = tasks.filter((t) => {
-        if (leadKindFilter === 'full_audit' && !isFullAuditTask(t)) return false;
-        if (leadKindFilter === 'leads' && isFullAuditTask(t)) return false;
-        if (!searchQuery.trim()) return true;
-        const q = searchQuery.toLowerCase();
-        return (
-            t.title.toLowerCase().includes(q) ||
-            (t.leadBusinessName && t.leadBusinessName.toLowerCase().includes(q)) ||
-            (t.leadPhone && t.leadPhone.includes(q)) ||
-            (t.leadEmail && t.leadEmail.toLowerCase().includes(q)) ||
-            (t.notes && t.notes.toLowerCase().includes(q))
-        );
-    });
+        const tom = new Date(now);
+        tom.setDate(tom.getDate() + 1);
+        const tomStr = tom.toISOString().slice(0, 10);
 
-    const fullAuditTaskCount = tasks.filter(isFullAuditTask).length;
-    const leadsTaskCount = tasks.length - fullAuditTaskCount;
+        const next7 = new Date(now);
+        next7.setDate(next7.getDate() + 7);
+        const next7Str = next7.toISOString().slice(0, 10);
+
+        if (dateFilter === 'today') {
+            return openTasks
+                .filter((t) => {
+                    if (!t.dueDate) return true;
+                    return t.dueDate.slice(0, 10) <= todayStr;
+                })
+                .sort((a, b) => {
+                    const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY;
+                    const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.POSITIVE_INFINITY;
+                    const aUrgent = a.dueDate && a.dueDate.slice(0, 10) <= todayStr ? 0 : 1;
+                    const bUrgent = b.dueDate && b.dueDate.slice(0, 10) <= todayStr ? 0 : 1;
+                    if (aUrgent !== bUrgent) return aUrgent - bUrgent;
+                    return aDue - bDue;
+                })
+                .slice(0, 6);
+        }
+
+        if (dateFilter === 'tomorrow') {
+            return openTasks
+                .filter((t) => t.dueDate && t.dueDate.slice(0, 10) === tomStr)
+                .sort((a, b) => {
+                    const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY;
+                    const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.POSITIVE_INFINITY;
+                    return aDue - bDue;
+                })
+                .slice(0, 6);
+        }
+
+        if (dateFilter === 'this_week') {
+            return openTasks
+                .filter((t) => t.dueDate && t.dueDate.slice(0, 10) >= todayStr && t.dueDate.slice(0, 10) <= next7Str)
+                .sort((a, b) => {
+                    const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY;
+                    const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.POSITIVE_INFINITY;
+                    return aDue - bDue;
+                })
+                .slice(0, 6);
+        }
+
+        if (dateFilter === 'custom' && customDate) {
+            return openTasks
+                .filter((t) => t.dueDate && t.dueDate.slice(0, 10) === customDate)
+                .sort((a, b) => {
+                    const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY;
+                    const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.POSITIVE_INFINITY;
+                    return aDue - bDue;
+                })
+                .slice(0, 6);
+        }
+
+        return [...openTasks]
+            .sort((a, b) => {
+                const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY;
+                const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.POSITIVE_INFINITY;
+                const aUrgent = a.dueDate && a.dueDate.slice(0, 10) <= todayStr ? 0 : 1;
+                const bUrgent = b.dueDate && b.dueDate.slice(0, 10) <= todayStr ? 0 : 1;
+                if (aUrgent !== bUrgent) return aUrgent - bUrgent;
+                return aDue - bDue;
+            })
+            .slice(0, 6);
+    }, [allTasks, dateFilter, customDate]);
+
+    // Dynamically filter calls by selected date filter
+    const displayedCalls = useMemo(() => {
+        const now = new Date();
+        const todayStr = now.toISOString().slice(0, 10);
+        const callLogs = allCalls.filter((a) => a.activityType === 'call_log');
+
+        if (dateFilter === 'today') {
+            const todayCalls = callLogs.filter((c) => c.createdAt && c.createdAt.slice(0, 10) === todayStr);
+            return todayCalls.length > 0 ? todayCalls.slice(0, 5) : callLogs.slice(0, 5);
+        }
+        if (dateFilter === 'custom' && customDate) {
+            const customCalls = callLogs.filter((c) => c.createdAt && c.createdAt.slice(0, 10) === customDate);
+            return customCalls.length > 0 ? customCalls.slice(0, 5) : callLogs.slice(0, 5);
+        }
+        return callLogs.slice(0, 5);
+    }, [allCalls, dateFilter, customDate]);
+
+    const dueMetricValue = useMemo(() => {
+        if (dateFilter === 'today') {
+            return summary.dueTodayTasksCount;
+        }
+        return displayedTasks.length;
+    }, [dateFilter, summary.dueTodayTasksCount, displayedTasks.length]);
+
+    const metricCards = [
+        {
+            label: 'Pending',
+            value: summary.pendingTasksCount,
+            hint: 'Not started',
+            icon: ListTodo,
+            tone: 'bg-slate-100 text-slate-700',
+            to: '/sales/tasks'
+        },
+        {
+            label: 'In progress',
+            value: summary.inProgressTasksCount ?? 0,
+            hint: 'Work started',
+            icon: Clock,
+            tone: 'bg-amber-50 text-amber-600',
+            to: '/sales/tasks'
+        },
+        {
+            label: dateFilter === 'today' ? 'Due today' : 'Due (' + (dateFilter === 'tomorrow' ? 'Tomorrow' : 'Selected') + ')',
+            value: dueMetricValue,
+            hint: dateFilter === 'today' ? 'Action needed' : 'Filtered view',
+            icon: Calendar,
+            tone: 'bg-rose-50 text-rose-600',
+            to: '/sales/tasks'
+        },
+        {
+            label: 'Calls today',
+            value: summary.callsTodayCount,
+            hint: 'Logged today',
+            icon: Phone,
+            tone: 'bg-blue-50 text-blue-600',
+            to: '/sales/calls'
+        },
+        {
+            label: 'Active leads',
+            value: summary.leadsCount,
+            hint: 'In your pipeline',
+            icon: Users,
+            tone: 'bg-orange-50 text-orange-600',
+            to: '/sales/customers'
+        }
+    ];
+
+    const shortcuts = [
+        {
+            title: 'Admin tasks',
+            desc: 'Work assigned by administrators',
+            to: '/sales/tasks',
+            icon: ListTodo,
+            count: summary.pendingTasksCount + (summary.inProgressTasksCount ?? 0)
+        },
+        {
+            title: 'Self reminders',
+            desc: 'Your follow-ups and scheduled calls',
+            to: '/sales/reminders',
+            icon: Bell,
+            count: null
+        },
+        {
+            title: 'Call logs',
+            desc: 'Conversation history & dispositions',
+            to: '/sales/calls',
+            icon: PhoneCall,
+            count: summary.callsTodayCount
+        },
+        {
+            title: 'Customers',
+            desc: 'Converted accounts you manage',
+            to: '/sales/customers',
+            icon: Users,
+            count: customersCount
+        }
+    ];
 
     return (
-        <div className="space-y-6 max-w-6xl mx-auto pb-12 animate-in fade-in duration-300">
-            {/* Quick Metrics Bar */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
-                    <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-[#64748B]">Pending</span>
-                        <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
-                            <ListTodo className="w-3.5 h-3.5" />
-                        </div>
-                    </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-1.5">{summary.pendingTasksCount}</p>
-                    <p className="text-[10px] text-[#94A3B8] mt-0.5">Not started</p>
+        <div className="space-y-6 max-w-7xl mx-auto pb-12 animate-in fade-in duration-300">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                    <h2 className="text-xl sm:text-2xl font-black text-[#0F172A] tracking-tight">
+                        Sales overview
+                    </h2>
+                    <p className="text-xs sm:text-sm text-[#64748B] mt-0.5">
+                        A snapshot of your pipeline, priorities, and today&apos;s activity.
+                    </p>
                 </div>
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                    {/* Workable Interactive Date Pill */}
+                    <div className="relative" ref={datePickerRef}>
+                        <button
+                            type="button"
+                            onClick={() => setDatePickerOpen((prev) => !prev)}
+                            className={cn(
+                                'text-xs sm:text-sm font-semibold bg-white border px-3.5 py-1.5 rounded-xl shadow-2xs flex items-center gap-2 transition-all cursor-pointer select-none group',
+                                datePickerOpen
+                                    ? 'border-orange-500 ring-2 ring-orange-500/10 text-[#0F172A]'
+                                    : dateFilter !== 'today'
+                                    ? 'border-orange-300 bg-orange-50/40 text-orange-900 hover:bg-orange-50'
+                                    : 'border-[#E2E8F0] text-[#64748B] hover:text-[#0F172A] hover:bg-[#F8FAFC]'
+                            )}
+                            title="Click to filter by date"
+                            aria-expanded={datePickerOpen}
+                        >
+                            <Calendar className={cn('w-3.5 h-3.5 transition-colors', datePickerOpen || dateFilter !== 'today' ? 'text-orange-600' : 'text-[#94A3B8] group-hover:text-[#64748B]')} />
+                            <span>{pillLabel}</span>
+                            <ChevronDown className={cn('w-3.5 h-3.5 text-[#94A3B8] transition-transform duration-200', datePickerOpen && 'rotate-180 text-orange-600')} />
+                        </button>
 
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
-                    <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800">In Progress</span>
-                        <div className="w-7 h-7 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
-                            <Clock className="w-3.5 h-3.5" />
-                        </div>
-                    </div>
-                    <p className="text-2xl font-black text-amber-950 mt-1.5">{summary.inProgressTasksCount ?? 0}</p>
-                    <p className="text-[10px] text-amber-700 font-medium mt-0.5">Work started</p>
-                </div>
+                        {/* Date Picker Popover */}
+                        {datePickerOpen && (
+                            <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-white rounded-2xl border border-[#E2E8F0] shadow-xl p-3.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                                <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-[#F1F5F9]">
+                                    <span className="text-[11px] font-black uppercase tracking-wider text-[#64748B]">Date View Filter</span>
+                                    {dateFilter !== 'today' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setDateFilter('today');
+                                                setDatePickerOpen(false);
+                                            }}
+                                            className="text-[11px] font-bold text-orange-600 hover:text-orange-700 hover:underline cursor-pointer"
+                                        >
+                                            Reset to Today
+                                        </button>
+                                    )}
+                                </div>
 
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
-                    <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Completed</span>
-                        <div className="w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                            <CheckSquare className="w-3.5 h-3.5" />
-                        </div>
-                    </div>
-                    <p className="text-2xl font-black text-emerald-950 mt-1.5">{summary.completedTasksCount}</p>
-                    <p className="text-[10px] text-emerald-700 font-medium mt-0.5">Finished items</p>
-                </div>
+                                <div className="grid grid-cols-2 gap-1.5 mb-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setDateFilter('today');
+                                            setDatePickerOpen(false);
+                                        }}
+                                        className={cn(
+                                            'flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer',
+                                            dateFilter === 'today'
+                                                ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                                                : 'bg-[#F8FAFC] hover:bg-[#F1F5F9] text-[#0F172A] border border-transparent'
+                                        )}
+                                    >
+                                        <span>Today</span>
+                                        {dateFilter === 'today' && <Check className="w-3.5 h-3.5 text-orange-600" />}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setDateFilter('tomorrow');
+                                            setDatePickerOpen(false);
+                                        }}
+                                        className={cn(
+                                            'flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer',
+                                            dateFilter === 'tomorrow'
+                                                ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                                                : 'bg-[#F8FAFC] hover:bg-[#F1F5F9] text-[#0F172A] border border-transparent'
+                                        )}
+                                    >
+                                        <span>Tomorrow</span>
+                                        {dateFilter === 'tomorrow' && <Check className="w-3.5 h-3.5 text-orange-600" />}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setDateFilter('this_week');
+                                            setDatePickerOpen(false);
+                                        }}
+                                        className={cn(
+                                            'flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer',
+                                            dateFilter === 'this_week'
+                                                ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                                                : 'bg-[#F8FAFC] hover:bg-[#F1F5F9] text-[#0F172A] border border-transparent'
+                                        )}
+                                    >
+                                        <span>Next 7 Days</span>
+                                        {dateFilter === 'this_week' && <Check className="w-3.5 h-3.5 text-orange-600" />}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setDateFilter('all');
+                                            setDatePickerOpen(false);
+                                        }}
+                                        className={cn(
+                                            'flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer',
+                                            dateFilter === 'all'
+                                                ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                                                : 'bg-[#F8FAFC] hover:bg-[#F1F5F9] text-[#0F172A] border border-transparent'
+                                        )}
+                                    >
+                                        <span>All Dates</span>
+                                        {dateFilter === 'all' && <Check className="w-3.5 h-3.5 text-orange-600" />}
+                                    </button>
+                                </div>
 
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
-                    <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-blue-800">Calls Today</span>
-                        <div className="w-7 h-7 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                            <Phone className="w-3.5 h-3.5" />
-                        </div>
-                    </div>
-                    <p className="text-2xl font-black text-blue-950 mt-1.5">{summary.callsTodayCount}</p>
-                    <p className="text-[10px] text-blue-700 font-medium mt-0.5">Calls logged</p>
-                </div>
-
-                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
-                    <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-rose-800">Due Today</span>
-                        <div className="w-7 h-7 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
-                            <Clock className="w-3.5 h-3.5" />
-                        </div>
-                    </div>
-                    <p className="text-2xl font-black text-rose-950 mt-1.5">{summary.dueTodayTasksCount}</p>
-                    <p className="text-[10px] text-rose-600 font-semibold mt-0.5">Action needed</p>
-                </div>
-            </div>
-
-            {}
-            {successToast && (
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 flex items-center justify-between gap-3 text-sm text-emerald-800 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="flex items-center gap-3">
-                        <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600" />
-                        <span className="font-medium">{successToast}</span>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={() => setSuccessToast(null)}
-                        className="text-emerald-600 hover:text-emerald-800 p-0.5 rounded"
-                    >
-                        <X className="w-4 h-4" />
-                    </button>
-                </div>
-            )}
-
-            {}
-            {error && (
-                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 flex items-center gap-3 text-sm text-red-700">
-                    <AlertCircle className="w-5 h-5 shrink-0 text-red-600" />
-                    <span>{error}</span>
-                </div>
-            )}
-
-            {}
-            <div className="flex items-center justify-between border-b border-[#E2E8F0] pb-3 gap-4 flex-wrap">
-                <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('tasks')}
-                        className={cn(
-                            'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all',
-                            activeTab === 'tasks'
-                                ? 'bg-[#0F172A] text-white shadow-sm'
-                                : 'bg-white border border-[#E2E8F0] text-[#64748B] hover:text-[#0F172A]'
+                                <div className="pt-2.5 border-t border-[#F1F5F9]">
+                                    <label className="block text-[10px] font-black uppercase tracking-wider text-[#64748B] mb-1.5">
+                                        Custom Date
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="date"
+                                            value={customDate}
+                                            onChange={(e) => {
+                                                if (e.target.value) {
+                                                    setCustomDate(e.target.value);
+                                                    setDateFilter('custom');
+                                                    setDatePickerOpen(false);
+                                                }
+                                            }}
+                                            className="flex-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs font-semibold text-[#0F172A] focus:outline-none focus:border-orange-500 focus:bg-white transition-colors"
+                                        />
+                                        {dateFilter === 'custom' && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setDateFilter('today');
+                                                    setDatePickerOpen(false);
+                                                }}
+                                                className="p-2 text-[#94A3B8] hover:text-[#0F172A] rounded-xl hover:bg-[#F1F5F9] transition-colors cursor-pointer"
+                                                title="Reset to today"
+                                            >
+                                                <X className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
                         )}
-                    >
-                        <ListTodo className="w-4 h-4" />
-                        <span>Assigned Tasks</span>
-                        <span className={cn(
-                            'px-2 py-0.5 rounded-full text-[10px] font-black',
-                            activeTab === 'tasks' ? 'bg-[#F59E0B] text-[#0F172A]' : 'bg-[#F1F5F9] text-[#64748B]'
-                        )}>
-                            {summary.pendingTasksCount}
-                        </span>
-                    </button>
+                    </div>
 
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('leads')}
-                        className={cn(
-                            'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all',
-                            activeTab === 'leads'
-                                ? 'bg-[#0F172A] text-white shadow-sm'
-                                : 'bg-white border border-[#E2E8F0] text-[#64748B] hover:text-[#0F172A]'
-                        )}
-                    >
-                        <Users className="w-4 h-4" />
-                        <span>My Leads & Pipeline</span>
-                        <span className={cn(
-                            'px-2 py-0.5 rounded-full text-[10px] font-black',
-                            activeTab === 'leads' ? 'bg-[#F59E0B] text-[#0F172A]' : 'bg-[#F1F5F9] text-[#64748B]'
-                        )}>
-                            {leads.length}
-                        </span>
-                    </button>
-                </div>
-
-                  <div className="flex items-center gap-2">
                     <button
                         type="button"
                         disabled={loading}
                         onClick={() => loadData()}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-bold text-[#475569] hover:bg-[#F8FAFC] disabled:opacity-50 transition-colors shadow-2xs"
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-white px-3.5 py-2 text-xs font-bold text-[#475569] hover:bg-[#F8FAFC] disabled:opacity-50 transition-colors shadow-2xs cursor-pointer"
                     >
-                        <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
-                        <span>Refresh</span>
+                        <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin text-orange-500')} />
+                        Refresh
                     </button>
                 </div>
             </div>
 
-            {}
-            {activeTab === 'tasks' && (
-                <div className="space-y-4">
-                    {}
-                    <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-                        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
-                            <div className="relative flex-1 min-w-[200px] max-w-sm">
-                                <Search className="w-4 h-4 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2" />
-                                <input
-                                    type="text"
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    placeholder="Search task title, lead, phone…"
-                                    className="w-full pl-9 pr-3 py-1.5 text-xs bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:outline-none focus:border-[#F59E0B] focus:bg-white"
-                                />
-                            </div>
+            {error && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 flex items-center justify-between gap-3 text-sm text-red-700">
+                    <div className="flex items-center gap-3">
+                        <AlertCircle className="w-5 h-5 shrink-0" />
+                        <span>{error}</span>
+                    </div>
+                    <button type="button" onClick={() => setError('')} className="font-bold text-red-600 hover:underline">
+                        Dismiss
+                    </button>
+                </div>
+            )}
 
-                            <select
-                                value={statusFilter}
-                                onChange={(e) => setStatusFilter(e.target.value)}
-                                className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
-                            >
-                                <option value="all">All Statuses</option>
-                                <option value="pending">Pending</option>
-                                <option value="in_progress">In Progress</option>
-                                <option value="completed">Completed</option>
-                                <option value="cancelled">Cancelled</option>
-                            </select>
-
-                            <select
-                                value={priorityFilter}
-                                onChange={(e) => setPriorityFilter(e.target.value)}
-                                className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
-                            >
-                                <option value="all">All Priorities</option>
-                                <option value="urgent">Urgent</option>
-                                <option value="high">High</option>
-                                <option value="medium">Medium</option>
-                                <option value="low">Low</option>
-                            </select>
-
-                            <select
-                                value={typeFilter}
-                                onChange={(e) => setTypeFilter(e.target.value)}
-                                className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
-                            >
-                                <option value="all">All Task Types</option>
-                                <option value="prepare_audit">Prepare Audit</option>
-                                <option value="follow_up_call">Follow-Up Call</option>
-                                <option value="send_proposal">Send Proposal</option>
-                                <option value="onboard_customer">Onboard Customer</option>
-                            </select>
-
-                            <select
-                                value={creatorFilter}
-                                onChange={(e) => setCreatorFilter(e.target.value as 'all' | 'admin' | 'self')}
-                                className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
-                            >
-                                <option value="all">All Creators</option>
-                                <option value="admin">🛡️ Assigned by Admin</option>
-                                <option value="self">👤 Self Created</option>
-                            </select>
-
-                            <select
-                                value={leadKindFilter}
-                                onChange={(e) =>
-                                    setLeadKindFilter(e.target.value as 'all' | 'full_audit' | 'leads')
-                                }
-                                className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
-                                title="Filter by lead type"
-                            >
-                                <option value="all">All Types ({tasks.length})</option>
-                                <option value="full_audit">Full Audits ({fullAuditTaskCount})</option>
-                                <option value="leads">Leads ({leadsTaskCount})</option>
-                            </select>
-                        </div>
-
-                        <button
-                            type="button"
-                            onClick={() => setDueTodayOnly((v) => !v)}
-                            className={cn(
-                                'px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors',
-                                dueTodayOnly
-                                    ? 'bg-[#F59E0B] text-[#0F172A] border-[#F59E0B]'
-                                    : 'bg-white text-[#64748B] border-[#E2E8F0] hover:bg-[#F8FAFC]'
-                            )}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+                {metricCards.map((card) => {
+                    const Icon = card.icon;
+                    return (
+                        <Link
+                            key={card.label}
+                            to={card.to}
+                            className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-2xs hover:shadow-xs hover:border-orange-200 transition-all group"
                         >
-                            Due Today Only
-                        </button>
-                    </div>
-
-                    {}
-                    <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
-                        {loading && !tasks.length ? (
-                            <div className="p-12 text-center text-[#64748B]">
-                                <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-[#F59E0B]" />
-                                <p className="text-sm font-semibold">Loading assigned tasks…</p>
+                            <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center', card.tone)}>
+                                <Icon className="w-4 h-4" />
                             </div>
-                        ) : !filteredTasks.length ? (
-                            <div className="p-12 text-center text-[#64748B]">
-                                <ListTodo className="w-8 h-8 text-[#CBD5E1] mx-auto mb-2" />
-                                <p className="text-sm font-bold text-[#0F172A]">No tasks found</p>
-                                <p className="text-xs mt-1">
-                                    {statusFilter === 'pending'
-                                        ? 'You have completed all pending tasks! Great job.'
-                                        : 'No tasks match the active filters.'}
-                                </p>
-                            </div>
-                        ) : (
-                            <ul className="divide-y divide-[#F1F5F9]">
-                                {filteredTasks.map((task) => {
-                                    const isDone = task.status === 'completed';
-                                    const typeConf = TASK_TYPE_CONFIG[task.taskType] || TASK_TYPE_CONFIG.custom;
-                                    const prioConf = PRIORITY_BADGES[task.priority] || PRIORITY_BADGES.medium;
-                                    const dueBadge = formatDueDate(task.dueDate);
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-[#64748B] mt-3">
+                                {card.label}
+                            </p>
+                            <p className="text-2xl font-black text-[#0F172A] mt-0.5 tabular-nums">
+                                {loading ? '—' : card.value}
+                            </p>
+                            <p className="text-xs text-[#94A3B8] mt-0.5 flex items-center gap-1 group-hover:text-orange-600 transition-colors">
+                                {card.hint}
+                                <ChevronRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </p>
+                        </Link>
+                    );
+                })}
+            </div>
 
-                                    return (
-                                        <li
-                                            key={task.id}
-                                            className={cn(
-                                                'p-4 sm:p-5 transition-colors group',
-                                                isDone
-                                                    ? 'bg-emerald-50/40 hover:bg-emerald-50/60 border-l-4 border-l-emerald-500'
-                                                    : 'hover:bg-[#F8FAFC]'
-                                            )}
-                                        >
-                                            <div className="flex items-start justify-between gap-3">
-                                                {}
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                                                        <span className={cn(
-                                                            'inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-black uppercase tracking-wider',
-                                                            typeConf.bg,
-                                                            typeConf.text
-                                                        )}>
-                                                            <span>{typeConf.icon}</span>
-                                                            <span>{typeConf.label}</span>
-                                                        </span>
-
-                                                        <span className={cn(
-                                                            'inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
-                                                            prioConf.bg,
-                                                            prioConf.text
-                                                        )}>
-                                                            <span className={cn('w-1.5 h-1.5 rounded-full', prioConf.dot)} />
-                                                            <span>{prioConf.label}</span>
-                                                        </span>
-
-                                                        {dueBadge && (
-                                                            <span className={cn('inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px]', dueBadge.style)}>
-                                                                <Clock className="w-3 h-3" />
-                                                                <span>{dueBadge.text}</span>
-                                                            </span>
-                                                        )}
-
-                                                        {task.createdByRole === 'admin' ? (
-                                                            <span className="inline-flex items-center gap-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
-                                                                <Shield className="w-2.5 h-2.5 text-purple-600" />
-                                                                Admin Assigned
-                                                            </span>
-                                                        ) : (
-                                                            <span className="inline-flex items-center gap-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
-                                                                <User className="w-2.5 h-2.5 text-slate-500" />
-                                                                Self Task
-                                                            </span>
-                                                        )}
-                                                    </div>
-
-                                                    <h3 className={cn('text-sm font-black tracking-tight', isDone ? 'text-emerald-950 line-through' : 'text-[#0F172A]')}>
-                                                        {task.title}
-                                                    </h3>
-
-                                                    {task.notes && (
-                                                        <div className={cn(
-                                                            "mt-2 p-2.5 rounded-xl text-xs leading-relaxed border flex items-start gap-2",
-                                                            isDone
-                                                                ? "bg-emerald-100/50 text-emerald-950 border-emerald-200"
-                                                                : task.status === 'in_progress'
-                                                                ? "bg-amber-50/80 text-amber-950 border-amber-200/80"
-                                                                : "bg-slate-50 text-slate-700 border-slate-200/80"
-                                                        )}>
-                                                            <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                                                            <p className="whitespace-pre-wrap flex-1">{task.notes}</p>
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                <div className="flex items-center gap-2 shrink-0">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setSelectedHistoryTask(task)}
-                                                        className={cn(
-                                                            "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg border shadow-2xs cursor-pointer hover:shadow-xs hover:scale-105 transition-all group/badge",
-                                                            task.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100" :
-                                                            task.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100" :
-                                                            task.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100" :
-                                                            "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                                                        )}
-                                                        title="Click to view full lead status history timeline"
-                                                    >
-                                                        {task.status === 'completed' && <Check className="w-3 h-3 text-emerald-600" />}
-                                                        {task.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600" />}
-                                                        {task.status === 'cancelled' && <XCircle className="w-3 h-3 text-rose-600" />}
-                                                        {task.status === 'pending' && <RotateCcw className="w-3 h-3 text-slate-500" />}
-                                                        <span className="capitalize">{task.status.replace('_', ' ')}</span>
-                                                        <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100 shrink-0 ml-0.5" />
-                                                    </button>
-
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => handleOpenToggleModal(task, e)}
-                                                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition-all shadow-2xs"
-                                                        title="Update Status"
-                                                    >
-                                                        <span>Update Status</span>
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            {}
-                                            <div className="mt-2.5 pt-2 border-t border-[#F1F5F9] flex flex-wrap items-center justify-between gap-2 text-xs text-[#64748B]">
-                                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                                                    <span className="font-bold text-[#0F172A]">
-                                                        🏢 {task.leadBusinessName || 'Lead'}
-                                                    </span>
-                                                    {task.leadPhone && (
-                                                        <a
-                                                            href={`tel:${task.leadPhone}`}
-                                                            onClick={(e) => e.stopPropagation()}
-                                                            className="text-[#475569] hover:text-[#0F172A] font-semibold flex items-center gap-1"
-                                                        >
-                                                            <Phone className="w-3 h-3 text-[#F59E0B]" />
-                                                            {task.leadPhone}
-                                                        </a>
-                                                    )}
-                                                    {task.leadScoreTotal != null && (
-                                                        <span className="bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.5 rounded text-[10px] font-black">
-                                                            Audit Score: {task.leadScoreTotal}/100
-                                                        </span>
-                                                    )}
-                                                </div>
-
-                                                <div className="flex items-center gap-2 shrink-0">
-                                                    {task.leadReportUrl && (
-                                                        <a
-                                                            href={task.leadReportUrl}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            onClick={(e) => e.stopPropagation()}
-                                                            className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 flex items-center gap-0.5 px-2 py-0.5 bg-indigo-50 border border-indigo-200 rounded-lg"
-                                                        >
-                                                            Audit Report
-                                                            <ArrowUpRight className="w-3 h-3" />
-                                                        </a>
-                                                    )}
-                                                    {task.leadAuditId ? (
-                                                        <>
-                                                            {emailShareStatusLabel(task.emailShareStatus) ? (
-                                                                <span
-                                                                    className={cn(
-                                                                        'text-[10px] font-bold px-2 py-0.5 rounded-lg border',
-                                                                        task.emailShareStatus === 'opened'
-                                                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                                                            : 'bg-slate-50 text-slate-600 border-slate-200'
-                                                                    )}
-                                                                    title={
-                                                                        task.emailShareStatus === 'opened'
-                                                                            ? `Opened${task.emailShareOpenedAt ? ` · ${new Date(task.emailShareOpenedAt).toLocaleString()}` : ''}`
-                                                                            : `Sent${task.emailShareSentAt ? ` · ${new Date(task.emailShareSentAt).toLocaleString()}` : ''}`
-                                                                    }
-                                                                >
-                                                                    {emailShareStatusLabel(task.emailShareStatus)}
-                                                                </span>
-                                                            ) : null}
-                                                            <button
-                                                                type="button"
-                                                                disabled={sharingAuditId === task.leadAuditId}
-                                                                onClick={(e) => handleEmailAuditPdf(task, e)}
-                                                                className="text-[11px] font-bold text-amber-800 hover:text-amber-950 flex items-center gap-0.5 px-2 py-0.5 bg-amber-50 border border-amber-200 rounded-lg disabled:opacity-50"
-                                                                title={
-                                                                    task.leadEmail
-                                                                        ? `Email PDF to ${task.leadEmail}`
-                                                                        : 'Email PDF report to business'
-                                                                }
-                                                            >
-                                                                <Mail
-                                                                    className={cn(
-                                                                        'w-3 h-3',
-                                                                        sharingAuditId === task.leadAuditId &&
-                                                                            'animate-pulse'
-                                                                    )}
-                                                                />
-                                                                Email PDF
-                                                            </button>
-                                                        </>
-                                                    ) : null}
-                                                    <Link
-                                                        to={`/sales/leads/${encodeURIComponent(task.leadId)}`}
-                                                        className="text-[11px] font-bold text-[#0F172A] hover:bg-[#F1F5F9] px-2.5 py-1 bg-white border border-[#E2E8F0] rounded-lg inline-flex items-center gap-1 shadow-2xs"
-                                                    >
-                                                        Open CRM
-                                                        <ChevronRight className="w-3 h-3 text-[#94A3B8]" />
-                                                    </Link>
-                                                </div>
-                                            </div>
-                                        </li>
-                                    );
-                                })}
-                            </ul>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {}
-            {activeTab === 'leads' && (
-                <div className="space-y-4">
-                    {/* Industry Category Filter Pills */}
-                    {industries.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1.5 bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
-                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mr-1">Industry:</span>
-                            <button
-                                type="button"
-                                onClick={() => setSelectedLeadIndustry('all')}
-                                className={cn(
-                                    'px-3 py-1 rounded-xl text-xs font-bold transition-all',
-                                    selectedLeadIndustry === 'all'
-                                        ? 'bg-[#0F172A] text-white shadow-xs'
-                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                )}
-                            >
-                                All Industries
-                            </button>
-                            {industries.map((ind) => (
-                                <button
-                                    key={ind.name}
-                                    type="button"
-                                    onClick={() => setSelectedLeadIndustry(ind.name)}
-                                    className={cn(
-                                        'px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5',
-                                        selectedLeadIndustry === ind.name
-                                            ? 'bg-indigo-600 text-white shadow-xs'
-                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                    )}
-                                >
-                                    <span>{ind.name}</span>
-                                    <span className={cn(
-                                        "text-[10px] px-1.5 py-0.2 rounded-full font-bold",
-                                        selectedLeadIndustry === ind.name ? "bg-white/20 text-white" : "bg-white text-slate-500"
-                                    )}>
-                                        {ind.count}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {shortcuts.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                        <Link
+                            key={item.to}
+                            to={item.to}
+                            className="bg-white border border-[#E2E8F0] rounded-2xl p-4 hover:border-orange-300 hover:bg-[#FFFBF5] transition-all group"
+                        >
+                            <div className="flex items-start justify-between gap-2">
+                                <div className="w-10 h-10 rounded-xl bg-[#FFF7ED] text-orange-600 flex items-center justify-center">
+                                    <Icon className="w-5 h-5" />
+                                </div>
+                                {item.count != null && (
+                                    <span className="text-xs font-black tabular-nums text-[#0F172A] bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-0.5 rounded-lg">
+                                        {loading ? '—' : item.count}
                                     </span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
+                                )}
+                            </div>
+                            <p className="mt-3 text-sm font-black text-[#0F172A] group-hover:text-orange-700 transition-colors">
+                                {item.title}
+                            </p>
+                            <p className="text-xs text-[#64748B] mt-0.5">{item.desc}</p>
+                            <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-orange-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                Open <ArrowRight className="w-3.5 h-3.5" />
+                            </span>
+                        </Link>
+                    );
+                })}
+            </div>
 
-                    <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
-                        {!leads.length ? (
-                            <div className="p-12 text-center text-[#64748B] space-y-3">
-                                <Users className="w-8 h-8 text-[#CBD5E1] mx-auto mb-1" />
-                                <p className="text-sm font-bold text-[#0F172A]">No assigned leads yet</p>
-                                <p className="text-xs text-slate-500">
-                                    When leads are assigned to you by the admin, they will appear here in your pipeline.
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Needs attention */}
+                <section className="lg:col-span-1 bg-white border border-[#E2E8F0] rounded-2xl shadow-2xs overflow-hidden">
+                    <div className="px-4 py-3.5 border-b border-[#E2E8F0] flex items-center justify-between gap-2">
+                        <div>
+                            <h3 className="text-sm font-black text-[#0F172A]">Needs attention</h3>
+                            <p className="text-[11px] text-[#64748B]">
+                                {dateFilter === 'today'
+                                    ? 'Due today & open tasks'
+                                    : dateFilter === 'tomorrow'
+                                    ? 'Tasks due tomorrow'
+                                    : dateFilter === 'this_week'
+                                    ? 'Tasks due next 7 days'
+                                    : dateFilter === 'custom'
+                                    ? `Tasks due ${pillLabel}`
+                                    : 'All pending & open tasks'}
+                            </p>
+                        </div>
+                        <Link
+                            to="/sales/tasks"
+                            className="text-xs font-bold text-orange-600 hover:text-orange-700 inline-flex items-center gap-1"
+                        >
+                            All tasks <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                    </div>
+                    <div className="divide-y divide-[#F1F5F9]">
+                        {loading && !displayedTasks.length ? (
+                            <p className="px-4 py-8 text-sm text-[#64748B] text-center">Loading…</p>
+                        ) : !displayedTasks.length ? (
+                            <div className="px-4 py-8 text-center">
+                                <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
+                                <p className="text-sm font-bold text-[#0F172A]">You&apos;re clear</p>
+                                <p className="text-xs text-[#64748B] mt-1">
+                                    {dateFilter === 'today'
+                                        ? 'No open tasks need attention right now.'
+                                        : `No tasks due for ${pillLabel}.`}
                                 </p>
+                                {dateFilter !== 'today' && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setDateFilter('today')}
+                                        className="mt-2.5 text-xs font-bold text-orange-600 hover:underline cursor-pointer"
+                                    >
+                                        Show Today
+                                    </button>
+                                )}
                             </div>
                         ) : (
-                            <ul className="divide-y divide-[#F1F5F9]">
-                                {leads.map((lead) => (
-                                    <li key={lead.id}>
-                                        <Link
-                                            to={`/sales/leads/${encodeURIComponent(lead.id)}`}
-                                            className="flex flex-wrap items-center justify-between gap-4 px-5 py-4 hover:bg-[#F8FAFC] group transition-colors"
-                                        >
-                                            <div className="flex items-start gap-3.5 min-w-0 flex-1">
-                                                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-[#FFFBEB] to-[#FEF3C7] text-[#D97706] border border-[#FED7AA] flex items-center justify-center shrink-0 shadow-2xs font-bold text-sm">
-                                                    {lead.businessName || lead.name ? (lead.businessName || lead.name || 'L').charAt(0).toUpperCase() : 'L'}
-                                                </div>
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                        <p className="text-sm font-bold text-[#0F172A] truncate group-hover:text-indigo-600 transition-colors">
-                                                            {lead.businessName || lead.name || 'Unnamed Lead'}
-                                                        </p>
-                                                        {lead.industry && (
-                                                            <span className="shrink-0 rounded-md bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
-                                                                {lead.industry}
-                                                            </span>
-                                                        )}
-                                                        {lead.opportunityLevel && (
-                                                            <span className={cn(
-                                                                "shrink-0 rounded-md px-2 py-0.5 text-[10px] font-black uppercase tracking-wider",
-                                                                lead.opportunityLevel === 'high'
-                                                                    ? "bg-emerald-100 text-emerald-800"
-                                                                    : lead.opportunityLevel === 'low'
-                                                                      ? "bg-slate-100 text-slate-600"
-                                                                      : "bg-amber-100 text-amber-800"
-                                                            )}>
-                                                                {lead.opportunityLevel} Opp
-                                                            </span>
-                                                        )}
-                                                        <span className="shrink-0 rounded-md bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#475569]">
-                                                            {STATUS_LABEL[lead.status || ''] || lead.status || 'New'}
-                                                        </span>
-                                                    </div>
-
-                                                    <div className="flex items-center gap-3 text-xs text-[#64748B] flex-wrap mt-1">
-                                                        {lead.phone && (
-                                                            <span className="font-semibold text-slate-800 font-mono">
-                                                                📞 {lead.phone}
-                                                            </span>
-                                                        )}
-                                                        {lead.address && (
-                                                            <span className="truncate max-w-xs text-slate-500">
-                                                                📍 {lead.address}
-                                                            </span>
-                                                        )}
-                                                        {lead.website && (
-                                                            <span className="text-indigo-600 truncate max-w-xs">
-                                                                🌐 {lead.website.replace(/^https?:\/\/(www\.)?/, '')}
-                                                            </span>
-                                                        )}
-                                                    </div>
-
-                                                    {lead.leadOpportunity && (
-                                                        <p className="text-[11px] text-emerald-800 font-medium mt-1 bg-emerald-50/60 px-2 py-0.5 rounded-md border border-emerald-100 inline-block">
-                                                            💡 {lead.leadOpportunity}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div className="flex items-center gap-2 shrink-0">
-                                                <span className="text-xs font-bold text-indigo-600 group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
-                                                    View Lead CRM <ChevronRight className="w-3.5 h-3.5" />
+                            displayedTasks.map((task) => {
+                                const due = formatDueLabel(task.dueDate);
+                                return (
+                                    <Link
+                                        key={task.id}
+                                        to={`/sales/leads/${encodeURIComponent(task.leadId)}`}
+                                        className="flex items-start gap-3 px-4 py-3 hover:bg-[#F8FAFC] transition-colors"
+                                    >
+                                        <span
+                                            className={cn(
+                                                'mt-1.5 w-2 h-2 rounded-full shrink-0',
+                                                PRIORITY_DOT[task.priority] || PRIORITY_DOT.medium
+                                            )}
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-sm font-bold text-[#0F172A] truncate">{task.title}</p>
+                                            <p className="text-xs text-[#64748B] truncate mt-0.5">
+                                                {task.leadBusinessName || 'Lead'}
+                                            </p>
+                                            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                                <span className="text-[10px] font-bold uppercase tracking-wide text-[#64748B] capitalize">
+                                                    {task.status.replace('_', ' ')}
                                                 </span>
+                                                {due && (
+                                                    <span
+                                                        className={cn(
+                                                            'text-[10px] font-bold px-1.5 py-0.5 rounded-md border',
+                                                            due.tone
+                                                        )}
+                                                    >
+                                                        {due.text}
+                                                    </span>
+                                                )}
                                             </div>
-                                        </Link>
-                                    </li>
-                                ))}
-                            </ul>
+                                        </div>
+                                        <ChevronRight className="w-4 h-4 text-[#CBD5E1] shrink-0 mt-1" />
+                                    </Link>
+                                );
+                            })
                         )}
                     </div>
+                </section>
+
+                {/* Pipeline snapshot */}
+                <section className="lg:col-span-1 bg-white border border-[#E2E8F0] rounded-2xl shadow-2xs overflow-hidden">
+                    <div className="px-4 py-3.5 border-b border-[#E2E8F0] flex items-center justify-between gap-2">
+                        <div>
+                            <h3 className="text-sm font-black text-[#0F172A]">Pipeline snapshot</h3>
+                            <p className="text-[11px] text-[#64748B]">Recent leads in your queue</p>
+                        </div>
+                        <Link
+                            to="/sales/customers"
+                            className="text-xs font-bold text-orange-600 hover:text-orange-700 inline-flex items-center gap-1"
+                        >
+                            Customers <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                    </div>
+                    <div className="divide-y divide-[#F1F5F9]">
+                        {loading && !recentLeads.length ? (
+                            <p className="px-4 py-8 text-sm text-[#64748B] text-center">Loading…</p>
+                        ) : !recentLeads.length ? (
+                            <p className="px-4 py-8 text-sm text-[#64748B] text-center">No active leads yet.</p>
+                        ) : (
+                            recentLeads.map((lead) => (
+                                <Link
+                                    key={lead.id}
+                                    to={`/sales/leads/${encodeURIComponent(lead.id)}`}
+                                    className="flex items-center gap-3 px-4 py-3 hover:bg-[#F8FAFC] transition-colors"
+                                >
+                                    <div className="w-9 h-9 rounded-xl bg-[#FFF7ED] text-orange-700 flex items-center justify-center text-xs font-black shrink-0">
+                                        {(lead.businessName || lead.name || '?').slice(0, 1).toUpperCase()}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-bold text-[#0F172A] truncate">
+                                            {lead.businessName || lead.name || 'Untitled lead'}
+                                        </p>
+                                        <p className="text-xs text-[#64748B] truncate mt-0.5">
+                                            {[lead.city, lead.industry].filter(Boolean).join(' · ') || lead.phone || '—'}
+                                        </p>
+                                    </div>
+                                    <span className="text-[10px] font-bold uppercase tracking-wide text-[#64748B] capitalize shrink-0">
+                                        {(lead.status || 'new').replace('_', ' ')}
+                                    </span>
+                                </Link>
+                            ))
+                        )}
+                    </div>
+                </section>
+
+                {/* Recent calls */}
+                <section className="lg:col-span-1 bg-white border border-[#E2E8F0] rounded-2xl shadow-2xs overflow-hidden">
+                    <div className="px-4 py-3.5 border-b border-[#E2E8F0] flex items-center justify-between gap-2">
+                        <div>
+                            <h3 className="text-sm font-black text-[#0F172A]">Recent calls</h3>
+                            <p className="text-[11px] text-[#64748B]">
+                                {dateFilter === 'today'
+                                    ? 'Logged today'
+                                    : dateFilter === 'custom'
+                                    ? `Calls for ${pillLabel}`
+                                    : 'Latest logged conversations'}
+                            </p>
+                        </div>
+                        <Link
+                            to="/sales/calls"
+                            className="text-xs font-bold text-orange-600 hover:text-orange-700 inline-flex items-center gap-1"
+                        >
+                            Call logs <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                    </div>
+                    <div className="divide-y divide-[#F1F5F9]">
+                        {loading && !displayedCalls.length ? (
+                            <p className="px-4 py-8 text-sm text-[#64748B] text-center">Loading…</p>
+                        ) : !displayedCalls.length ? (
+                            <p className="px-4 py-8 text-sm text-[#64748B] text-center">No calls logged for this date.</p>
+                        ) : (
+                            displayedCalls.map((act) => (
+                                <Link
+                                    key={act.id}
+                                    to={`/sales/leads/${encodeURIComponent(act.leadId)}`}
+                                    className="flex items-start gap-3 px-4 py-3 hover:bg-[#F8FAFC] transition-colors"
+                                >
+                                    <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                                        <PhoneCall className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-bold text-[#0F172A] truncate">
+                                            {act.leadBusinessName || 'Lead call'}
+                                        </p>
+                                        <p className="text-xs text-[#64748B] truncate mt-0.5">
+                                            {act.disposition
+                                                ? act.disposition.replace(/_/g, ' ')
+                                                : act.note || 'Call logged'}
+                                        </p>
+                                        <p className="text-[10px] font-semibold text-[#94A3B8] mt-1">
+                                            {formatRelativeTime(act.createdAt)}
+                                        </p>
+                                    </div>
+                                </Link>
+                            ))
+                        )}
+                    </div>
+                </section>
+            </div>
+
+            <div className="rounded-2xl border border-[#E2E8F0] bg-gradient-to-r from-[#0F172A] to-[#1E293B] text-white px-5 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-orange-300">Completed</p>
+                    <p className="text-2xl font-black mt-1 tabular-nums">{loading ? '—' : summary.completedTasksCount}</p>
+                    <p className="text-sm text-white/60 mt-1">Tasks finished across your queue. Keep the momentum going.</p>
                 </div>
-            )}
-
-            {/* Task Update Modal */}
-            <TaskCompletionModal
-                isOpen={!!confirmModalTask}
-                onClose={() => setConfirmModalTask(null)}
-                onConfirm={handleConfirmToggleStatus}
-                taskTitle={confirmModalTask?.task.title || ''}
-                leadName={confirmModalTask?.task.leadBusinessName}
-                priority={confirmModalTask?.task.priority}
-                currentStatus={confirmModalTask?.task.status}
-                initialNotes={confirmModalTask?.task.notes || ''}
-                isCompleting={confirmModalTask?.isCompleting ?? true}
-                loading={modalLoading}
-            />
-
-            {/* Lead Status History Modal */}
-            {selectedHistoryTask && (
-                <LeadStatusHistoryModal
-                    isOpen={Boolean(selectedHistoryTask)}
-                    leadId={selectedHistoryTask.leadId}
-                    leadName={selectedHistoryTask.leadBusinessName || selectedHistoryTask.title}
-                    currentStatus={selectedHistoryTask.status || 'pending'}
-                    initialNote={selectedHistoryTask.notes}
-                    initialDate={selectedHistoryTask.updatedAt || selectedHistoryTask.createdAt}
-                    authorName={(selectedHistoryTask as any).assignedToName || undefined}
-                    readOnly={true}
-                    onClose={() => setSelectedHistoryTask(null)}
-                    onStatusUpdated={async () => {
-                        await loadData();
-                    }}
-                />
-            )}
+                <Link
+                    to="/sales/tasks"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 text-white px-5 py-3 text-sm font-bold hover:bg-orange-400 shrink-0"
+                >
+                    Go to tasks <ArrowRight className="w-4 h-4" />
+                </Link>
+            </div>
         </div>
     );
 }

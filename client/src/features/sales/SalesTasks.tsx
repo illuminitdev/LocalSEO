@@ -204,33 +204,26 @@ export default function SalesTasks() {
 
     return (
         <div className="space-y-6 max-w-6xl mx-auto pb-16 animate-in fade-in duration-300">
-            {}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-r from-[#0F172A] via-[#1E293B] to-[#334155] text-white p-6 rounded-3xl shadow-sm">
+            {/* Page Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
-                    <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-2xl bg-purple-500/20 border border-purple-400/40 flex items-center justify-center text-purple-300">
-                            <Shield className="w-5 h-5" />
-                        </div>
-                        <div>
-                            <h1 className="text-xl font-black tracking-tight text-white">Admin Assigned Tasks</h1>
-                            <p className="text-xs text-slate-300 mt-0.5">
-                                High-priority tasks and lead assignments directed by your administrators.
-                            </p>
-                        </div>
-                    </div>
+                    <h1 className="text-xl sm:text-2xl font-black text-[#0F172A] tracking-tight">
+                        Admin Assigned Tasks
+                    </h1>
+                    <p className="text-xs sm:text-sm text-[#64748B] mt-0.5">
+                        High-priority tasks and lead assignments directed by your administrators.
+                    </p>
                 </div>
 
-                <div className="flex items-center gap-2 self-start sm:self-auto">
-                    <button
-                        type="button"
-                        disabled={loading}
-                        onClick={() => loadData()}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-3.5 py-2 text-xs font-bold text-slate-300 hover:bg-slate-700 disabled:opacity-50 transition-colors shadow-2xs"
-                    >
-                        <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
-                        Refresh
-                    </button>
-                </div>
+                <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => loadData()}
+                    className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E2E8F0] hover:bg-[#F8FAFC] text-[#475569] hover:text-[#0F172A] text-xs font-bold rounded-xl transition-all shadow-2xs disabled:opacity-50 cursor-pointer"
+                >
+                    <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
+                    <span>Refresh</span>
+                </button>
             </div>
 
             {/* Quick Stats Grid */}
