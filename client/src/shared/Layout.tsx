@@ -51,13 +51,38 @@ type NavSection = {
     items: NavItem[];
 };
 
+function AiInsightsIcon({ className = 'w-5 h-5', strokeWidth = 2 }: { className?: string; strokeWidth?: number }) {
+    return (
+        <svg
+            className={className}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            {/* Trend line with circular vertices */}
+            <path d="M3 13L7.5 8.5L12 12L20 4" />
+            <circle cx="3" cy="13" r="1.5" fill="currentColor" />
+            <circle cx="7.5" cy="8.5" r="1.5" fill="currentColor" />
+            <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+            <circle cx="20" cy="4" r="1.5" fill="currentColor" />
+            {/* Vertical bars */}
+            <path d="M3.5 17.5v3" />
+            <path d="M9.5 15.5v5" />
+            <path d="M15.5 13v7.5" />
+        </svg>
+    );
+}
+
 const NAV: NavSection[] = [
     { group: 'Overview', items: [{ name: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, end: true, featurePath: '/dashboard' }] },
     {
         group: 'Track visibility',
         items: [
             { name: 'Local Search Grid', to: '/rank-tracker', icon: MapPin, featurePath: '/rank-tracker' },
-            { name: 'AI Insights', to: '/report', icon: Wand2, featurePath: '/report' },
+            { name: 'AI Insights', to: '/report', icon: AiInsightsIcon, featurePath: '/report' },
         ]
     },
     {
