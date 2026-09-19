@@ -29,6 +29,9 @@ export interface SalesLeadTask {
     leadReportUrl?: string | null;
     leadAuditId?: string | null;
     leadSource?: string;
+    emailShareStatus?: 'none' | 'sent' | 'opened';
+    emailShareSentAt?: string | null;
+    emailShareOpenedAt?: string | null;
 }
 
 export interface SalesLeadActivity {
@@ -77,6 +80,9 @@ export interface SalesUnifiedLead {
     auditId?: string | null;
     reportUrl?: string | null;
     source?: string;
+    emailShareStatus?: 'none' | 'sent' | 'opened';
+    emailShareSentAt?: string | null;
+    emailShareOpenedAt?: string | null;
     assignedTo?: string | null;
     nextFollowUpAt?: string | null;
 }
@@ -254,5 +260,25 @@ export async function confirmAndShareFullAuditEmail(opts: {
     }
     const res = await shareFullAuditEmail(opts.auditId, { email });
     return { to: res.to, attached: res.attached };
+}
+
+export function emailShareStatusLabel(
+    status?: 'none' | 'sent' | 'opened' | null
+): 'Sent' | 'Opened' | null {
+    if (status === 'opened') return 'Opened';
+    if (status === 'sent') return 'Sent';
+    return null;
+}
+
+export function emailShareStatusHint(
+    status?: 'none' | 'sent' | 'opened' | null
+): string {
+    if (status === 'opened') {
+        return 'They opened the email (images loaded) or clicked the report link';
+    }
+    if (status === 'sent') {
+        return 'Waiting — turns Opened when they display images or click “View full audit report”. Opening the PDF attachment alone is not tracked.';
+    }
+    return '';
 }
 

@@ -51,6 +51,13 @@ import {
 import { loadOrgEntitlements } from '../middleware/entitlements';
 import { orgHasBookingTeams } from '../lib/planCatalog';
 import { listBookableMembers } from '../lib/team';
+import {
+    markAuditEmailOpened,
+    isSafeHttpUrl,
+    TRANSPARENT_GIF,
+    ZAPP_EMAIL_LOGO_PNG
+} from '../lib/auditEmailSends';
+import { ensureCrmTables } from '../lib/sales';
 
 function frontendOrigin() {
     return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -1144,6 +1151,54 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             console.error('Book error:', err);
             res.status(500).json({ error: err.message });
         }
+    });
+
+    async function handleEmailOpen(req: Request, res: Response, kind: 'gif' | 'png') {
+        try {
+            await ensureCrmTables();
+            const token = String(req.params.token || '').trim();
+            if (token) {
+                const ok = await markAuditEmailOpened(token).catch(() => false);
+                console.log('[audit-email-open]', kind, token.slice(0, 8), ok ? 'ok' : 'miss');
+            }
+        } catch (err) {
+            console.warn('[audit-email-open] mark failed:', err);
+        }
+        if (kind === 'png') {
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+            res.setHeader('Pragma', 'no-cache');
+            return res.status(200).send(ZAPP_EMAIL_LOGO_PNG);
+        }
+        res.setHeader('Content-Type', 'image/gif');
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        res.setHeader('Pragma', 'no-cache');
+        return res.status(200).send(TRANSPARENT_GIF);
+    }
+
+    // Preferred paths (no ambiguous :token.gif param)
+    router.get('/audit-email-open/:token/logo.png', (req, res) => handleEmailOpen(req, res, 'png'));
+    router.get('/audit-email-open/:token/pixel.gif', (req, res) => handleEmailOpen(req, res, 'gif'));
+    // Legacy fallbacks
+    router.get('/audit-email-open/:token.gif', (req, res) => handleEmailOpen(req, res, 'gif'));
+    router.get('/audit-email-open/:token', (req, res) => handleEmailOpen(req, res, 'gif'));
+
+    router.get('/audit-email-click/:token', async (req: Request, res: Response) => {
+        const token = String(req.params.token || '').trim();
+        const dest = String(req.query.u || '').trim();
+        try {
+            await ensureCrmTables();
+            if (token) {
+                const ok = await markAuditEmailOpened(token).catch(() => false);
+                console.log('[audit-email-click]', token.slice(0, 8), ok ? 'ok' : 'miss');
+            }
+        } catch (err) {
+            console.warn('[audit-email-click] mark failed:', err);
+        }
+        if (isSafeHttpUrl(dest)) {
+            return res.redirect(302, dest);
+        }
+        return res.status(400).send('Invalid link');
     });
 
     return router;
