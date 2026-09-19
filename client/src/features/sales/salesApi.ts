@@ -138,7 +138,7 @@ export async function updateSalesTask(
 }
 
 export async function createSalesTask(task: {
-    lead_id: string;
+    lead_id?: string;
     task_type: SalesTaskType;
     title: string;
     notes?: string;
