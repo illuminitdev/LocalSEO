@@ -6,6 +6,10 @@ function emailFrom() {
     return process.env.BOOKING_EMAIL_FROM || 'info@zappsites.com';
 }
 
+function emailFromAddress() {
+    return `ZappSites <${emailFrom()}>`;
+}
+
 function getSesClient() {
     if (sesClient) return sesClient;
     sesClient = new SESv2Client({
@@ -25,11 +29,12 @@ function formatDeposit(depositAmount: any, currency = 'GBP') {
 
 async function sendMail({ to, subject, text, html }: any) {
     const from = emailFrom();
+    const fromAddress = emailFromAddress();
     try {
         const client = getSesClient();
         await client.send(
             new SendEmailCommand({
-                FromEmailAddress: from,
+                FromEmailAddress: fromAddress,
                 Destination: { ToAddresses: [to] },
                 Content: {
                     Simple: {
@@ -46,7 +51,7 @@ async function sendMail({ to, subject, text, html }: any) {
     } catch (err: any) {
         console.error('[booking-email] SES send failed:', err?.message || err);
         console.log('[booking-email] email logged (not delivered):');
-        console.log(`  From: ${from}`);
+        console.log(`  From: ${fromAddress}`);
         console.log(`  To: ${to}`);
         console.log(`  Subject: ${subject}`);
         console.log(text);
@@ -252,7 +257,8 @@ async function sendMailWithAttachment({
     attachment?: { filename: string; contentType: string; content: Buffer } | null;
 }) {
     const from = emailFrom();
-    const fromHeader = `ZappSites Local SEO <${from}>`;
+    const fromHeader = `ZappSites <${from}>`;
+    const fromAddress = emailFromAddress();
     const boundaryMixed = `mixed_${Date.now().toString(36)}`;
     const boundaryAlt = `alt_${Date.now().toString(36)}`;
 
@@ -334,7 +340,7 @@ async function sendMailWithAttachment({
         const client = getSesClient();
         await client.send(
             new SendEmailCommand({
-                FromEmailAddress: from,
+                FromEmailAddress: fromAddress,
                 Destination: { ToAddresses: [to] },
                 Content: {
                     Raw: {
@@ -352,7 +358,7 @@ async function sendMailWithAttachment({
     } catch (err: any) {
         console.error('[booking-email] SES raw send failed:', err?.message || err);
         console.log('[booking-email] email logged (not delivered):');
-        console.log(`  From: ${from}`);
+        console.log(`  From: ${fromAddress}`);
         console.log(`  To: ${to}`);
         console.log(`  Subject: ${subject}`);
         console.log(text);
@@ -372,7 +378,10 @@ async function sendFullAuditShareEmail({
     score,
     reportUrl,
     pdfBuffer,
-    pdfFilename
+    pdfFilename,
+    openTrackingUrl,
+    logoTrackingUrl,
+    clickTrackingUrl
 }: {
     to: string;
     businessName?: string | null;
@@ -381,11 +390,18 @@ async function sendFullAuditShareEmail({
     reportUrl?: string | null;
     pdfBuffer?: Buffer | null;
     pdfFilename?: string;
+    openTrackingUrl?: string | null;
+    logoTrackingUrl?: string | null;
+    /** Tracked wrapper around reportUrl — marks opened on click, then redirects */
+    clickTrackingUrl?: string | null;
 }) {
     const biz = String(businessName || 'there').trim() || 'there';
     const site = String(website || '').trim();
     const scoreLabel = score != null && Number.isFinite(Number(score)) ? `${Number(score)}/100` : null;
     const report = String(reportUrl || '').trim();
+    const track = String(openTrackingUrl || '').trim();
+    const logoTrack = String(logoTrackingUrl || openTrackingUrl || '').trim();
+    const clickThru = String(clickTrackingUrl || report || '').trim();
     const subject = scoreLabel
         ? `Your Local SEO audit for ${biz} — ${scoreLabel}`
         : `Your Local SEO audit for ${biz}`;
@@ -399,11 +415,11 @@ async function sendFullAuditShareEmail({
         '',
         'There are clear gaps that are likely costing you local visibility and leads.',
         'We have put together a short plan to improve this — your full audit report PDF is attached.',
-        report ? `You can also view the report online: ${report}` : '',
+        report ? `View your report online: ${report}` : '',
         '',
         'Have a look and reply to this email if you would like us to walk you through the next steps.',
         '',
-        '— ZappSites Local SEO'
+        '— ZappSites'
     ]
         .filter((line) => line !== '')
         .join('\n');
@@ -413,29 +429,119 @@ async function sendFullAuditShareEmail({
     const siteHref = site
         ? escapeHtml(/^https?:\/\//i.test(site) ? site : `https://${site}`)
         : '';
+    const safeClick = clickThru && /^https?:\/\//i.test(clickThru) ? escapeHtml(clickThru) : '';
+    const safeScore = scoreLabel ? escapeHtml(scoreLabel) : '';
+    const safeLogo =
+        logoTrack && /^https?:\/\//i.test(logoTrack) ? escapeHtml(logoTrack) : '';
+    const safePixel = track && /^https?:\/\//i.test(track) ? escapeHtml(track) : '';
+
+    const logoImg = safeLogo
+        ? `<img src="${safeLogo}" width="28" height="28" alt="ZappSites" border="0" style="display:block;width:28px;height:28px;border:0;border-radius:6px;background:#F59E0B;" />`
+        : '';
+
+    const pixel = safePixel
+        ? `<img src="${safePixel}" width="1" height="1" alt="" border="0" style="width:1px;height:1px;border:0;display:block;" />`
+        : '';
+
+    const scoreBlock = safeScore
+        ? `
+            <tr>
+              <td align="center" style="padding:0 32px 24px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:12px;">
+                  <tr>
+                    <td style="padding:16px 28px;text-align:center;">
+                      <div style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#92400E;">Local SEO score</div>
+                      <div style="font-size:36px;font-weight:800;color:#0F172A;line-height:1.2;margin-top:4px;">${safeScore}</div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>`
+        : '';
+
+    const siteLine = site
+        ? `We reviewed <a href="${siteHref}" style="color:#0F172A;font-weight:600;text-decoration:underline;">${safeSite}</a>${
+              safeScore ? ` and scored your Local SEO at <strong>${safeScore}</strong>` : ''
+          }.`
+        : `We completed a Local SEO review for your business${
+              safeScore ? ` — your score is <strong>${safeScore}</strong>` : ''
+          }.`;
+
+    const ctaBlock = safeClick
+        ? `
+            <tr>
+              <td align="center" style="padding:8px 32px 28px;">
+                <a href="${safeClick}" style="display:inline-block;background:#F59E0B;color:#0F172A;font-size:15px;font-weight:700;text-decoration:none;padding:14px 28px;border-radius:10px;">
+                  View full audit report
+                </a>
+                <div style="font-size:12px;color:#64748B;margin-top:12px;">PDF is also attached — opening the report link confirms you received this email</div>
+              </td>
+            </tr>`
+        : `
+            <tr>
+              <td align="center" style="padding:8px 32px 28px;">
+                <div style="font-size:13px;color:#64748B;">Your full audit report PDF is attached to this email.</div>
+              </td>
+            </tr>`;
+
     const html = `
-        <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#0F172A;line-height:1.55">
-            <p>Hi ${safeBiz},</p>
-            <p>${
-                site
-                    ? `We reviewed your website (<a href="${siteHref}" style="color:#0F172A">${safeSite}</a>)${
-                          scoreLabel ? ` and your Local SEO score is <strong>${escapeHtml(scoreLabel)}</strong>` : ''
-                      }.`
-                    : `We completed a Local SEO review for your business${
-                          scoreLabel ? ` — your score is <strong>${escapeHtml(scoreLabel)}</strong>` : ''
-                      }.`
-            }</p>
-            <p>There are clear gaps that are likely costing you local visibility and leads.</p>
-            <p>We have put together a short plan to improve this — your full audit report PDF is attached.</p>
-            ${
-                report
-                    ? `<p><a href="${escapeHtml(report)}" style="color:#D97706;font-weight:600">View your audit report online</a></p>`
-                    : ''
-            }
-            <p>Have a look and reply to this email if you would like us to walk you through the next steps.</p>
-            <p style="color:#64748B;margin-top:24px">— ZappSites Local SEO</p>
-        </div>
-    `;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:#F1F5F9;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F1F5F9;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #E2E8F0;">
+          <tr>
+            <td style="background:#0F172A;padding:22px 32px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="padding-right:12px;vertical-align:middle;">${logoImg}</td>
+                  <td style="vertical-align:middle;">
+                    <div style="font-size:18px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">ZappSites</div>
+                    <div style="font-size:12px;color:#94A3B8;margin-top:4px;">Local SEO Audit Report</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 32px 8px;">
+              <p style="margin:0 0 16px;font-size:16px;color:#0F172A;line-height:1.5;">Hi ${safeBiz},</p>
+              <p style="margin:0 0 14px;font-size:15px;color:#334155;line-height:1.6;">${siteLine}</p>
+              <p style="margin:0 0 14px;font-size:15px;color:#334155;line-height:1.6;">
+                There are clear gaps that are likely costing you local visibility and leads.
+                We’ve put together a short plan to improve this — details are in your report.
+              </p>
+            </td>
+          </tr>
+          ${scoreBlock}
+          ${ctaBlock}
+          <tr>
+            <td style="padding:0 32px 28px;">
+              <p style="margin:0;font-size:14px;color:#64748B;line-height:1.55;">
+                Reply to this email if you’d like us to walk you through the next steps.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#F8FAFC;border-top:1px solid #E2E8F0;padding:18px 32px;">
+              <div style="font-size:13px;font-weight:700;color:#0F172A;">ZappSites</div>
+              <div style="font-size:12px;color:#94A3B8;margin-top:2px;">Local SEO for growing businesses</div>
+            </td>
+          </tr>
+        </table>
+        ${pixel}
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 
     const attachment =
         pdfBuffer && pdfBuffer.length
@@ -450,6 +556,10 @@ async function sendFullAuditShareEmail({
         console.warn(
             `[booking-email] PDF too large for SES attachment (${attachment.content.length} bytes); sending link only`
         );
+    }
+
+    if (logoTrack) {
+        console.log('[booking-email] open-track logo', logoTrack.slice(0, 80));
     }
 
     return sendMailWithAttachment({

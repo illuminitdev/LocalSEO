@@ -30,7 +30,9 @@ import {
     fetchSalesLeadCrm,
     updateSalesTask,
     convertLeadToCustomer,
-    confirmAndShareFullAuditEmail
+    confirmAndShareFullAuditEmail,
+    emailShareStatusLabel,
+    emailShareStatusHint
 } from './salesApi';
 import { cn } from '../../shared/utils';
 import {
@@ -72,6 +74,15 @@ export default function SalesLeadDetail() {
     useEffect(() => {
         loadLead();
     }, [loadLead]);
+
+    // While waiting for open, poll so badge turns green without manual refresh
+    useEffect(() => {
+        if (lead?.emailShareStatus !== 'sent') return;
+        const timer = window.setInterval(() => {
+            loadLead();
+        }, 8000);
+        return () => window.clearInterval(timer);
+    }, [lead?.emailShareStatus, loadLead]);
 
     
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask } | null>(null);
@@ -143,6 +154,7 @@ export default function SalesLeadDetail() {
                     ? `Report emailed to ${res.to} (link only — PDF was too large to attach).`
                     : `Report emailed to ${res.to}.`
             );
+            await loadLead();
         } catch (err: any) {
             setError(err.message || 'Could not email audit report');
         } finally {
@@ -216,20 +228,35 @@ export default function SalesLeadDetail() {
                         </a>
                     )}
                     {lead.auditId ? (
-                        <button
-                            type="button"
-                            onClick={handleEmailAuditPdf}
-                            disabled={sharingAudit}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-900 hover:bg-amber-100 text-xs font-bold rounded-xl transition-colors shadow-2xs disabled:opacity-50"
-                            title={
-                                lead.email
-                                    ? `Email PDF to ${lead.email}`
-                                    : 'Email PDF report to business'
-                            }
-                        >
-                            <Mail className={cn('w-3.5 h-3.5', sharingAudit && 'animate-pulse')} />
-                            <span>{sharingAudit ? 'Sending…' : 'Email PDF'}</span>
-                        </button>
+                        <>
+                            {emailShareStatusLabel(lead.emailShareStatus) ? (
+                                <span
+                                    className={cn(
+                                        'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
+                                        lead.emailShareStatus === 'opened'
+                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                                    )}
+                                    title={emailShareStatusHint(lead.emailShareStatus)}
+                                >
+                                    {emailShareStatusLabel(lead.emailShareStatus)}
+                                </span>
+                            ) : null}
+                            <button
+                                type="button"
+                                onClick={handleEmailAuditPdf}
+                                disabled={sharingAudit}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-900 hover:bg-amber-100 text-xs font-bold rounded-xl transition-colors shadow-2xs disabled:opacity-50"
+                                title={
+                                    lead.email
+                                        ? `Email PDF to ${lead.email}`
+                                        : 'Email PDF report to business'
+                                }
+                            >
+                                <Mail className={cn('w-3.5 h-3.5', sharingAudit && 'animate-pulse')} />
+                                <span>{sharingAudit ? 'Sending…' : 'Email PDF'}</span>
+                            </button>
+                        </>
                     ) : null}
                 </div>
             </div>

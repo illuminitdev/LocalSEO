@@ -36,7 +36,8 @@ import {
     fetchSalesSummary,
     fetchSalesLeads,
     fetchSalesIndustries,
-    confirmAndShareFullAuditEmail
+    confirmAndShareFullAuditEmail,
+    emailShareStatusLabel
 } from './salesApi';
 import { cn } from '../../shared/utils';
 
@@ -217,6 +218,7 @@ export default function SalesQueue() {
                     : `Report emailed to ${res.to}.`
             );
             setTimeout(() => setSuccessToast(null), 4000);
+            await loadData();
         } catch (err: any) {
             setError(err.message || 'Could not email audit report');
         } finally {
@@ -642,26 +644,45 @@ export default function SalesQueue() {
                                                         </a>
                                                     )}
                                                     {task.leadAuditId ? (
-                                                        <button
-                                                            type="button"
-                                                            disabled={sharingAuditId === task.leadAuditId}
-                                                            onClick={(e) => handleEmailAuditPdf(task, e)}
-                                                            className="text-[11px] font-bold text-amber-800 hover:text-amber-950 flex items-center gap-0.5 px-2 py-0.5 bg-amber-50 border border-amber-200 rounded-lg disabled:opacity-50"
-                                                            title={
-                                                                task.leadEmail
-                                                                    ? `Email PDF to ${task.leadEmail}`
-                                                                    : 'Email PDF report to business'
-                                                            }
-                                                        >
-                                                            <Mail
-                                                                className={cn(
-                                                                    'w-3 h-3',
-                                                                    sharingAuditId === task.leadAuditId &&
-                                                                        'animate-pulse'
-                                                                )}
-                                                            />
-                                                            Email PDF
-                                                        </button>
+                                                        <>
+                                                            {emailShareStatusLabel(task.emailShareStatus) ? (
+                                                                <span
+                                                                    className={cn(
+                                                                        'text-[10px] font-bold px-2 py-0.5 rounded-lg border',
+                                                                        task.emailShareStatus === 'opened'
+                                                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                                                                    )}
+                                                                    title={
+                                                                        task.emailShareStatus === 'opened'
+                                                                            ? `Opened${task.emailShareOpenedAt ? ` · ${new Date(task.emailShareOpenedAt).toLocaleString()}` : ''}`
+                                                                            : `Sent${task.emailShareSentAt ? ` · ${new Date(task.emailShareSentAt).toLocaleString()}` : ''}`
+                                                                    }
+                                                                >
+                                                                    {emailShareStatusLabel(task.emailShareStatus)}
+                                                                </span>
+                                                            ) : null}
+                                                            <button
+                                                                type="button"
+                                                                disabled={sharingAuditId === task.leadAuditId}
+                                                                onClick={(e) => handleEmailAuditPdf(task, e)}
+                                                                className="text-[11px] font-bold text-amber-800 hover:text-amber-950 flex items-center gap-0.5 px-2 py-0.5 bg-amber-50 border border-amber-200 rounded-lg disabled:opacity-50"
+                                                                title={
+                                                                    task.leadEmail
+                                                                        ? `Email PDF to ${task.leadEmail}`
+                                                                        : 'Email PDF report to business'
+                                                                }
+                                                            >
+                                                                <Mail
+                                                                    className={cn(
+                                                                        'w-3 h-3',
+                                                                        sharingAuditId === task.leadAuditId &&
+                                                                            'animate-pulse'
+                                                                    )}
+                                                                />
+                                                                Email PDF
+                                                            </button>
+                                                        </>
                                                     ) : null}
                                                     <Link
                                                         to={`/sales/leads/${encodeURIComponent(task.leadId)}`}

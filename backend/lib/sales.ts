@@ -118,6 +118,19 @@ export async function ensureCrmTables() {
             ALTER TABLE lead_activities DROP CONSTRAINT IF EXISTS lead_activities_disposition_check;
             CREATE INDEX IF NOT EXISTS idx_lead_activities_lead_id ON lead_activities(lead_id);
             CREATE INDEX IF NOT EXISTS idx_lead_activities_created_at ON lead_activities(created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS audit_email_sends (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                token TEXT NOT NULL UNIQUE,
+                audit_id TEXT NOT NULL,
+                to_email TEXT NOT NULL,
+                sent_by_user_id UUID,
+                sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                opened_at TIMESTAMPTZ,
+                open_count INT NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_email_sends_audit ON audit_email_sends(audit_id, sent_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_audit_email_sends_token ON audit_email_sends(token);
         `);
         crmTablesInitialized = true;
     } catch (err) {

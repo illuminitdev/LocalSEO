@@ -10,6 +10,15 @@ import {
     zappSitesOrigin as zappSitesOriginFromProxy
 } from '../lib/zappSitesAuditProxy';
 import {
+    auditEmailClickTrackingUrl,
+    auditEmailLogoTrackingUrl,
+    auditEmailOpenTrackingUrl,
+    fetchLatestAuditEmailShareMap,
+    newAuditEmailOpenToken,
+    recordAuditEmailSend,
+    shareInfoForAudit
+} from '../lib/auditEmailSends';
+import {
     CALL_OUTCOMES,
     getAssignedLead,
     listAssignedLeads,
@@ -399,9 +408,18 @@ router.get('/tasks', async (req: Request, res: Response) => {
 
         const leadIds = Array.from(new Set(tasks.map((t) => t.leadId)));
         const leadMetaMap = await fetchLeadMetadataMap(leadIds);
+        const auditIds = Array.from(
+            new Set(
+                Array.from(leadMetaMap.values())
+                    .map((m: any) => String(m.auditId || '').trim())
+                    .filter(Boolean)
+            )
+        );
+        const shareMap = await fetchLatestAuditEmailShareMap(auditIds);
 
         const enrichedTasks = tasks.map((t) => {
             const meta = leadMetaMap.get(t.leadId) || {};
+            const share = shareInfoForAudit(shareMap, meta.auditId);
             return {
                 ...t,
                 leadBusinessName: meta.businessName || 'Lead',
@@ -413,7 +431,10 @@ router.get('/tasks', async (req: Request, res: Response) => {
                 leadScoreTotal: meta.scoreTotal ?? null,
                 leadReportUrl: meta.reportUrl || null,
                 leadAuditId: meta.auditId || null,
-                leadSource: meta.source || ''
+                leadSource: meta.source || '',
+                emailShareStatus: share.emailShareStatus,
+                emailShareSentAt: share.emailShareSentAt,
+                emailShareOpenedAt: share.emailShareOpenedAt
             };
         });
 
@@ -639,6 +660,12 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
             reportUrl: null,
             source: ''
         };
+
+        const shareMap = await fetchLatestAuditEmailShareMap(
+            lead.auditId ? [String(lead.auditId)] : []
+        );
+        const share = shareInfoForAudit(shareMap, lead.auditId);
+        Object.assign(lead, share);
 
         const allLeadIds = await resolveAllLeadIds(leadId);
 
@@ -1318,6 +1345,21 @@ router.post('/full-audits/:auditId/share-email', async (req: Request, res: Respo
                 .slice(0, 40)
                 .toLowerCase() || 'audit';
 
+        const openToken = newAuditEmailOpenToken();
+        const openTrackingUrl = auditEmailOpenTrackingUrl(openToken);
+        const logoTrackingUrl = auditEmailLogoTrackingUrl(openToken);
+        const clickTrackingUrl = reportUrl
+            ? auditEmailClickTrackingUrl(openToken, reportUrl)
+            : null;
+
+        // Record before send so an instant open/click can update the row
+        await recordAuditEmailSend({
+            token: openToken,
+            auditId,
+            toEmail: email,
+            sentByUserId: agentId
+        });
+
         const result = await sendFullAuditShareEmail({
             to: email,
             businessName,
@@ -1325,10 +1367,14 @@ router.post('/full-audits/:auditId/share-email', async (req: Request, res: Respo
             score,
             reportUrl,
             pdfBuffer: pdfResult.buffer,
-            pdfFilename: `zappsites-audit-${safeName}.pdf`
+            pdfFilename: `zappsites-audit-${safeName}.pdf`,
+            openTrackingUrl,
+            logoTrackingUrl,
+            clickTrackingUrl
         });
 
         if (!result.sent) {
+            await query(`DELETE FROM audit_email_sends WHERE token = $1`, [openToken]).catch(() => {});
             return res.status(502).json({
                 success: false,
                 error: 'Email could not be delivered via SES. Check sender identity and try again.'
@@ -1339,7 +1385,8 @@ router.post('/full-audits/:auditId/share-email', async (req: Request, res: Respo
             success: true,
             to: email,
             attached: result.attached,
-            reportUrl
+            reportUrl,
+            emailShareStatus: 'sent'
         });
     } catch (err: any) {
         console.error('Sales full-audit share-email error:', err);

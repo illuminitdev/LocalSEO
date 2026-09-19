@@ -7,6 +7,15 @@ import {
     reportPdfUrl,
     reportShareUrl
 } from '../lib/zappSitesAuditProxy';
+import {
+    auditEmailClickTrackingUrl,
+    auditEmailLogoTrackingUrl,
+    auditEmailOpenTrackingUrl,
+    newAuditEmailOpenToken,
+    recordAuditEmailSend
+} from '../lib/auditEmailSends';
+import { ensureCrmTables } from '../lib/sales';
+import { query } from '../lib/db';
 
 const router = Router();
 
@@ -204,6 +213,22 @@ router.post('/full-audits/:id/share-email', requireAdmin, async (req: Request, r
                 .slice(0, 40)
                 .toLowerCase() || 'audit';
 
+        await ensureCrmTables();
+        const adminId = String((req as any).admin?.id || (req as any).user?.id || '') || null;
+        const openToken = newAuditEmailOpenToken();
+        const openTrackingUrl = auditEmailOpenTrackingUrl(openToken);
+        const logoTrackingUrl = auditEmailLogoTrackingUrl(openToken);
+        const clickTrackingUrl = reportUrl
+            ? auditEmailClickTrackingUrl(openToken, reportUrl)
+            : null;
+
+        await recordAuditEmailSend({
+            token: openToken,
+            auditId: id,
+            toEmail: email,
+            sentByUserId: adminId
+        });
+
         const result = await sendFullAuditShareEmail({
             to: email,
             businessName,
@@ -211,10 +236,14 @@ router.post('/full-audits/:id/share-email', requireAdmin, async (req: Request, r
             score,
             reportUrl,
             pdfBuffer: pdfResult.buffer,
-            pdfFilename: `zappsites-audit-${safeName}.pdf`
+            pdfFilename: `zappsites-audit-${safeName}.pdf`,
+            openTrackingUrl,
+            logoTrackingUrl,
+            clickTrackingUrl
         });
 
         if (!result.sent) {
+            await query(`DELETE FROM audit_email_sends WHERE token = $1`, [openToken]).catch(() => {});
             return res.status(502).json({
                 success: false,
                 error: 'Email could not be delivered via SES. Check sender identity and try again.'
@@ -225,7 +254,8 @@ router.post('/full-audits/:id/share-email', requireAdmin, async (req: Request, r
             success: true,
             to: email,
             attached: result.attached,
-            reportUrl
+            reportUrl,
+            emailShareStatus: 'sent'
         });
     } catch (err: any) {
         console.error('Admin full-audit share-email error:', err);
