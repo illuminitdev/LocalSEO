@@ -1,6 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { getToken, isSalesAgent } from '../features/auth/auth';
-import { getAdminToken } from '../features/admin/adminApi';
+import { getAdminToken } from '../admin/adminApi';
 
 
 export function RequireAuth({ children }: { children: React.ReactNode }) {

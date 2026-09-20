@@ -57,7 +57,7 @@ import {
     TRANSPARENT_GIF,
     ZAPP_EMAIL_LOGO_PNG
 } from '../lib/auditEmailSends';
-import { ensureCrmTables } from '../lib/sales';
+import { ensureCrmTables } from '../sales-agent/sales';
 
 function frontendOrigin() {
     return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');

@@ -31,23 +31,23 @@ import Login from './features/auth/Login';
 import { ForgotPassword, ResetPassword } from './features/auth/PasswordReset';
 import Account from './features/account/Account';
 import { Privacy, Terms } from './features/auth/Legal';
-import AdminDashboard from './features/admin/AdminDashboard';
-import AdminUsers from './features/admin/AdminUsers';
-import AdminUserDetail from './features/admin/AdminUserDetail';
-import AdminServices from './features/admin/AdminServices';
-import AdminSettings from './features/admin/AdminSettings';
-import AdminGrowthAuditLeads from './features/admin/AdminGrowthAuditLeads';
-import AdminCrmTasks from './features/admin/AdminCrmTasks';
-import AdminFullAudits from './features/admin/AdminFullAudits';
-import AdminLayout from './features/admin/AdminLayout';
-import SalesLayout from './features/sales/SalesLayout';
-import SalesQueue from './features/sales/SalesQueue';
-import CustomersPage from './features/sales/CustomersPage';
-import SalesTasks from './features/sales/SalesTasks';
-import SalesReminders from './features/sales/SalesReminders';
-import SalesActivityLogs from './features/sales/SalesActivityLogs';
-import SalesLeadDetail from './features/sales/SalesLeadDetail';
-import SalesAccount from './features/sales/SalesAccount';
+import AdminDashboard from './admin/AdminDashboard';
+import AdminUsers from './admin/AdminUsers';
+import AdminUserDetail from './admin/AdminUserDetail';
+import AdminServices from './admin/AdminServices';
+import AdminSettings from './admin/AdminSettings';
+import AdminGrowthAuditLeads from './admin/AdminGrowthAuditLeads';
+import AdminCrmTasks from './admin/AdminCrmTasks';
+import AdminFullAudits from './admin/AdminFullAudits';
+import AdminLayout from './admin/AdminLayout';
+import SalesLayout from './sales-agent/SalesLayout';
+import SalesQueue from './sales-agent/SalesQueue';
+import CustomersPage from './sales-agent/CustomersPage';
+import SalesTasks from './sales-agent/SalesTasks';
+import SalesReminders from './sales-agent/SalesReminders';
+import SalesActivityLogs from './sales-agent/SalesActivityLogs';
+import SalesLeadDetail from './sales-agent/SalesLeadDetail';
+import SalesAccount from './sales-agent/SalesAccount';
 
 
 function BookingSettingsRedirect() {
@@ -81,8 +81,6 @@ export default function App() {
           <Route path="/admin/services" element={<AdminServices />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
         </Route>
-        {
-}
         <Route path="/" element={<Login />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Navigate to="/" replace />} />
