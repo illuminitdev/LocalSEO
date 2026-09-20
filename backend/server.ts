@@ -13,8 +13,8 @@ import { authRateLimit, corsOptions, globalRateLimit, parseJsonBodyFallback, sec
 import createHostRouter from './routes/host';
 import createPublicRouter from './routes/public';
 import authRouter from './routes/auth';
-import adminRouter from './routes/admin';
-import salesRouter from './routes/sales';
+import adminRouter from './admin/routes';
+import salesRouter from './sales-agent/routes';
 import integrationsRouter from './routes/integrations';
 import { migrate } from './lib/db';
 import { loadOrgAppState, saveOrgAppState } from './lib/orgAppState';

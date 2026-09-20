@@ -1,10 +1,10 @@
-﻿import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock, ArrowRight } from 'lucide-react';
 import { API_BASE, apiPost } from '../../shared/utils';
 import { resolveMarketingUrl } from '../../shared/apiConfig';
 import { clearToken, setMustChangePassword, setPlatformRole, setToken } from './auth';
-import { clearAdminToken, setAdminToken } from '../admin/adminApi';
+import { clearAdminToken, setAdminToken } from '../../admin/adminApi';
 import { useEntitlements } from '../../shared/EntitlementsContext';
 import AuthShell from './AuthShell';
 
