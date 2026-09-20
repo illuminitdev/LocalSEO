@@ -985,7 +985,7 @@ export async function checkAiEngineMentions(opts: {
     if (!res.text) {
       return skippedRow(engine, label, res.error || 'No answer');
     }
-    const excerpt = sanitizeLlmExcerpt(res.text, 520);
+    const excerpt = sanitizeLlmExcerpt(res.text, 2000);
     const mentioned = brandMentionedInText(res.text, businessName);
     return {
       engine,

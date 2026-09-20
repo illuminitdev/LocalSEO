@@ -399,7 +399,7 @@ export function publicReportView(audit: AuditRecord | null) {
                 citedHosts: Array.isArray(row?.citedHosts)
                   ? row.citedHosts.map((h: unknown) => String(h)).slice(0, 12)
                   : [],
-                answerExcerpt: String(row?.answerExcerpt || '').slice(0, 800),
+                answerExcerpt: String(row?.answerExcerpt || '').slice(0, 2000),
                 skipped: Boolean(row?.skipped),
                 reason: row?.reason || null,
                 capturedAt: row?.capturedAt || null
