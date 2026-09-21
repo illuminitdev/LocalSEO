@@ -33,6 +33,7 @@ import {
 } from './adminApi';
 import { AUDIT_SERVICE_OPTIONS, resolveAuditService } from './auditServices';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
+import { resolveAuditReportUrl } from '../shared/apiConfig';
 import { cn } from '../shared/utils';
 
 const PAGE_SIZE = 10;
@@ -83,7 +84,7 @@ async function copyText(text: string) {
 }
 
 function auditToLeadRef(a: FullAuditListItem): GrowthAuditLeadRef {
-    const report = a.shareUrl || a.reportUrl || null;
+    const report = resolveAuditReportUrl(a.shareUrl || a.reportUrl || a.id) || null;
     return {
         id: a.id,
         createdAt: a.createdAt,
@@ -193,7 +194,9 @@ export default function AdminFullAudits() {
         try {
             const auditRes = await fetchFullAudit(auditId);
             const data = auditRes.data || {};
-            reportUrl = String(data.shareUrl || data.reportUrl || '').trim();
+            reportUrl = resolveAuditReportUrl(
+                String(data.shareUrl || data.reportUrl || auditId).trim()
+            );
         } catch {
             /* fall through */
         }
@@ -686,7 +689,7 @@ export default function AdminFullAudits() {
 
                 <ul className="divide-y divide-[#F1F5F9]">
                     {pageAudits.map((a) => {
-                        const share = a.shareUrl || a.reportUrl || '';
+                        const share = resolveAuditReportUrl(a.shareUrl || a.reportUrl || a.id);
                         const busy = busyId === a.id;
                         const canShare = Boolean(a.published);
                         return (

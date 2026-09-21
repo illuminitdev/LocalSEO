@@ -158,6 +158,17 @@ export function fallbackPillarDecks(audit) {
     ? audit.gbpLookup.aiEngineChecks
     : [];
   const geoChecklist = audit?.gbpLookup?.geoChecklist || null;
+  const geoPromptTexts = Array.from(
+    new Set(
+      aiEngineChecks
+        .map((e: { prompt?: string }) => String(e?.prompt || '').trim())
+        .filter(Boolean)
+    )
+  );
+  const geoPromptSummary =
+    geoPromptTexts.length > 0
+      ? geoPromptTexts.map((p) => `“${p}”`).join(', ')
+      : `“${measuredQuery}”, “best ${service} in ${city}”, “${service} near me”`;
 
   return {
     localSeoFixes: {
@@ -245,8 +256,8 @@ export function fallbackPillarDecks(audit) {
       title: 'GEO: Google + AI visibility',
       visualIntro:
         'Optimising a business/entity to be mentioned or recommended in generative AI/search experiences such as Google AI Overviews, ChatGPT, Perplexity, etc.',
-      goalLine: `Win the measured query “${measuredQuery}” on Google Local Pack and get cited in ChatGPT / Claude / Gemini answers.`,
-      verifyHint: `Cross-check: search “${measuredQuery}” on Google, and ask ChatGPT / Claude / Gemini the same text.`,
+      goalLine: `Win Local Pack for “${measuredQuery}” and get cited in ChatGPT / Claude / Gemini for ${geoPromptSummary}.`,
+      verifyHint: `Cross-check on Google for “${measuredQuery}”, then ask ChatGPT / Claude / Gemini: ${geoPromptSummary}.`,
       queryCards: mapsResults.length
         ? [
             {
@@ -261,15 +272,23 @@ export function fallbackPillarDecks(audit) {
       aiEngines: aiEngineChecks,
       geoChecklist,
       opportunity: (() => {
-        const mentioned = aiEngineChecks.filter((e) => e && e.mentioned === true).map((e) => e.label);
-        const missed = aiEngineChecks.filter((e) => e && e.mentioned === false).map((e) => e.label);
+        const mentioned = [
+          ...new Set(
+            aiEngineChecks.filter((e) => e && e.mentioned === true).map((e) => e.label).filter(Boolean)
+          )
+        ];
+        const missed = [
+          ...new Set(
+            aiEngineChecks.filter((e) => e && e.mentioned === false).map((e) => e.label).filter(Boolean)
+          )
+        ];
         const googleBit = inPack
           ? `${name} is in the measured Google Local Pack for “${measuredQuery}”.`
           : `${name} is not in the measured Google Local Pack for “${measuredQuery}”.`;
         const aiBit = mentioned.length
-          ? ` Mentioned in ${mentioned.join(' / ')}.`
+          ? ` Mentioned in ${mentioned.join(' / ')} across measured GEO prompts.`
           : missed.length
-            ? ` Not mentioned in ${missed.join(' / ')} for the same prompt.`
+            ? ` Not mentioned in ${missed.join(' / ')} across measured GEO prompts.`
             : ' AI engine checks were unavailable for this run.';
         return `${googleBit}${aiBit}`;
       })(),

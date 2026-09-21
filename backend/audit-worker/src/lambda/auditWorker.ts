@@ -14,7 +14,7 @@ import {
   buildDeepLocalRank,
   captureMapsScreenshotFromTask,
   captureOrganicLocalPackScreenshot,
-  checkAiEngineMentions,
+  checkAiEngineMentionsMulti,
   fetchMapsLocalPack,
   fetchOrganicBrandImages,
   findMatchingMapsItem,
@@ -436,13 +436,19 @@ async function enrichFromDataForSeo(audit: any) {
       }
     }
 
-    // ChatGPT + Claude + Gemini with the same local prompt (cross-checkable)
+    // ChatGPT + Claude + Gemini × three GEO prompts (near / best / near me)
     try {
-      const aiEngineChecks = await checkAiEngineMentions({
-        prompt: measuredQuery,
-        businessName,
-        city: locationLabel || undefined
+      const aiEngineChecks = await checkAiEngineMentionsMulti({
+        service,
+        city: locationLabel || undefined,
+        businessName
       });
+      console.log(
+        '[auditWorker] AI engine checks:',
+        aiEngineChecks.length,
+        'rows,',
+        [...new Set(aiEngineChecks.map((r) => r.promptKey || r.prompt))].join(' | ')
+      );
       audit.gbpLookup = {
         ...(audit.gbpLookup || {}),
         aiEngineChecks
@@ -450,34 +456,30 @@ async function enrichFromDataForSeo(audit: any) {
     } catch (aiErr) {
       const err = aiErr as Error;
       console.warn('[auditWorker] AI engine checks failed:', err.message);
+      const capturedAt = new Date().toISOString();
+      const reason = err.message || 'AI check failed';
+      const fallbackPrompt = measuredQuery || `${service} near ${locationLabel || ''}`.trim();
       audit.gbpLookup = {
         ...(audit.gbpLookup || {}),
-        aiEngineChecks: [
-          {
-            engine: 'chatgpt',
-            label: 'ChatGPT',
-            prompt: measuredQuery,
-            mentioned: null,
-            recommendedLikely: null,
-            citedHosts: [],
-            answerExcerpt: '',
-            skipped: true,
-            reason: err.message || 'AI check failed',
-            capturedAt: new Date().toISOString()
-          },
-          {
-            engine: 'claude',
-            label: 'Claude',
-            prompt: measuredQuery,
-            mentioned: null,
-            recommendedLikely: null,
-            citedHosts: [],
-            answerExcerpt: '',
-            skipped: true,
-            reason: err.message || 'AI check failed',
-            capturedAt: new Date().toISOString()
-          }
-        ]
+        aiEngineChecks: (
+          [
+            ['chatgpt', 'ChatGPT'],
+            ['claude', 'Claude'],
+            ['gemini', 'Gemini']
+          ] as const
+        ).map(([engine, label]) => ({
+          engine,
+          label,
+          prompt: fallbackPrompt,
+          promptKey: 'near' as const,
+          mentioned: null,
+          recommendedLikely: null,
+          citedHosts: [],
+          answerExcerpt: '',
+          skipped: true,
+          reason,
+          capturedAt
+        }))
       };
     }
   }
