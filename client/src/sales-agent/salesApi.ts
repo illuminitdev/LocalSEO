@@ -29,6 +29,7 @@ export interface SalesLeadTask {
     leadReportUrl?: string | null;
     leadAuditId?: string | null;
     leadSource?: string;
+    leadIndustry?: string;
     emailShareStatus?: 'none' | 'sent' | 'opened';
     emailShareSentAt?: string | null;
     emailShareOpenedAt?: string | null;

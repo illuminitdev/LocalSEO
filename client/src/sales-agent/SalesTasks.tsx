@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
     CheckSquare,
@@ -25,6 +25,7 @@ import {
     type SalesTaskStatus,
     type SalesTaskType,
     fetchSalesTasks,
+    fetchSalesIndustries,
     updateSalesTask,
     confirmAndShareFullAuditEmail,
     emailShareStatusLabel
@@ -46,8 +47,29 @@ const PRIORITY_BADGES: Record<SalesTaskPriority, { label: string; bg: string; te
     low: { label: 'Low', bg: 'bg-slate-50 border-slate-200', text: 'text-slate-600', dot: 'bg-slate-400' }
 };
 
+function normalizeTaskIndustry(task: SalesLeadTask): string {
+    const raw = String(task.leadIndustry || '').trim();
+    return raw || 'General';
+}
+
+
+function industryKey(name: string): string {
+    return String(name || '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
+}
+
+function displayIndustryName(name: string): string {
+    const cleaned = String(name || '')
+        .trim()
+        .replace(/\s+/g, ' ');
+    return cleaned || 'General';
+}
+
 export default function SalesTasks() {
     const [tasks, setTasks] = useState<SalesLeadTask[]>([]);
+    const [industries, setIndustries] = useState<Array<{ name: string; count: number }>>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [successToast, setSuccessToast] = useState<string | null>(null);
@@ -58,6 +80,7 @@ export default function SalesTasks() {
     const [priorityFilter, setPriorityFilter] = useState<string>('all');
     const [typeFilter, setTypeFilter] = useState<string>('all');
     const [leadKindFilter, setLeadKindFilter] = useState<'all' | 'full_audit' | 'leads'>('all');
+    const [industryFilter, setIndustryFilter] = useState<string>('all');
     const [dueTodayOnly, setDueTodayOnly] = useState(false);
 
     // Pagination
@@ -74,15 +97,19 @@ export default function SalesTasks() {
         setLoading(true);
         setError('');
         try {
-            const taskList = await fetchSalesTasks({
-                status: statusFilter !== 'all' ? statusFilter : undefined,
-                priority: priorityFilter !== 'all' ? priorityFilter : undefined,
-                taskType: typeFilter !== 'all' ? typeFilter : undefined,
-                createdBy: 'admin',
-                dueToday: dueTodayOnly
-            });
+            const [taskList, industryList] = await Promise.all([
+                fetchSalesTasks({
+                    status: statusFilter !== 'all' ? statusFilter : undefined,
+                    priority: priorityFilter !== 'all' ? priorityFilter : undefined,
+                    taskType: typeFilter !== 'all' ? typeFilter : undefined,
+                    createdBy: 'admin',
+                    dueToday: dueTodayOnly
+                }),
+                fetchSalesIndustries().catch(() => [] as Array<{ name: string; count: number }>)
+            ]);
 
             setTasks(taskList);
+            setIndustries(industryList);
         } catch (err: any) {
             setError(err.message || 'Failed to load assigned tasks');
         } finally {
@@ -184,7 +211,38 @@ export default function SalesTasks() {
     const isFullAuditTask = (t: SalesLeadTask) =>
         String(t.leadSource || '').toLowerCase() === 'full_audit';
 
-    const filteredTasks = tasks.filter((t) => {
+    const industryOptions = useMemo(() => {
+        // key → preferred display name (unique industries only)
+        const byKey = new Map<string, string>();
+        const preferName = (candidate: string) => {
+            const display = displayIndustryName(candidate);
+            const key = industryKey(display);
+            const existing = byKey.get(key);
+            if (!existing) {
+                byKey.set(key, display);
+                return;
+            }
+            // Prefer the nicer/longer label when casing/spacing variants collide
+            if (display.length > existing.length || (display.length === existing.length && display < existing)) {
+                byKey.set(key, display);
+            }
+        };
+        for (const ind of industries) {
+            preferName(String(ind.name || ''));
+        }
+        for (const t of tasks) {
+            preferName(normalizeTaskIndustry(t));
+        }
+        return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    }, [industries, tasks]);
+
+    const industryScopedTasks = useMemo(() => {
+        if (industryFilter === 'all') return tasks;
+        const selected = industryKey(industryFilter);
+        return tasks.filter((t) => industryKey(normalizeTaskIndustry(t)) === selected);
+    }, [tasks, industryFilter]);
+
+    const filteredTasks = industryScopedTasks.filter((t) => {
         if (leadKindFilter === 'full_audit' && !isFullAuditTask(t)) return false;
         if (leadKindFilter === 'leads' && isFullAuditTask(t)) return false;
         if (!searchQuery.trim()) return true;
@@ -194,7 +252,8 @@ export default function SalesTasks() {
             (t.notes && t.notes.toLowerCase().includes(q)) ||
             (t.leadBusinessName && t.leadBusinessName.toLowerCase().includes(q)) ||
             (t.leadPhone && t.leadPhone.includes(q)) ||
-            (t.leadEmail && t.leadEmail.toLowerCase().includes(q))
+            (t.leadEmail && t.leadEmail.toLowerCase().includes(q)) ||
+            normalizeTaskIndustry(t).toLowerCase().includes(q)
         );
     });
 
@@ -205,13 +264,14 @@ export default function SalesTasks() {
 
     const goToPage = (page: number) => setCurrentPage(Math.max(1, Math.min(page, totalPages)));
 
-    const fullAuditCount = tasks.filter(isFullAuditTask).length;
-    const leadsOnlyCount = tasks.length - fullAuditCount;
+    const fullAuditCount = industryScopedTasks.filter(isFullAuditTask).length;
+    const leadsOnlyCount = industryScopedTasks.length - fullAuditCount;
 
-    const pendingCount = tasks.filter((t) => t.status === 'pending').length;
-    const inProgressCount = tasks.filter((t) => t.status === 'in_progress').length;
-    const completedCount = tasks.filter((t) => t.status === 'completed').length;
-    const dueTodayCount = tasks.filter((t) => t.dueDate && t.status !== 'completed' && t.dueDate.startsWith(new Date().toISOString().slice(0, 10))).length;
+    const pendingCount = industryScopedTasks.filter((t) => t.status === 'pending').length;
+    const inProgressCount = industryScopedTasks.filter((t) => t.status === 'in_progress').length;
+    const completedCount = industryScopedTasks.filter((t) => t.status === 'completed').length;
+    const dueTodayCount = industryScopedTasks.filter((t) => t.dueDate && t.status !== 'completed' && t.dueDate.startsWith(new Date().toISOString().slice(0, 10))).length;
+    const totalAssignedCount = industryScopedTasks.length;
 
     return (
         <div className="space-y-6 max-w-6xl mx-auto pb-16 animate-in fade-in duration-300">
@@ -327,7 +387,7 @@ export default function SalesTasks() {
                             <Shield className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-1.5">{tasks.length}</p>
+                    <p className="text-2xl font-black text-[#0F172A] mt-1.5">{totalAssignedCount}</p>
                     <p className="text-[10px] text-[#94A3B8] mt-0.5">From admin team</p>
                 </button>
 
@@ -382,8 +442,8 @@ export default function SalesTasks() {
             )}
 
             {}
-            <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-                <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
+            <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
+                <div className="flex flex-wrap items-center gap-2">
                     <div className="relative flex-1 min-w-[200px] max-w-sm">
                         <Search className="w-4 h-4 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2" />
                         <input
@@ -400,11 +460,25 @@ export default function SalesTasks() {
                         onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                     >
-                        <option value="all">All Statuses ({tasks.length})</option>
-                        <option value="pending">Pending ({tasks.filter((t) => t.status === 'pending').length})</option>
-                        <option value="in_progress">In Progress ({tasks.filter((t) => t.status === 'in_progress').length})</option>
-                        <option value="completed">Completed ({tasks.filter((t) => t.status === 'completed').length})</option>
-                        <option value="cancelled">Cancelled ({tasks.filter((t) => t.status === 'cancelled').length})</option>
+                        <option value="all">All Statuses ({industryScopedTasks.length})</option>
+                        <option value="pending">Pending ({industryScopedTasks.filter((t) => t.status === 'pending').length})</option>
+                        <option value="in_progress">In Progress ({industryScopedTasks.filter((t) => t.status === 'in_progress').length})</option>
+                        <option value="completed">Completed ({industryScopedTasks.filter((t) => t.status === 'completed').length})</option>
+                        <option value="cancelled">Cancelled ({industryScopedTasks.filter((t) => t.status === 'cancelled').length})</option>
+                    </select>
+
+                    <select
+                        value={industryFilter}
+                        onChange={(e) => { setIndustryFilter(e.target.value); setCurrentPage(1); }}
+                        className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none max-w-[200px]"
+                        title="Filter by business / service industry"
+                    >
+                        <option value="all">All Industries ({industryOptions.length})</option>
+                        {industryOptions.map((name) => (
+                            <option key={industryKey(name)} value={name}>
+                                {name}
+                            </option>
+                        ))}
                     </select>
 
                     <select
@@ -441,24 +515,24 @@ export default function SalesTasks() {
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                         title="Filter by lead type"
                     >
-                        <option value="all">All Types ({tasks.length})</option>
+                        <option value="all">All Types ({industryScopedTasks.length})</option>
                         <option value="full_audit">Full Audits ({fullAuditCount})</option>
                         <option value="leads">Leads ({leadsOnlyCount})</option>
                     </select>
-                </div>
 
-                <button
-                    type="button"
-                    onClick={() => { setDueTodayOnly((v) => !v); setCurrentPage(1); }}
-                    className={cn(
-                        'px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors',
-                        dueTodayOnly
-                            ? 'bg-[#F59E0B] text-[#0F172A] border-[#F59E0B]'
-                            : 'bg-white text-[#64748B] border-[#E2E8F0] hover:bg-[#F8FAFC]'
-                    )}
-                >
-                    Due Today Only
-                </button>
+                    <button
+                        type="button"
+                        onClick={() => { setDueTodayOnly((v) => !v); setCurrentPage(1); }}
+                        className={cn(
+                            'px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors shrink-0',
+                            dueTodayOnly
+                                ? 'bg-[#F59E0B] text-[#0F172A] border-[#F59E0B]'
+                                : 'bg-[#F8FAFC] text-[#0F172A] border-[#E2E8F0] hover:bg-white'
+                        )}
+                    >
+                        Due Today Only
+                    </button>
+                </div>
             </div>
 
             {}
@@ -596,6 +670,10 @@ export default function SalesTasks() {
                                                 <span>{task.leadBusinessName || 'Open Lead Profile'}</span>
                                                 <ArrowUpRight className="w-3 h-3 text-amber-500 group-hover/lead:translate-x-0.5 group-hover/lead:-translate-y-0.5 transition-transform" />
                                             </Link>
+
+                                            <span className="inline-flex items-center gap-1 text-[#64748B] font-medium bg-[#F1F5F9] border border-[#E2E8F0] px-2 py-0.5 rounded-md text-[11px]">
+                                                {normalizeTaskIndustry(task)}
+                                            </span>
 
                                             {task.leadPhone && (
                                                 <a

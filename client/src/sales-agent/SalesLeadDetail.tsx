@@ -481,46 +481,59 @@ export default function SalesLeadDetail() {
                 </div>
             </div>
 
-            {/* Observations Section (GBP, AI Visibility, and Conclusion Takeaway) */}
-            {(lead.gbpObservation || lead.aiVisibilityObservation || lead.notes) && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {lead.gbpObservation && (
-                        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs space-y-2">
-                            <div className="flex items-center gap-2 text-indigo-700 font-bold text-xs uppercase tracking-wider">
-                                <Store className="w-4 h-4 text-indigo-600" />
-                                <span>GBP Observation</span>
-                            </div>
-                            <div className="text-xs text-slate-700 whitespace-pre-line leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-100 font-sans">
-                                {lead.gbpObservation}
-                            </div>
-                        </div>
-                    )}
-
-                    {lead.aiVisibilityObservation && (
-                        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs space-y-2">
-                            <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs uppercase tracking-wider">
-                                <Bot className="w-4 h-4 text-emerald-600" />
-                                <span>AI Visibility Observation</span>
-                            </div>
-                            <div className="text-xs text-slate-700 whitespace-pre-line leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-100 font-sans">
-                                {lead.aiVisibilityObservation}
-                            </div>
-                        </div>
-                    )}
-
-                    {lead.notes && (
-                        <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs space-y-2 md:col-span-2 lg:col-span-1">
-                            <div className="flex items-center gap-2 text-amber-700 font-bold text-xs uppercase tracking-wider">
-                                <MessageSquare className="w-4 h-4 text-amber-600" />
-                                <span>Conclusion Takeaway</span>
-                            </div>
-                            <div className="text-xs text-slate-700 whitespace-pre-line leading-relaxed bg-amber-50/50 p-3.5 rounded-xl border border-amber-200/60 font-sans">
-                                {lead.notes}
-                            </div>
-                        </div>
-                    )}
+            {/* Observations Section — always show all three boxes (empty state when no notes) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs space-y-2">
+                    <div className="flex items-center gap-2 text-indigo-700 font-bold text-xs uppercase tracking-wider">
+                        <Store className="w-4 h-4 text-indigo-600" />
+                        <span>GBP Observation</span>
+                    </div>
+                    <div
+                        className={cn(
+                            'text-xs whitespace-pre-line leading-relaxed p-3.5 rounded-xl border font-sans min-h-[4.5rem]',
+                            lead.gbpObservation
+                                ? 'text-slate-700 bg-slate-50 border-slate-100'
+                                : 'text-slate-400 bg-slate-50/60 border-dashed border-slate-200 italic'
+                        )}
+                    >
+                        {lead.gbpObservation || 'No GBP observation notes yet.'}
+                    </div>
                 </div>
-            )}
+
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs space-y-2">
+                    <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs uppercase tracking-wider">
+                        <Bot className="w-4 h-4 text-emerald-600" />
+                        <span>AI Visibility Observation</span>
+                    </div>
+                    <div
+                        className={cn(
+                            'text-xs whitespace-pre-line leading-relaxed p-3.5 rounded-xl border font-sans min-h-[4.5rem]',
+                            lead.aiVisibilityObservation
+                                ? 'text-slate-700 bg-slate-50 border-slate-100'
+                                : 'text-slate-400 bg-slate-50/60 border-dashed border-slate-200 italic'
+                        )}
+                    >
+                        {lead.aiVisibilityObservation || 'No AI visibility notes yet.'}
+                    </div>
+                </div>
+
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs space-y-2 md:col-span-2 lg:col-span-1">
+                    <div className="flex items-center gap-2 text-amber-700 font-bold text-xs uppercase tracking-wider">
+                        <MessageSquare className="w-4 h-4 text-amber-600" />
+                        <span>Conclusion Takeaway</span>
+                    </div>
+                    <div
+                        className={cn(
+                            'text-xs whitespace-pre-line leading-relaxed p-3.5 rounded-xl border font-sans min-h-[4.5rem]',
+                            lead.notes
+                                ? 'text-slate-700 bg-amber-50/50 border-amber-200/60'
+                                : 'text-slate-400 bg-amber-50/30 border-dashed border-amber-200/50 italic'
+                        )}
+                    >
+                        {lead.notes || 'No conclusion takeaway yet.'}
+                    </div>
+                </div>
+            </div>
 
             {/* Two-Column CRM Workspace: Left = Tasks for this Lead, Right = Unified CRM Activity Timeline */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">

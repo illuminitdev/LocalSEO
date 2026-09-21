@@ -432,6 +432,7 @@ router.get('/tasks', async (req: Request, res: Response) => {
                 leadReportUrl: meta.reportUrl || null,
                 leadAuditId: meta.auditId || null,
                 leadSource: meta.source || '',
+                leadIndustry: String(meta.industry || '').trim() || '',
                 emailShareStatus: share.emailShareStatus,
                 emailShareSentAt: share.emailShareSentAt,
                 emailShareOpenedAt: share.emailShareOpenedAt
