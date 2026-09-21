@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import { requireSalesAgent } from '../middleware/auth';
 import { comparePassword, hashPassword } from '../lib/authTokens';
 import { query } from '../lib/db';
@@ -176,7 +177,10 @@ async function fetchLeadMetadataMap(leadIds: string[]) {
                     scoreTotal: null,
                     auditId: null,
                     reportUrl: null,
-                    source: row.source || 'sales_lead'
+                    source: row.source || 'sales_lead',
+                    spreadsheetStatus: row.spreadsheet_status || '',
+                    spreadsheetStatus1: row.spreadsheet_status_1 || '',
+                    spreadsheetStatus2: row.spreadsheet_status_2 || ''
                 });
             }
         } catch {}
@@ -1118,11 +1122,15 @@ router.post('/leads/bulk-import', async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
         const agentId = (req as any).user.id;
-        const { leads } = req.body || {};
+        const { leads, fileName } = req.body || {};
 
         if (!Array.isArray(leads) || !leads.length) {
             return res.status(400).json({ error: 'No leads provided for import.' });
         }
+
+        const resolvedFileName = String(fileName || '').trim() || 'Excel Import';
+        const importBatchId = randomUUID();
+        const importUploadedAt = new Date();
 
         const normalizedLeads = leads.map((item: any) => {
             let rawConclusion =
@@ -1172,11 +1180,18 @@ router.post('/leads/bulk-import', async (req: Request, res: Response) => {
                 opportunityLevel: String(item.opportunityLevel || '').toLowerCase() || 'medium',
                 status: normalizeSpreadsheetStatus(rawStatusVal),
                 notes: String(rawConclusion).trim(),
-                assignedTo: item.assignedTo || agentId
+                assignedTo: item.assignedTo || agentId,
+                spreadsheetStatus: String(item.spreadsheetStatus || '').trim(),
+                spreadsheetStatus1: String(item.spreadsheetStatus1 || '').trim(),
+                spreadsheetStatus2: String(item.spreadsheetStatus2 || '').trim()
             };
         });
 
-        const result = await bulkImportSalesLeads(normalizedLeads, false);
+        const result = await bulkImportSalesLeads(normalizedLeads, false, {
+            fileName: resolvedFileName,
+            importBatchId,
+            importUploadedAt
+        });
 
         res.json(result);
     } catch (err: any) {

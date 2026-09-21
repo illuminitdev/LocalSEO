@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { query } from '../lib/db';
 
 export const LEAD_STATUSES = [
@@ -65,11 +66,18 @@ export async function ensureCrmTables() {
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS opportunity_level TEXT DEFAULT 'medium';
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS is_customer BOOLEAN NOT NULL DEFAULT FALSE;
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS converted_at TIMESTAMPTZ;
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS import_batch_id UUID NULL;
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS import_file_name TEXT NOT NULL DEFAULT '';
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS import_uploaded_at TIMESTAMPTZ NULL;
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status TEXT NOT NULL DEFAULT '';
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status_1 TEXT NOT NULL DEFAULT '';
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status_2 TEXT NOT NULL DEFAULT '';
 
             CREATE INDEX IF NOT EXISTS idx_sales_leads_industry ON sales_leads(industry);
             CREATE INDEX IF NOT EXISTS idx_sales_leads_is_customer ON sales_leads(is_customer);
             CREATE INDEX IF NOT EXISTS idx_sales_leads_opportunity ON sales_leads(opportunity_level);
             CREATE INDEX IF NOT EXISTS idx_sales_leads_phone ON sales_leads(phone);
+            CREATE INDEX IF NOT EXISTS idx_sales_leads_import_batch_id ON sales_leads(import_batch_id);
 
             CREATE TABLE IF NOT EXISTS sales_call_logs (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -160,6 +168,12 @@ function mapLead(row: any) {
         opportunityLevel: row.opportunity_level || 'medium',
         isCustomer: Boolean(row.is_customer),
         convertedAt: row.converted_at || null,
+        importBatchId: row.import_batch_id || null,
+        importFileName: row.import_file_name || '',
+        importUploadedAt: row.import_uploaded_at || null,
+        spreadsheetStatus: row.spreadsheet_status || '',
+        spreadsheetStatus1: row.spreadsheet_status_1 || '',
+        spreadsheetStatus2: row.spreadsheet_status_2 || '',
         createdAt: row.created_at,
         updatedAt: row.updated_at
     };
@@ -489,6 +503,12 @@ export async function createSalesLead(data: {
     assignedTo?: string | null;
     nextFollowUpAt?: string | null;
     createdByAdmin?: boolean;
+    importBatchId?: string | null;
+    importFileName?: string;
+    importUploadedAt?: string | Date | null;
+    spreadsheetStatus?: string;
+    spreadsheetStatus1?: string;
+    spreadsheetStatus2?: string;
 }) {
     await ensureCrmTables();
     const oppLevel = ['high', 'medium', 'low'].includes(String(data.opportunityLevel || '').toLowerCase())
@@ -497,6 +517,14 @@ export async function createSalesLead(data: {
 
     const status = LEAD_STATUSES.includes(data.status as LeadStatus) ? data.status : 'new';
     const assignedTo = sanitizeUuid(data.assignedTo);
+    const importBatchId = sanitizeUuid(data.importBatchId);
+    const status1 = String(data.spreadsheetStatus1 || '').trim();
+    const status2 = String(data.spreadsheetStatus2 || '').trim();
+    const spreadsheetStatus =
+        String(data.spreadsheetStatus || '').trim() ||
+        (status1 && status2 && status1.toLowerCase() !== status2.toLowerCase()
+            ? `${status1} · ${status2}`
+            : status1 || status2);
 
     const isCustomer = status === 'converted';
     const convertedAt = isCustomer ? new Date() : null;
@@ -505,8 +533,10 @@ export async function createSalesLead(data: {
         `INSERT INTO sales_leads (
             name, phone, email, notes, status, source, industry, address, website,
             gbp_observation, ai_visibility_observation, lead_opportunity, opportunity_level,
-            assigned_to, next_follow_up_at, created_by_admin, is_customer, converted_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            assigned_to, next_follow_up_at, created_by_admin, is_customer, converted_at,
+            import_batch_id, import_file_name, import_uploaded_at,
+            spreadsheet_status, spreadsheet_status_1, spreadsheet_status_2
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
         RETURNING *`,
         [
             String(data.name || 'New Lead').trim(),
@@ -526,7 +556,13 @@ export async function createSalesLead(data: {
             data.nextFollowUpAt || null,
             data.createdByAdmin ?? true,
             isCustomer,
-            convertedAt
+            convertedAt,
+            importBatchId,
+            String(data.importFileName || '').trim(),
+            data.importUploadedAt || null,
+            spreadsheetStatus,
+            status1,
+            status2
         ]
     );
 
@@ -550,13 +586,25 @@ export async function bulkImportSalesLeads(
         opportunityLevel?: string;
         assignedTo?: string | null;
         nextFollowUpAt?: string | null;
+        spreadsheetStatus?: string;
+        spreadsheetStatus1?: string;
+        spreadsheetStatus2?: string;
     }>,
-    createdByAdmin = true
+    createdByAdmin = true,
+    opts?: {
+        fileName?: string;
+        importBatchId?: string | null;
+        importUploadedAt?: string | Date | null;
+    }
 ) {
     await ensureCrmTables();
     if (!Array.isArray(leads) || leads.length === 0) {
-        return { count: 0, created: 0, skipped: 0, leads: [] };
+        return { count: 0, created: 0, skipped: 0, leads: [], importBatchId: null as string | null };
     }
+
+    const importBatchId = sanitizeUuid(opts?.importBatchId) || randomUUID();
+    const importFileName = String(opts?.fileName || '').trim();
+    const importUploadedAt = opts?.importUploadedAt || new Date();
 
     let created = 0;
     let skipped = 0;
@@ -645,6 +693,31 @@ export async function bulkImportSalesLeads(
                 params.push(String(item.industry).trim());
                 updates.push(`industry = COALESCE(NULLIF(industry, ''), $${params.length})`);
             }
+            if (item.spreadsheetStatus && String(item.spreadsheetStatus).trim()) {
+                params.push(String(item.spreadsheetStatus).trim());
+                updates.push(`spreadsheet_status = $${params.length}`);
+            }
+            if (item.spreadsheetStatus1 && String(item.spreadsheetStatus1).trim()) {
+                params.push(String(item.spreadsheetStatus1).trim());
+                updates.push(`spreadsheet_status_1 = $${params.length}`);
+            }
+            if (item.spreadsheetStatus2 && String(item.spreadsheetStatus2).trim()) {
+                params.push(String(item.spreadsheetStatus2).trim());
+                updates.push(`spreadsheet_status_2 = $${params.length}`);
+            }
+
+            // Move lead into this upload batch for filter / assign / delete by Excel
+            if (importBatchId) {
+                params.push(importBatchId);
+                updates.push(`import_batch_id = $${params.length}`);
+                params.push(importFileName);
+                updates.push(`import_file_name = $${params.length}`);
+                params.push(importUploadedAt);
+                updates.push(`import_uploaded_at = $${params.length}`);
+                if (!(item.source && String(item.source).trim())) {
+                    updates.push(`source = COALESCE(NULLIF(source, ''), 'excel_import')`);
+                }
+            }
 
             if (updates.length > 1) {
                 const { rows: updatedRows } = await query(
@@ -694,7 +767,13 @@ export async function bulkImportSalesLeads(
             opportunityLevel: oppLevel,
             assignedTo: sanitizeUuid(item.assignedTo),
             nextFollowUpAt: item.nextFollowUpAt || null,
-            createdByAdmin
+            createdByAdmin,
+            importBatchId,
+            importFileName,
+            importUploadedAt,
+            spreadsheetStatus: item.spreadsheetStatus || '',
+            spreadsheetStatus1: item.spreadsheetStatus1 || '',
+            spreadsheetStatus2: item.spreadsheetStatus2 || ''
         });
 
         createdLeads.push(lead);
@@ -716,7 +795,8 @@ export async function bulkImportSalesLeads(
         count: leads.length,
         created,
         skipped,
-        leads: createdLeads
+        leads: createdLeads,
+        importBatchId
     };
 }
 

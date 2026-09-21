@@ -288,6 +288,12 @@ export type AdminCrmLead = {
     assignedAgentName?: string | null;
     assignedAgentEmail?: string | null;
     nextFollowUpAt?: string | null;
+    importBatchId?: string | null;
+    importFileName?: string;
+    importUploadedAt?: string | null;
+    spreadsheetStatus?: string;
+    spreadsheetStatus1?: string;
+    spreadsheetStatus2?: string;
     createdAt: string;
     updatedAt: string;
 };
@@ -315,8 +321,14 @@ export async function createAdminCrmLead(lead: Partial<AdminCrmLead>): Promise<A
     return res.lead;
 }
 
-export async function bulkImportAdminCrmLeads(leads: any[]): Promise<{ count: number; created: number; skipped: number; leads: AdminCrmLead[] }> {
-    return adminPost('/api/admin/crm/leads/bulk-import', { leads });
+export async function bulkImportAdminCrmLeads(
+    leads: any[],
+    meta?: { fileName?: string }
+): Promise<{ count: number; created: number; skipped: number; leads: AdminCrmLead[]; importBatchId?: string | null }> {
+    return adminPost('/api/admin/crm/leads/bulk-import', {
+        leads,
+        fileName: meta?.fileName || ''
+    });
 }
 
 export async function convertAdminCrmLead(leadId: string, note?: string): Promise<{ success: boolean; lead: AdminCrmLead }> {
@@ -363,8 +375,28 @@ export async function updateAdminCrmLead(
     return adminPatch(`/api/admin/crm/leads/${encodeURIComponent(leadId)}`, updates);
 }
 
-export async function deleteAdminExcelLeads(): Promise<{ success: boolean; count: number; message: string }> {
-    return adminDelete('/api/admin/crm/leads/excel');
+export type ExcelImportBatch = {
+    batchId: string;
+    fileName: string;
+    uploadedAt: string | null;
+    leadCount: number;
+};
+
+export async function fetchAdminExcelBatches(): Promise<ExcelImportBatch[]> {
+    const res = await adminGet('/api/admin/crm/leads/excel-batches');
+    return res.batches || [];
+}
+
+export async function deleteAdminExcelLeads(
+    batchId: string
+): Promise<{ success: boolean; count: number; message: string; batchId?: string }> {
+    return adminDelete(`/api/admin/crm/leads/excel?batchId=${encodeURIComponent(batchId)}`);
+}
+
+export async function bulkDeleteAdminCrmLeads(
+    leadIds: string[]
+): Promise<{ success: boolean; count: number; message: string }> {
+    return adminPost('/api/admin/crm/leads/bulk-delete', { leadIds });
 }
 
 export async function deleteAdminCrmLead(leadId: string): Promise<{ success: boolean; id: string }> {

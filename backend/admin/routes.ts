@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import { query } from '../lib/db';
 import { signToken, comparePassword, hashPassword } from '../lib/authTokens';
 import { requireAdmin, adminConfigured, resolveAdminCredentials } from './adminAuth';
@@ -751,7 +752,13 @@ function mapSalesLeadToAdminLead(row: any) {
         notes: row.notes || null,
         assignedTo: row.assigned_to || null,
         assignedAgentName: row.assignedAgentName || row.assigned_agent_name || null,
-        assignedAgentEmail: row.assignedAgentEmail || row.assigned_agent_email || null
+        assignedAgentEmail: row.assignedAgentEmail || row.assigned_agent_email || null,
+        importBatchId: row.import_batch_id || null,
+        importFileName: row.import_file_name || '',
+        importUploadedAt: row.import_uploaded_at || null,
+        spreadsheetStatus: row.spreadsheet_status || '',
+        spreadsheetStatus1: row.spreadsheet_status_1 || '',
+        spreadsheetStatus2: row.spreadsheet_status_2 || ''
     };
 }
 
@@ -2020,11 +2027,15 @@ function normalizeSpreadsheetStatus(rawStatus: any): string {
 router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
-        const { leads } = req.body || {};
+        const { leads, fileName } = req.body || {};
 
         if (!Array.isArray(leads) || !leads.length) {
             return res.status(400).json({ error: 'No leads provided for import.' });
         }
+
+        const importBatchId = randomUUID();
+        const importUploadedAt = new Date();
+        const resolvedFileName = String(fileName || '').trim() || 'Excel Import';
 
         const normalizedLeads = leads.map((item: any) => {
             let rawConclusion =
@@ -2074,11 +2085,18 @@ router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Re
                 opportunityLevel: String(item.opportunityLevel || '').toLowerCase() || 'medium',
                 status: normalizeSpreadsheetStatus(rawStatusVal),
                 notes: String(rawConclusion).trim(),
-                assignedTo: item.assignedTo || null
+                assignedTo: item.assignedTo || null,
+                spreadsheetStatus: String(item.spreadsheetStatus || '').trim(),
+                spreadsheetStatus1: String(item.spreadsheetStatus1 || '').trim(),
+                spreadsheetStatus2: String(item.spreadsheetStatus2 || '').trim()
             };
         });
 
-        const result = await bulkImportSalesLeads(normalizedLeads, true);
+        const result = await bulkImportSalesLeads(normalizedLeads, true, {
+            fileName: resolvedFileName,
+            importBatchId,
+            importUploadedAt
+        });
         res.json(result);
     } catch (err: any) {
         console.error('Admin bulk import error:', err);
@@ -2438,38 +2456,161 @@ router.get('/crm/industries', requireAdmin, async (_req: Request, res: Response)
     }
 });
 
-/** Admin: Delete all leads uploaded from Excel / bulk imports */
-router.delete('/crm/leads/excel', requireAdmin, async (_req: Request, res: Response) => {
+/** Admin: List Excel import batches (for filter / assign / delete by file) */
+router.get('/crm/leads/excel-batches', requireAdmin, async (_req: Request, res: Response) => {
     try {
         await ensureCrmTables();
 
-        // 1. Delete tasks for excel leads
-        await query(`
-            DELETE FROM lead_tasks
-            WHERE lead_id IN (
-                SELECT id::text FROM sales_leads WHERE source = 'excel_import' OR source ILIKE '%excel%'
-            )
-        `).catch(() => {});
-
-        // 2. Delete activities for excel leads
-        await query(`
-            DELETE FROM lead_activities
-            WHERE lead_id IN (
-                SELECT id::text FROM sales_leads WHERE source = 'excel_import' OR source ILIKE '%excel%'
-            )
-        `).catch(() => {});
-
-        // 3. Delete sales leads
-        const { rows } = await query(`
-            DELETE FROM sales_leads
-            WHERE source = 'excel_import' OR source ILIKE '%excel%'
-            RETURNING id
+        const { rows: batches } = await query(`
+            SELECT
+                import_batch_id::text AS "batchId",
+                COALESCE(NULLIF(TRIM(MAX(import_file_name)), ''), 'Excel Import') AS "fileName",
+                MAX(import_uploaded_at) AS "uploadedAt",
+                COUNT(*)::int AS "leadCount"
+            FROM sales_leads
+            WHERE import_batch_id IS NOT NULL
+              AND (source = 'excel_import' OR source ILIKE '%excel%')
+            GROUP BY import_batch_id
+            ORDER BY MAX(import_uploaded_at) DESC NULLS LAST, MAX(created_at) DESC
         `);
 
-        res.json({ success: true, count: rows.length, message: `Successfully deleted ${rows.length} excel leads.` });
+        const { rows: legacyRows } = await query(`
+            SELECT COUNT(*)::int AS count
+            FROM sales_leads
+            WHERE import_batch_id IS NULL
+              AND (source = 'excel_import' OR source ILIKE '%excel%')
+        `);
+        const legacyCount = Number(legacyRows[0]?.count || 0);
+
+        const result = [...batches];
+        if (legacyCount > 0) {
+            result.push({
+                batchId: 'legacy',
+                fileName: 'Older Excel imports',
+                uploadedAt: null,
+                leadCount: legacyCount
+            });
+        }
+
+        res.json({ batches: result });
+    } catch (err: any) {
+        console.error('Admin list excel batches error:', err);
+        res.status(500).json({ error: err.message || 'Failed to load excel batches' });
+    }
+});
+
+/** Admin: Delete leads from one Excel upload batch (not all Excel data) */
+router.delete('/crm/leads/excel', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const batchId = String(req.query.batchId || (req.body as any)?.batchId || '').trim();
+        if (!batchId) {
+            return res.status(400).json({
+                error: 'Select one Excel file (batchId) to delete. Deleting all Excel data at once is not allowed.'
+            });
+        }
+
+        const isLegacy = batchId === 'legacy';
+        if (!isLegacy) {
+            const uuidOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(batchId);
+            if (!uuidOk) {
+                return res.status(400).json({ error: 'Invalid Excel batch id.' });
+            }
+        }
+
+        const leadIdSubquery = isLegacy
+            ? `SELECT id::text FROM sales_leads
+               WHERE import_batch_id IS NULL
+                 AND (source = 'excel_import' OR source ILIKE '%excel%')`
+            : `SELECT id::text FROM sales_leads
+               WHERE import_batch_id = $1::uuid
+                 AND (source = 'excel_import' OR source ILIKE '%excel%')`;
+
+        const params = isLegacy ? [] : [batchId];
+
+        await query(
+            `DELETE FROM lead_tasks WHERE lead_id IN (${leadIdSubquery})`,
+            params
+        ).catch(() => {});
+
+        await query(
+            `DELETE FROM lead_activities WHERE lead_id IN (${leadIdSubquery})`,
+            params
+        ).catch(() => {});
+
+        const { rows } = await query(
+            isLegacy
+                ? `DELETE FROM sales_leads
+                   WHERE import_batch_id IS NULL
+                     AND (source = 'excel_import' OR source ILIKE '%excel%')
+                   RETURNING id`
+                : `DELETE FROM sales_leads
+                   WHERE import_batch_id = $1::uuid
+                     AND (source = 'excel_import' OR source ILIKE '%excel%')
+                   RETURNING id`,
+            params
+        );
+
+        res.json({
+            success: true,
+            count: rows.length,
+            batchId,
+            message: `Successfully deleted ${rows.length} lead(s) from this Excel upload.`
+        });
     } catch (err: any) {
         console.error('Admin delete excel leads error:', err);
         res.status(500).json({ error: err.message || 'Failed to delete excel leads' });
+    }
+});
+
+/** Admin: Bulk delete selected leads (sales_leads and/or submissions) */
+router.post('/crm/leads/bulk-delete', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const rawIds = Array.isArray((req.body as any)?.leadIds) ? (req.body as any).leadIds : [];
+        const leadIds = Array.from(
+            new Set(rawIds.map((id: any) => String(id || '').trim()).filter(Boolean))
+        );
+
+        if (!leadIds.length) {
+            return res.status(400).json({ error: 'No lead IDs provided.' });
+        }
+        if (leadIds.length > 2000) {
+            return res.status(400).json({ error: 'Too many leads selected (max 2000).' });
+        }
+
+        await query(`DELETE FROM lead_tasks WHERE lead_id = ANY($1::text[])`, [leadIds]).catch(() => {});
+        await query(`DELETE FROM lead_activities WHERE lead_id = ANY($1::text[])`, [leadIds]).catch(
+            () => {}
+        );
+
+        const { rows: salesRows } = await query(
+            `DELETE FROM sales_leads WHERE id::text = ANY($1::text[]) RETURNING id::text AS id`,
+            [leadIds]
+        );
+
+        let submissionCount = 0;
+        try {
+            const { rows: subRows } = await query(
+                `DELETE FROM submissions WHERE id::text = ANY($1::text[]) RETURNING id::text AS id`,
+                [leadIds]
+            );
+            submissionCount = subRows.length;
+        } catch {
+            // submissions table may be unavailable in some envs
+        }
+
+        const deletedCount = salesRows.length + submissionCount;
+        res.json({
+            success: true,
+            count: deletedCount,
+            salesLeadsDeleted: salesRows.length,
+            submissionsDeleted: submissionCount,
+            message: `Successfully deleted ${deletedCount} lead(s).`
+        });
+    } catch (err: any) {
+        console.error('Admin bulk delete leads error:', err);
+        res.status(500).json({ error: err.message || 'Failed to delete leads' });
     }
 });
 

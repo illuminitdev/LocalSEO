@@ -356,15 +356,21 @@ export default function SalesLeadDetail() {
                 {/* Current Status & Latest Activity / Remarks Banner */}
                 {(() => {
                     const latestAct = activities && activities.length > 0 ? activities[0] : null;
+                    const status1 = String((lead as any).spreadsheetStatus1 || '').trim();
+                    const status2 = String((lead as any).spreadsheetStatus2 || '').trim();
+                    // Back-compat: older imports only have combined spreadsheetStatus
+                    const combinedSheet = String((lead as any).spreadsheetStatus || '').trim();
+                    const hasSheetStatuses = Boolean(status1 || status2 || combinedSheet);
+                    const crmStatus = String((lead as any).status || latestAct?.disposition || '').trim();
+                    const showCrmPill = Boolean(crmStatus && crmStatus.toLowerCase() !== 'new');
                     const activeNote = (lead as any).salesNotes || (lead as any).notes || latestAct?.note || '';
-                    const activeStatus = (lead as any).status || latestAct?.disposition || '';
                     const activeDate = latestAct?.createdAt || (lead as any).updatedAt || (lead as any).createdAt;
                     const activeAuthor = latestAct?.authorName || (lead as any).assignedAgentName;
 
-                    if (!activeStatus && !activeNote) return null;
+                    if (!hasSheetStatuses && !showCrmPill && !activeNote) return null;
 
                     return (
-                        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-300/80 text-xs text-amber-950 space-y-2 shadow-2xs">
+                        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-300/80 text-xs text-amber-950 space-y-2.5 shadow-2xs">
                             <div className="flex items-center justify-between flex-wrap gap-2">
                                 <div className="flex items-center gap-2">
                                     <div className="w-6 h-6 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center font-bold">
@@ -375,20 +381,30 @@ export default function SalesLeadDetail() {
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    {activeStatus && (
+                                    {showCrmPill && (
                                         <button
                                             type="button"
                                             onClick={() => setShowLeadHistoryModal(true)}
                                             className={cn(
                                                 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border shadow-2xs cursor-pointer hover:scale-105 transition-all group/badge',
-                                                activeStatus.includes('convert') ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200' :
-                                                activeStatus.includes('progress') ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200' :
+                                                crmStatus.includes('convert') ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200' :
+                                                crmStatus.includes('progress') ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200' :
                                                 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
                                             )}
                                             title="Click to view full lead status history timeline"
                                         >
-                                            <span>{activeStatus.replace(/_/g, ' ')}</span>
+                                            <span>{crmStatus.replace(/_/g, ' ')}</span>
                                             <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100" />
+                                        </button>
+                                    )}
+                                    {!showCrmPill && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowLeadHistoryModal(true)}
+                                            className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:text-slate-800"
+                                            title="View status history"
+                                        >
+                                            <History className="w-3.5 h-3.5" />
                                         </button>
                                     )}
                                     {activeDate && (
@@ -406,6 +422,42 @@ export default function SalesLeadDetail() {
                                     )}
                                 </div>
                             </div>
+
+                            {hasSheetStatuses && (
+                                <ul className="space-y-1.5 text-xs text-slate-800 font-semibold leading-relaxed list-none pl-0">
+                                    {status1 ? (
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-amber-700 font-black shrink-0">1.</span>
+                                            <span>
+                                                <span className="text-slate-500 font-bold">Status 1:</span>{' '}
+                                                {status1}
+                                            </span>
+                                        </li>
+                                    ) : null}
+                                    {status2 ? (
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-amber-700 font-black shrink-0">2.</span>
+                                            <span>
+                                                <span className="text-slate-500 font-bold">Status 2:</span>{' '}
+                                                <span className="whitespace-pre-wrap font-medium">{status2}</span>
+                                            </span>
+                                        </li>
+                                    ) : null}
+                                    {!status1 && !status2 && combinedSheet ? (
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-amber-700 font-black shrink-0">•</span>
+                                            <span className="whitespace-pre-wrap font-medium">{combinedSheet}</span>
+                                        </li>
+                                    ) : null}
+                                    {!status1 && !status2 && !combinedSheet ? (
+                                        <li className="flex items-start gap-2 text-slate-500 italic">
+                                            <span className="text-amber-700 font-black shrink-0">•</span>
+                                            <span>No Status 1 / Status 2 from Excel.</span>
+                                        </li>
+                                    ) : null}
+                                </ul>
+                            )}
+
                             {activeNote && (
                                 <div className="flex items-start gap-2 bg-white/90 p-3 rounded-xl border border-amber-200/80 mt-1">
                                     <MessageSquare className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />

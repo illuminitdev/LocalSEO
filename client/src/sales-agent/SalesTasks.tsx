@@ -212,7 +212,6 @@ export default function SalesTasks() {
         String(t.leadSource || '').toLowerCase() === 'full_audit';
 
     const industryOptions = useMemo(() => {
-        // key → preferred display name (unique industries only)
         const byKey = new Map<string, string>();
         const preferName = (candidate: string) => {
             const display = displayIndustryName(candidate);
@@ -222,7 +221,6 @@ export default function SalesTasks() {
                 byKey.set(key, display);
                 return;
             }
-            // Prefer the nicer/longer label when casing/spacing variants collide
             if (display.length > existing.length || (display.length === existing.length && display < existing)) {
                 byKey.set(key, display);
             }
@@ -257,7 +255,7 @@ export default function SalesTasks() {
         );
     });
 
-    // Pagination derived values — reset to page 1 whenever filters produce a new result set
+    
     const totalPages = Math.max(1, Math.ceil(filteredTasks.length / TASKS_PER_PAGE));
     const safePage = Math.min(currentPage, totalPages);
     const pagedTasks = filteredTasks.slice((safePage - 1) * TASKS_PER_PAGE, safePage * TASKS_PER_PAGE);
@@ -297,9 +295,9 @@ export default function SalesTasks() {
                 </button>
             </div>
 
-            {/* Quick Stats Grid */}
+            {}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                {/* Pending */}
+                {}
                 <button
                     type="button"
                     onClick={() => {
