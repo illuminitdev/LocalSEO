@@ -388,11 +388,17 @@ export function publicReportView(audit: AuditRecord | null) {
             const rows = (audit.gbpLookup as Record<string, unknown>).aiEngineChecks;
             if (!Array.isArray(rows)) return [];
             return rows
-              .slice(0, 4)
+              .slice(0, 9)
               .map((row: any) => ({
                 engine: row?.engine || null,
                 label: row?.label || null,
                 prompt: row?.prompt || null,
+                promptKey:
+                  row?.promptKey === 'near' ||
+                  row?.promptKey === 'best' ||
+                  row?.promptKey === 'near_me'
+                    ? row.promptKey
+                    : null,
                 mentioned: typeof row?.mentioned === 'boolean' ? row.mentioned : null,
                 recommendedLikely:
                   typeof row?.recommendedLikely === 'boolean' ? row.recommendedLikely : null,
@@ -415,6 +421,7 @@ export function publicReportView(audit: AuditRecord | null) {
                     items?: Array<{
                       id?: string;
                       label?: string;
+                      definition?: string;
                       status?: string;
                       evidence?: string;
                     }>;
@@ -432,6 +439,7 @@ export function publicReportView(audit: AuditRecord | null) {
                   ? g.items.slice(0, 16).map((it) => ({
                       id: it?.id || null,
                       label: it?.label || null,
+                      definition: String(it?.definition || '').slice(0, 240) || null,
                       status:
                         it?.status === 'yes' || it?.status === 'no' || it?.status === 'unknown'
                           ? it.status

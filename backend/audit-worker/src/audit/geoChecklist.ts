@@ -3,6 +3,7 @@ export type GeoCheckStatus = 'yes' | 'no' | 'unknown';
 export type GeoChecklistItem = {
   id: string;
   label: string;
+  definition?: string;
   status: GeoCheckStatus;
   evidence: string;
 };
@@ -25,6 +26,8 @@ type AiEngine = {
   answerExcerpt?: string;
   skipped?: boolean;
   prompt?: string;
+  promptKey?: 'near' | 'best' | 'near_me' | string | null;
+  recommendedLikely?: boolean | null;
 };
 
 type LocalRank = {
@@ -72,63 +75,198 @@ function statusFromBool(v: boolean | null | undefined, yesEv: string, noEv: stri
   return { status: 'unknown' as const, evidence: unkEv };
 }
 
+function enginesForPromptKey(engines: AiEngine[], key: 'near' | 'best' | 'near_me'): AiEngine[] {
+  const keyed = engines.filter((e) => e.promptKey === key);
+  if (keyed.length) return keyed;
+  // Legacy single-prompt audits: infer from prompt text
+  if (key === 'best') return engines.filter((e) => /\bbest\b/i.test(String(e.prompt || '')));
+  if (key === 'near_me') return engines.filter((e) => /\bnear me\b/i.test(String(e.prompt || '')));
+  if (key === 'near') {
+    const nearish = engines.filter(
+      (e) => /\bnear\b/i.test(String(e.prompt || '')) && !/\bnear me\b/i.test(String(e.prompt || ''))
+    );
+    if (nearish.length) return nearish;
+    // Fall back to all rows when no promptKey (old audits)
+    if (!engines.some((e) => e.promptKey)) return engines;
+  }
+  return [];
+}
+
+function promptSliceStats(slice: AiEngine[]) {
+  const anyMeasured = slice.some((e) => !e.skipped && e.mentioned != null);
+  const anyMentioned = slice.some((e) => e.mentioned === true);
+  return { anyMeasured, anyMentioned };
+}
+
 export const GEO_CHECKLIST_DEFS: Array<{
   groupId: string;
   groupTitle: string;
-  items: Array<{ id: string; label: string }>;
+  items: Array<{ id: string; label: string; definition: string }>;
 }> = [
   {
     groupId: 'ai_visibility',
     groupTitle: 'AI Visibility',
     items: [
-      { id: 'geo_ai_1', label: 'Business mentioned in AI answers' },
-      { id: 'geo_ai_2', label: 'Business recommended for local searches' },
-      { id: 'geo_ai_3', label: 'Service + location visibility' },
-      { id: 'geo_ai_4', label: '"Best" query visibility' },
-      { id: 'geo_ai_5', label: '"Near me" query visibility' },
-      { id: 'geo_ai_6', label: 'Problem/solution query visibility' },
-      { id: 'geo_ai_7', label: 'Competitor mentions in AI answers' },
-      { id: 'geo_ai_8', label: 'AI recommendation position/order' }
+      {
+        id: 'geo_ai_1',
+        label: 'Business mentioned in AI answers',
+        definition: 'Whether ChatGPT, Claude, or Gemini name this business in their replies.'
+      },
+      {
+        id: 'geo_ai_2',
+        label: 'Business recommended for local searches',
+        definition: 'Whether an AI answer uses recommendation language alongside the brand.'
+      },
+      {
+        id: 'geo_ai_3',
+        label: 'Service + location visibility',
+        definition: 'Whether the business appears for a service-near-location style prompt.'
+      },
+      {
+        id: 'geo_ai_4',
+        label: '"Best" query visibility',
+        definition: 'Whether the business appears when users ask for the best provider in the area.'
+      },
+      {
+        id: 'geo_ai_5',
+        label: '"Near me" query visibility',
+        definition: 'Whether the business appears for near-me style prompts.'
+      },
+      {
+        id: 'geo_ai_6',
+        label: 'Problem/solution query visibility',
+        definition: 'Whether the site supports how-to or problem/solution intent that AI may cite.'
+      },
+      {
+        id: 'geo_ai_7',
+        label: 'Competitor mentions in AI answers',
+        definition: 'Whether Local Pack competitors also show up in measured AI answers.'
+      },
+      {
+        id: 'geo_ai_8',
+        label: 'AI recommendation position/order',
+        definition: 'Whether AI answers give a clear ranked order for this brand versus others.'
+      }
     ]
   },
   {
     groupId: 'entity_strength',
     groupTitle: 'Entity Strength',
     items: [
-      { id: 'geo_ent_1', label: 'Business entity correctly identified' },
-      { id: 'geo_ent_2', label: 'Business category correctly identified' },
-      { id: 'geo_ent_3', label: 'Location correctly identified' },
-      { id: 'geo_ent_4', label: 'Services correctly identified' },
-      { id: 'geo_ent_5', label: 'Website correctly associated' },
-      { id: 'geo_ent_6', label: 'Business information consistency' },
-      { id: 'geo_ent_7', label: 'SameAs / entity connections' }
+      {
+        id: 'geo_ent_1',
+        label: 'Business entity correctly identified',
+        definition: 'Whether schema or Maps listing clearly identifies this business as an entity.'
+      },
+      {
+        id: 'geo_ent_2',
+        label: 'Business category correctly identified',
+        definition: 'Whether the category or service type matches what the business offers.'
+      },
+      {
+        id: 'geo_ent_3',
+        label: 'Location correctly identified',
+        definition: 'Whether the business location is correctly associated in Maps or site data.'
+      },
+      {
+        id: 'geo_ent_4',
+        label: 'Services correctly identified',
+        definition: 'Whether services are clearly stated and match what AI/Maps can attribute.'
+      },
+      {
+        id: 'geo_ent_5',
+        label: 'Website correctly associated',
+        definition: 'Whether the official website is linked from GBP or entity signals.'
+      },
+      {
+        id: 'geo_ent_6',
+        label: 'Business information consistency',
+        definition: 'Whether name, phone, and address stay consistent across key sources.'
+      },
+      {
+        id: 'geo_ent_7',
+        label: 'SameAs / entity connections',
+        definition: 'Whether sameAs or social/profile links strengthen the entity graph.'
+      }
     ]
   },
   {
     groupId: 'external_ai_signals',
     groupTitle: 'External AI Signals',
     items: [
-      { id: 'geo_ext_1', label: 'Review-platform presence' },
-      { id: 'geo_ext_2', label: 'Directory presence' },
-      { id: 'geo_ext_3', label: 'Industry mentions' },
-      { id: 'geo_ext_4', label: 'Local publication mentions' },
-      { id: 'geo_ext_5', label: 'Local backlinks' },
-      { id: 'geo_ext_6', label: 'Brand mentions' }
+      {
+        id: 'geo_ext_1',
+        label: 'Review-platform presence',
+        definition: 'Whether review platforms that AI often cites are present for this brand.'
+      },
+      {
+        id: 'geo_ext_2',
+        label: 'Directory presence',
+        definition: 'Whether local directories list the business as a corroborating source.'
+      },
+      {
+        id: 'geo_ext_3',
+        label: 'Industry mentions',
+        definition: 'Whether industry accreditation or association signals are findable.'
+      },
+      {
+        id: 'geo_ext_4',
+        label: 'Local publication mentions',
+        definition: 'Whether local press or publications mention the business.'
+      },
+      {
+        id: 'geo_ext_5',
+        label: 'Local backlinks',
+        definition: 'Whether local sites link to the business as a trust signal.'
+      },
+      {
+        id: 'geo_ext_6',
+        label: 'Brand mentions',
+        definition: 'Whether the brand name appears in AI answers or crawled pages.'
+      }
     ]
   },
   {
     groupId: 'ai_citation',
     groupTitle: 'AI Citation / Source Monitoring',
     items: [
-      { id: 'geo_cite_1', label: 'Sources cited by AI' },
-      { id: 'geo_cite_2', label: 'Website cited' },
-      { id: 'geo_cite_3', label: 'GBP / business data referenced' },
-      { id: 'geo_cite_4', label: 'Third-party sources referenced' },
-      { id: 'geo_cite_5', label: 'Incorrect information detected' },
-      { id: 'geo_cite_6', label: 'Missing information detected' }
+      {
+        id: 'geo_cite_1',
+        label: 'Sources cited by AI',
+        definition: 'Whether measured AI answers include clear source URLs or hosts.'
+      },
+      {
+        id: 'geo_cite_2',
+        label: 'Website cited',
+        definition: 'Whether the business website host appears among AI citations.'
+      },
+      {
+        id: 'geo_cite_3',
+        label: 'GBP / business data referenced',
+        definition: 'Whether AI answers or Maps pack reference Google Business Profile data.'
+      },
+      {
+        id: 'geo_cite_4',
+        label: 'Third-party sources referenced',
+        definition: 'Whether AI answers cite third-party hosts beyond the business site.'
+      },
+      {
+        id: 'geo_cite_5',
+        label: 'Incorrect information detected',
+        definition: 'Whether AI answers contain facts that disagree with known business data.'
+      },
+      {
+        id: 'geo_cite_6',
+        label: 'Missing information detected',
+        definition: 'Whether AI answers omit the business when it should reasonably appear.'
+      }
     ]
   }
 ];
+
+const DEF_BY_ID = new Map(
+  GEO_CHECKLIST_DEFS.flatMap((g) => g.items.map((it) => [it.id, it.definition] as const))
+);
 
 /** Schema rows for checklistSchema (section ai_seo). */
 export function geoChecklistSchemaRows(): Array<{ id: string; label: string; groupTitle: string }> {
@@ -175,11 +313,19 @@ export function buildGeoChecklist(opts: {
   const anyMentioned = engines.some((e) => e.mentioned === true);
   const anyMeasured = engines.some((e) => !e.skipped && e.mentioned != null);
   const combinedText = measured.map((e) => e.answerExcerpt || '').join('\n');
-  const recommended = measured.some((e) => recommendedLikely(e.answerExcerpt || '', e.mentioned === true));
-  const query = String(opts.localRank?.query || measured[0]?.prompt || '').trim();
+  const recommended = measured.some(
+    (e) =>
+      e.recommendedLikely === true ||
+      recommendedLikely(e.answerExcerpt || '', e.mentioned === true)
+  );
+  const nearSlice = enginesForPromptKey(engines, 'near');
+  const bestSlice = enginesForPromptKey(engines, 'best');
+  const nearMeSlice = enginesForPromptKey(engines, 'near_me');
+  const nearStats = promptSliceStats(nearSlice.length ? nearSlice : engines);
+  const bestStats = promptSliceStats(bestSlice);
+  const nearMeStats = promptSliceStats(nearMeSlice.length ? nearMeSlice : nearSlice.length ? nearSlice : engines);
+  const query = String(opts.localRank?.query || nearSlice[0]?.prompt || measured[0]?.prompt || '').trim();
   const inPack = typeof opts.localRank?.position === 'number';
-  const isBestQuery = /\bbest\b/i.test(query);
-  const isNearQuery = /\bnear\b|\bnear me\b/i.test(query);
   const competitors = (opts.localRank?.topResults || [])
     .filter((r) => r?.name && !r.isProspect)
     .map((r) => String(r.name));
@@ -206,9 +352,15 @@ export function buildGeoChecklist(opts: {
     /how to|what (causes|to do)|signs of|get rid of|problem|solution|faq/i.test(corpus) &&
     (opts.crawl as any)?.hasFaq !== false;
 
-  const item = (id: string, label: string, status: GeoCheckStatus, evidence: string): GeoChecklistItem => ({
+  const item = (
+    id: string,
+    label: string,
+    status: GeoCheckStatus,
+    evidence: string
+  ): GeoChecklistItem => ({
     id,
     label,
+    definition: DEF_BY_ID.get(id),
     status,
     evidence
   });
@@ -233,11 +385,11 @@ export function buildGeoChecklist(opts: {
       return item('geo_ai_2', 'Business recommended for local searches', s.status, s.evidence);
     })(),
     (() => {
-      const hasServiceLoc = Boolean(service && city && (anyMentioned || inPack));
+      const hasServiceLoc = Boolean(service && city && (nearStats.anyMentioned || inPack));
       const s = statusFromBool(
-        service && city ? hasServiceLoc : null,
-        inPack || anyMentioned
-          ? `Service/location signals present for “${query || `${service} near ${city}`}”`
+        service && city ? (nearStats.anyMeasured || inPack ? hasServiceLoc : null) : null,
+        inPack || nearStats.anyMentioned
+          ? `Service/location signals present for “${nearSlice[0]?.prompt || query || `${service} near ${city}`}”`
           : 'Service + location not visible in measured AI / Maps',
         'Not visible for service + location in measured AI / Maps',
         'Service or location not provided'
@@ -245,42 +397,44 @@ export function buildGeoChecklist(opts: {
       return item('geo_ai_3', 'Service + location visibility', s.status, s.evidence);
     })(),
     (() => {
-      if (!isBestQuery && !/best/i.test(query)) {
+      if (!bestSlice.length && !bestStats.anyMeasured) {
         return item(
           'geo_ai_4',
           '"Best" query visibility',
           'unknown',
-          'Measured query is not a “best …” query'
+          '“Best” style prompt not measured yet'
         );
       }
       const s = statusFromBool(
-        anyMentioned || inPack,
-        anyMentioned || inPack ? 'Visible for measured “best” style query' : 'Not visible',
-        'Not visible for measured “best” style query',
-        'Not measured'
+        bestStats.anyMeasured ? bestStats.anyMentioned : null,
+        bestStats.anyMentioned
+          ? `Mentioned for “${bestSlice[0]?.prompt || 'best …'}”`
+          : 'Visible for measured “best” style query',
+        `Not mentioned for “${bestSlice[0]?.prompt || 'best …'}”`,
+        '“Best” style prompt not measured yet'
       );
       return item('geo_ai_4', '"Best" query visibility', s.status, s.evidence);
     })(),
     (() => {
-      if (!isNearQuery) {
+      const slice = nearMeSlice.length ? nearMeSlice : nearSlice;
+      const stats = nearMeSlice.length ? nearMeStats : nearStats;
+      if (!slice.length && !stats.anyMeasured && !inPack) {
         return item(
           'geo_ai_5',
           '"Near me" query visibility',
-          inPack ? 'yes' : anyMeasured ? (anyMentioned ? 'yes' : 'no') : 'unknown',
-          inPack
-            ? `In Local Pack for “${query}”`
-            : anyMeasured
-              ? anyMentioned
-                ? 'Mentioned for near-style prompt'
-                : 'Not mentioned for near-style prompt'
-              : 'Near-me visibility not measured'
+          'unknown',
+          'Near-me visibility not measured'
         );
       }
       const s = statusFromBool(
-        inPack || anyMentioned,
-        inPack ? `Local Pack #${opts.localRank?.position}` : 'Mentioned in AI for near-me style prompt',
-        'Not in Local Pack / AI for near-me style query',
-        'Not measured'
+        inPack || stats.anyMeasured ? Boolean(inPack || stats.anyMentioned) : null,
+        inPack
+          ? `In Local Pack for “${query}”`
+          : stats.anyMentioned
+            ? `Mentioned for “${slice[0]?.prompt || 'near me'}”`
+            : 'Mentioned for near-me style prompt',
+        `Not mentioned for “${slice[0]?.prompt || 'near me'}”`,
+        'Near-me visibility not measured'
       );
       return item('geo_ai_5', '"Near me" query visibility', s.status, s.evidence);
     })(),

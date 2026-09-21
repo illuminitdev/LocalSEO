@@ -719,10 +719,13 @@ export function buildDeepLocalRank(opts: {
   };
 }
 
+export type GeoAiPromptKey = 'near' | 'best' | 'near_me';
+
 export type AiEngineCheckResult = {
   engine: 'chatgpt' | 'claude' | 'gemini';
   label: string;
   prompt: string;
+  promptKey?: GeoAiPromptKey;
   mentioned: boolean | null;
   recommendedLikely?: boolean | null;
   citedHosts?: string[];
@@ -731,6 +734,23 @@ export type AiEngineCheckResult = {
   reason?: string;
   capturedAt?: string;
 };
+
+/** Three GEO prompts asked of ChatGPT / Claude / Gemini for cross-checkable visibility. */
+export function buildGeoAiPrompts(opts: {
+  service?: string;
+  city?: string;
+}): Array<{ key: GeoAiPromptKey; prompt: string }> {
+  const service = String(opts.service || 'local business').replace(/\s+/g, ' ').trim() || 'local business';
+  const city = String(opts.city || '').replace(/\s+/g, ' ').trim();
+  const near = city ? `${service} near ${city}` : `${service} near me`;
+  const best = city ? `best ${service} in ${city}` : `best ${service}`;
+  const nearMe = `${service} near me`;
+  return [
+    { key: 'near', prompt: near },
+    { key: 'best', prompt: best },
+    { key: 'near_me', prompt: nearMe }
+  ];
+}
 
 function extractCitedHostsFromText(text: string): string[] {
   const out = new Set<string>();
@@ -921,10 +941,12 @@ export async function checkAiEngineMentions(opts: {
   prompt: string;
   businessName: string;
   city?: string;
+  promptKey?: GeoAiPromptKey;
 }): Promise<AiEngineCheckResult[]> {
   const prompt = String(opts.prompt || '').trim();
   const businessName = String(opts.businessName || '').trim();
   const city = String(opts.city || '').trim() || undefined;
+  const promptKey = opts.promptKey;
   const capturedAt = new Date().toISOString();
 
   const skippedRow = (
@@ -935,6 +957,7 @@ export async function checkAiEngineMentions(opts: {
     engine,
     label,
     prompt,
+    promptKey,
     mentioned: null,
     recommendedLikely: null,
     citedHosts: [],
@@ -991,6 +1014,7 @@ export async function checkAiEngineMentions(opts: {
       engine,
       label,
       prompt,
+      promptKey,
       mentioned,
       recommendedLikely: recommendedLikelyInText(res.text, mentioned),
       citedHosts: extractCitedHostsFromText(res.text),
@@ -1004,4 +1028,30 @@ export async function checkAiEngineMentions(opts: {
     toRow('claude', 'Claude', claude),
     toRow('gemini', 'Gemini', gemini)
   ];
+}
+
+/**
+ * Run the three GEO prompts against ChatGPT, Claude, and Gemini (9 rows).
+ * Soft-fails per engine/prompt if the API is unavailable.
+ * Prompts run sequentially to reduce DataForSEO rate-limit / timeout risk.
+ */
+export async function checkAiEngineMentionsMulti(opts: {
+  service?: string;
+  city?: string;
+  businessName: string;
+}): Promise<AiEngineCheckResult[]> {
+  const businessName = String(opts.businessName || '').trim();
+  const city = String(opts.city || '').trim() || undefined;
+  const prompts = buildGeoAiPrompts({ service: opts.service, city });
+  const out: AiEngineCheckResult[] = [];
+  for (const { key, prompt } of prompts) {
+    const batch = await checkAiEngineMentions({
+      prompt,
+      businessName,
+      city,
+      promptKey: key
+    });
+    out.push(...batch);
+  }
+  return out;
 }
