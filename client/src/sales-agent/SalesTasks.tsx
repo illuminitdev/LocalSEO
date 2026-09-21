@@ -60,6 +60,10 @@ export default function SalesTasks() {
     const [leadKindFilter, setLeadKindFilter] = useState<'all' | 'full_audit' | 'leads'>('all');
     const [dueTodayOnly, setDueTodayOnly] = useState(false);
 
+    // Pagination
+    const TASKS_PER_PAGE = 10;
+    const [currentPage, setCurrentPage] = useState(1);
+
     
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask; isCompleting: boolean } | null>(null);
     const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
@@ -194,6 +198,13 @@ export default function SalesTasks() {
         );
     });
 
+    // Pagination derived values — reset to page 1 whenever filters produce a new result set
+    const totalPages = Math.max(1, Math.ceil(filteredTasks.length / TASKS_PER_PAGE));
+    const safePage = Math.min(currentPage, totalPages);
+    const pagedTasks = filteredTasks.slice((safePage - 1) * TASKS_PER_PAGE, safePage * TASKS_PER_PAGE);
+
+    const goToPage = (page: number) => setCurrentPage(Math.max(1, Math.min(page, totalPages)));
+
     const fullAuditCount = tasks.filter(isFullAuditTask).length;
     const leadsOnlyCount = tasks.length - fullAuditCount;
 
@@ -234,6 +245,7 @@ export default function SalesTasks() {
                     onClick={() => {
                         setStatusFilter(statusFilter === 'pending' ? 'all' : 'pending');
                         setDueTodayOnly(false);
+                        setCurrentPage(1);
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-slate-300",
@@ -256,6 +268,7 @@ export default function SalesTasks() {
                     onClick={() => {
                         setStatusFilter(statusFilter === 'in_progress' ? 'all' : 'in_progress');
                         setDueTodayOnly(false);
+                        setCurrentPage(1);
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-amber-300",
@@ -278,6 +291,7 @@ export default function SalesTasks() {
                     onClick={() => {
                         setStatusFilter(statusFilter === 'completed' ? 'all' : 'completed');
                         setDueTodayOnly(false);
+                        setCurrentPage(1);
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-emerald-300",
@@ -300,6 +314,7 @@ export default function SalesTasks() {
                     onClick={() => {
                         setStatusFilter('all');
                         setDueTodayOnly(false);
+                        setCurrentPage(1);
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-purple-300",
@@ -322,6 +337,7 @@ export default function SalesTasks() {
                     onClick={() => {
                         setDueTodayOnly(!dueTodayOnly);
                         if (!dueTodayOnly) setStatusFilter('all');
+                        setCurrentPage(1);
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-rose-300",
@@ -381,7 +397,7 @@ export default function SalesTasks() {
 
                     <select
                         value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
+                        onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                     >
                         <option value="all">All Statuses ({tasks.length})</option>
@@ -393,7 +409,7 @@ export default function SalesTasks() {
 
                     <select
                         value={priorityFilter}
-                        onChange={(e) => setPriorityFilter(e.target.value)}
+                        onChange={(e) => { setPriorityFilter(e.target.value); setCurrentPage(1); }}
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                     >
                         <option value="all">All Priorities</option>
@@ -405,7 +421,7 @@ export default function SalesTasks() {
 
                     <select
                         value={typeFilter}
-                        onChange={(e) => setTypeFilter(e.target.value)}
+                        onChange={(e) => { setTypeFilter(e.target.value); setCurrentPage(1); }}
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                     >
                         <option value="all">All Task Types</option>
@@ -418,9 +434,10 @@ export default function SalesTasks() {
 
                     <select
                         value={leadKindFilter}
-                        onChange={(e) =>
-                            setLeadKindFilter(e.target.value as 'all' | 'full_audit' | 'leads')
-                        }
+                        onChange={(e) => {
+                            setLeadKindFilter(e.target.value as 'all' | 'full_audit' | 'leads');
+                            setCurrentPage(1);
+                        }}
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                         title="Filter by lead type"
                     >
@@ -432,7 +449,7 @@ export default function SalesTasks() {
 
                 <button
                     type="button"
-                    onClick={() => setDueTodayOnly((v) => !v)}
+                    onClick={() => { setDueTodayOnly((v) => !v); setCurrentPage(1); }}
                     className={cn(
                         'px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors',
                         dueTodayOnly
@@ -463,7 +480,7 @@ export default function SalesTasks() {
                     </div>
                 ) : (
                     <ul className="divide-y divide-[#F1F5F9]">
-                        {filteredTasks.map((task) => {
+                        {pagedTasks.map((task) => {
                             const isDone = task.status === 'completed';
                             const typeConf = TASK_TYPE_CONFIG[task.taskType] || TASK_TYPE_CONFIG.custom;
                             const prioConf = PRIORITY_BADGES[task.priority] || PRIORITY_BADGES.medium;
@@ -648,6 +665,73 @@ export default function SalesTasks() {
                                 );
                             })}
                     </ul>
+                )}
+
+                {/* Pagination Footer */}
+                {filteredTasks.length > TASKS_PER_PAGE && (
+                    <div className="flex items-center justify-between px-5 py-3 border-t border-[#F1F5F9] bg-[#F8FAFC]">
+                        <p className="text-xs text-[#64748B] font-medium">
+                            Showing{' '}
+                            <span className="font-bold text-[#0F172A]">
+                                {(safePage - 1) * TASKS_PER_PAGE + 1}–{Math.min(safePage * TASKS_PER_PAGE, filteredTasks.length)}
+                            </span>{' '}
+                            of{' '}
+                            <span className="font-bold text-[#0F172A]">{filteredTasks.length}</span> tasks
+                        </p>
+
+                        <div className="flex items-center gap-1.5">
+                            {/* Previous */}
+                            <button
+                                type="button"
+                                disabled={safePage <= 1}
+                                onClick={() => goToPage(safePage - 1)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-xl border border-[#E2E8F0] bg-white text-[#475569] hover:bg-[#F1F5F9] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                            >
+                                ← Prev
+                            </button>
+
+                            {/* Page numbers */}
+                            {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                .filter((p) => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
+                                .reduce<(number | '...')[]>((acc, p, idx, arr) => {
+                                    if (idx > 0 && typeof arr[idx - 1] === 'number' && (p as number) - (arr[idx - 1] as number) > 1) {
+                                        acc.push('...');
+                                    }
+                                    acc.push(p);
+                                    return acc;
+                                }, [])
+                                .map((item, idx) =>
+                                    item === '...' ? (
+                                        <span key={`ellipsis-${idx}`} className="px-1.5 text-xs text-[#94A3B8] font-bold">…</span>
+                                    ) : (
+                                        <button
+                                            key={item}
+                                            type="button"
+                                            onClick={() => goToPage(item as number)}
+                                            className={cn(
+                                                'min-w-[30px] h-[30px] flex items-center justify-center text-xs font-bold rounded-xl border transition-all',
+                                                safePage === item
+                                                    ? 'bg-[#F59E0B] text-white border-[#F59E0B] shadow-sm'
+                                                    : 'bg-white text-[#475569] border-[#E2E8F0] hover:bg-[#F1F5F9]'
+                                            )}
+                                        >
+                                            {item}
+                                        </button>
+                                    )
+                                )
+                            }
+
+                            {/* Next */}
+                            <button
+                                type="button"
+                                disabled={safePage >= totalPages}
+                                onClick={() => goToPage(safePage + 1)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-xl border border-[#E2E8F0] bg-white text-[#475569] hover:bg-[#F1F5F9] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                            >
+                                Next →
+                            </button>
+                        </div>
+                    </div>
                 )}
             </div>
 
