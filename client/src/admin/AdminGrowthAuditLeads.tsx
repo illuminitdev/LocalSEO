@@ -29,7 +29,10 @@ import {
     bulkImportAdminCrmLeads,
     createAdminCrmLead,
     deleteAdminExcelLeads,
-    deleteAdminCrmLead
+    deleteAdminCrmLead,
+    bulkDeleteAdminCrmLeads,
+    fetchAdminExcelBatches,
+    type ExcelImportBatch
 } from './adminApi';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import LeadDetailsModal from './LeadDetailsModal';
@@ -54,6 +57,12 @@ type AdminLead = GrowthAuditLeadRef & {
     auditId?: string | null;
     salesNotes?: string | null;
     assignedAgentName?: string | null;
+    importBatchId?: string | null;
+    importFileName?: string | null;
+    importUploadedAt?: string | null;
+    spreadsheetStatus?: string | null;
+    spreadsheetStatus1?: string | null;
+    spreadsheetStatus2?: string | null;
     latestActivity?: {
         type?: string;
         disposition?: string | null;
@@ -156,8 +165,21 @@ function statusBadge(status?: string | null) {
     if (s === 'submitted') {
         return { label: 'Submitted', className: 'bg-slate-100 text-slate-700 border-slate-200' };
     }
-    const label = raw.length > 18 ? `${raw.slice(0, 18)}…` : raw;
-    return { label, className: 'bg-slate-100 text-slate-700 border-slate-200' };
+    // Excel Status 1 / Status 2 free text (e.g. Phone/enquiry)
+    const label = raw.length > 28 ? `${raw.slice(0, 28)}…` : raw;
+    return { label, className: 'bg-indigo-50 text-indigo-800 border-indigo-200 font-semibold' };
+}
+
+/** Prefer Excel Status 1 (short) while CRM status is still new; otherwise show CRM status. */
+function displayLeadStatus(lead: {
+    status?: string | null;
+    spreadsheetStatus?: string | null;
+    spreadsheetStatus1?: string | null;
+}) {
+    const sheet = String(lead.spreadsheetStatus1 || lead.spreadsheetStatus || '').trim();
+    const crm = String(lead.status || '').trim() || 'new';
+    if (sheet && (!crm || crm.toLowerCase() === 'new')) return sheet;
+    return crm;
 }
 
 function getCleanSalesNote(lead: AdminLead): string {
@@ -219,6 +241,8 @@ export default function AdminGrowthAuditLeads() {
     const [isAddLeadModalOpen, setIsAddLeadModalOpen] = useState(false);
     const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
     const [selectedStatusLead, setSelectedStatusLead] = useState<AdminLead | null>(null);
+    const [excelBatches, setExcelBatches] = useState<ExcelImportBatch[]>([]);
+    const [excelBatchFilter, setExcelBatchFilter] = useState<string>('all');
 
     const handleSetSourceCategory = (cat: SourceCategoryFilter) => {
         setSourceCategory(cat);
@@ -238,11 +262,13 @@ export default function AdminGrowthAuditLeads() {
 
         Promise.all([
             adminGet(`/api/admin/growth-audit-leads${qs ? `?${qs}` : ''}`),
-            fetchSalesAgents().catch(() => [])
+            fetchSalesAgents().catch(() => []),
+            fetchAdminExcelBatches().catch(() => [] as ExcelImportBatch[])
         ])
-            .then(([data, agents]) => {
+            .then(([data, agents, batches]) => {
                 setLeads(data.leads || []);
                 setSalesAgents(agents);
+                setExcelBatches(batches);
                 setPage(1);
             })
             .catch((err: Error) => {
@@ -255,6 +281,12 @@ export default function AdminGrowthAuditLeads() {
     useEffect(() => {
         load();
     }, [load]);
+
+    useEffect(() => {
+        if (excelBatchFilter !== 'all' && !excelBatches.some((b) => b.batchId === excelBatchFilter)) {
+            setExcelBatchFilter('all');
+        }
+    }, [excelBatches, excelBatchFilter]);
 
     useEffect(() => {
         const t = window.setTimeout(() => setQuery(draftQuery), 300);
@@ -270,14 +302,41 @@ export default function AdminGrowthAuditLeads() {
         [leads]
     );
 
+    const selectedExcelBatch = useMemo(
+        () => excelBatches.find((b) => b.batchId === excelBatchFilter) || null,
+        [excelBatches, excelBatchFilter]
+    );
+
+    const leadMatchesExcelBatch = (lead: AdminLead, batchId: string) => {
+        if (batchId === 'legacy') {
+            return (
+                isLeadAdded(lead) &&
+                String(lead.source || '').toLowerCase().includes('excel') &&
+                !lead.importBatchId
+            );
+        }
+        return String(lead.importBatchId || '') === batchId;
+    };
+
     const filteredLeads = useMemo(() => {
         return leads.filter((lead) => {
             const added = isLeadAdded(lead);
             if (sourceCategory === 'growth_audit') return !added;
+            if (sourceCategory === 'added') {
+                if (!added) return false;
+            }
+            if (excelBatchFilter !== 'all') {
+                return leadMatchesExcelBatch(lead, excelBatchFilter);
+            }
             if (sourceCategory === 'added') return added;
             return true;
         });
-    }, [leads, sourceCategory]);
+    }, [leads, sourceCategory, excelBatchFilter]);
+
+    const excelBatchLeadIds = useMemo(() => {
+        if (excelBatchFilter === 'all') return [] as string[];
+        return filteredLeads.map((l) => l.id);
+    }, [filteredLeads, excelBatchFilter]);
 
     const totalPages = Math.max(1, Math.ceil(filteredLeads.length / PAGE_SIZE));
     const safePage = Math.min(page, totalPages);
@@ -295,17 +354,20 @@ export default function AdminGrowthAuditLeads() {
 
     // Bulk selection state
     const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+    const [bulkAssignLeadIds, setBulkAssignLeadIds] = useState<string[]>([]);
     const [bulkSuccessToast, setBulkSuccessToast] = useState<string | null>(null);
 
     const isAllPageSelected = pageLeads.length > 0 && pageLeads.every((l) => selectedLeadIds.has(l.id));
+    const isAllFilteredSelected =
+        filteredLeads.length > 0 && filteredLeads.every((l) => selectedLeadIds.has(l.id));
 
     const handleToggleSelectAllPage = () => {
         setSelectedLeadIds((prev) => {
             const next = new Set(prev);
-            if (isAllPageSelected) {
-                pageLeads.forEach((l) => next.delete(l.id));
+            if (isAllFilteredSelected) {
+                filteredLeads.forEach((l) => next.delete(l.id));
             } else {
-                pageLeads.forEach((l) => next.add(l.id));
+                filteredLeads.forEach((l) => next.add(l.id));
             }
             return next;
         });
@@ -327,18 +389,68 @@ export default function AdminGrowthAuditLeads() {
     const [isDeletingExcel, setIsDeletingExcel] = useState(false);
 
     const handleDeleteExcelLeads = async () => {
-        if (!window.confirm('Are you sure you want to delete all leads imported from Excel/spreadsheets? This action cannot be undone.')) {
+        if (excelBatchFilter === 'all' || !selectedExcelBatch) {
+            setError('Select one Excel file from the filter before deleting.');
+            return;
+        }
+        const label = selectedExcelBatch.fileName || 'this Excel upload';
+        const count = selectedExcelBatch.leadCount;
+        if (
+            !window.confirm(
+                `Delete ${count} lead(s) from “${label}” only? Other Excel uploads will not be deleted. This cannot be undone.`
+            )
+        ) {
             return;
         }
         setIsDeletingExcel(true);
         setError('');
         try {
-            await deleteAdminExcelLeads();
+            await deleteAdminExcelLeads(excelBatchFilter);
+            setExcelBatchFilter('all');
+            setSelectedLeadIds(new Set());
             await load();
         } catch (err: any) {
             setError(err.message || 'Failed to delete excel leads');
         } finally {
             setIsDeletingExcel(false);
+        }
+    };
+
+    const handleAssignThisExcel = () => {
+        if (excelBatchFilter === 'all' || !excelBatchLeadIds.length) {
+            setError('Select one Excel file that has leads to assign.');
+            return;
+        }
+        setSelectedLeadIds(new Set(excelBatchLeadIds));
+        setBulkAssignLeadIds(excelBatchLeadIds);
+        setIsBulkAssignModalOpen(true);
+    };
+
+    const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
+    const handleBulkDeleteSelected = async () => {
+        const ids = Array.from(selectedLeadIds);
+        if (!ids.length) return;
+        if (
+            !window.confirm(
+                `Delete ${ids.length} selected lead(s)? This also removes their tasks/activity and cannot be undone.`
+            )
+        ) {
+            return;
+        }
+        setIsBulkDeleting(true);
+        setError('');
+        try {
+            const res = await bulkDeleteAdminCrmLeads(ids);
+            setBulkSuccessToast(res.message || `Deleted ${res.count} lead(s).`);
+            setSelectedLeadIds(new Set());
+            setBulkAssignLeadIds([]);
+            await load();
+            setTimeout(() => setBulkSuccessToast(null), 4000);
+        } catch (err: any) {
+            setError(err.message || 'Failed to delete selected leads');
+        } finally {
+            setIsBulkDeleting(false);
         }
     };
 
@@ -380,7 +492,7 @@ export default function AdminGrowthAuditLeads() {
             <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
                 {/* Source Category Segmented Bar & Action Buttons */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 sm:px-4 py-3 bg-slate-50/80 border-b border-[#E2E8F0]">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs font-bold text-[#64748B] whitespace-nowrap">Source:</span>
                         <select
                             value={sourceCategory}
@@ -391,19 +503,64 @@ export default function AdminGrowthAuditLeads() {
                             <option value="added">Added / Uploaded Leads ({addedCount})</option>
                             <option value="growth_audit">Growth Audit & Funnels ({growthAuditCount})</option>
                         </select>
+
+                        <select
+                            value={excelBatchFilter}
+                            onChange={(e) => {
+                                setExcelBatchFilter(e.target.value);
+                                setPage(1);
+                                setSelectedLeadIds(new Set());
+                                if (e.target.value !== 'all') {
+                                    setSourceCategory('added');
+                                }
+                            }}
+                            className="bg-white border border-[#CBD5E1] text-[#0F172A] font-bold text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:border-amber-500 shadow-2xs cursor-pointer hover:border-slate-400 transition-colors max-w-[240px]"
+                            title="Filter by uploaded Excel file"
+                        >
+                            <option value="all">All Excels ({excelBatches.length})</option>
+                            {excelBatches.map((b) => {
+                                const when = b.uploadedAt
+                                    ? new Date(b.uploadedAt).toLocaleDateString(undefined, {
+                                          day: '2-digit',
+                                          month: 'short',
+                                          year: 'numeric'
+                                      })
+                                    : '';
+                                const label = when
+                                    ? `${b.fileName} · ${when} (${b.leadCount})`
+                                    : `${b.fileName} (${b.leadCount})`;
+                                return (
+                                    <option key={b.batchId} value={b.batchId}>
+                                        {label}
+                                    </option>
+                                );
+                            })}
+                        </select>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                        {addedCount > 0 && (
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                        {excelBatchFilter !== 'all' && excelBatchLeadIds.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={handleAssignThisExcel}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 transition-colors shadow-2xs"
+                                title="Assign all leads from this Excel to one agent"
+                            >
+                                <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+                                <span>Assign this Excel</span>
+                            </button>
+                        )}
+
+                        {excelBatchFilter !== 'all' && selectedExcelBatch && (
                             <button
                                 type="button"
                                 disabled={isDeletingExcel}
                                 onClick={handleDeleteExcelLeads}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors shadow-2xs"
-                                title="Delete all leads uploaded from Excel spreadsheets"
+                                title="Delete only leads from the selected Excel file"
                             >
                                 <Trash2 className="w-3.5 h-3.5 text-red-600" />
-                                <span>{isDeletingExcel ? 'Deleting...' : 'Delete Excel Data'}</span>
+                                <span>{isDeletingExcel ? 'Deleting...' : 'Delete this Excel'}</span>
                             </button>
                         )}
 
@@ -489,7 +646,7 @@ export default function AdminGrowthAuditLeads() {
                                             <th className="px-3 py-2.5 font-bold">
                                                 <input
                                                     type="checkbox"
-                                                    checked={isAllPageSelected}
+                                                    checked={isAllFilteredSelected || isAllPageSelected}
                                                     onChange={handleToggleSelectAllPage}
                                                     className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
                                                     title="Select / Deselect all on this page"
@@ -507,7 +664,7 @@ export default function AdminGrowthAuditLeads() {
                                     </thead>
                                     <tbody className="divide-y divide-[#F1F5F9]">
                                         {pageLeads.map((lead) => {
-                                             const badge = statusBadge(lead.status);
+                                             const badge = statusBadge(displayLeadStatus(lead));
                                              const title = displayName(lead);
                                              const isSelected = selectedLeadIds.has(lead.id);
                                              return (
@@ -753,7 +910,7 @@ export default function AdminGrowthAuditLeads() {
                                             <th className="px-3 py-2.5 font-bold">
                                                 <input
                                                     type="checkbox"
-                                                    checked={isAllPageSelected}
+                                                    checked={isAllFilteredSelected || isAllPageSelected}
                                                     onChange={handleToggleSelectAllPage}
                                                     className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
                                                     title="Select / Deselect all on this page"
@@ -771,7 +928,7 @@ export default function AdminGrowthAuditLeads() {
                                     </thead>
                                     <tbody className="divide-y divide-[#F1F5F9]">
                                         {pageLeads.map((lead) => {
-                                            const badge = statusBadge(lead.status);
+                                            const badge = statusBadge(displayLeadStatus(lead));
                                             const title = displayName(lead);
                                             const oppLevel = String(lead.opportunityLevel || '').toLowerCase();
                                             const isSelected = selectedLeadIds.has(lead.id);
@@ -1085,11 +1242,24 @@ export default function AdminGrowthAuditLeads() {
 
                     <button
                         type="button"
-                        onClick={() => setIsBulkAssignModalOpen(true)}
+                        onClick={() => {
+                            setBulkAssignLeadIds(Array.from(selectedLeadIds));
+                            setIsBulkAssignModalOpen(true);
+                        }}
                         className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-sm whitespace-nowrap"
                     >
                         <UserCheck className="w-3.5 h-3.5" />
                         <span>Assign to Telecaller & Create Tasks</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        disabled={isBulkDeleting}
+                        onClick={handleBulkDeleteSelected}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-500 hover:bg-red-400 text-white font-bold text-xs rounded-xl transition-all shadow-sm whitespace-nowrap disabled:opacity-50"
+                    >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>{isBulkDeleting ? 'Deleting…' : `Delete selected (${selectedLeadIds.size})`}</span>
                     </button>
 
                     <div className="h-5 w-px bg-slate-700/80 shrink-0" />
@@ -1107,12 +1277,13 @@ export default function AdminGrowthAuditLeads() {
             {/* Bulk Assign & Task Creation Modal */}
             <BulkAssignTasksModal
                 isOpen={isBulkAssignModalOpen}
-                leadIds={Array.from(selectedLeadIds)}
+                leadIds={bulkAssignLeadIds}
                 salesAgents={salesAgents}
                 onClose={() => setIsBulkAssignModalOpen(false)}
                 onSuccess={async (res) => {
                     setBulkSuccessToast(res.message);
                     setSelectedLeadIds(new Set());
+                    setBulkAssignLeadIds([]);
                     await load();
                     setTimeout(() => setBulkSuccessToast(null), 4000);
                 }}

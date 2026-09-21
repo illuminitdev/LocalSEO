@@ -22,6 +22,9 @@ export interface ParsedLeadRow {
     leadOpportunity: string;
     opportunityLevel: 'high' | 'medium' | 'low';
     status: string;
+    spreadsheetStatus?: string;
+    spreadsheetStatus1?: string;
+    spreadsheetStatus2?: string;
     notes: string;
     conclusion?: string;
     sheetName: string;
@@ -31,7 +34,10 @@ interface ExcelLeadUploadModalProps {
     isOpen: boolean;
     onClose: () => void;
     onImportSuccess: (count: number) => void;
-    importEndpoint?: (leads: ParsedLeadRow[]) => Promise<{ count: number; created: number; skipped: number }>;
+    importEndpoint?: (
+        leads: ParsedLeadRow[],
+        meta?: { fileName: string }
+    ) => Promise<{ count: number; created: number; skipped: number }>;
 }
 
 export default function ExcelLeadUploadModal({
@@ -199,8 +205,14 @@ export default function ExcelLeadUploadModal({
                     }
 
                     const opp = findVal(['leadopportunity', 'opportunity', 'pitch', 'priority']);
-                    const statusVal1 = findVal(['status', 'leadstatus', 'stage', 'status1', 'initialstatus', 'leadstage', 'leadstate', 'state', 'currentstatus', 'actionstatus']);
-                    const statusVal2 = findVal(['callingstatus', 'callstatus', 'disposition', 'callingdisposition', 'status2', 'lateststatus', 'callresult', 'telecallerstatus', 'outcomestatus', 'followupstatus', 'followup']);
+                    const statusVal1 = findVal(
+                        ['status1', 'initialstatus', 'leadstatus', 'leadstage', 'leadstate', 'currentstatus', 'actionstatus', 'stage', 'state', 'status'],
+                        ['status2', 'status3', 'callingstatus', 'callstatus', 'disposition', 'callingdisposition', 'lateststatus', 'callresult', 'telecallerstatus', 'outcomestatus', 'followupstatus', 'followup']
+                    );
+                    const statusVal2 = findVal(
+                        ['status2', 'callingstatus', 'callstatus', 'disposition', 'callingdisposition', 'lateststatus', 'callresult', 'telecallerstatus', 'outcomestatus'],
+                        ['status1', 'status3', 'initialstatus', 'leadstatus', 'leadstage']
+                    );
                     const email = findVal(['email', 'mail', 'emailaddress', 'contactemail']);
 
                     // Skip empty rows
@@ -222,15 +234,19 @@ export default function ExcelLeadUploadModal({
                         return 'new';
                     };
 
-                    const activeStatusRaw = statusVal2 || statusVal1;
-                    const mappedStatus = mapStatus(activeStatusRaw);
+                    // Map CRM status from Status 1 first (short labels like Called / Not Called)
+                    const mappedStatus = mapStatus(statusVal1 || statusVal2);
 
-                    // Combine status context into conclusion notes if multiple distinct status columns exist
-                    let finalNotes = conclusion;
-                    if (statusVal1 && statusVal2 && statusVal1.toLowerCase().trim() !== statusVal2.toLowerCase().trim()) {
-                        const statusNote = `Status: ${statusVal1} | Calling Status: ${statusVal2}`;
-                        finalNotes = finalNotes ? `${statusNote}\n${finalNotes}` : statusNote;
+                    const spreadsheetStatus1 = (statusVal1 || '').trim();
+                    const spreadsheetStatus2 = (statusVal2 || '').trim();
+                    let spreadsheetStatus = '';
+                    if (spreadsheetStatus1 && spreadsheetStatus2 && spreadsheetStatus1.toLowerCase() !== spreadsheetStatus2.toLowerCase()) {
+                        spreadsheetStatus = `${spreadsheetStatus1} · ${spreadsheetStatus2}`;
+                    } else {
+                        spreadsheetStatus = spreadsheetStatus1 || spreadsheetStatus2;
                     }
+
+                    const finalNotes = conclusion;
 
                     rows.push({
                         businessName: bName || 'Lead',
@@ -244,6 +260,9 @@ export default function ExcelLeadUploadModal({
                         leadOpportunity: opp,
                         opportunityLevel: oppLevel,
                         status: mappedStatus,
+                        spreadsheetStatus,
+                        spreadsheetStatus1,
+                        spreadsheetStatus2,
                         notes: finalNotes,
                         conclusion: finalNotes,
                         sheetName: sheet.trim()
@@ -291,7 +310,7 @@ export default function ExcelLeadUploadModal({
 
         try {
             if (importEndpoint) {
-                const res = await importEndpoint(activeRowsToImport);
+                const res = await importEndpoint(activeRowsToImport, { fileName });
                 setImportResult({ created: res.created, skipped: res.skipped });
                 onImportSuccess(res.created);
             } else {
@@ -299,7 +318,7 @@ export default function ExcelLeadUploadModal({
                 const res = await fetch('/api/sales/leads/bulk-import', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ leads: activeRowsToImport })
+                    body: JSON.stringify({ leads: activeRowsToImport, fileName })
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'Failed to import leads');
@@ -524,15 +543,16 @@ export default function ExcelLeadUploadModal({
                                                                     {row.businessName}
                                                                 </td>
                                                                 <td className="p-2.5">
-                                                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
-                                                                        row.status === 'converted' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
-                                                                        row.status === 'contacted' ? 'bg-blue-100 text-blue-800 border-blue-200' :
-                                                                        row.status === 'callback' ? 'bg-amber-100 text-amber-800 border-amber-200' :
-                                                                        row.status === 'interested' ? 'bg-purple-100 text-purple-800 border-purple-200' :
-                                                                        row.status === 'not_interested' ? 'bg-rose-100 text-rose-800 border-rose-200' :
-                                                                        'bg-slate-100 text-slate-700 border-slate-200'
+                                                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border tracking-wider ${
+                                                                        row.spreadsheetStatus ? 'bg-indigo-50 text-indigo-800 border-indigo-200 normal-case' :
+                                                                        row.status === 'converted' ? 'bg-emerald-100 text-emerald-800 border-emerald-300 uppercase' :
+                                                                        row.status === 'contacted' ? 'bg-blue-100 text-blue-800 border-blue-200 uppercase' :
+                                                                        row.status === 'callback' ? 'bg-amber-100 text-amber-800 border-amber-200 uppercase' :
+                                                                        row.status === 'interested' ? 'bg-purple-100 text-purple-800 border-purple-200 uppercase' :
+                                                                        row.status === 'not_interested' ? 'bg-rose-100 text-rose-800 border-rose-200 uppercase' :
+                                                                        'bg-slate-100 text-slate-700 border-slate-200 uppercase'
                                                                     }`}>
-                                                                        {row.status.replace(/_/g, ' ')}
+                                                                        {row.spreadsheetStatus || row.status.replace(/_/g, ' ')}
                                                                     </span>
                                                                 </td>
                                                                 <td className="p-2.5 text-slate-600 font-mono">

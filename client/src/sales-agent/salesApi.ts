@@ -77,6 +77,9 @@ export interface SalesUnifiedLead {
     convertedAt?: string | null;
     notes?: string;
     status?: string;
+    spreadsheetStatus?: string;
+    spreadsheetStatus1?: string;
+    spreadsheetStatus2?: string;
     scoreTotal?: number | null;
     auditId?: string | null;
     reportUrl?: string | null;
@@ -205,8 +208,11 @@ export async function createSalesLead(lead: Partial<SalesUnifiedLead>): Promise<
     return res.lead;
 }
 
-export async function bulkImportSalesLeads(leads: any[]): Promise<{ count: number; created: number; skipped: number; leads: SalesUnifiedLead[] }> {
-    return apiPost('/api/sales/leads/bulk-import', { leads });
+export async function bulkImportSalesLeads(
+    leads: any[],
+    meta?: { fileName?: string }
+): Promise<{ count: number; created: number; skipped: number; leads: SalesUnifiedLead[] }> {
+    return apiPost('/api/sales/leads/bulk-import', { leads, fileName: meta?.fileName || '' });
 }
 
 export async function convertLeadToCustomer(leadId: string, note?: string): Promise<{ success: boolean; lead: SalesUnifiedLead }> {

@@ -63,6 +63,10 @@ export type GrowthAuditLeadRef = {
     sharePath?: string | null;
     reportUrl?: string | null;
     notes?: string | null;
+    importBatchId?: string | null;
+    importFileName?: string | null;
+    importUploadedAt?: string | null;
+    spreadsheetStatus?: string | null;
     latestActivity?: {
         type: string;
         disposition?: string;
@@ -236,7 +240,13 @@ export default function LeadCrmDrawer({
     const cleanPhone = (lead.phone || '').replace(/[^0-9+]/g, '');
     const displayScore = lead.scoreTotal ?? lead.leadScoreTotal;
     const typeLabel = leadTypeLabel(lead.type);
-    const statusBadge = leadStatusBadge(lead.status);
+    const sheetStatus = String(
+        (lead as any).spreadsheetStatus1 || (lead as any).spreadsheetStatus || ''
+    ).trim();
+    const crmStatus = String(lead.status || '').trim() || 'new';
+    const displayStatus =
+        sheetStatus && (!crmStatus || crmStatus.toLowerCase() === 'new') ? sheetStatus : crmStatus;
+    const statusBadge = leadStatusBadge(displayStatus);
 
     return (
         <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/40 backdrop-blur-sm flex justify-end transition-opacity">
