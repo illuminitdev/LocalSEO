@@ -610,19 +610,49 @@ export async function bulkImportSalesLeads(
     let skipped = 0;
     const createdLeads: any[] = [];
 
+   
+    const batchSeenName = new Set<string>();
+    const batchSeenEmail = new Set<string>();
+    const batchSeenPhone = new Set<string>();
+    const batchSeenWebsite = new Set<string>();
+
+    const normalizeWebsiteKey = (value: string) =>
+        String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/^https?:\/\//, '')
+            .replace(/^www\./, '')
+            .replace(/\/+$/, '');
+
     for (const item of leads) {
         const name = String(item.name || '').trim();
         const phone = String(item.phone || '').trim();
         const email = String(item.email || '').trim().toLowerCase();
+        const website = String(item.website || '').trim();
+        const nameKey = name && name.toLowerCase() !== 'lead' ? name.toLowerCase() : '';
+        const rawPhoneDigits = phone.replace(/[^0-9]/g, '');
+        const phoneKey = rawPhoneDigits.length >= 7 ? rawPhoneDigits : '';
+        const websiteKey = normalizeWebsiteKey(website);
 
-        if (!name && !phone && !email) {
+        if (!name && !phone && !email && !website) {
             skipped++;
             continue;
         }
 
-        // Deduplication & Upsert check: check phone (normalized or exact), email, or name
+        
+        const batchDup =
+            (nameKey && batchSeenName.has(nameKey)) ||
+            (email && batchSeenEmail.has(email)) ||
+            (phoneKey && batchSeenPhone.has(phoneKey)) ||
+            (websiteKey && batchSeenWebsite.has(websiteKey));
+
+        if (batchDup) {
+            skipped++;
+            continue;
+        }
+
+        
         let existingId: string | null = null;
-        const rawPhoneDigits = phone.replace(/[^0-9]/g, '');
 
         if (phone) {
             const existing = await query(
@@ -642,10 +672,22 @@ export async function bulkImportSalesLeads(
                 existingId = existing.rows[0].id;
             }
         }
-        if (!existingId && name) {
+        if (!existingId && nameKey) {
             const existing = await query(
                 `SELECT id FROM sales_leads WHERE LOWER(TRIM(name)) = $1 LIMIT 1`,
-                [name.toLowerCase()]
+                [nameKey]
+            );
+            if (existing.rows.length > 0) {
+                existingId = existing.rows[0].id;
+            }
+        }
+        if (!existingId && websiteKey) {
+            const existing = await query(
+                `SELECT id FROM sales_leads
+                 WHERE NULLIF(TRIM(website), '') IS NOT NULL
+                   AND LOWER(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(TRIM(website), '^https?://', '', 'i'), '^www\\.', '', 'i'), '/+$', '')) = $1
+                 LIMIT 1`,
+                [websiteKey]
             );
             if (existing.rows.length > 0) {
                 existingId = existing.rows[0].id;
@@ -653,6 +695,10 @@ export async function bulkImportSalesLeads(
         }
 
         if (existingId) {
+            if (nameKey) batchSeenName.add(nameKey);
+            if (email) batchSeenEmail.add(email);
+            if (phoneKey) batchSeenPhone.add(phoneKey);
+            if (websiteKey) batchSeenWebsite.add(websiteKey);
             // Update existing lead observations, notes & status if provided in the spreadsheet
             const updates: string[] = ['updated_at = NOW()'];
             const params: any[] = [existingId];
@@ -778,6 +824,11 @@ export async function bulkImportSalesLeads(
 
         createdLeads.push(lead);
         created++;
+
+        if (nameKey) batchSeenName.add(nameKey);
+        if (email) batchSeenEmail.add(email);
+        if (phoneKey) batchSeenPhone.add(phoneKey);
+        if (websiteKey) batchSeenWebsite.add(websiteKey);
 
         // Log initial activity in lead_activities
         try {
