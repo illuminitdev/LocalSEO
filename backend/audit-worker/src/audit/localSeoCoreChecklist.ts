@@ -227,7 +227,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
           'Schema not measured'
         );
 
-  const mapsVis = fromCheck(checkById(checks, 'maps_vis_2') || checkByLabel(checks, /google maps ranking/i));
+  const mapsVis = fromCheck(checkById(checks, 'maps_vis_2') || checkByLabel(checks, /google maps ranking|visible in maps/i));
   let mapsSe: StatusEv = mapsVis;
   if (mapsVis.status === 'unknown') {
     if (inPack) mapsSe = { status: 'yes', evidence: `Maps / pack #${localRank.position}` };
@@ -449,7 +449,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
         id: 'visibility',
         title: 'Visibility',
         items: [
-          item('core_vis_maps', 'Google Maps ranking', mapsSe),
+          item('core_vis_maps', 'Visible in Maps', mapsSe),
           item('core_vis_pack', 'Local Pack visibility', packSe),
           item(
             'core_vis_organic',
