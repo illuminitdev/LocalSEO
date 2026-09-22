@@ -261,7 +261,7 @@ export function buildChecklist({
 
   [
     ['Local Pack visibility (measured local query)', 'crawl'],
-    ['Google Maps ranking (measured local query)', 'crawl']
+    ['Visible in Maps (measured local query)', 'crawl']
   ].forEach(([label, source], i) => {
     checks.push(
       check(`maps_vis_${i + 1}`, 'maps_competitors', label, source, {

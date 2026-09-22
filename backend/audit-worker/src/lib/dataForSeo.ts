@@ -680,6 +680,8 @@ export function buildDeepLocalRank(opts: {
     reviewCount: r.reviewsCount,
     mainImage: r.mainImage || '',
     placeId: r.placeId || '',
+    lat: typeof r.lat === 'number' ? r.lat : null,
+    lng: typeof r.lng === 'number' ? r.lng : null,
     isProspect:
       Boolean(match && match.placeId && r.placeId === match.placeId) ||
       Boolean(match && r.name === match.name)
