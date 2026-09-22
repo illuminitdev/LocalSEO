@@ -12,6 +12,7 @@ import { deriveTopFixes } from '../audit/store.js';
 import { updateAuditJob } from '../lib/auditJobs.js';
 import {
   buildDeepLocalRank,
+  buildGeoAiPrompts,
   captureMapsScreenshotFromTask,
   captureOrganicLocalPackScreenshot,
   checkAiEngineMentionsMulti,
@@ -449,6 +450,12 @@ async function enrichFromDataForSeo(audit: any) {
         'rows,',
         [...new Set(aiEngineChecks.map((r) => r.promptKey || r.prompt))].join(' | ')
       );
+      if (aiEngineChecks.length !== 9) {
+        console.warn(
+          '[auditWorker] Expected 9 AI engine rows (3 prompts × 3 engines), got',
+          aiEngineChecks.length
+        );
+      }
       audit.gbpLookup = {
         ...(audit.gbpLookup || {}),
         aiEngineChecks
@@ -458,28 +465,32 @@ async function enrichFromDataForSeo(audit: any) {
       console.warn('[auditWorker] AI engine checks failed:', err.message);
       const capturedAt = new Date().toISOString();
       const reason = err.message || 'AI check failed';
-      const fallbackPrompt = measuredQuery || `${service} near ${locationLabel || ''}`.trim();
+      const prompts = buildGeoAiPrompts({
+        service,
+        city: locationLabel || undefined
+      });
+      const engines = [
+        ['chatgpt', 'ChatGPT'],
+        ['claude', 'Claude'],
+        ['gemini', 'Gemini']
+      ] as const;
       audit.gbpLookup = {
         ...(audit.gbpLookup || {}),
-        aiEngineChecks: (
-          [
-            ['chatgpt', 'ChatGPT'],
-            ['claude', 'Claude'],
-            ['gemini', 'Gemini']
-          ] as const
-        ).map(([engine, label]) => ({
-          engine,
-          label,
-          prompt: fallbackPrompt,
-          promptKey: 'near' as const,
-          mentioned: null,
-          recommendedLikely: null,
-          citedHosts: [],
-          answerExcerpt: '',
-          skipped: true,
-          reason,
-          capturedAt
-        }))
+        aiEngineChecks: prompts.flatMap(({ key, prompt }) =>
+          engines.map(([engine, label]) => ({
+            engine,
+            label,
+            prompt,
+            promptKey: key,
+            mentioned: null,
+            recommendedLikely: null,
+            citedHosts: [],
+            answerExcerpt: '',
+            skipped: true,
+            reason,
+            capturedAt
+          }))
+        )
       };
     }
   }

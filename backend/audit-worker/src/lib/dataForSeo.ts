@@ -792,14 +792,18 @@ function extractLlmAnswerText(result: any): string {
 }
 
 /** Strip markdown noise for report/PDF excerpts while keeping readable prose + URLs. */
-export function sanitizeLlmExcerpt(text: string, maxLen = 520): string {
+export function sanitizeLlmExcerpt(text: string, maxLen = 420): string {
   let s = String(text || '');
   s = s.replace(/^#{1,6}\s+/gm, '');
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '$1 — $2');
   s = s.replace(/\*\*([^*]+)\*\*/g, '$1');
   s = s.replace(/\*([^*]+)\*/g, '$1');
   s = s.replace(/`([^`]+)`/g, '$1');
-  s = s.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
+  // Drop lone dash / bullet gap lines Claude often inserts
+  s = s.replace(/^[ \t]*[-–—•*][ \t]*$/gm, '');
+  s = s.replace(/[ \t]+\n/g, '\n');
+  s = s.replace(/\n{2,}/g, '\n');
+  s = s.replace(/[ \t]{2,}/g, ' ').trim();
   if (s.length > maxLen) s = `${s.slice(0, maxLen).trim()}…`;
   return s;
 }
@@ -831,6 +835,20 @@ function shortCityForWebSearch(city?: string): string | undefined {
   return first || undefined;
 }
 
+/** Keep user_prompt as a real search query; steer models to a short name list. */
+function geoLlmSystemMessage(city?: string): string {
+  const place = shortCityForWebSearch(city) || 'the local area in the UK';
+  return (
+    `UK local search helper. Use web search. Location: ${place} (if query says "near me", use that place). ` +
+    `Reply in under 80 words. Numbered list of up to 5 real business names only, one per line. ` +
+    `No addresses, ratings, URLs, paragraphs, or blank lines. Do not say you lack maps or location.`
+  ).slice(0, 500);
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchLlmResponseLive(opts: {
   platform: 'chat_gpt' | 'claude' | 'gemini';
   modelName: string;
@@ -846,15 +864,17 @@ async function fetchLlmResponseLive(opts: {
   const task: Record<string, unknown> = {
     user_prompt: prompt,
     model_name: opts.modelName,
-    max_output_tokens: opts.platform === 'claude' ? 1025 : 450,
-    web_search: true
+    max_output_tokens: opts.platform === 'claude' ? 320 : 280,
+    web_search: true,
+    system_message: geoLlmSystemMessage(opts.city)
   };
   if (opts.withTemperature !== false && opts.platform !== 'claude') {
     task.temperature = 0.2;
   }
-  // ChatGPT + Claude support country; Gemini live docs omit city/country fields
+  // ChatGPT + Claude support country + force_web_search; Gemini live docs omit city/country
   if (opts.platform !== 'gemini') {
     task.web_search_country_iso_code = 'GB';
+    task.force_web_search = true;
     const city = shortCityForWebSearch(opts.city);
     if (city) task.web_search_city = city;
   }
@@ -919,8 +939,23 @@ async function fetchLlmWithModelFallback(opts: {
       timeoutMs: opts.timeoutMs
     });
     if (last.text) return last;
-    // Retry without city if field validation fails
-    if (/invalid field/i.test(last.error || '') && opts.city) {
+    const err = last.error || '';
+    // Rate limit — wait once and retry same model
+    if (/rate_limit/i.test(err)) {
+      await sleepMs(4000);
+      last = await fetchLlmResponseLive({
+        platform: opts.platform,
+        modelName,
+        prompt: opts.prompt,
+        city: opts.city,
+        timeoutMs: opts.timeoutMs
+      });
+      if (last.text) return last;
+    }
+    // Bad model_name — try next model; city retry won't help
+    if (/invalid field.*model_name/i.test(err)) continue;
+    // Retry without city for other Invalid Field cases (e.g. web_search_city)
+    if (/invalid field/i.test(err) && opts.city) {
       last = await fetchLlmResponseLive({
         platform: opts.platform,
         modelName,
@@ -975,7 +1010,8 @@ export async function checkAiEngineMentions(opts: {
     ];
   }
 
-  const [gpt, claude, gemini] = await Promise.all([
+  // ChatGPT + Claude in parallel; Gemini after to reduce rate_limit_exceeded
+  const [gpt, claude] = await Promise.all([
     fetchLlmWithModelFallback({
       platform: 'chat_gpt',
       models: ['gpt-4.1-mini', 'gpt-4o-mini'],
@@ -985,20 +1021,20 @@ export async function checkAiEngineMentions(opts: {
     }),
     fetchLlmWithModelFallback({
       platform: 'claude',
-      // Prefer non-fragile dated / haiku models — claude-sonnet-4-0 often returns Invalid Field
-      models: ['claude-3-7-sonnet-20250219', 'claude-3-5-haiku-latest', 'claude-sonnet-4-20250514'],
-      prompt,
-      city,
-      timeoutMs: 55000
-    }),
-    fetchLlmWithModelFallback({
-      platform: 'gemini',
-      models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+      // From DataForSEO /claude/llm_responses/models (web_search_supported)
+      models: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-sonnet-4-6'],
       prompt,
       city,
       timeoutMs: 55000
     })
   ]);
+  const gemini = await fetchLlmWithModelFallback({
+    platform: 'gemini',
+    models: ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.5-flash-lite'],
+    prompt,
+    city,
+    timeoutMs: 55000
+  });
 
   const toRow = (
     engine: AiEngineCheckResult['engine'],
@@ -1008,7 +1044,7 @@ export async function checkAiEngineMentions(opts: {
     if (!res.text) {
       return skippedRow(engine, label, res.error || 'No answer');
     }
-    const excerpt = sanitizeLlmExcerpt(res.text, 2000);
+    const excerpt = sanitizeLlmExcerpt(res.text, 420);
     const mentioned = brandMentionedInText(res.text, businessName);
     return {
       engine,
@@ -1044,7 +1080,9 @@ export async function checkAiEngineMentionsMulti(opts: {
   const city = String(opts.city || '').trim() || undefined;
   const prompts = buildGeoAiPrompts({ service: opts.service, city });
   const out: AiEngineCheckResult[] = [];
-  for (const { key, prompt } of prompts) {
+  for (let i = 0; i < prompts.length; i++) {
+    if (i > 0) await sleepMs(2000);
+    const { key, prompt } = prompts[i];
     const batch = await checkAiEngineMentions({
       prompt,
       businessName,

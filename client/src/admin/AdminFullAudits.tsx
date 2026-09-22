@@ -64,8 +64,7 @@ const CRAWL_STEPS = [
 const EMPTY_FORM = {
     businessName: '',
     website: '',
-    phone: '',
-    email: '',
+    emailOrPhone: '',
     address: '',
     city: 'Manchester',
     serviceId: '',
@@ -73,6 +72,27 @@ const EMPTY_FORM = {
     contactName: '',
     operatorNotes: ''
 };
+
+/** Split a combined contact value into email and/or phone for the API. */
+function splitEmailOrPhone(raw: string): { email: string; phone: string } {
+    const value = String(raw || '').trim();
+    if (!value) return { email: '', phone: '' };
+    if (value.includes('@')) {
+        return { email: value, phone: '' };
+    }
+    return { email: '', phone: value };
+}
+
+function isValidEmailOrPhone(raw: string): boolean {
+    const value = String(raw || '').trim();
+    if (!value) return false;
+    if (value.includes('@')) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    }
+    // At least 7 digits after stripping formatting
+    const digits = value.replace(/\D/g, '');
+    return digits.length >= 7;
+}
 
 async function copyText(text: string) {
     try {
@@ -225,8 +245,8 @@ export default function AdminFullAudits() {
             setError('Business name and address are required');
             return;
         }
-        if (!form.email.trim() || !form.email.includes('@')) {
-            setError('A valid company email is required so you can share the report');
+        if (!isValidEmailOrPhone(form.emailOrPhone)) {
+            setError('Email or phone is required (enter a valid email or phone number)');
             return;
         }
 
@@ -240,6 +260,8 @@ export default function AdminFullAudits() {
             return;
         }
 
+        const { email, phone } = splitEmailOrPhone(form.emailOrPhone);
+
         setCreating(true);
         setStepIndex(0);
         setError('');
@@ -250,8 +272,8 @@ export default function AdminFullAudits() {
             const res = await startFullCrawl({
                 businessName: form.businessName.trim(),
                 website: form.website.trim(),
-                phone: form.phone.trim(),
-                email: form.email.trim(),
+                phone,
+                email,
                 address: form.address.trim(),
                 city: form.city.trim() || form.address.trim(),
                 contactName: form.contactName.trim(),
@@ -511,8 +533,8 @@ export default function AdminFullAudits() {
                                                     done && 'bg-emerald-500 text-white',
                                                     active && 'bg-[#F59E0B] text-[#0F172A]',
                                                     !done &&
-                                                        !active &&
-                                                        'bg-white border border-[#E2E8F0] text-[#94A3B8]'
+                                                    !active &&
+                                                    'bg-white border border-[#E2E8F0] text-[#94A3B8]'
                                                 )}
                                             >
                                                 {done ? (
@@ -564,30 +586,21 @@ export default function AdminFullAudits() {
                                 />
                             </label>
                             <label className="block text-sm font-semibold text-[#0F172A]">
-                                Phone
+                                Email or phone *
                                 <input
-                                    value={form.phone}
-                                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                                    required
+                                    value={form.emailOrPhone}
+                                    onChange={(e) => setForm({ ...form, emailOrPhone: e.target.value })}
+                                    placeholder="company@example.com or +44…"
                                     className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
                                 />
                             </label>
-                            <label className="block text-sm font-semibold text-[#0F172A]">
+                            <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
                                 Website
                                 <input
                                     placeholder="https:// (optional)"
                                     value={form.website}
                                     onChange={(e) => setForm({ ...form, website: e.target.value })}
-                                    className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
-                                />
-                            </label>
-                            <label className="block text-sm font-semibold text-[#0F172A]">
-                                Email *
-                                <input
-                                    type="email"
-                                    required
-                                    value={form.email}
-                                    onChange={(e) => setForm({ ...form, email: e.target.value })}
-                                    placeholder="company@example.com"
                                     className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
                                 />
                             </label>
@@ -655,188 +668,190 @@ export default function AdminFullAudits() {
                 </div>
             ) : null}
 
-            <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
-                <div className="px-5 py-4 border-b border-[#E2E8F0] bg-gradient-to-r from-[#FFFBEB] to-white flex items-center gap-2.5">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FEF3C7] border border-[#FDE68A]">
-                        <ClipboardCheck className="w-4 h-4 text-[#D97706]" />
-                    </div>
-                    <div className="min-w-0">
-                        <h2 className="text-sm font-bold text-[#0F172A]">Full audit history</h2>
-                        <p className="text-[11px] text-[#94A3B8]">
-                            Deep crawl reports ready to share and assign
-                        </p>
-                    </div>
-                    <span className="text-xs font-semibold text-[#64748B] bg-[#F8FAFC] border border-[#E2E8F0] rounded-full px-2.5 py-1 ml-auto">
-                        {audits.length} reports
-                    </span>
-                </div>
-
-                {loading ? <p className="p-6 text-sm text-[#64748B]">Loading…</p> : null}
-
-                {!loading && audits.length === 0 ? (
-                    <p className="p-6 text-sm text-[#64748B]">
-                        No full crawl audits yet.{' '}
-                        <button
-                            type="button"
-                            onClick={openNewForm}
-                            className="font-semibold text-[#D97706] hover:underline"
-                        >
-                            Start a new full audit
-                        </button>
-                        .
-                    </p>
-                ) : null}
-
-                <ul className="divide-y divide-[#F1F5F9]">
-                    {pageAudits.map((a) => {
-                        const share = resolveAuditReportUrl(a.shareUrl || a.reportUrl || a.id);
-                        const busy = busyId === a.id;
-                        const canShare = Boolean(a.published);
-                        return (
-                            <li
-                                key={a.id}
-                                className="group p-4 sm:p-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between transition-colors"
-                            >
-                                <div className="min-w-0 flex-1 space-y-2">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <p className="text-base font-semibold text-[#0F172A] truncate group-hover:font-bold">
-                                            {a.businessName || 'Untitled business'}
-                                        </p>
-                                        {a.totalScore != null ? (
-                                            <span className="inline-flex items-center rounded-full bg-[#FFFBEB] border border-[#FDE68A] px-2 py-0.5 text-[11px] font-bold text-[#92400E]">
-                                                {a.totalScore}/100
-                                            </span>
-                                        ) : null}
-                                    </div>
-                                    <div className="flex flex-wrap gap-1.5">
-                                        <span className="inline-flex items-center rounded-md bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-0.5 text-[11px] font-semibold text-[#475569]">
-                                            Full crawl
-                                        </span>
-                                        <span className="inline-flex items-center rounded-md bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-0.5 text-[11px] font-medium text-[#64748B]">
-                                            {a.city || '—'}
-                                        </span>
-                                        <span className="inline-flex items-center rounded-md bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-0.5 text-[11px] font-medium text-[#64748B]">
-                                            {a.tradeId || '—'}
-                                        </span>
-                                        <span
-                                            className={cn(
-                                                'inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold',
-                                                a.published
-                                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                                                    : 'bg-slate-50 border-slate-200 text-slate-600'
-                                            )}
-                                        >
-                                            {a.published ? 'Published' : 'Draft'}
-                                        </span>
-                                    </div>
-                                    <p className="text-xs text-[#94A3B8] truncate">
-                                        {[a.email, a.phone].filter(Boolean).join(' · ') || 'No contact'}
-                                        {a.website ? ` · ${a.website}` : ''}
-                                    </p>
-                                </div>
-
-                                <div className="flex flex-wrap items-center gap-2 shrink-0">
-                                    {share ? (
-                                        <>
-                                            <a
-                                                href={share}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:bg-[#F8FAFC]"
-                                            >
-                                                <ExternalLink className="w-3.5 h-3.5" />
-                                                Open report
-                                            </a>
-                                            <button
-                                                type="button"
-                                                onClick={() => onCopy(share)}
-                                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:bg-[#F8FAFC]"
-                                            >
-                                                <Copy className="w-3.5 h-3.5" />
-                                                Copy link
-                                            </button>
-                                        </>
-                                    ) : null}
-                                    <button
-                                        type="button"
-                                        disabled={busy || !canShare}
-                                        onClick={() => onShare(a)}
-                                        className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-[#E2E8F0] bg-white text-[#64748B] hover:text-[#D97706] hover:border-[#FDE68A] hover:bg-[#FFFBEB] disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-[#64748B]"
-                                        aria-label={
-                                            a.email
-                                                ? `Email report to ${a.email}`
-                                                : 'Email report (enter address)'
-                                        }
-                                        title={
-                                            !a.published
-                                                ? 'Publish before sharing'
-                                                : a.email
-                                                  ? `Email report to ${a.email}`
-                                                  : 'Email report — you’ll be asked for an address'
-                                        }
-                                    >
-                                        <Share2
-                                            className={cn(
-                                                'w-4 h-4',
-                                                busy && busyAction === 'share' && 'animate-pulse'
-                                            )}
-                                        />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled={busy}
-                                        onClick={() => onDelete(a)}
-                                        className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-[#E2E8F0] bg-white text-[#94A3B8] hover:text-red-600 hover:border-red-200 disabled:opacity-60"
-                                        aria-label={`Delete ${a.businessName || 'audit'}`}
-                                        title="Delete report"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setActiveLead(auditToLeadRef(a))}
-                                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-xs font-bold shadow-xs transition-colors"
-                                    >
-                                        <CheckSquare className="w-3.5 h-3.5 text-[#D97706]" />
-                                        Manage Task
-                                    </button>
-                                </div>
-                            </li>
-                        );
-                    })}
-                </ul>
-
-                {!loading && audits.length > 0 ? (
-                    <div className="px-4 sm:px-5 py-3 border-t border-[#E2E8F0] bg-[#FCFDFE] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <p className="text-xs text-[#64748B]">
-                            Showing {rangeStart}–{rangeEnd} of {audits.length}
-                        </p>
-                        <div className="flex items-center gap-2">
-                            <button
-                                type="button"
-                                disabled={safePage <= 1}
-                                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
-                            >
-                                <ChevronLeft className="w-3.5 h-3.5" />
-                                Previous
-                            </button>
-                            <span className="text-xs font-bold text-[#475569] tabular-nums px-1">
-                                {safePage} / {totalPages}
-                            </span>
-                            <button
-                                type="button"
-                                disabled={safePage >= totalPages}
-                                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
-                            >
-                                Next
-                                <ChevronRight className="w-3.5 h-3.5" />
-                            </button>
+            {!showForm ? (
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
+                    <div className="px-5 py-4 border-b border-[#E2E8F0] bg-gradient-to-r from-[#FFFBEB] to-white flex items-center gap-2.5">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FEF3C7] border border-[#FDE68A]">
+                            <ClipboardCheck className="w-4 h-4 text-[#D97706]" />
                         </div>
+                        <div className="min-w-0">
+                            <h2 className="text-sm font-bold text-[#0F172A]">Full audit history</h2>
+                            <p className="text-[11px] text-[#94A3B8]">
+                                Deep crawl reports ready to share and assign
+                            </p>
+                        </div>
+                        <span className="text-xs font-semibold text-[#64748B] bg-[#F8FAFC] border border-[#E2E8F0] rounded-full px-2.5 py-1 ml-auto">
+                            {audits.length} reports
+                        </span>
                     </div>
-                ) : null}
-            </div>
+
+                    {loading ? <p className="p-6 text-sm text-[#64748B]">Loading…</p> : null}
+
+                    {!loading && audits.length === 0 ? (
+                        <p className="p-6 text-sm text-[#64748B]">
+                            No full crawl audits yet.{' '}
+                            <button
+                                type="button"
+                                onClick={openNewForm}
+                                className="font-semibold text-[#D97706] hover:underline"
+                            >
+                                Start a new full audit
+                            </button>
+                            .
+                        </p>
+                    ) : null}
+
+                    <ul className="divide-y divide-[#F1F5F9]">
+                        {pageAudits.map((a) => {
+                            const share = resolveAuditReportUrl(a.shareUrl || a.reportUrl || a.id);
+                            const busy = busyId === a.id;
+                            const canShare = Boolean(a.published);
+                            return (
+                                <li
+                                    key={a.id}
+                                    className="group p-4 sm:p-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between transition-colors"
+                                >
+                                    <div className="min-w-0 flex-1 space-y-2">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <p className="text-base font-semibold text-[#0F172A] truncate group-hover:font-bold">
+                                                {a.businessName || 'Untitled business'}
+                                            </p>
+                                            {a.totalScore != null ? (
+                                                <span className="inline-flex items-center rounded-full bg-[#FFFBEB] border border-[#FDE68A] px-2 py-0.5 text-[11px] font-bold text-[#92400E]">
+                                                    {a.totalScore}/100
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            <span className="inline-flex items-center rounded-md bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-0.5 text-[11px] font-semibold text-[#475569]">
+                                                Full crawl
+                                            </span>
+                                            <span className="inline-flex items-center rounded-md bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-0.5 text-[11px] font-medium text-[#64748B]">
+                                                {a.city || '—'}
+                                            </span>
+                                            <span className="inline-flex items-center rounded-md bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-0.5 text-[11px] font-medium text-[#64748B]">
+                                                {a.tradeId || '—'}
+                                            </span>
+                                            <span
+                                                className={cn(
+                                                    'inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold',
+                                                    a.published
+                                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                                                )}
+                                            >
+                                                {a.published ? 'Published' : 'Draft'}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-[#94A3B8] truncate">
+                                            {[a.email, a.phone].filter(Boolean).join(' · ') || 'No contact'}
+                                            {a.website ? ` · ${a.website}` : ''}
+                                        </p>
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                        {share ? (
+                                            <>
+                                                <a
+                                                    href={share}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:bg-[#F8FAFC]"
+                                                >
+                                                    <ExternalLink className="w-3.5 h-3.5" />
+                                                    Open report
+                                                </a>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onCopy(share)}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:bg-[#F8FAFC]"
+                                                >
+                                                    <Copy className="w-3.5 h-3.5" />
+                                                    Copy link
+                                                </button>
+                                            </>
+                                        ) : null}
+                                        <button
+                                            type="button"
+                                            disabled={busy || !canShare}
+                                            onClick={() => onShare(a)}
+                                            className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-[#E2E8F0] bg-white text-[#64748B] hover:text-[#D97706] hover:border-[#FDE68A] hover:bg-[#FFFBEB] disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-[#64748B]"
+                                            aria-label={
+                                                a.email
+                                                    ? `Email report to ${a.email}`
+                                                    : 'Email report (enter address)'
+                                            }
+                                            title={
+                                                !a.published
+                                                    ? 'Publish before sharing'
+                                                    : a.email
+                                                        ? `Email report to ${a.email}`
+                                                        : 'Email report — you’ll be asked for an address'
+                                            }
+                                        >
+                                            <Share2
+                                                className={cn(
+                                                    'w-4 h-4',
+                                                    busy && busyAction === 'share' && 'animate-pulse'
+                                                )}
+                                            />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={busy}
+                                            onClick={() => onDelete(a)}
+                                            className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-[#E2E8F0] bg-white text-[#94A3B8] hover:text-red-600 hover:border-red-200 disabled:opacity-60"
+                                            aria-label={`Delete ${a.businessName || 'audit'}`}
+                                            title="Delete report"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveLead(auditToLeadRef(a))}
+                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-xs font-bold shadow-xs transition-colors"
+                                        >
+                                            <CheckSquare className="w-3.5 h-3.5 text-[#D97706]" />
+                                            Manage Task
+                                        </button>
+                                    </div>
+                                </li>
+                            );
+                        })}
+                    </ul>
+
+                    {!loading && audits.length > 0 ? (
+                        <div className="px-4 sm:px-5 py-3 border-t border-[#E2E8F0] bg-[#FCFDFE] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <p className="text-xs text-[#64748B]">
+                                Showing {rangeStart}–{rangeEnd} of {audits.length}
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    disabled={safePage <= 1}
+                                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
+                                >
+                                    <ChevronLeft className="w-3.5 h-3.5" />
+                                    Previous
+                                </button>
+                                <span className="text-xs font-bold text-[#475569] tabular-nums px-1">
+                                    {safePage} / {totalPages}
+                                </span>
+                                <button
+                                    type="button"
+                                    disabled={safePage >= totalPages}
+                                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
+                                >
+                                    Next
+                                    <ChevronRight className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
             {activeLead ? (
                 <LeadCrmDrawer
                     lead={activeLead}
