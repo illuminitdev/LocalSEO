@@ -1,6 +1,95 @@
 
 import { buildLocalSeoCoreChecklist } from './localSeoCoreChecklist.js';
 
+/** Country aliases → canonical token (applied only as address suffix). */
+const COUNTRY_SUFFIX_ALIASES = [
+  {
+    canon: 'unitedkingdom',
+    keys: [
+      'united kingdom of great britain and northern ireland',
+      'united kingdom',
+      'great britain',
+      'u k',
+      'uk',
+      'g b',
+      'gb'
+    ]
+  },
+  {
+    canon: 'unitedstates',
+    keys: ['united states of america', 'united states', 'u s a', 'u s', 'usa', 'us']
+  },
+  { canon: 'australia', keys: ['australia', 'au'] },
+  { canon: 'canada', keys: ['canada', 'ca'] },
+  { canon: 'ireland', keys: ['republic of ireland', 'ireland', 'ie'] },
+  { canon: 'newzealand', keys: ['new zealand', 'nz'] },
+  { canon: 'germany', keys: ['germany', 'de'] },
+  { canon: 'france', keys: ['france', 'fr'] },
+  { canon: 'india', keys: ['india', 'in'] },
+  { canon: 'netherlands', keys: ['netherlands', 'the netherlands', 'nl'] },
+  { canon: 'southafrica', keys: ['south africa', 'za'] }
+];
+
+/** Street type abbreviations → full forms (Rd ≈ Road, etc.). */
+const STREET_ABBREV: Array<[RegExp, string]> = [
+  [/\brd\b/g, 'road'],
+  [/\bstreet\b/g, 'street'],
+  [/\bst\b/g, 'street'],
+  [/\bave\b/g, 'avenue'],
+  [/\bav\b/g, 'avenue'],
+  [/\bblvd\b/g, 'boulevard'],
+  [/\bln\b/g, 'lane'],
+  [/\bdr\b/g, 'drive'],
+  [/\bct\b/g, 'court'],
+  [/\bpl\b/g, 'place'],
+  [/\bsq\b/g, 'square'],
+  [/\bter\b/g, 'terrace'],
+  [/\bcres\b/g, 'crescent'],
+  [/\bcl\b/g, 'close'],
+  [/\bhwy\b/g, 'highway'],
+  [/\bpkwy\b/g, 'parkway'],
+  [/\bcir\b/g, 'circle']
+];
+
+/** Normalize address text; UK ≈ United Kingdom; Rd ≈ Road. */
+function normAddress(s) {
+  let t = String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!t) return '';
+  for (const [re, full] of STREET_ABBREV) {
+    t = t.replace(re, full);
+  }
+  t = t.replace(/\s+/g, ' ').trim();
+  for (const { canon, keys } of COUNTRY_SUFFIX_ALIASES) {
+    const sorted = [...keys].sort((a, b) => b.length - a.length);
+    for (const key of sorted) {
+      if (t === key) return canon;
+      if (t.endsWith(` ${key}`)) {
+        return `${t.slice(0, t.length - key.length - 1).trim()} ${canon}`.trim();
+      }
+    }
+  }
+  return t;
+}
+
+function addressesMatch(a, b) {
+  const na = normAddress(a);
+  const nb = normAddress(b);
+  if (!na || !nb) return false;
+  if (na === nb || na.includes(nb) || nb.includes(na)) return true;
+  // Token overlap for minor word-order / extra-locality differences
+  const ta = new Set(na.split(' ').filter((w) => w.length > 1));
+  const tb = new Set(nb.split(' ').filter((w) => w.length > 1));
+  if (!ta.size || !tb.size) return false;
+  let shared = 0;
+  for (const w of ta) if (tb.has(w)) shared += 1;
+  const minSize = Math.min(ta.size, tb.size);
+  return shared >= Math.max(3, Math.ceil(minSize * 0.85));
+}
+
 export function buildLocalSeoInconsistencies(audit) {
   const b = audit?.business || {};
   const g = audit?.gbpLookup || {};
@@ -32,7 +121,7 @@ export function buildLocalSeoInconsistencies(audit) {
   const addrGbp = g.address || '';
   const addrBiz = b.address || '';
   if (addrGbp || addrBiz) {
-    const match = addrGbp && addrBiz && (norm(addrGbp).includes(norm(addrBiz)) || norm(addrBiz).includes(norm(addrGbp)));
+    const match = addrGbp && addrBiz && addressesMatch(addrGbp, addrBiz);
     cards.push({
       field: 'address',
       title: match ? 'Address Correct & Consistent' : 'Address Inconsistency',

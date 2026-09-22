@@ -16,12 +16,21 @@ import {
   captureMapsScreenshotFromTask,
   captureOrganicLocalPackScreenshot,
   checkAiEngineMentionsMulti,
+  detectDuplicateListings,
+  fetchBacklinksSummary,
+  fetchGbpMyBusinessInfo,
+  fetchGbpQa,
+  fetchGbpReviewsSample,
+  fetchGbpUpdates,
   fetchMapsLocalPack,
   fetchOrganicBrandImages,
+  fetchOrganicLocalRank,
   findMatchingMapsItem,
+  measureGeoGridVisibility,
   requireDataForSeoConfigured,
   type DataForSeoMapsItem
 } from '../lib/dataForSeo.js';
+import { runCitationAudit } from '../audit/citationAudit.js';
 import {
   fetchPlaceDetailsById,
   gbpFieldsFromPlaceDetails,
@@ -46,6 +55,31 @@ async function staticMapDataUrl(lat: number, lng: number): Promise<string | null
     const buf = Buffer.from(await res.arrayBuffer());
     const ct = (res.headers.get('content-type') || 'image/png').split(';')[0];
     if (!buf.length || !/^image\//i.test(ct)) return null;
+    return `data:${ct};base64,${buf.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Google KP “See outside” — Street View at the listing pin (distinct from Search photos). */
+async function streetViewDataUrl(lat: number, lng: number): Promise<string | null> {
+  const key = String(process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '').trim();
+  if (!key || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  try {
+    const params = new URLSearchParams({
+      size: '600x400',
+      location: `${lat},${lng}`,
+      fov: '80',
+      pitch: '0',
+      key
+    });
+    const res = await fetch(`https://maps.googleapis.com/maps/api/streetview?${params}`);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const ct = (res.headers.get('content-type') || 'image/jpeg').split(';')[0];
+    if (!buf.length || !/^image\//i.test(ct)) return null;
+    // Skip tiny “sorry” placeholders when Street View is missing
+    if (buf.length < 4000) return null;
     return `data:${ct};base64,${buf.toString('base64')}`;
   } catch {
     return null;
@@ -88,7 +122,7 @@ async function mergeGbpFromMapsHit(
   const place = hit.placeId ? await fetchPlaceDetailsById(hit.placeId) : null;
   const fromPlace = place ? gbpFieldsFromPlaceDetails(place) : null;
 
-  // Prefer Google Search brand images; fall back to one Places photo if Search returned none
+  // Prefer Google Search brand images for collage main slot
   let photoUrls: string[] = (opts?.searchPhotoUrls || []).filter((u) =>
     String(u || '').startsWith('data:image/')
   );
@@ -99,12 +133,19 @@ async function mergeGbpFromMapsHit(
     if (photoUrls.length) photoSource = 'google-search';
   }
 
-  if (!photoUrls.length && place) {
+  // If Search gave fewer than 2 distinct images, fill remaining collage slots from Places
+  // (outside / "See outside") — never replace Search main with Maps main_image when Search exists
+  if (photoUrls.length < 2 && place) {
     const resolved = await photoUrlsFromPlace(place, 2);
     for (const u of resolved) {
-      if (!photoUrls.includes(u)) photoUrls.push(u);
+      if (photoUrls.length >= 2) break;
+      const asData = (await imageUrlToDataUrl(u)) || u;
+      if (!String(asData || '').startsWith('data:image/')) continue;
+      const key = String(asData).slice(0, 120);
+      if (photoUrls.some((p) => String(p).slice(0, 120) === key)) continue;
+      photoUrls.push(asData);
     }
-    if (photoUrls.length) photoSource = 'places-or-maps';
+    if (!photoSource && photoUrls.length) photoSource = 'places-or-maps';
   }
   if (!photoUrls.length && hit.mainImage) {
     const asData = await imageUrlToDataUrl(hit.mainImage);
@@ -128,7 +169,12 @@ async function mergeGbpFromMapsHit(
   });
 
   const outsideDistinct =
-    photoUrls.find((u, i) => i > 0 && u !== photoUrls[0]) || null;
+    photoUrls.find((u, i) => i > 0 && u !== photoUrls[0]) ||
+    (prev.outsideImageUrl &&
+    String(prev.outsideImageUrl).startsWith('data:image/') &&
+    prev.outsideImageUrl !== photoUrls[0]
+      ? prev.outsideImageUrl
+      : null);
 
   const gbpName = fromPlace?.gbpName || hit.name || prev.gbpName || '';
   const address = fromPlace?.address || hit.address || prev.address || '';
@@ -143,6 +189,22 @@ async function mergeGbpFromMapsHit(
     (gbpName
       ? `https://www.google.com/search?q=${encodeURIComponent(gbpName)}`
       : '');
+
+  // “See outside” = Street View at pin (Google KP style), never the same as main Search photo
+  let outsideImageUrl: string | null = null;
+  if (typeof latitude === 'number' && typeof longitude === 'number') {
+    outsideImageUrl = await streetViewDataUrl(latitude, longitude);
+  }
+  if (!outsideImageUrl) {
+    outsideImageUrl =
+      outsideDistinct ||
+      (prev.outsideImageUrl && prev.outsideImageUrl !== photoUrls[0]
+        ? prev.outsideImageUrl
+        : null);
+  }
+  if (outsideImageUrl && photoUrls[0] && outsideImageUrl === photoUrls[0]) {
+    outsideImageUrl = outsideDistinct && outsideDistinct !== photoUrls[0] ? outsideDistinct : null;
+  }
 
   audit.gbpLookup = {
     ...prev,
@@ -161,13 +223,15 @@ async function mergeGbpFromMapsHit(
     latitude,
     longitude,
     primaryTypeDisplayName: fromPlace?.primaryTypeDisplayName || prev.primaryTypeDisplayName || null,
+    secondaryTypes: fromPlace?.secondaryTypes || prev.secondaryTypes || [],
+    hasHours: fromPlace?.hasHours ?? prev.hasHours ?? null,
+    hoursText: fromPlace?.hoursText || prev.hoursText || '',
+    description: fromPlace?.description || prev.description || null,
     photosPresent: photoUrls.length > 0 || Boolean(fromPlace?.photosPresent) || hit.totalPhotos > 0,
     photoNames: fromPlace?.photoNames || prev.photoNames || [],
     photoUrls,
     photoSource: photoSource || prev.photoSource || null,
-    outsideImageUrl:
-      outsideDistinct ||
-      (prev.outsideImageUrl && prev.outsideImageUrl !== photoUrls[0] ? prev.outsideImageUrl : null),
+    outsideImageUrl,
     evidence: `Matched Google Maps listing via DataForSEO: ${gbpName || hit.placeId}`,
     serviceQuery: prev.serviceQuery || null
   };
@@ -318,25 +382,218 @@ async function enrichFromDataForSeo(audit: any) {
       console.warn('[auditWorker] DataForSEO Maps: no GBP match for', businessName);
     }
   } else if (searchPhotoUrls.length || googleSearchUrl) {
-    // GBP already present — still upgrade collage to Google Search images
+    // GBP already present — Search images for main; Street View for “See outside”
     const prev = audit.gbpLookup || {};
-    const merged = searchPhotoUrls.length ? [...searchPhotoUrls] : [];
-    const outsideDistinct = merged.find((u, i) => i > 0 && u !== merged[0]) || null;
+    const merged = searchPhotoUrls.length
+      ? searchPhotoUrls.filter((u) => String(u || '').startsWith('data:image/')).slice(0, 3)
+      : [];
+    const plat = typeof prev.latitude === 'number' ? prev.latitude : null;
+    const plng = typeof prev.longitude === 'number' ? prev.longitude : null;
+    let outside =
+      plat != null && plng != null ? await streetViewDataUrl(plat, plng) : null;
+    if (
+      !outside &&
+      prev.outsideImageUrl &&
+      String(prev.outsideImageUrl).startsWith('data:image/') &&
+      prev.outsideImageUrl !== merged[0]
+    ) {
+      outside = prev.outsideImageUrl;
+    }
     audit.gbpLookup = {
       ...prev,
       ...(merged.length
         ? {
-            photoUrls: merged,
+            photoUrls: merged.slice(0, 3),
             photoSource: 'google-search',
-            photosPresent: true,
-            outsideImageUrl: outsideDistinct || null
+            photosPresent: true
           }
         : {}),
+      outsideImageUrl: outside || null,
       googleSearchUrl: googleSearchUrl || prev.googleSearchUrl || null
     };
   }
 
-  
+  // Ensure “See outside” is Street View whenever we have coords (Google KP layout)
+  {
+    const gbp = audit.gbpLookup || {};
+    const olat = typeof gbp.latitude === 'number' ? gbp.latitude : typeof lat === 'number' ? lat : null;
+    const olng =
+      typeof gbp.longitude === 'number' ? gbp.longitude : typeof lng === 'number' ? lng : null;
+    const main0 = Array.isArray(gbp.photoUrls) ? gbp.photoUrls[0] : null;
+    const hasOutside =
+      String(gbp.outsideImageUrl || '').startsWith('data:image/') &&
+      gbp.outsideImageUrl !== main0;
+    if (!hasOutside && olat != null && olng != null) {
+      const street = await streetViewDataUrl(olat, olng);
+      if (street && street !== main0) {
+        audit.gbpLookup = { ...gbp, outsideImageUrl: street };
+      }
+    }
+  }
+
+  // Best-effort full Local SEO signals (DataForSEO + Gemini) — soft-fail
+  try {
+    const gbp = audit.gbpLookup || {};
+    const placeId = String(gbp.placeId || '').trim();
+    const keyword =
+      placeId ||
+      String(gbp.gbpName || businessName || '').trim() ||
+      brandQuery;
+    if (keyword) {
+      const locOpts = {
+        lat: typeof gbp.latitude === 'number' ? gbp.latitude : typeof lat === 'number' ? lat : null,
+        lng: typeof gbp.longitude === 'number' ? gbp.longitude : typeof lng === 'number' ? lng : null,
+        locationName: locationLabel || undefined,
+        timeoutMs: 22000
+      };
+      const organicKw = packQuery || `${service} ${locationLabel}`.trim();
+
+      const [updates, reviews, info, qa, backlinks, organic, duplicates, citations] =
+        await Promise.all([
+          fetchGbpUpdates({
+            placeId: placeId || undefined,
+            keyword: placeId ? undefined : String(keyword),
+            ...locOpts,
+            depth: 10,
+            recentDays: 60
+          }),
+          fetchGbpReviewsSample({
+            placeId: placeId || undefined,
+            keyword: placeId ? undefined : String(keyword),
+            ...locOpts,
+            depth: 20,
+            recentDays: 90
+          }),
+          fetchGbpMyBusinessInfo({
+            placeId: placeId || undefined,
+            keyword: placeId ? undefined : String(keyword),
+            ...locOpts
+          }),
+          fetchGbpQa({
+            placeId: placeId || undefined,
+            keyword: placeId ? undefined : String(keyword),
+            ...locOpts,
+            depth: 20
+          }),
+          fetchBacklinksSummary({ website: business.website }),
+          fetchOrganicLocalRank({
+            keyword: organicKw,
+            website: business.website || gbp.websiteOnGbp,
+            businessName: businessName || gbp.gbpName,
+            lat: locOpts.lat,
+            lng: locOpts.lng,
+            locationName: locOpts.locationName
+          }),
+          detectDuplicateListings({
+            businessName: businessName || gbp.gbpName || '',
+            placeId: placeId || undefined,
+            phone: business.phone || gbp.phone,
+            website: business.website,
+            lat: locOpts.lat,
+            lng: locOpts.lng,
+            locationName: locOpts.locationName
+          }),
+          runCitationAudit({
+            businessName: businessName || gbp.gbpName || '',
+            address: business.address || gbp.address,
+            phone: business.phone || gbp.phone,
+            website: business.website || gbp.websiteOnGbp,
+            city: locationLabel,
+            service
+          })
+        ]);
+
+      let geoGrid: Awaited<ReturnType<typeof measureGeoGridVisibility>> | null = null;
+      if (
+        typeof locOpts.lat === 'number' &&
+        typeof locOpts.lng === 'number' &&
+        organicKw
+      ) {
+        geoGrid = await measureGeoGridVisibility({
+          keyword: organicKw,
+          placeId: placeId || undefined,
+          businessName: businessName || gbp.gbpName,
+          lat: locOpts.lat,
+          lng: locOpts.lng,
+          locationName: locOpts.locationName
+        });
+      }
+
+      audit.gbpLookup = {
+        ...(audit.gbpLookup || {}),
+        hasRecentPosts: updates.hasRecentPosts,
+        postsEvidence: updates.evidence,
+        recentPostAt: updates.recentPostAt,
+        postsTotal: updates.totalPosts,
+        ownerRepliesLikely: reviews.ownerRepliesLikely,
+        ownerRepliesEvidence: reviews.evidence,
+        reviewReplyRate: reviews.replyRate,
+        reviewSamples: reviews.samples,
+        reviewsLookRecent: reviews.reviewsLookRecent,
+        reviewRecencyEvidence: reviews.recencyEvidence,
+        newestReviewAt: reviews.newestReviewAt,
+        primaryCategory: info.category || gbp.primaryTypeDisplayName || null,
+        primaryTypeDisplayName:
+          info.category || gbp.primaryTypeDisplayName || null,
+        additionalCategories: info.additionalCategories,
+        hasSecondaryCategories: info.ok
+          ? info.additionalCategories.length > 0
+          : Array.isArray(gbp.secondaryTypes) && gbp.secondaryTypes.length > 1
+            ? true
+            : null,
+        description: info.description || gbp.description || null,
+        hasDescription: info.ok
+          ? Boolean(info.description)
+          : gbp.description
+            ? true
+            : null,
+        hasHours: info.hasHours ?? gbp.hasHours ?? null,
+        hoursEvidence: info.hoursEvidence,
+        hasServices: info.hasServices,
+        servicesCount: info.servicesCount,
+        hasProducts: info.hasProducts,
+        productsEvidence: info.productsEvidence,
+        gbpInfoEvidence: info.evidence,
+        cid: info.cid || null,
+        hasQa: qa.hasQa,
+        qaEvidence: qa.evidence,
+        qaQuestionCount: qa.questionCount,
+        backlinksCount: backlinks.backlinks,
+        referringDomains: backlinks.referringDomains,
+        hasBacklinks: backlinks.hasBacklinks,
+        backlinksEvidence: backlinks.evidence,
+        inOrganicLocal: organic.inOrganic,
+        organicPosition: organic.position,
+        organicEvidence: organic.evidence,
+        duplicateLikely: duplicates.duplicateLikely,
+        duplicateEvidence: duplicates.evidence,
+        citationConsistency: citations.citationConsistency,
+        directoriesPresent: citations.directoriesPresent,
+        industryCitations: citations.industryCitations,
+        brandMentions: citations.brandMentions,
+        citationsEvidence: citations.evidence,
+        citationRows: citations.citations,
+        geoGridVisible: geoGrid?.inGrid ?? null,
+        geoGridPct: geoGrid?.visibilityPct ?? null,
+        geoGridEvidence: geoGrid?.evidence || null
+      };
+      console.log(
+        '[auditWorker] Local SEO extras:',
+        updates.evidence,
+        '|',
+        reviews.evidence,
+        '|',
+        info.evidence,
+        '|',
+        qa.evidence,
+        '|',
+        citations.evidence
+      );
+    }
+  } catch (postsErr) {
+    console.warn('[auditWorker] Local SEO extras enrich failed:', (postsErr as Error).message);
+  }
+
   lat = audit.gbpLookup?.latitude ?? audit.gbpLookup?.lat ?? null;
   lng = audit.gbpLookup?.longitude ?? audit.gbpLookup?.lng ?? null;
   const hadCoordsBefore = typeof lat === 'number' && typeof lng === 'number';
