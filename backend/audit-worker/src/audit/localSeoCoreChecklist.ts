@@ -87,12 +87,75 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
 
   const primaryCat = fromCheck(
     checkByLabel(checks, /primary category/i) || checkById(checks, 'gbp_6'),
-    gbp.primaryTypeDisplayName ? `Category: ${gbp.primaryTypeDisplayName}` : undefined
+    gbp.primaryTypeDisplayName || gbp.primaryCategory
+      ? `Category: ${gbp.primaryTypeDisplayName || gbp.primaryCategory}`
+      : undefined
   );
   const primarySe: StatusEv =
-    primaryCat.status === 'unknown' && gbp.primaryTypeDisplayName
-      ? { status: 'yes', evidence: `Listed as ${gbp.primaryTypeDisplayName}` }
+    primaryCat.status === 'unknown' && (gbp.primaryTypeDisplayName || gbp.primaryCategory)
+      ? { status: 'yes', evidence: `Listed as ${gbp.primaryTypeDisplayName || gbp.primaryCategory}` }
       : primaryCat;
+
+  const secondarySe: StatusEv =
+    gbp.hasSecondaryCategories === true
+      ? {
+          status: 'yes',
+          evidence:
+            Array.isArray(gbp.additionalCategories) && gbp.additionalCategories.length
+              ? `Secondary: ${gbp.additionalCategories.slice(0, 3).join(', ')}`
+              : 'Secondary categories present'
+        }
+      : gbp.hasSecondaryCategories === false
+        ? { status: 'no', evidence: 'No secondary categories on GBP' }
+        : Array.isArray(gbp.secondaryTypes) && gbp.secondaryTypes.length > 1
+          ? { status: 'yes', evidence: `Types: ${gbp.secondaryTypes.slice(0, 3).join(', ')}` }
+          : fromCheck(checkByLabel(checks, /secondary categor/i) || checkById(checks, 'gbp_7'));
+
+  const descriptionSe: StatusEv =
+    gbp.hasDescription === true || (gbp.description && String(gbp.description).trim())
+      ? { status: 'yes', evidence: 'Business description present on GBP' }
+      : gbp.hasDescription === false
+        ? { status: 'no', evidence: 'No business description on GBP' }
+        : fromCheck(checkByLabel(checks, /business description/i) || checkById(checks, 'gbp_15'));
+
+  const hoursSe: StatusEv =
+    gbp.hasHours === true
+      ? { status: 'yes', evidence: gbp.hoursEvidence || gbp.hoursText || 'Opening hours present' }
+      : gbp.hasHours === false
+        ? { status: 'no', evidence: gbp.hoursEvidence || 'No opening hours on GBP' }
+        : fromCheck(checkByLabel(checks, /opening hours|hours correct/i) || checkById(checks, 'gbp_16'));
+
+  const servicesSe: StatusEv =
+    gbp.hasServices === true
+      ? {
+          status: 'yes',
+          evidence:
+            gbp.servicesCount > 0 ? `${gbp.servicesCount} service(s) listed` : 'Services present on GBP'
+        }
+      : gbp.hasServices === false
+        ? { status: 'no', evidence: 'No services listed on GBP' }
+        : fromCheck(checkByLabel(checks, /services\/products|services added/i) || checkById(checks, 'gbp_14'));
+
+  const productsSe: StatusEv =
+    gbp.hasProducts === true
+      ? { status: 'yes', evidence: gbp.productsEvidence || 'Products present on GBP' }
+      : gbp.hasProducts === false
+        ? { status: 'no', evidence: gbp.productsEvidence || 'No products listed on GBP' }
+        : fromCheck(checkByLabel(checks, /products added|products\b/i));
+
+  const qaSe: StatusEv =
+    gbp.hasQa === true
+      ? { status: 'yes', evidence: gbp.qaEvidence || 'GBP Q&A present' }
+      : gbp.hasQa === false
+        ? { status: 'no', evidence: gbp.qaEvidence || 'No GBP Q&A found' }
+        : { status: 'unknown', evidence: 'Q&A not measured' };
+
+  const reviewRecencySe: StatusEv =
+    gbp.reviewsLookRecent === true
+      ? { status: 'yes', evidence: gbp.reviewRecencyEvidence || 'Recent reviews found' }
+      : gbp.reviewsLookRecent === false
+        ? { status: 'no', evidence: gbp.reviewRecencyEvidence || 'No recent reviews' }
+        : fromCheck(checkByLabel(checks, /reviews recent/i) || checkById(checks, 'gbp_10'));
 
   const photosCheck = fromCheck(
     checkByLabel(checks, /photos updated|photos\b/i) || checkById(checks, 'gbp_13')
@@ -106,10 +169,26 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
     checkByLabel(checks, /responding to reviews|review replies/i) || checkById(checks, 'gbp_11')
   );
   let reviewResponseSe: StatusEv = reviewResponseCheck;
-  if (gbp.ownerRepliesLikely === true) {
+  if (typeof gbp.reviewReplyRate === 'number' && Number.isFinite(gbp.reviewReplyRate)) {
+    const rate = Number(gbp.reviewReplyRate);
+    reviewResponseSe =
+      rate >= 50
+        ? { status: 'yes', evidence: gbp.ownerRepliesEvidence || `Owner reply rate ${rate}%` }
+        : { status: 'no', evidence: gbp.ownerRepliesEvidence || `Owner reply rate ${rate}%` };
+  } else if (gbp.ownerRepliesLikely === true) {
     reviewResponseSe = { status: 'yes', evidence: gbp.ownerRepliesEvidence || 'Owner replies detected' };
   } else if (gbp.ownerRepliesLikely === false) {
     reviewResponseSe = { status: 'no', evidence: gbp.ownerRepliesEvidence || 'Few or no owner replies' };
+  }
+
+  const postsCheck = fromCheck(
+    checkByLabel(checks, /posts being used|google posts/i) || checkById(checks, 'gbp_18')
+  );
+  let postsSe: StatusEv = postsCheck;
+  if (gbp.hasRecentPosts === true) {
+    postsSe = { status: 'yes', evidence: gbp.postsEvidence || 'Recent Google Posts found' };
+  } else if (gbp.hasRecentPosts === false) {
+    postsSe = { status: 'no', evidence: gbp.postsEvidence || 'No recent Google Posts' };
   }
 
   const svcChecks = checks.filter((c) => c.section === 'service_pages');
@@ -204,16 +283,8 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
             )
           ),
           item('core_gbp_primary_cat', 'Primary category', primarySe),
-          item(
-            'core_gbp_secondary_cat',
-            'Secondary categories',
-            fromCheck(checkByLabel(checks, /secondary categor/i) || checkById(checks, 'gbp_7'))
-          ),
-          item(
-            'core_gbp_description',
-            'Business description',
-            fromCheck(checkByLabel(checks, /business description/i) || checkById(checks, 'gbp_15'))
-          ),
+          item('core_gbp_secondary_cat', 'Secondary categories', secondarySe),
+          item('core_gbp_description', 'Business description', descriptionSe),
           item(
             'core_gbp_address',
             'Address / service area',
@@ -244,35 +315,15 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
               'Website URL not confirmed'
             )
           ),
-          item(
-            'core_gbp_hours',
-            'Opening hours',
-            fromCheck(checkByLabel(checks, /opening hours|hours correct/i) || checkById(checks, 'gbp_16'))
-          ),
-          item(
-            'core_gbp_services',
-            'Services',
-            fromCheck(checkByLabel(checks, /services\/products|services added/i) || checkById(checks, 'gbp_14'))
-          ),
-          item(
-            'core_gbp_products',
-            'Products',
-            fromCheck(checkByLabel(checks, /products added|products\b/i))
-          ),
+          item('core_gbp_hours', 'Opening hours', hoursSe),
+          item('core_gbp_services', 'Services', servicesSe),
+          item('core_gbp_products', 'Products', productsSe),
           item('core_gbp_photos', 'Photos', photosSe),
-          item(
-            'core_gbp_posts',
-            'Google Posts',
-            fromCheck(checkByLabel(checks, /posts being used|google posts/i) || checkById(checks, 'gbp_18'))
-          ),
-          itemFixed('core_gbp_qa', 'GBP Q&A', 'unknown', 'Q&A not measured automatically'),
+          item('core_gbp_posts', 'Google Posts', postsSe),
+          item('core_gbp_qa', 'GBP Q&A', qaSe),
           item('core_gbp_rating', 'Review rating', ratingSe),
           item('core_gbp_review_count', 'Review count', reviewCountSe),
-          item(
-            'core_gbp_review_recency',
-            'Review recency',
-            fromCheck(checkByLabel(checks, /reviews recent/i) || checkById(checks, 'gbp_10'))
-          ),
+          item('core_gbp_review_recency', 'Review recency', reviewRecencySe),
           item('core_gbp_review_response', 'Review response rate', reviewResponseSe)
         ]
       },
@@ -327,25 +378,70 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
         id: 'authority',
         title: 'Local Authority',
         items: [
-          item('core_auth_citations', 'Citation consistency', fromCheck(checkByLabel(checks, /citation/i))),
-          itemFixed(
+          item(
+            'core_auth_citations',
+            'Citation consistency',
+            fromBool(
+              gbp.citationConsistency,
+              gbp.citationsEvidence || 'Citations look consistent',
+              gbp.citationsEvidence || 'Citation NAP gaps / mismatches',
+              'Citations not measured'
+            )
+          ),
+          item(
             'core_auth_duplicates',
             'Duplicate/incorrect listings',
-            'unknown',
-            'Duplicate listings not measured automatically'
+            fromBool(
+              gbp.duplicateLikely === null || gbp.duplicateLikely === undefined
+                ? null
+                : !gbp.duplicateLikely,
+              gbp.duplicateEvidence || 'No duplicate listings detected',
+              gbp.duplicateEvidence || 'Possible duplicate Google listings',
+              'Duplicate listings not measured'
+            )
           ),
-          item('core_auth_directories', 'Relevant local directories', fromCheck(checkByLabel(checks, /director/i))),
-          itemFixed(
+          item(
+            'core_auth_directories',
+            'Relevant local directories',
+            fromBool(
+              gbp.directoriesPresent,
+              gbp.citationsEvidence || 'Local directories found',
+              gbp.citationsEvidence || 'Few or no local directories found',
+              'Directories not measured'
+            )
+          ),
+          item(
             'core_auth_industry',
             'Industry citations',
-            'unknown',
-            'Industry citations not measured automatically'
+            fromBool(
+              gbp.industryCitations,
+              'Industry / trade citations found',
+              'No industry citations found',
+              'Industry citations not measured'
+            )
           ),
-          item('core_auth_backlinks', 'Local backlinks', fromCheck(checkByLabel(checks, /backlink|local link/i))),
+          item(
+            'core_auth_backlinks',
+            'Local backlinks',
+            fromBool(
+              gbp.hasBacklinks,
+              gbp.backlinksEvidence || 'Backlinks present',
+              gbp.backlinksEvidence || 'No backlinks detected',
+              'Backlinks not measured'
+            )
+          ),
           item(
             'core_auth_mentions',
             'Local brand mentions',
-            fromCheck(checkByLabel(checks, /brand mention|local publication/i))
+            (() => {
+              if (gbp.brandMentions === true) {
+                return { status: 'yes' as const, evidence: 'Local brand mentions found' };
+              }
+              if (gbp.brandMentions === false) {
+                return { status: 'no' as const, evidence: 'Few or no local brand mentions' };
+              }
+              return fromCheck(checkByLabel(checks, /brand mention|local publication/i));
+            })()
           )
         ]
       },
@@ -355,14 +451,27 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
         items: [
           item('core_vis_maps', 'Google Maps ranking', mapsSe),
           item('core_vis_pack', 'Local Pack visibility', packSe),
-          itemFixed(
+          item(
             'core_vis_organic',
             'Local organic ranking',
-            'unknown',
-            'Organic local ranking not measured in this pass'
+            fromBool(
+              gbp.inOrganicLocal,
+              gbp.organicEvidence || 'In local organic results',
+              gbp.organicEvidence || 'Not in local organic results',
+              'Organic local ranking not measured'
+            )
           ),
           item('core_vis_competitors', 'Competitor comparison', competitorSe),
-          itemFixed('core_vis_geogrid', 'Geo-grid visibility', 'unknown', 'Geo-grid not measured in full audit'),
+          item(
+            'core_vis_geogrid',
+            'Geo-grid visibility',
+            fromBool(
+              gbp.geoGridVisible,
+              gbp.geoGridEvidence || 'Visible across geo-grid cells',
+              gbp.geoGridEvidence || 'Weak geo-grid visibility',
+              'Geo-grid not measured'
+            )
+          ),
           item('core_vis_service', 'Service-level visibility', serviceVisSe)
         ]
       }

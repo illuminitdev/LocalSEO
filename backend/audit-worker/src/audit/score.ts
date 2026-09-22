@@ -150,7 +150,7 @@ export function computeTriadScore(checks = [], context: { localRank?: any } = {}
     local_seo: {
       id: 'local_seo',
       label: 'Local SEO',
-      focus: 'Google, Maps, citations, local signals',
+      focus: 'GBP + Website + Citations + Maps Visibility',
       weight: 40,
       score: local.score,
       max: 100,

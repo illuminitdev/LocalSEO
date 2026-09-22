@@ -30,7 +30,11 @@ export async function fetchPlaceDetailsById(placeId: string): Promise<Record<str
           'userRatingCount',
           'photos',
           'location',
-          'primaryTypeDisplayName'
+          'primaryTypeDisplayName',
+          'primaryType',
+          'types',
+          'regularOpeningHours',
+          'editorialSummary'
         ].join(',')
       }
     });
@@ -97,6 +101,24 @@ export function gbpFieldsFromPlaceDetails(place: Record<string, unknown>) {
     typeof (place.location as any)?.longitude === 'number'
       ? (place.location as any).longitude
       : null;
+  const skipTypes = new Set([
+    'establishment',
+    'point_of_interest',
+    'premise',
+    'geocode',
+    'political',
+    'route',
+    'street_address'
+  ]);
+  const types = (Array.isArray(place.types) ? place.types : [])
+    .map((t) => String(t || ''))
+    .filter((t) => t && !skipTypes.has(t));
+  const hoursLines = (place.regularOpeningHours as { weekdayDescriptions?: string[] } | undefined)
+    ?.weekdayDescriptions;
+  const description =
+    (place.editorialSummary as { text?: string } | undefined)?.text ||
+    String((place.editorialSummary as any) || '') ||
+    '';
   return {
     gbpName: displayName,
     address: String(place.formattedAddress || ''),
@@ -109,6 +131,10 @@ export function gbpFieldsFromPlaceDetails(place: Record<string, unknown>) {
     latitude: lat,
     longitude: lng,
     primaryTypeDisplayName: primary,
+    secondaryTypes: types.slice(0, 8),
+    hasHours: Array.isArray(hoursLines) && hoursLines.length > 0,
+    hoursText: Array.isArray(hoursLines) ? hoursLines.join('; ') : '',
+    description: String(description || '').trim() || null,
     photosPresent: Array.isArray(place.photos) && place.photos.length > 0,
     photoNames: (Array.isArray(place.photos) ? place.photos : [])
       .map((p: any) => String(p?.name || ''))
