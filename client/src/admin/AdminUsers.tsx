@@ -129,7 +129,7 @@ export default function AdminUsers() {
 
     useEffect(() => {
         load();
-        fetchSalesAgents().then(setSalesAgents).catch(() => {});
+        fetchSalesAgents().then(setSalesAgents).catch(() => { });
     }, []);
 
     const totalUsers = users.length;
@@ -433,8 +433,8 @@ export default function AdminUsers() {
                                                     role === 'sales_agent'
                                                         ? 'bg-emerald-100 text-emerald-700'
                                                         : role === 'invite'
-                                                          ? 'bg-amber-50 text-amber-800'
-                                                          : 'bg-[#0F172A] text-[#F59E0B]'
+                                                            ? 'bg-amber-50 text-amber-800'
+                                                            : 'bg-[#0F172A] text-[#F59E0B]'
                                                 )}
                                             >
                                                 {(user.name || user.email || '?').charAt(0).toUpperCase()}
@@ -450,8 +450,8 @@ export default function AdminUsers() {
                                                             role === 'sales_agent'
                                                                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                                                 : role === 'invite'
-                                                                  ? 'bg-amber-50 text-amber-900 border-amber-200'
-                                                                  : 'bg-sky-50 text-sky-800 border-sky-200'
+                                                                    ? 'bg-amber-50 text-amber-900 border-amber-200'
+                                                                    : 'bg-sky-50 text-sky-800 border-sky-200'
                                                         )}
                                                     >
                                                         {roleLabel(user)}
@@ -460,7 +460,7 @@ export default function AdminUsers() {
                                                         role === 'customer' &&
                                                         (user.subscription?.status === 'active' ? (
                                                             <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
-                                                                 Live
+                                                                Live
                                                             </span>
                                                         ) : (
                                                             <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">

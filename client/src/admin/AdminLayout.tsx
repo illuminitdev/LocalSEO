@@ -1,8 +1,170 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, LogOut, Layers, Settings, Menu, X, ClipboardList, CheckSquare, ClipboardCheck, Bell } from 'lucide-react';
+import {
+    LayoutDashboard, Users, LogOut, Layers, Settings, Menu, X,
+    ClipboardList, CheckSquare, ClipboardCheck, Bell,
+    UserPlus, AlertCircle, CheckCheck, FileText, Zap
+} from 'lucide-react';
 import { clearAdminToken } from './adminApi';
 import { cn } from '../shared/utils';
+
+// ─── Notification Types ───────────────────────────────────────────────────────
+type NotifType = 'lead' | 'task' | 'audit' | 'system' | 'alert';
+
+interface AdminNotification {
+    id: string;
+    type: NotifType;
+    title: string;
+    body: string;
+    time: string;
+    read: boolean;
+}
+
+
+
+function timeAgo(iso: string): string {
+    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+}
+
+type IconConfig = { icon: React.ElementType; bg: string; color: string };
+
+const NOTIF_ICON: Record<NotifType, IconConfig> = {
+    lead:   { icon: UserPlus,    bg: 'bg-blue-50',    color: 'text-blue-500'    },
+    task:   { icon: CheckSquare, bg: 'bg-orange-50',  color: 'text-orange-500'  },
+    audit:  { icon: FileText,    bg: 'bg-emerald-50', color: 'text-emerald-500' },
+    system: { icon: Zap,         bg: 'bg-violet-50',  color: 'text-violet-500'  },
+    alert:  { icon: AlertCircle, bg: 'bg-red-50',     color: 'text-red-500'     },
+};
+
+// ─── Notification Bell Component ──────────────────────────────────────────────
+function NotificationBell({ notifRef, notifOpen, setNotifOpen }: {
+    notifRef: React.RefObject<HTMLDivElement | null>;
+    notifOpen: boolean;
+    setNotifOpen: React.Dispatch<React.SetStateAction<boolean>>;
+}) {
+    const [notifications, setNotifications] = useState<AdminNotification[]>([]);
+
+    const unreadCount = notifications.filter((n) => !n.read).length;
+
+    const markAllRead = () => {
+        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    };
+
+    const markOneRead = (id: string) => {
+        setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
+    };
+
+    return (
+        <div className="relative shrink-0" ref={notifRef}>
+            <button
+                type="button"
+                id="admin-notif-bell"
+                onClick={() => setNotifOpen((prev) => !prev)}
+                className={cn(
+                    'relative p-2 rounded-xl transition-all duration-150 cursor-pointer',
+                    notifOpen
+                        ? 'bg-amber-50 text-amber-600 ring-2 ring-amber-200'
+                        : 'text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9]'
+                )}
+                title="Notifications"
+                aria-expanded={notifOpen}
+                aria-label="Open notifications"
+            >
+                <Bell className={cn('w-5 h-5 transition-transform duration-200', notifOpen && 'scale-110')} strokeWidth={1.75} />
+                {unreadCount > 0 && (
+                    <span className="absolute top-1 right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 ring-2 ring-white text-white text-[9px] font-black flex items-center justify-center leading-none">
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                )}
+            </button>
+
+            {notifOpen && (
+                <div
+                    id="admin-notif-panel"
+                    className="absolute right-0 top-full mt-2 w-[340px] sm:w-[380px] rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_20px_60px_-12px_rgba(15,23,42,0.2)] z-50 overflow-hidden"
+                    style={{ animation: 'notifSlideIn 0.18s cubic-bezier(0.16,1,0.3,1)' }}
+                >
+                    {/* Header */}
+                    <div className="px-4 py-3 border-b border-[#F1F5F9] flex items-center justify-between bg-gradient-to-r from-[#F8FAFC] to-white">
+                        <div className="flex items-center gap-2">
+                            <Bell className="w-4 h-4 text-[#64748B]" strokeWidth={1.75} />
+                            <span className="font-bold text-sm text-[#0F172A]">Notifications</span>
+                            {unreadCount > 0 && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-100 text-red-600">
+                                    {unreadCount} new
+                                </span>
+                            )}
+                        </div>
+                        {unreadCount > 0 && (
+                            <button
+                                type="button"
+                                id="admin-notif-mark-all-read"
+                                onClick={markAllRead}
+                                className="flex items-center gap-1 text-[11px] font-semibold text-amber-600 hover:text-amber-700 transition-colors px-2 py-1 rounded-lg hover:bg-amber-50"
+                            >
+                                <CheckCheck className="w-3.5 h-3.5" />
+                                Mark all read
+                            </button>
+                        )}
+                    </div>
+
+                    {/* List */}
+                    <div className="max-h-[380px] overflow-y-auto overscroll-contain divide-y divide-[#F1F5F9]">
+                        {notifications.map((notif) => {
+                            const cfg = NOTIF_ICON[notif.type];
+                            const IconComp = cfg.icon;
+                            return (
+                                <button
+                                    type="button"
+                                    key={notif.id}
+                                    id={'admin-notif-item-' + notif.id}
+                                    onClick={() => markOneRead(notif.id)}
+                                    className={cn(
+                                        'w-full text-left flex items-start gap-3 px-4 py-3.5 transition-colors duration-100',
+                                        notif.read ? 'bg-white hover:bg-[#F8FAFC]' : 'bg-blue-50/40 hover:bg-blue-50/70'
+                                    )}
+                                >
+                                    <div className={cn('flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center mt-0.5', cfg.bg)}>
+                                        <IconComp className={cn('w-4 h-4', cfg.color)} strokeWidth={1.75} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <p className={cn('text-sm leading-tight', notif.read ? 'font-medium text-[#475569]' : 'font-semibold text-[#0F172A]')}>
+                                                {notif.title}
+                                            </p>
+                                            <span className="text-[10px] text-[#94A3B8] shrink-0 mt-0.5 font-medium">{timeAgo(notif.time)}</span>
+                                        </div>
+                                        <p className="text-xs text-[#64748B] mt-0.5 leading-relaxed line-clamp-2">{notif.body}</p>
+                                    </div>
+                                    {!notif.read && <span className="flex-shrink-0 w-2 h-2 rounded-full bg-blue-500 mt-2" />}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="px-4 py-2.5 border-t border-[#F1F5F9] bg-[#F8FAFC]">
+                        <p className="text-[11px] text-[#94A3B8] text-center font-medium">
+                            {unreadCount === 0 ? 'All caught up! ✓' : unreadCount + ' unread notification' + (unreadCount !== 1 ? 's' : '')}
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            <style>{`
+                @keyframes notifSlideIn {
+                    from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+                    to   { opacity: 1; transform: translateY(0) scale(1); }
+                }
+            `}</style>
+        </div>
+    );
+}
+
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 380;
@@ -266,38 +428,7 @@ export default function AdminLayout() {
                         </div>
 
                         {/* Notifications Bell */}
-                        <div className="relative shrink-0" ref={notifRef}>
-                            <button
-                                type="button"
-                                onClick={() => setNotifOpen((prev) => !prev)}
-                                className={cn(
-                                    'p-1.5 rounded-lg transition-colors cursor-pointer relative text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9]',
-                                    notifOpen && 'text-[#0F172A] bg-[#F1F5F9]'
-                                )}
-                                title="Notifications"
-                                aria-expanded={notifOpen}
-                            >
-                                <Bell className="w-5 h-5 text-[#475569]" strokeWidth={1.75} />
-                                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#EF4444] ring-2 ring-white" />
-                            </button>
-
-                            {notifOpen && (
-                                <div className="absolute right-0 top-full mt-2 w-80 sm:w-88 rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_15px_50px_-12px_rgba(15,23,42,0.25)] z-50 overflow-hidden">
-                                    <div className="px-4 py-3 border-b border-[#F1F5F9] flex items-center justify-between bg-[#F8FAFC]">
-                                        <span className="font-bold text-sm text-[#0F172A]">System Notifications</span>
-                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800">
-                                            Admin
-                                        </span>
-                                    </div>
-                                    <div className="p-4 space-y-3">
-                                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-xs">
-                                            <p className="font-semibold text-slate-800">Local SEO Portal is Live</p>
-                                            <p className="text-slate-500 mt-0.5">Rank tracker, GBP tools, and bookings are operating normally.</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
+                        <NotificationBell notifRef={notifRef} notifOpen={notifOpen} setNotifOpen={setNotifOpen} />
                     </div>
                 </header>
                 <main className="flex-1 overflow-auto overscroll-contain p-4 sm:p-6 lg:p-8">
