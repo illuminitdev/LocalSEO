@@ -5,7 +5,8 @@ import { newManageToken } from '../lib/authTokens';
 import { fetchBusyBlocks, updateCalendarEvent, deleteCalendarEvent } from '../lib/googleCalendar';
 import {
     sendCancellationEmail,
-    sendRescheduleEmail
+    sendRescheduleEmail,
+    sendBookingConfirmationEmail
 } from '../lib/bookingEmail';
 import { buildIcs } from '../lib/ics';
 import { confirmBookingPayment } from '../lib/confirmBooking';
@@ -148,16 +149,36 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         return orgHasBookingTeams(ents.planId);
     }
 
+    async function loadEventTypesBySlugs(orgId: string, slugs: string[]) {
+        const unique = Array.from(new Set(slugs.map((s) => String(s || '').trim()).filter(Boolean)));
+        if (!unique.length) return [];
+        const { rows } = await query(
+            `SELECT * FROM event_types
+             WHERE org_id = $1 AND active = TRUE AND slug = ANY($2::text[])`,
+            [orgId, unique]
+        );
+        const bySlug = new Map(rows.map((r: any) => [r.slug, r]));
+        return unique.map((slug) => bySlug.get(slug)).filter(Boolean);
+    }
+
     async function computeAvailability(
         org: any,
         eventType: any,
         fromDate: any,
         toDate: any,
-        opts?: { memberUserId?: string | null; firstAvailable?: boolean }
+        opts?: {
+            memberUserId?: string | null;
+            firstAvailable?: boolean;
+            durationMinutes?: number | null;
+        }
     ) {
         const teamsEnabled = await orgTeamsEnabled(org.id);
         const memberUserId = opts?.memberUserId || null;
         const firstAvailable = Boolean(opts?.firstAvailable);
+        const durationMinutes =
+            Number(opts?.durationMinutes) > 0
+                ? Number(opts?.durationMinutes)
+                : Number(eventType.duration_minutes) || 60;
 
         if (teamsEnabled && (memberUserId || firstAvailable)) {
             const [{ rows: orgDateRules }, { rows: orgWeeklyRules }] = await Promise.all([
@@ -215,7 +236,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                         memberWeeklyRules,
                         dateRules: memberHasSchedule ? undefined : orgDateRules,
                         weeklyRules: memberHasSchedule ? undefined : orgWeeklyRules,
-                        durationMinutes: eventType.duration_minutes,
+                        durationMinutes,
                         bufferMinutes: org.buffer_minutes,
                         minNoticeHours: org.min_notice_hours,
                         maxDaysAhead: org.max_days_ahead,
@@ -256,7 +277,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             timezone: org.timezone,
             dateRules,
             weeklyRules,
-            durationMinutes: eventType.duration_minutes,
+            durationMinutes,
             bufferMinutes: org.buffer_minutes,
             minNoticeHours: org.min_notice_hours,
             maxDaysAhead: org.max_days_ahead,
@@ -295,10 +316,16 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             });
             if (!booking) return res.status(404).json({ error: 'Booking not found' });
 
+            const createdMs = new Date(booking.created_at).getTime();
+            const contactEditExpiresAt = new Date(createdMs + 10 * 60 * 1000).toISOString();
+            const contactEditable = Date.now() < createdMs + 10 * 60 * 1000;
+
             res.json({
                 booking,
                 paymentDocument: booking.paymentDocument || null,
-                manageUrl: `${frontendOrigin()}/book/manage/${booking.manage_token}`
+                manageUrl: `${frontendOrigin()}/book/manage/${booking.manage_token}`,
+                contactEditable,
+                contactEditExpiresAt
             });
         } catch (err: any) {
             console.error('Verify error:', err);
@@ -330,6 +357,120 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
+    router.post('/manage/:token/update-contact', async (req: Request, res: Response) => {
+        try {
+            const { rows } = await query(
+                `SELECT b.*, e.name AS event_name,
+                        o.name AS org_name, o.email AS org_email, o.phone AS org_phone,
+                        o.host_name AS org_host_name, o.currency AS org_currency, o.logo_url AS org_logo_url
+                 FROM bookings b
+                 JOIN event_types e ON e.id = b.event_type_id
+                 JOIN organizations o ON o.id = b.org_id
+                 WHERE b.manage_token = $1`,
+                [req.params.token]
+            );
+            if (!rows.length) return res.status(404).json({ error: 'Booking not found' });
+            const booking = rows[0];
+
+            const createdMs = new Date(booking.created_at).getTime();
+            const expiresAt = createdMs + 10 * 60 * 1000;
+            if (Date.now() >= expiresAt) {
+                return res.status(403).json({
+                    error: 'Contact details can only be changed within 10 minutes of booking. This window has locked.',
+                    contactEditable: false,
+                    contactEditExpiresAt: new Date(expiresAt).toISOString()
+                });
+            }
+
+            const emailRaw = String(req.body?.email || '').trim();
+            const phoneRaw = String(req.body?.phone || '').trim();
+            let nextEmail = String(booking.customer_email || '').trim();
+            let nextPhone = String(booking.customer_phone || '').trim();
+
+            if (emailRaw) {
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
+                    return res.status(400).json({ error: 'Enter a valid email address' });
+                }
+                nextEmail = emailRaw.toLowerCase();
+            }
+            if (phoneRaw) {
+                const digits = phoneRaw.replace(/\D/g, '');
+                if (digits.length < 10) {
+                    return res.status(400).json({ error: 'Enter a valid phone number' });
+                }
+                nextPhone = phoneRaw;
+            }
+            if (!emailRaw && !phoneRaw) {
+                return res.status(400).json({ error: 'Enter a new email or phone number' });
+            }
+            if (!nextEmail && !nextPhone) {
+                return res.status(400).json({ error: 'Email or phone is required' });
+            }
+
+            const { rows: updatedRows } = await query(
+                `UPDATE bookings
+                 SET customer_email = $1, customer_phone = $2, updated_at = NOW()
+                 WHERE id = $3
+                 RETURNING *`,
+                [nextEmail, nextPhone, booking.id]
+            );
+            const updated = updatedRows[0];
+
+            // Merge cart services label if present
+            let serviceName = booking.event_name;
+            try {
+                const answers =
+                    typeof updated.intake_answers === 'string'
+                        ? JSON.parse(updated.intake_answers || '{}')
+                        : updated.intake_answers || {};
+                const cart = Array.isArray(answers.cartServices) ? answers.cartServices : [];
+                if (cart.length) {
+                    serviceName = cart.map((i: any) => i.name || i.slug).filter(Boolean).join(', ');
+                }
+            } catch {
+                /* ignore */
+            }
+
+            if (nextEmail) {
+                const manageUrl = `${frontendOrigin()}/book/manage/${updated.manage_token}`;
+                const icsUrl = `${frontendOrigin()}/api/public/bookings/${updated.id}/calendar.ics`;
+                const whenLabel = new Date(updated.start_at).toLocaleString('en-GB', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short'
+                });
+                await sendBookingConfirmationEmail({
+                    to: nextEmail,
+                    customerName: updated.customer_name,
+                    businessName: booking.org_name,
+                    tradespersonName: booking.org_host_name || booking.org_name,
+                    serviceName,
+                    date: String(updated.start_at).slice(0, 10),
+                    slotLabel: whenLabel,
+                    depositAmount: updated.deposit_cents,
+                    currency: booking.org_currency || 'GBP',
+                    address: updated.customer_address,
+                    hostPhone: booking.org_phone,
+                    hostEmail: booking.org_email,
+                    manageUrl,
+                    icsUrl,
+                    logoUrl: booking.org_logo_url || process.env.BOOKING_EMAIL_LOGO_URL || ''
+                }).catch((err: any) => console.error('Resend confirmation after contact update:', err?.message));
+            }
+
+            res.json({
+                success: true,
+                booking: updated,
+                contactEditable: Date.now() < expiresAt,
+                contactEditExpiresAt: new Date(expiresAt).toISOString(),
+                message: nextEmail
+                    ? `Updated — confirmation sent to ${nextEmail}`
+                    : 'Contact details updated'
+            });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
     router.get('/manage/:token', async (req: Request, res: Response) => {
         const { rows } = await query(
             `SELECT b.*, e.name AS event_name, e.slug AS event_slug, e.duration_minutes,
@@ -339,7 +480,30 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             [req.params.token]
         );
         if (!rows.length) return res.status(404).json({ error: 'Booking not found' });
-        res.json({ booking: rows[0] });
+        const booking = rows[0];
+        const answers =
+            typeof booking.intake_answers === 'string'
+                ? JSON.parse(booking.intake_answers || '{}')
+                : booking.intake_answers || {};
+        const cart = Array.isArray(answers.cartServices) ? answers.cartServices : [];
+        const lineItems = cart.map((item: any, i: number) => ({
+            name: item.name || item.slug || 'Service',
+            duration_minutes: Number(item.durationMinutes ?? item.duration_minutes) || 0,
+            deposit_cents: Number(item.depositCents ?? item.deposit_cents) || 0,
+            total_cents: Number(item.totalCents ?? item.total_cents) || 0,
+            sort_order: Number(item.sortOrder ?? i) || i
+        }));
+        const serviceNames = lineItems.length
+            ? lineItems.map((i: any) => i.name).join(', ')
+            : booking.event_name;
+        res.json({
+            booking: {
+                ...booking,
+                event_name: serviceNames,
+                line_items: lineItems,
+                service_names: serviceNames
+            }
+        });
     });
 
     router.get('/portal/:token', async (req: Request, res: Response) => {
@@ -628,9 +792,22 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         );
         if (!rows.length) return res.status(404).send('Not found');
         const b = rows[0];
+        let serviceLabel = b.event_name;
+        try {
+            const answers =
+                typeof b.intake_answers === 'string'
+                    ? JSON.parse(b.intake_answers || '{}')
+                    : b.intake_answers || {};
+            const cart = Array.isArray(answers.cartServices) ? answers.cartServices : [];
+            if (cart.length) {
+                serviceLabel = cart.map((i: any) => i.name || i.slug).filter(Boolean).join(', ');
+            }
+        } catch {
+            /* ignore */
+        }
         const ics = buildIcs({
             uid: `booking-${b.id}@localpulse`,
-            summary: `${b.event_name} — ${b.org_name}`,
+            summary: `${serviceLabel} — ${b.org_name}`,
             description: b.description,
             location: b.customer_address,
             startAt: b.start_at,
@@ -828,6 +1005,23 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 String(req.query.firstAvailable || '').toLowerCase() === 'true' ||
                 String(req.query.firstAvailable || '') === '1';
 
+            let durationOverride: number | null = null;
+            const serviceSlugsRaw = String(req.query.serviceSlugs || '').trim();
+            if (serviceSlugsRaw) {
+                const slugs = serviceSlugsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+                const types = await loadEventTypesBySlugs(org.id, slugs);
+                if (types.length) {
+                    durationOverride = types.reduce(
+                        (sum: number, t: any) => sum + (Number(t.duration_minutes) || 0),
+                        0
+                    );
+                }
+            }
+            const durationParam = Number(req.query.durationMinutes);
+            if (!durationOverride && Number.isFinite(durationParam) && durationParam > 0) {
+                durationOverride = durationParam;
+            }
+
             if (memberUserId && !teamsEnabled) {
                 return res.status(403).json({
                     error: 'Member availability requires Booking Pro',
@@ -848,7 +1042,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
 
             const slots = await computeAvailability(org, eventType, fromDate, toDate, {
                 memberUserId: teamsEnabled ? memberUserId : null,
-                firstAvailable: teamsEnabled && (firstAvailable || !memberUserId)
+                firstAvailable: teamsEnabled && (firstAvailable || !memberUserId),
+                durationMinutes: durationOverride
             });
 
             res.json({
@@ -856,7 +1051,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 availableDates: datesWithAvailability(slots),
                 hasAvailabilityRules: anyRules.length > 0,
                 maxDaysAhead: org.max_days_ahead,
-                teamsEnabled
+                teamsEnabled,
+                durationMinutes: durationOverride || eventType.duration_minutes
             });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
@@ -882,13 +1078,54 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 preferredSlots,
                 photoUrls,
                 intakeAnswers,
-                assignedUserId
+                assignedUserId,
+                serviceSlugs
             } = req.body || {};
 
             const isRequest = intakeType === 'request';
             const salonVisit = isSalonsOrg(org);
             const restaurantVisit = isRestaurantOrg(org);
             const dentistVisit = isDentistsOrg(org);
+
+            // Same-visit cart: resolve all selected services (salon multi-service)
+            let cartEventTypes: any[] = [eventType];
+            if (salonVisit && Array.isArray(serviceSlugs) && serviceSlugs.length) {
+                const ordered = await loadEventTypesBySlugs(org.id, [
+                    eventType.slug,
+                    ...serviceSlugs.map((s: any) => String(s || ''))
+                ]);
+                // Deduplicate while preserving first occurrence order
+                const seen = new Set<string>();
+                cartEventTypes = [];
+                for (const t of ordered) {
+                    if (!t?.id || seen.has(t.id)) continue;
+                    seen.add(t.id);
+                    cartEventTypes.push(t);
+                }
+                if (!cartEventTypes.length) cartEventTypes = [eventType];
+                if (cartEventTypes[0].slug !== eventType.slug) {
+                    // Prefer URL primary as first line item for backwards compatibility
+                    cartEventTypes = [
+                        eventType,
+                        ...cartEventTypes.filter((t) => t.id !== eventType.id)
+                    ];
+                }
+            }
+            const cartDurationMinutes = cartEventTypes.reduce(
+                (sum, t) => sum + (Number(t.duration_minutes) || 0),
+                0
+            );
+            const cartDepositCents = cartEventTypes.reduce(
+                (sum, t) => sum + (Number(t.deposit_cents) || 0),
+                0
+            );
+            const cartTotalCents = cartEventTypes.reduce(
+                (sum, t) =>
+                    sum + Math.max(Number(t.total_cents) || 0, Number(t.deposit_cents) || 0),
+                0
+            );
+            const cartServiceLabel = cartEventTypes.map((t) => t.name).join(', ');
+
             const teamsEnabled = await orgTeamsEnabled(org.id);
             let resolvedAssignedUserId: string | null = null;
             if (teamsEnabled) {
@@ -919,7 +1156,16 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                       : dentistVisit
                         ? 'Clinic visit'
                         : 'Booking');
-            if (!customerName?.trim() || !email?.trim() || !phone?.trim()) {
+            if (!customerName?.trim()) {
+                return res.status(400).json({ error: 'Name is required' });
+            }
+            const emailTrim = String(email || '').trim();
+            const phoneTrim = String(phone || '').trim();
+            if (salonVisit) {
+                if (!emailTrim && !phoneTrim) {
+                    return res.status(400).json({ error: 'Email or phone is required' });
+                }
+            } else if (!emailTrim || !phoneTrim) {
                 return res.status(400).json({
                     error: 'Name, email, and phone are required'
                 });
@@ -970,7 +1216,9 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 const dateStr = String(start).slice(0, 10);
                 const slots = await computeAvailability(org, eventType, dateStr, dateStr, {
                     memberUserId: resolvedAssignedUserId,
-                    firstAvailable: teamsEnabled && !resolvedAssignedUserId
+                    firstAvailable: teamsEnabled && !resolvedAssignedUserId,
+                    durationMinutes:
+                        salonVisit && cartDurationMinutes > 0 ? cartDurationMinutes : null
                 });
                 const startMs = new Date(start).getTime();
                 const endMs = new Date(end).getTime();
@@ -986,8 +1234,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const { client, property } = await upsertClientWithProperty({
                 orgId: org.id,
                 name: customerName,
-                email,
-                phone,
+                email: emailTrim,
+                phone: phoneTrim,
                 address: resolvedAddress,
                 status: isRequest ? 'lead' : 'active'
             });
@@ -995,6 +1243,9 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const photos = normalizePhotoUrls(photoUrls);
             const manageToken = newManageToken();
             let depositCents = isRequest ? 0 : Number(eventType.deposit_cents) || 0;
+            if (!isRequest && salonVisit && cartEventTypes.length) {
+                depositCents = cartDepositCents;
+            }
             
             if (!isRequest && isDentistsOrg(org) && bookMenuItems.length) {
                 const itemId = String(answers.priceListItemId || '').trim();
@@ -1020,7 +1271,9 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 }
             }
             const totalCents = Math.max(
-                Number(eventType.total_cents) || 0,
+                salonVisit && cartEventTypes.length
+                    ? cartTotalCents
+                    : Number(eventType.total_cents) || 0,
                 isRequest ? 0 : depositCents
             );
             const allowSimulated =
@@ -1050,7 +1303,30 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const enquiryNote = answers.selectedService || answers.enquiryType
                 ? `Selected: ${answers.selectedService || answers.enquiryType}`
                 : '';
-            const bookingDescription = [String(description || '').trim(), enquiryNote].filter(Boolean).join('\n');
+            const cartNote =
+                salonVisit && cartEventTypes.length > 1 ? `Services: ${cartServiceLabel}` : '';
+            const bookingDescription = [String(description || '').trim(), enquiryNote, cartNote]
+                .filter(Boolean)
+                .join('\n');
+
+            // Store multi-service cart on existing intake_answers JSONB (no new table)
+            const answersWithCart =
+                salonVisit && cartEventTypes.length
+                    ? {
+                          ...answers,
+                          cartServices: cartEventTypes.map((t: any, i: number) => ({
+                              slug: t.slug,
+                              name: t.name,
+                              durationMinutes: Number(t.duration_minutes) || 0,
+                              depositCents: Number(t.deposit_cents) || 0,
+                              totalCents: Math.max(
+                                  Number(t.total_cents) || 0,
+                                  Number(t.deposit_cents) || 0
+                              ),
+                              sortOrder: i
+                          }))
+                      }
+                    : answers;
 
             const pendingRes = await query(
                 `INSERT INTO bookings (
@@ -1066,8 +1342,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     eventType.id,
                     initialStatus,
                     customerName,
-                    email.toLowerCase(),
-                    phone,
+                    emailTrim.toLowerCase(),
+                    phoneTrim,
                     resolvedAddress,
                     bookingDescription,
                     start,
@@ -1082,7 +1358,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     JSON.stringify(preferred),
                     isRequest ? 'request' : 'instant',
                     isRequest,
-                    JSON.stringify(answers),
+                    JSON.stringify(answersWithCart),
                     resolvedAssignedUserId
                 ]
             );
@@ -1091,7 +1367,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             if (isRequest) {
                 try {
                     await sendRequestReceivedEmail(
-                        { ...booking, event_name: eventType.name },
+                        { ...booking, event_name: cartServiceLabel || eventType.name },
                         org
                     );
                     await issuePortalAccess(org.id, client.id, { emailClient: true });
@@ -1122,14 +1398,16 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             const session = await stripeClient.checkout.sessions.create(
                 {
                     mode: 'payment',
-                    customer_email: email.toLowerCase(),
+                    ...(emailTrim
+                        ? { customer_email: emailTrim.toLowerCase() }
+                        : {}),
                     line_items: [{
                         quantity: 1,
                         price_data: {
                             currency: (org.currency || 'GBP').toLowerCase(),
                             unit_amount: depositCents,
                             product_data: {
-                                name: `Deposit — ${eventType.name}`,
+                                name: `Deposit — ${cartServiceLabel || eventType.name}`,
                                 description: `${org.name} on ${new Date(start).toLocaleString('en-GB')}`
                             }
                         }

@@ -1958,6 +1958,13 @@ export function BookSuccess() {
     const [error, setError] = useState('');
     const [booking, setBooking] = useState<any>(null);
     const [paymentDocument, setPaymentDocument] = useState<any>(null);
+    const [contactEditable, setContactEditable] = useState(false);
+    const [contactEditExpiresAt, setContactEditExpiresAt] = useState('');
+    const [showContactFix, setShowContactFix] = useState(false);
+    const [contactInput, setContactInput] = useState('');
+    const [contactBusy, setContactBusy] = useState(false);
+    const [contactMsg, setContactMsg] = useState('');
+    const [contactErr, setContactErr] = useState('');
 
     useEffect(() => {
         if (!sessionId) {
@@ -1969,10 +1976,62 @@ export function BookSuccess() {
             .then((data) => {
                 setBooking(data.booking);
                 setPaymentDocument(data.paymentDocument || data.booking?.paymentDocument || null);
+                setContactEditable(Boolean(data.contactEditable));
+                setContactEditExpiresAt(data.contactEditExpiresAt || '');
             })
             .catch((e) => setError(e.message || 'Could not confirm booking'))
             .finally(() => setLoading(false));
     }, [sessionId]);
+
+    useEffect(() => {
+        if (!contactEditExpiresAt || !contactEditable) return;
+        const ms = new Date(contactEditExpiresAt).getTime() - Date.now();
+        if (ms <= 0) {
+            setContactEditable(false);
+            return;
+        }
+        const t = window.setTimeout(() => setContactEditable(false), ms);
+        return () => window.clearTimeout(t);
+    }, [contactEditExpiresAt, contactEditable]);
+
+    const submitContactFix = async () => {
+        if (!booking?.manage_token) return;
+        const raw = contactInput.trim();
+        if (!raw) {
+            setContactErr('Enter your correct email or phone.');
+            return;
+        }
+        setContactBusy(true);
+        setContactErr('');
+        setContactMsg('');
+        try {
+            const isEmail = raw.includes('@');
+            const body = isEmail
+                ? { email: raw }
+                : { phone: restrictPhoneInput(raw) };
+            const data = await apiPost(
+                `/api/public/manage/${booking.manage_token}/update-contact`,
+                body
+            );
+            setBooking((b: any) => ({
+                ...b,
+                customer_email: data.booking?.customer_email ?? b.customer_email,
+                customer_phone: data.booking?.customer_phone ?? b.customer_phone
+            }));
+            setContactEditable(Boolean(data.contactEditable));
+            if (data.contactEditExpiresAt) setContactEditExpiresAt(data.contactEditExpiresAt);
+            setContactMsg(data.message || 'Contact updated.');
+            setShowContactFix(false);
+            setContactInput('');
+        } catch (e: any) {
+            setContactErr(e.message || 'Could not update contact');
+            if (/locked|10 minutes/i.test(String(e.message || ''))) {
+                setContactEditable(false);
+            }
+        } finally {
+            setContactBusy(false);
+        }
+    };
 
     if (loading) {
         return (
@@ -2002,6 +2061,76 @@ export function BookSuccess() {
 
     const when = new Date(booking.start_at).toLocaleString('en-GB');
     const icsUrl = `${API_BASE}/api/public/bookings/${booking.id}/calendar.ics`;
+    const minsLeft = contactEditExpiresAt
+        ? Math.max(0, Math.ceil((new Date(contactEditExpiresAt).getTime() - Date.now()) / 60000))
+        : 0;
+
+    const contactFixBlock = (
+        <div className="mt-4 pt-4 border-t border-[#F1F5F9] text-center space-y-2">
+            {contactMsg && (
+                <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
+                    {contactMsg}
+                </p>
+            )}
+            {contactEditable ? (
+                <>
+                    {!showContactFix ? (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowContactFix(true);
+                                setContactErr('');
+                            }}
+                            className="text-sm font-bold text-[#F59E0B] hover:underline"
+                        >
+                            Email or number wrong? Change it here
+                        </button>
+                    ) : (
+                        <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3 text-left space-y-2">
+                            <p className="text-xs text-[#64748B]">
+                                Update your email or phone within {minsLeft || 1} min — then we resend
+                                confirmation (no extra payment).
+                            </p>
+                            <input
+                                value={contactInput}
+                                onChange={(e) => setContactInput(e.target.value)}
+                                placeholder="Correct email or phone"
+                                className="w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-sm"
+                            />
+                            {contactErr && <p className="text-xs text-red-600">{contactErr}</p>}
+                            <div className="flex gap-2">
+                                <button
+                                    type="button"
+                                    disabled={contactBusy}
+                                    onClick={() => void submitContactFix()}
+                                    className="flex-1 rounded-xl bg-[#0F172A] text-white text-xs font-bold py-2.5 disabled:opacity-50"
+                                >
+                                    {contactBusy ? 'Saving…' : 'Save & resend'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowContactFix(false);
+                                        setContactErr('');
+                                    }}
+                                    className="rounded-xl border border-[#E2E8F0] px-3 text-xs font-bold text-[#64748B]"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    <p className="text-[10px] text-[#94A3B8]">
+                        Editable for 10 minutes after booking, then locked.
+                    </p>
+                </>
+            ) : (
+                <p className="text-xs text-[#94A3B8]">
+                    Contact change window has locked (available for 10 minutes after booking only).
+                </p>
+            )}
+        </div>
+    );
 
     const footer = (
         <div className="flex flex-col gap-2 text-center">
@@ -2014,11 +2143,13 @@ export function BookSuccess() {
                 <Download className="w-4 h-4" /> Add to calendar (.ics)
             </a>
             <p className="flex items-center justify-center gap-2 text-xs text-[#64748B]">
-                <Mail className="w-3.5 h-3.5" /> Confirmation sent to {booking.customer_email}
+                <Mail className="w-3.5 h-3.5" /> Confirmation sent to{' '}
+                {booking.customer_email || booking.customer_phone || 'your contact'}
             </p>
             <p className="text-xs text-[#64748B] mt-1">
                 {booking.customer_name} · {when}
             </p>
+            {contactFixBlock}
         </div>
     );
 
@@ -2041,6 +2172,12 @@ export function BookSuccess() {
 
                 <div className="mt-6 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] p-4 text-left text-sm space-y-2">
                     <p><span className="text-[#64748B]">Name:</span> <strong>{booking.customer_name}</strong></p>
+                    {(booking.event_name || booking.service_names) && (
+                        <p>
+                            <span className="text-[#64748B]">Services:</span>{' '}
+                            <strong>{booking.service_names || booking.event_name}</strong>
+                        </p>
+                    )}
                     <p><span className="text-[#64748B]">When:</span> <strong>{when}</strong></p>
                     {booking.customer_address &&
                         !/^(clinic visit|salon visit|restaurant table booking|booking)$/i.test(
@@ -2111,7 +2248,24 @@ export function BookManage() {
             <div className="max-w-md w-full bg-white rounded-2xl border border-[#E2E8F0] p-8 space-y-4">
                 <h1 className="text-xl font-black text-[#0F172A]">Manage booking</h1>
                 <div className="text-sm space-y-1">
-                    <p><span className="text-[#64748B]">Service:</span> <strong>{booking.event_name}</strong></p>
+                    <p>
+                        <span className="text-[#64748B]">
+                            {Array.isArray(booking.line_items) && booking.line_items.length > 1
+                                ? 'Services:'
+                                : 'Service:'}
+                        </span>{' '}
+                        <strong>{booking.service_names || booking.event_name}</strong>
+                    </p>
+                    {Array.isArray(booking.line_items) && booking.line_items.length > 1 && (
+                        <ul className="text-xs text-[#64748B] list-disc pl-5 space-y-0.5">
+                            {booking.line_items.map((item: any, i: number) => (
+                                <li key={`${item.name}-${i}`}>
+                                    {item.name}
+                                    {item.duration_minutes ? ` (${item.duration_minutes} min)` : ''}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
                     <p><span className="text-[#64748B]">When:</span> <strong>{when}</strong></p>
                     <p><span className="text-[#64748B]">Status:</span> <strong>{booking.status}</strong></p>
                 </div>

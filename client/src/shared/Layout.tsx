@@ -329,7 +329,7 @@ export default function Layout() {
                                         cn(
                                             'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors min-h-[44px]',
                                             isNavActive(item)
-                                                ? 'text-white font-semibold bg-[var(--brand-primary)]'
+                                                ? 'text-[#0F172A] font-semibold bg-[var(--brand-primary)]'
                                                 : 'text-[#334155] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
                                         )
                                     }

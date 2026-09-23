@@ -26,6 +26,21 @@ async function getHostUserId(orgId: any) {
     return rows[0]?.user_id || null;
 }
 
+function serviceLabelFromBooking(booking: any, fallbackName: string) {
+    try {
+        const answers =
+            typeof booking.intake_answers === 'string'
+                ? JSON.parse(booking.intake_answers || '{}')
+                : booking.intake_answers || {};
+        const cart = Array.isArray(answers.cartServices) ? answers.cartServices : [];
+        if (cart.length) {
+            return cart.map((i: any) => i.name || i.slug).filter(Boolean).join(', ');
+        }
+    } catch {
+        /* ignore */
+    }
+    return fallbackName || 'Booking';
+}
 
 async function confirmBookingPayment({
     bookingId,
@@ -50,6 +65,7 @@ async function confirmBookingPayment({
 
     let booking = rows[0];
     const meta = rows[0];
+    const serviceLabel = serviceLabelFromBooking(booking, meta.event_name);
     const alreadyConfirmed = booking.deposit_paid && booking.status === 'confirmed';
 
     if (!alreadyConfirmed) {
@@ -65,7 +81,7 @@ async function confirmBookingPayment({
 
     const userId = await getHostUserId(booking.org_id);
     if (userId && !booking.google_event_id) {
-        const googleEventId = await createCalendarEvent(userId, booking, { name: meta.event_name }, { name: meta.org_name });
+        const googleEventId = await createCalendarEvent(userId, booking, { name: serviceLabel }, { name: meta.org_name });
         if (googleEventId) {
             await query('UPDATE bookings SET google_event_id = $1 WHERE id = $2', [googleEventId, booking.id]);
             booking.google_event_id = googleEventId;
@@ -97,7 +113,7 @@ async function confirmBookingPayment({
                 customerName: booking.customer_name,
                 businessName: meta.org_name,
                 tradespersonName: meta.org_host_name || meta.org_name,
-                serviceName: meta.event_name,
+                serviceName: serviceLabel,
                 date: datePart(booking.start_at),
                 slotLabel: whenLabel,
                 depositAmount: booking.deposit_cents,
@@ -116,7 +132,7 @@ async function confirmBookingPayment({
                     customerName: booking.customer_name,
                     customerEmail: booking.customer_email,
                     customerPhone: booking.customer_phone,
-                    eventName: meta.event_name,
+                    eventName: serviceLabel,
                     startAt: whenLabel,
                     address: booking.customer_address,
                     depositAmount: booking.deposit_cents,
@@ -138,7 +154,7 @@ async function confirmBookingPayment({
 
     try {
         await scheduleVisitReminder(
-            { ...booking, event_name: meta.event_name },
+            { ...booking, event_name: serviceLabel },
             {
                 id: booking.org_id,
                 name: meta.org_name,
@@ -195,7 +211,7 @@ async function confirmBookingPayment({
                 businessName: meta.org_name,
                 lineItems: [
                     {
-                        description: `${meta.event_name || 'Booking'} — deposit`,
+                        description: `${serviceLabel || 'Booking'} — deposit`,
                         amountCents: depositCents,
                         quantity: 1
                     }
@@ -211,7 +227,13 @@ async function confirmBookingPayment({
         }
     }
 
-    return { ...booking, event_name: meta.event_name, org_name: meta.org_name, org_currency: meta.org_currency, paymentDocument };
+    return {
+        ...booking,
+        event_name: serviceLabel,
+        org_name: meta.org_name,
+        org_currency: meta.org_currency,
+        paymentDocument
+    };
 }
 
 export { confirmBookingPayment };
