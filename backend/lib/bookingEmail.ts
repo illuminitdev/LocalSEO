@@ -227,6 +227,23 @@ async function sendPasswordResetEmail({ to, name, resetUrl }: any) {
     return sendMail({ to, subject, text, html });
 }
 
+async function sendPasswordResetOtpEmail({ to, name, otp }: { to: string; name?: string; otp: string }) {
+    const subject = 'Your ZappSites password reset code';
+    const text = [
+        `Hi ${name || 'there'},`,
+        '',
+        'Use this one-time code to reset your password:',
+        otp,
+        '',
+        'This code expires in 15 minutes. If you did not ask for this, you can ignore this email.'
+    ].join('\n');
+    const html = `<p>Hi ${name || 'there'},</p>
+<p>Use this one-time code to reset your password:</p>
+<p style="font-size:24px;font-weight:700;letter-spacing:4px;">${escapeHtml(otp)}</p>
+<p>This code expires in 15 minutes. If you did not ask for this, you can ignore this email.</p>`;
+    return sendMail({ to, subject, text, html });
+}
+
 function escapeHtml(value: string) {
     return String(value || '')
         .replace(/&/g, '&amp;')
@@ -581,5 +598,6 @@ export {
     sendCancellationEmail,
     sendRescheduleEmail,
     sendPasswordResetEmail,
+    sendPasswordResetOtpEmail,
     formatMoneyFromCents
 };
