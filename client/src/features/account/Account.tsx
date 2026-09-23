@@ -547,7 +547,7 @@ export default function Account() {
                             className={cn(
                                 'inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all min-h-[38px]',
                                 active
-                                    ? 'text-white shadow-sm'
+                                    ? 'text-[#0F172A] shadow-sm'
                                     : 'text-[#64748B] hover:text-[#0F172A] hover:bg-[#F8FAFC]'
                             )}
                             style={active ? { background: 'var(--brand-primary, #F59E0B)' } : undefined}
