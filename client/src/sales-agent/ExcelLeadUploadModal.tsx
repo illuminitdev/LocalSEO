@@ -45,55 +45,58 @@ interface ExcelLeadUploadModalProps {
 
 const SKIP_SHEET_NAMES = new Set(['note', 'notes', 'instructions', 'readme']);
 
-/** Column headers the importer understands — keep in sync with parseWorkbookSheet. */
+/** Column headers matching Businesses_For_Tele_Callers_Standardized.xlsx */
 export const LEADS_EXCEL_TEMPLATE_HEADERS = [
-    'Business Name',
+    'Business',
     'Phone',
-    'Email',
-    'Address',
-    'Website',
-    'Industry',
+    'Business name',
+    'Town/postcode',
+    'Website URL',
     'My Observation GBP',
     'My Observation AI Visibility',
-    'Lead Opportunity',
+    'My Conclusion',
+    'Lead Oppurtunity',
     'Status 1',
     'Status 2',
-    'Status 3',
-    'Conclusion'
+    'Status 3'
 ] as const;
 
 /** Download a blank leads workbook with headers + two example rows. */
 export function downloadLeadsExcelTemplate(filename = 'zappsites-leads-import-template.xlsx') {
     const examples = [
         {
-            'Business Name': 'Riverside Plumbing Ltd',
-            Phone: '0161 555 0142',
-            Email: 'hello@riversideplumbing.example',
-            Address: 'Manchester M1 2AB',
-            Website: 'https://www.riversideplumbing.example',
-            Industry: 'Plumbing',
-            'My Observation GBP': 'GBP listed but incomplete categories and weak photos',
-            'My Observation AI Visibility': 'Not mentioned in ChatGPT / Gemini local answers',
-            'Lead Opportunity': 'High — strong local demand, weak online presence',
-            'Status 1': 'New',
-            'Status 2': 'Phone / enquiry',
-            'Status 3': 'Follow up next week',
-            Conclusion: 'Pitch Local Presence + GBP cleanup'
+            Business: 'Pestcontrol',
+            Phone: '01772 885100',
+            'Business name': 'LES Pest Management',
+            'Town/postcode': 'Unit 6A, Bannister Hall Works, Higher Walton, Preston PR5 4DZ',
+            'Website URL': 'https://lespestmgt.com/',
+            'My Observation GBP':
+                '1. Basic Information : Correct\n2. Categories : Correct\n3. Services & Description : Correct\n4. Reviews & Engagement : Present\n5. Photos & Profile Completeness : Almost done but missing regular postings',
+            'My Observation AI Visibility':
+                '1. Who provides pest control services in South Ribble? Ans : Not Listed\n2. Who provides pest control services in Preston? Ans : Not Listed',
+            'My Conclusion':
+                'GBP : Postings on GBP will also increase the enquiries. Website : We can get more enquiries if we optimise for local AI SEO and add a booking system.',
+            'Lead Oppurtunity': 'Medium but we can pitch for Booking System',
+            'Status 1': '10/09 voicemail',
+            'Status 2': '11/09 voicemail',
+            'Status 3': 'Follow up next week'
         },
         {
-            'Business Name': 'Bloom Hair Studio',
-            Phone: '020 7946 0958',
-            Email: 'bookings@bloomhair.example',
-            Address: 'London SW1A 1AA',
-            Website: 'https://bloomhair.example',
-            Industry: 'Hair & Beauty',
-            'My Observation GBP': 'Good reviews; NAP mismatch vs website',
-            'My Observation AI Visibility': 'Appears inconsistently for “hair salon near me”',
-            'Lead Opportunity': 'Medium — fix NAP and booking CTA',
-            'Status 1': 'Contacted',
-            'Status 2': 'Interested',
-            'Status 3': 'Send proposal',
-            Conclusion: 'Offer Local Growth + booking page'
+            Business: 'Landscaping',
+            Phone: '07830 317170',
+            'Business name': 'JDM Gardens',
+            'Town/postcode': '26 Whitehaven Rd, Bramhall, Stockport SK7 1EL, United Kingdom',
+            'Website URL': 'https://www.jdmgardens.com/',
+            'My Observation GBP':
+                '1. Basic Information : Missing "Garden Design & Landscaping" in Business Name\n2. Categories : Correct\n3. Services & Description : Correct\n4. Reviews & Engagement : No replies for reviews\n5. Photos & Profile Completeness : Done',
+            'My Observation AI Visibility':
+                '1. What are the best gardening and landscaping companies near Bramhall, Stockport? Ans: 2nd position\n2. Who would you recommend for garden landscaping in Bramhall? Ans: 2nd position',
+            'My Conclusion':
+                'Strong local ranking already — pitch review replies, GBP name fix, and booking system.',
+            'Lead Oppurtunity': 'High and also we can pitch for Booking System',
+            'Status 1': '09/09 Spoke to receptionist — send info to pass on',
+            'Status 2': 'Interested — waiting for decision maker',
+            'Status 3': 'Send proposal'
         }
     ];
 
@@ -101,7 +104,7 @@ export function downloadLeadsExcelTemplate(filename = 'zappsites-leads-import-te
         header: [...LEADS_EXCEL_TEMPLATE_HEADERS]
     });
     ws['!cols'] = LEADS_EXCEL_TEMPLATE_HEADERS.map((h) => ({
-        wch: Math.min(36, Math.max(14, h.length + 2))
+        wch: Math.min(40, Math.max(16, h.length + 4))
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Leads');
@@ -321,7 +324,7 @@ function parseWorkbookSheet(
             }
         }
 
-        const opp = findVal(['leadopportunity', 'opportunity', 'pitch', 'priority']);
+        const opp = findVal(['leadopportunity', 'leadoppurtunity', 'opportunity', 'oppurtunity', 'pitch', 'priority']);
         const statusVal1 = findVal(
             [
                 'status1',
