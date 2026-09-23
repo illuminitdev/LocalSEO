@@ -294,6 +294,7 @@ export type AdminCrmLead = {
     spreadsheetStatus?: string;
     spreadsheetStatus1?: string;
     spreadsheetStatus2?: string;
+    spreadsheetStatus3?: string;
     createdAt: string;
     updatedAt: string;
 };

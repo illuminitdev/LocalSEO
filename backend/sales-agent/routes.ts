@@ -180,7 +180,8 @@ async function fetchLeadMetadataMap(leadIds: string[]) {
                     source: row.source || 'sales_lead',
                     spreadsheetStatus: row.spreadsheet_status || '',
                     spreadsheetStatus1: row.spreadsheet_status_1 || '',
-                    spreadsheetStatus2: row.spreadsheet_status_2 || ''
+                    spreadsheetStatus2: row.spreadsheet_status_2 || '',
+                    spreadsheetStatus3: row.spreadsheet_status_3 || ''
                 });
             }
         } catch {}
@@ -1183,7 +1184,8 @@ router.post('/leads/bulk-import', async (req: Request, res: Response) => {
                 assignedTo: item.assignedTo || agentId,
                 spreadsheetStatus: String(item.spreadsheetStatus || '').trim(),
                 spreadsheetStatus1: String(item.spreadsheetStatus1 || '').trim(),
-                spreadsheetStatus2: String(item.spreadsheetStatus2 || '').trim()
+                spreadsheetStatus2: String(item.spreadsheetStatus2 || '').trim(),
+                spreadsheetStatus3: String(item.spreadsheetStatus3 || '').trim()
             };
         });
 

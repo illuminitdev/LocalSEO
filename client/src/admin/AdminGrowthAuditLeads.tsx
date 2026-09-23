@@ -9,6 +9,7 @@ import {
     ChevronLeft,
     ChevronRight,
     FileSpreadsheet,
+    Download,
     Plus,
     Phone,
     Mail,
@@ -38,7 +39,7 @@ import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import LeadDetailsModal from './LeadDetailsModal';
 import BulkAssignTasksModal from './BulkAssignTasksModal';
 import LeadStatusHistoryModal from './LeadStatusHistoryModal';
-import ExcelLeadUploadModal from '../sales-agent/ExcelLeadUploadModal';
+import ExcelLeadUploadModal, { downloadLeadsExcelTemplate } from '../sales-agent/ExcelLeadUploadModal';
 import AddLeadModal from '../sales-agent/AddLeadModal';
 import { cn } from '../shared/utils';
 
@@ -63,6 +64,7 @@ type AdminLead = GrowthAuditLeadRef & {
     spreadsheetStatus?: string | null;
     spreadsheetStatus1?: string | null;
     spreadsheetStatus2?: string | null;
+    spreadsheetStatus3?: string | null;
     latestActivity?: {
         type?: string;
         disposition?: string | null;
@@ -563,6 +565,16 @@ export default function AdminGrowthAuditLeads() {
                                 <span>{isDeletingExcel ? 'Deleting...' : 'Delete this Excel'}</span>
                             </button>
                         )}
+
+                        <button
+                            type="button"
+                            onClick={() => downloadLeadsExcelTemplate()}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-sky-300 bg-sky-50 text-sky-800 hover:bg-sky-100 transition-colors shadow-2xs"
+                            title="Download Excel template with column headers and two example rows"
+                        >
+                            <Download className="w-3.5 h-3.5 text-sky-600" />
+                            <span>Template</span>
+                        </button>
 
                         <button
                             type="button"

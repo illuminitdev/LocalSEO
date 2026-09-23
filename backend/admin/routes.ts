@@ -758,7 +758,8 @@ function mapSalesLeadToAdminLead(row: any) {
         importUploadedAt: row.import_uploaded_at || null,
         spreadsheetStatus: row.spreadsheet_status || '',
         spreadsheetStatus1: row.spreadsheet_status_1 || '',
-        spreadsheetStatus2: row.spreadsheet_status_2 || ''
+        spreadsheetStatus2: row.spreadsheet_status_2 || '',
+        spreadsheetStatus3: row.spreadsheet_status_3 || ''
     };
 }
 
@@ -2088,7 +2089,8 @@ router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Re
                 assignedTo: item.assignedTo || null,
                 spreadsheetStatus: String(item.spreadsheetStatus || '').trim(),
                 spreadsheetStatus1: String(item.spreadsheetStatus1 || '').trim(),
-                spreadsheetStatus2: String(item.spreadsheetStatus2 || '').trim()
+                spreadsheetStatus2: String(item.spreadsheetStatus2 || '').trim(),
+                spreadsheetStatus3: String(item.spreadsheetStatus3 || '').trim()
             };
         });
 

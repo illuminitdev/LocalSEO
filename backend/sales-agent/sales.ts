@@ -72,6 +72,7 @@ export async function ensureCrmTables() {
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status TEXT NOT NULL DEFAULT '';
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status_1 TEXT NOT NULL DEFAULT '';
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status_2 TEXT NOT NULL DEFAULT '';
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status_3 TEXT NOT NULL DEFAULT '';
 
             CREATE INDEX IF NOT EXISTS idx_sales_leads_industry ON sales_leads(industry);
             CREATE INDEX IF NOT EXISTS idx_sales_leads_is_customer ON sales_leads(is_customer);
@@ -174,6 +175,7 @@ function mapLead(row: any) {
         spreadsheetStatus: row.spreadsheet_status || '',
         spreadsheetStatus1: row.spreadsheet_status_1 || '',
         spreadsheetStatus2: row.spreadsheet_status_2 || '',
+        spreadsheetStatus3: row.spreadsheet_status_3 || '',
         createdAt: row.created_at,
         updatedAt: row.updated_at
     };
@@ -509,6 +511,7 @@ export async function createSalesLead(data: {
     spreadsheetStatus?: string;
     spreadsheetStatus1?: string;
     spreadsheetStatus2?: string;
+    spreadsheetStatus3?: string;
 }) {
     await ensureCrmTables();
     const oppLevel = ['high', 'medium', 'low'].includes(String(data.opportunityLevel || '').toLowerCase())
@@ -520,11 +523,11 @@ export async function createSalesLead(data: {
     const importBatchId = sanitizeUuid(data.importBatchId);
     const status1 = String(data.spreadsheetStatus1 || '').trim();
     const status2 = String(data.spreadsheetStatus2 || '').trim();
-    const spreadsheetStatus =
-        String(data.spreadsheetStatus || '').trim() ||
-        (status1 && status2 && status1.toLowerCase() !== status2.toLowerCase()
-            ? `${status1} · ${status2}`
-            : status1 || status2);
+    const status3 = String(data.spreadsheetStatus3 || '').trim();
+    const statusParts = [status1, status2, status3].filter(
+        (s, i, arr) => s && arr.findIndex((x) => x.toLowerCase() === s.toLowerCase()) === i
+    );
+    const spreadsheetStatus = String(data.spreadsheetStatus || '').trim() || statusParts.join(' · ');
 
     const isCustomer = status === 'converted';
     const convertedAt = isCustomer ? new Date() : null;
@@ -535,8 +538,8 @@ export async function createSalesLead(data: {
             gbp_observation, ai_visibility_observation, lead_opportunity, opportunity_level,
             assigned_to, next_follow_up_at, created_by_admin, is_customer, converted_at,
             import_batch_id, import_file_name, import_uploaded_at,
-            spreadsheet_status, spreadsheet_status_1, spreadsheet_status_2
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+            spreadsheet_status, spreadsheet_status_1, spreadsheet_status_2, spreadsheet_status_3
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
         RETURNING *`,
         [
             String(data.name || 'New Lead').trim(),
@@ -562,7 +565,8 @@ export async function createSalesLead(data: {
             data.importUploadedAt || null,
             spreadsheetStatus,
             status1,
-            status2
+            status2,
+            status3
         ]
     );
 
@@ -589,6 +593,7 @@ export async function bulkImportSalesLeads(
         spreadsheetStatus?: string;
         spreadsheetStatus1?: string;
         spreadsheetStatus2?: string;
+        spreadsheetStatus3?: string;
     }>,
     createdByAdmin = true,
     opts?: {
@@ -751,6 +756,10 @@ export async function bulkImportSalesLeads(
                 params.push(String(item.spreadsheetStatus2).trim());
                 updates.push(`spreadsheet_status_2 = $${params.length}`);
             }
+            if (item.spreadsheetStatus3 && String(item.spreadsheetStatus3).trim()) {
+                params.push(String(item.spreadsheetStatus3).trim());
+                updates.push(`spreadsheet_status_3 = $${params.length}`);
+            }
 
             // Move lead into this upload batch for filter / assign / delete by Excel
             if (importBatchId) {
@@ -775,7 +784,7 @@ export async function bulkImportSalesLeads(
                 }
             }
 
-            // Always log activity if status or conclusion notes were imported
+            
             if (item.status || (item.notes && String(item.notes).trim())) {
                 try {
                     const cleanNote = item.notes && String(item.notes).trim()
@@ -819,7 +828,8 @@ export async function bulkImportSalesLeads(
             importUploadedAt,
             spreadsheetStatus: item.spreadsheetStatus || '',
             spreadsheetStatus1: item.spreadsheetStatus1 || '',
-            spreadsheetStatus2: item.spreadsheetStatus2 || ''
+            spreadsheetStatus2: item.spreadsheetStatus2 || '',
+            spreadsheetStatus3: item.spreadsheetStatus3 || ''
         });
 
         createdLeads.push(lead);
@@ -830,7 +840,7 @@ export async function bulkImportSalesLeads(
         if (phoneKey) batchSeenPhone.add(phoneKey);
         if (websiteKey) batchSeenWebsite.add(websiteKey);
 
-        // Log initial activity in lead_activities
+        
         try {
             const initialCleanNote = item.notes && String(item.notes).trim()
                 ? String(item.notes).trim()
