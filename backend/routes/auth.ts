@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomInt } from 'crypto';
 import { query } from '../lib/db';
 import { hashPassword, comparePassword, signToken } from '../lib/authTokens';
 import { uniqueOrgSlug } from '../lib/slug';
 import { requireAuth } from '../middleware/auth';
-import { sendPasswordResetEmail } from '../lib/bookingEmail';
+import { sendPasswordResetOtpEmail } from '../lib/bookingEmail';
 import {
     loadOrgEntitlements,
     upsertOrgSubscription,
@@ -32,12 +32,16 @@ function getStripeClient() {
     }
 }
 
-function frontendOrigin() {
-    return (process.env.FRONTEND_URL || process.env.CLIENT_ORIGIN || 'http://localhost:5173').replace(/\/$/, '');
-}
-
 function hashResetToken(token: string) {
     return createHash('sha256').update(token).digest('hex');
+}
+
+function hashPasswordResetOtp(userId: string, otp: string) {
+    return hashResetToken(`${userId}:${String(otp || '').trim()}`);
+}
+
+function generatePasswordResetOtp() {
+    return String(randomInt(100000, 1000000));
 }
 
 
@@ -287,9 +291,9 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
         const { rows } = await query('SELECT id, email, name FROM users WHERE email = $1', [email]);
         if (rows.length) {
             const user = rows[0];
-            const rawToken = randomBytes(32).toString('hex');
-            const tokenHash = hashResetToken(rawToken);
-            const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+            const otp = generatePasswordResetOtp();
+            const tokenHash = hashPasswordResetOtp(user.id, otp);
+            const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
             await query('DELETE FROM password_reset_tokens WHERE user_id = $1 OR expires_at < NOW()', [user.id]);
             await query(
@@ -297,13 +301,12 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
                 [user.id, tokenHash, expiresAt]
             );
 
-            const resetUrl = `${frontendOrigin()}/reset-password?token=${rawToken}`;
-            await sendPasswordResetEmail({ to: user.email, name: user.name, resetUrl });
+            await sendPasswordResetOtpEmail({ to: user.email, name: user.name, otp });
         }
 
         res.json({
             success: true,
-            message: 'If an account exists for that email, we sent password reset instructions.'
+            message: 'If an account exists for that email, we sent a one-time code.'
         });
     } catch (err: any) {
         console.error('Forgot password error:', err);
@@ -311,29 +314,90 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
     }
 });
 
+router.post('/verify-reset-otp', async (req: Request, res: Response) => {
+    try {
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        const otp = String(req.body?.otp || '').trim().replace(/\s+/g, '');
+        if (!email || !otp) {
+            return res.status(400).json({ error: 'Email and code are required.' });
+        }
+        if (!/^\d{6}$/.test(otp)) {
+            return res.status(400).json({ error: 'Enter the 6-digit code from your email.' });
+        }
+
+        const { rows: users } = await query('SELECT id FROM users WHERE email = $1', [email]);
+        if (!users.length) {
+            return res.status(400).json({ error: 'Invalid or expired code.' });
+        }
+
+        const userId = users[0].id;
+        const tokenHash = hashPasswordResetOtp(userId, otp);
+        const { rows } = await query(
+            `SELECT id FROM password_reset_tokens
+             WHERE user_id = $1 AND token_hash = $2 AND used_at IS NULL AND expires_at > NOW()
+             LIMIT 1`,
+            [userId, tokenHash]
+        );
+        if (!rows.length) {
+            return res.status(400).json({ error: 'Invalid or expired code.' });
+        }
+
+        res.json({ success: true, message: 'Code verified. Choose a new password.' });
+    } catch (err: any) {
+        console.error('Verify reset OTP error:', err);
+        res.status(500).json({ error: err.message || 'Could not verify code' });
+    }
+});
+
 router.post('/reset-password', async (req: Request, res: Response) => {
     try {
-        const token = String(req.body?.token || '').trim();
         const password = String(req.body?.password || '');
-        if (!token || !password) {
-            return res.status(400).json({ error: 'Token and new password are required.' });
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        const otp = String(req.body?.otp || '').trim().replace(/\s+/g, '');
+        const token = String(req.body?.token || '').trim();
+
+        if (!password) {
+            return res.status(400).json({ error: 'New password is required.' });
         }
         if (password.length < 8) {
             return res.status(400).json({ error: 'Password must be at least 8 characters.' });
         }
 
-        const tokenHash = hashResetToken(token);
-        const { rows } = await query(
-            `SELECT id, user_id FROM password_reset_tokens
-             WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
-             LIMIT 1`,
-            [tokenHash]
-        );
-        if (!rows.length) {
-            return res.status(400).json({ error: 'This reset link is invalid or has expired.' });
+        let row: { id: string; user_id: string } | null = null;
+
+        if (email && otp) {
+            if (!/^\d{6}$/.test(otp)) {
+                return res.status(400).json({ error: 'Enter the 6-digit code from your email.' });
+            }
+            const { rows: users } = await query('SELECT id FROM users WHERE email = $1', [email]);
+            if (!users.length) {
+                return res.status(400).json({ error: 'Invalid or expired code.' });
+            }
+            const tokenHash = hashPasswordResetOtp(users[0].id, otp);
+            const { rows } = await query(
+                `SELECT id, user_id FROM password_reset_tokens
+                 WHERE user_id = $1 AND token_hash = $2 AND used_at IS NULL AND expires_at > NOW()
+                 LIMIT 1`,
+                [users[0].id, tokenHash]
+            );
+            row = rows[0] || null;
+        } else if (token) {
+            const tokenHash = hashResetToken(token);
+            const { rows } = await query(
+                `SELECT id, user_id FROM password_reset_tokens
+                 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+                 LIMIT 1`,
+                [tokenHash]
+            );
+            row = rows[0] || null;
+        } else {
+            return res.status(400).json({ error: 'Email, code, and new password are required.' });
         }
 
-        const row = rows[0];
+        if (!row) {
+            return res.status(400).json({ error: 'Invalid or expired code.' });
+        }
+
         const passwordHash = await hashPassword(password);
         await query(
             `UPDATE users SET password_hash = $1, must_change_password = FALSE WHERE id = $2`,

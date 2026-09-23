@@ -912,7 +912,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 deliveryAddress: body.deliveryAddress,
                 deliveryNotes: body.deliveryNotes,
                 pickupAt: body.pickupAt,
-                items: body.items || []
+                items: body.items || [],
+                returnOrigin: body.returnOrigin || body.origin || req.get('origin') || ''
             });
             res.status(201).json(result);
         } catch (err: any) {

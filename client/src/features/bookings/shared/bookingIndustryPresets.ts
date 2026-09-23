@@ -43,6 +43,26 @@ export const SALON_SERVICE_CATEGORIES = [
     'Courses'
 ] as const;
 
+/** Customer appointment board: shared shell, per-industry behavior. */
+export type BookingFlowConfig = {
+    selection: 'multi' | 'single';
+    categories: boolean;
+    staffStep: 'team' | 'field' | false;
+    requestMode: boolean;
+    catalogMode: 'none' | 'priceList';
+    labels: {
+        services: string;
+        staff: string;
+        when: string;
+        details: string;
+        confirm: string;
+        browseTitle: string;
+        selectionTitle: string;
+        emptyServices: string;
+        addressFallback: string;
+    };
+};
+
 export type BookingIndustryPreset = {
     id: BookingIndustryId;
     name: string;
@@ -847,4 +867,117 @@ export function resolveSalonServiceCategory(
         return 'Beauty';
     }
     return '';
+}
+
+const DEFAULT_FLOW_LABELS: BookingFlowConfig['labels'] = {
+    services: 'Services',
+    staff: 'Staff',
+    when: 'When',
+    details: 'About you',
+    confirm: 'Confirm',
+    browseTitle: 'Browse services',
+    selectionTitle: 'Your selection',
+    emptyServices: 'No services are published yet.',
+    addressFallback: 'Booking'
+};
+
+/** Per-industry customer board behavior for CustomerViewPortal. */
+export function getBookingFlowConfig(
+    industryId: string | null | undefined
+): BookingFlowConfig {
+    const id = normalizeBookingIndustryId(industryId) || getBookingPreset(industryId).id;
+
+    if (id === 'salons') {
+        return {
+            selection: 'multi',
+            categories: true,
+            staffStep: 'team',
+            requestMode: false,
+            catalogMode: 'none',
+            labels: {
+                ...DEFAULT_FLOW_LABELS,
+                staff: 'Stylist',
+                browseTitle: 'Browse services',
+                emptyServices: 'No salon services are published yet.',
+                addressFallback: 'Salon visit'
+            }
+        };
+    }
+
+    if (id === 'dentists') {
+        return {
+            selection: 'single',
+            categories: true,
+            staffStep: false,
+            requestMode: true,
+            catalogMode: 'priceList',
+            labels: {
+                ...DEFAULT_FLOW_LABELS,
+                services: 'Visit',
+                browseTitle: 'Book a visit',
+                emptyServices: 'No appointments are published yet.',
+                addressFallback: 'Clinic visit'
+            }
+        };
+    }
+
+    if (id === 'restaurants') {
+        return {
+            selection: 'single',
+            categories: false,
+            staffStep: false,
+            requestMode: false,
+            catalogMode: 'none',
+            labels: {
+                ...DEFAULT_FLOW_LABELS,
+                services: 'Table',
+                browseTitle: 'Book a table',
+                emptyServices: 'Table booking is not available yet.',
+                addressFallback: 'Restaurant table booking'
+            }
+        };
+    }
+
+    if (id === 'personal-trainers') {
+        return {
+            selection: 'single',
+            categories: false,
+            staffStep: 'field',
+            requestMode: false,
+            catalogMode: 'none',
+            labels: {
+                ...DEFAULT_FLOW_LABELS,
+                staff: 'Trainer',
+                browseTitle: 'Choose a session',
+                emptyServices: 'No sessions are published yet.',
+                addressFallback: 'Training session'
+            }
+        };
+    }
+
+    const tradeLike = [
+        'plumbing',
+        'electricians',
+        'cleaners',
+        'valeting',
+        'pressure-washing',
+        'pest-control',
+        'gardeners',
+        'professional-services',
+        'small-business'
+    ].includes(id);
+
+    return {
+        selection: 'single',
+        categories: false,
+        staffStep: false,
+        requestMode: tradeLike,
+        catalogMode: 'none',
+        labels: {
+            ...DEFAULT_FLOW_LABELS,
+            browseTitle: tradeLike ? 'Choose a service' : 'Browse services',
+            emptyServices: 'No services are published yet.',
+            addressFallback: 'Booking'
+        }
+    };
 }

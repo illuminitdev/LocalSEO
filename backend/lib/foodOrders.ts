@@ -9,7 +9,42 @@ import {
 } from './paymentDocuments';
 
 function frontendOrigin() {
-    return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+    return (process.env.FRONTEND_URL || process.env.CLIENT_ORIGIN || 'http://localhost:5173').replace(
+        /\/$/,
+        ''
+    );
+}
+
+/** Prefer the page the customer is on (e.g. localhost) so Stripe returns there after pay. */
+function resolveCheckoutOrigin(requested?: string | null) {
+    const fallback = frontendOrigin();
+    const raw = String(requested || '').trim().replace(/\/$/, '');
+    if (!raw) return fallback;
+    let parsed: URL;
+    try {
+        parsed = new URL(raw);
+    } catch {
+        return fallback;
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return fallback;
+
+    const host = parsed.hostname.toLowerCase();
+    const allowedHosts = new Set<string>(['localhost', '127.0.0.1']);
+    for (const envKey of ['FRONTEND_URL', 'CLIENT_ORIGIN']) {
+        const v = String(process.env[envKey] || '').trim();
+        if (!v) continue;
+        try {
+            allowedHosts.add(new URL(v).hostname.toLowerCase());
+        } catch {
+            /* ignore */
+        }
+    }
+    const isLocal = host === 'localhost' || host === '127.0.0.1';
+    const isZappSites = host === 'zappsites.com' || host.endsWith('.zappsites.com');
+    if (!isLocal && !isZappSites && !allowedHosts.has(host)) {
+        return fallback;
+    }
+    return `${parsed.protocol}//${parsed.host}`;
 }
 
 const HOST_STATUSES = new Set([
@@ -128,10 +163,27 @@ export async function loadFoodOrderByToken(token: string) {
     if (!rows[0]) return null;
     const order = await attachItems(rows[0]);
     const { rows: orgRows } = await query(
-        `SELECT id, slug, name, phone, email, currency FROM organizations WHERE id = $1`,
+        `SELECT id, slug, name, phone, email, currency, service_area, trade_type,
+                logo_url, brand_primary, brand_secondary
+         FROM organizations WHERE id = $1`,
         [rows[0].org_id]
     );
-    return { order, org: orgRows[0] || null };
+    const org = orgRows[0]
+        ? {
+              id: orgRows[0].id,
+              slug: orgRows[0].slug,
+              name: orgRows[0].name,
+              phone: orgRows[0].phone,
+              email: orgRows[0].email,
+              currency: orgRows[0].currency,
+              serviceArea: orgRows[0].service_area || '',
+              tradeType: orgRows[0].trade_type || '',
+              logoUrl: orgRows[0].logo_url || '',
+              brandPrimary: orgRows[0].brand_primary || '',
+              brandSecondary: orgRows[0].brand_secondary || ''
+          }
+        : null;
+    return { order, org };
 }
 
 async function attachItems(order: any) {
@@ -223,6 +275,8 @@ type CreateFoodOrderInput = {
     deliveryNotes?: string;
     pickupAt?: string | null;
     items: { menuItemId: string; quantity: number }[];
+    /** Browser origin where the customer started checkout (localhost / app URL). */
+    returnOrigin?: string | null;
 };
 
 export async function createFoodOrderCheckout(input: CreateFoodOrderInput) {
@@ -421,6 +475,7 @@ export async function createFoodOrderCheckout(input: CreateFoodOrderInput) {
         });
     }
 
+    const origin = resolveCheckoutOrigin(input.returnOrigin);
     const session = await stripeClient.checkout.sessions.create(
         {
             mode: 'payment',
@@ -431,8 +486,8 @@ export async function createFoodOrderCheckout(input: CreateFoodOrderInput) {
                 metadata: { foodOrderId: order.id, orgId: org.id, kind: 'food_order' }
             },
             metadata: { foodOrderId: order.id, orgId: org.id, kind: 'food_order' },
-            success_url: `${frontendOrigin()}/book/food-order/success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${frontendOrigin()}/book/${org.slug}?food=1&cancelled=1`
+            success_url: `${origin}/book/food-order/success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${origin}/book/${org.slug}?food=1&cancelled=1`
         },
         stripeAccountOpts(org.stripe_account_id)
     );
