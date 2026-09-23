@@ -80,6 +80,7 @@ export interface SalesUnifiedLead {
     spreadsheetStatus?: string;
     spreadsheetStatus1?: string;
     spreadsheetStatus2?: string;
+    spreadsheetStatus3?: string;
     scoreTotal?: number | null;
     auditId?: string | null;
     reportUrl?: string | null;

@@ -8,7 +8,8 @@ import {
     X,
     Loader2,
     Layers,
-    AlertTriangle
+    AlertTriangle,
+    Download
 } from 'lucide-react';
 
 export interface ParsedLeadRow {
@@ -26,6 +27,7 @@ export interface ParsedLeadRow {
     spreadsheetStatus?: string;
     spreadsheetStatus1?: string;
     spreadsheetStatus2?: string;
+    spreadsheetStatus3?: string;
     notes: string;
     conclusion?: string;
     sheetName: string;
@@ -42,6 +44,69 @@ interface ExcelLeadUploadModalProps {
 }
 
 const SKIP_SHEET_NAMES = new Set(['note', 'notes', 'instructions', 'readme']);
+
+/** Column headers the importer understands — keep in sync with parseWorkbookSheet. */
+export const LEADS_EXCEL_TEMPLATE_HEADERS = [
+    'Business Name',
+    'Phone',
+    'Email',
+    'Address',
+    'Website',
+    'Industry',
+    'My Observation GBP',
+    'My Observation AI Visibility',
+    'Lead Opportunity',
+    'Status 1',
+    'Status 2',
+    'Status 3',
+    'Conclusion'
+] as const;
+
+/** Download a blank leads workbook with headers + two example rows. */
+export function downloadLeadsExcelTemplate(filename = 'zappsites-leads-import-template.xlsx') {
+    const examples = [
+        {
+            'Business Name': 'Riverside Plumbing Ltd',
+            Phone: '0161 555 0142',
+            Email: 'hello@riversideplumbing.example',
+            Address: 'Manchester M1 2AB',
+            Website: 'https://www.riversideplumbing.example',
+            Industry: 'Plumbing',
+            'My Observation GBP': 'GBP listed but incomplete categories and weak photos',
+            'My Observation AI Visibility': 'Not mentioned in ChatGPT / Gemini local answers',
+            'Lead Opportunity': 'High — strong local demand, weak online presence',
+            'Status 1': 'New',
+            'Status 2': 'Phone / enquiry',
+            'Status 3': 'Follow up next week',
+            Conclusion: 'Pitch Local Presence + GBP cleanup'
+        },
+        {
+            'Business Name': 'Bloom Hair Studio',
+            Phone: '020 7946 0958',
+            Email: 'bookings@bloomhair.example',
+            Address: 'London SW1A 1AA',
+            Website: 'https://bloomhair.example',
+            Industry: 'Hair & Beauty',
+            'My Observation GBP': 'Good reviews; NAP mismatch vs website',
+            'My Observation AI Visibility': 'Appears inconsistently for “hair salon near me”',
+            'Lead Opportunity': 'Medium — fix NAP and booking CTA',
+            'Status 1': 'Contacted',
+            'Status 2': 'Interested',
+            'Status 3': 'Send proposal',
+            Conclusion: 'Offer Local Growth + booking page'
+        }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(examples, {
+        header: [...LEADS_EXCEL_TEMPLATE_HEADERS]
+    });
+    ws['!cols'] = LEADS_EXCEL_TEMPLATE_HEADERS.map((h) => ({
+        wch: Math.min(36, Math.max(14, h.length + 2))
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Leads');
+    XLSX.writeFile(wb, filename);
+}
 
 function normalizeName(value: string): string {
     return String(value || '').trim().toLowerCase();
@@ -299,6 +364,18 @@ function parseWorkbookSheet(
             ],
             ['status1', 'status3', 'initialstatus', 'leadstatus', 'leadstage']
         );
+        const statusVal3 = findVal(
+            ['status3', 'followupstatus', 'followup', 'nextstep', 'nextaction'],
+            [
+                'status1',
+                'status2',
+                'callingstatus',
+                'callstatus',
+                'disposition',
+                'initialstatus',
+                'leadstatus'
+            ]
+        );
         const email = findVal(['email', 'mail', 'emailaddress', 'contactemail']);
 
         if (!bName && !phone && !website && !address) continue;
@@ -363,19 +440,14 @@ function parseWorkbookSheet(
             return 'new';
         };
 
-        const mappedStatus = mapStatus(statusVal1 || statusVal2);
+        const mappedStatus = mapStatus(statusVal1 || statusVal2 || statusVal3);
         const spreadsheetStatus1 = (statusVal1 || '').trim();
         const spreadsheetStatus2 = (statusVal2 || '').trim();
-        let spreadsheetStatus = '';
-        if (
-            spreadsheetStatus1 &&
-            spreadsheetStatus2 &&
-            spreadsheetStatus1.toLowerCase() !== spreadsheetStatus2.toLowerCase()
-        ) {
-            spreadsheetStatus = `${spreadsheetStatus1} · ${spreadsheetStatus2}`;
-        } else {
-            spreadsheetStatus = spreadsheetStatus1 || spreadsheetStatus2;
-        }
+        const spreadsheetStatus3 = (statusVal3 || '').trim();
+        const statusParts = [spreadsheetStatus1, spreadsheetStatus2, spreadsheetStatus3].filter(
+            (s, i, arr) => s && arr.findIndex((x) => x.toLowerCase() === s.toLowerCase()) === i
+        );
+        const spreadsheetStatus = statusParts.join(' · ');
 
         const industryFallback = sheet.includes(' › ') ? sheet.split(' › ').slice(-1)[0].trim() : sheet.trim();
 
@@ -394,6 +466,7 @@ function parseWorkbookSheet(
             spreadsheetStatus,
             spreadsheetStatus1,
             spreadsheetStatus2,
+            spreadsheetStatus3,
             notes: conclusion,
             conclusion,
             sheetName: displaySheetName
@@ -689,6 +762,17 @@ export default function ExcelLeadUploadModal({
                                             Select one or more .xlsx, .xls, .ods, or .csv files with multi-sheet tabs
                                         </div>
                                     </div>
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            downloadLeadsExcelTemplate();
+                                        }}
+                                        className="inline-flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-sky-200 bg-white text-sky-800 hover:bg-sky-50 transition-colors"
+                                    >
+                                        <Download className="w-3.5 h-3.5" />
+                                        Download template (2 examples)
+                                    </button>
                                 </div>
                             ) : (
                                 <div className="space-y-5">

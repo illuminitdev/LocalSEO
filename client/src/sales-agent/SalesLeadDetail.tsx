@@ -358,9 +358,10 @@ export default function SalesLeadDetail() {
                     const latestAct = activities && activities.length > 0 ? activities[0] : null;
                     const status1 = String((lead as any).spreadsheetStatus1 || '').trim();
                     const status2 = String((lead as any).spreadsheetStatus2 || '').trim();
+                    const status3 = String((lead as any).spreadsheetStatus3 || '').trim();
                     // Back-compat: older imports only have combined spreadsheetStatus
                     const combinedSheet = String((lead as any).spreadsheetStatus || '').trim();
-                    const hasSheetStatuses = Boolean(status1 || status2 || combinedSheet);
+                    const hasSheetStatuses = Boolean(status1 || status2 || status3 || combinedSheet);
                     const crmStatus = String((lead as any).status || latestAct?.disposition || '').trim();
                     const showCrmPill = Boolean(crmStatus && crmStatus.toLowerCase() !== 'new');
                     const activeNote = (lead as any).salesNotes || (lead as any).notes || latestAct?.note || '';
@@ -443,16 +444,25 @@ export default function SalesLeadDetail() {
                                             </span>
                                         </li>
                                     ) : null}
-                                    {!status1 && !status2 && combinedSheet ? (
+                                    {status3 ? (
+                                        <li className="flex items-start gap-2">
+                                            <span className="text-amber-700 font-black shrink-0">3.</span>
+                                            <span>
+                                                <span className="text-slate-500 font-bold">Status 3:</span>{' '}
+                                                <span className="whitespace-pre-wrap font-medium">{status3}</span>
+                                            </span>
+                                        </li>
+                                    ) : null}
+                                    {!status1 && !status2 && !status3 && combinedSheet ? (
                                         <li className="flex items-start gap-2">
                                             <span className="text-amber-700 font-black shrink-0">•</span>
                                             <span className="whitespace-pre-wrap font-medium">{combinedSheet}</span>
                                         </li>
                                     ) : null}
-                                    {!status1 && !status2 && !combinedSheet ? (
+                                    {!status1 && !status2 && !status3 && !combinedSheet ? (
                                         <li className="flex items-start gap-2 text-slate-500 italic">
                                             <span className="text-amber-700 font-black shrink-0">•</span>
-                                            <span>No Status 1 / Status 2 from Excel.</span>
+                                            <span>No Status 1 / Status 2 / Status 3 from Excel.</span>
                                         </li>
                                     ) : null}
                                 </ul>
