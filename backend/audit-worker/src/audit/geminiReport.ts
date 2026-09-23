@@ -460,6 +460,7 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
       const aeoFixes = {
         ...fallbacks.aeoFixes,
         ...(parsed.aeoFixes || {}),
+        aeoChecklist: fallbacks.aeoFixes.aeoChecklist || parsed.aeoFixes?.aeoChecklist || null,
         priorities: Array.isArray(parsed.aeoFixes?.priorities)
           ? parsed.aeoFixes.priorities.slice(0, 4)
           : fallbacks.aeoFixes.priorities,

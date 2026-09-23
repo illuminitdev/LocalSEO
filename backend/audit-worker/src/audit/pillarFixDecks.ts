@@ -1,5 +1,6 @@
 
 import { buildLocalSeoCoreChecklist } from './localSeoCoreChecklist.js';
+import { buildAeoCoreChecklist } from './aeoCoreChecklist.js';
 
 /** Country aliases → canonical token (applied only as address suffix). */
 const COUNTRY_SUFFIX_ALIASES = [
@@ -285,6 +286,7 @@ export function fallbackPillarDecks(audit) {
       title: 'AEO: Answer Engine Optimisation',
       visualIntro:
         'Optimising content to appear as answers to user questions — e.g. Google People Also Ask, featured snippets, direct answers, and AI-generated answers.',
+      aeoChecklist: buildAeoCoreChecklist(audit),
       priorities:
         toActions(aeoFails, 'Medium').length > 0
           ? toActions(aeoFails, 'Medium')
