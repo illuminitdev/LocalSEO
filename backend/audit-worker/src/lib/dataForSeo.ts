@@ -871,21 +871,40 @@ function brandMentionedInText(answer: string, businessName: string): boolean {
   const name = String(businessName || '').trim().toLowerCase();
   if (!text || !name || name.length < 3) return false;
   if (text.includes(name)) return true;
-  
+
+  // Drop weak filler tokens; keep distinctive brand words (incl. short ones like "plus").
+  const stop = new Set([
+    'ltd',
+    'limited',
+    'services',
+    'service',
+    'the',
+    'and',
+    'in',
+    'of',
+    'for',
+    'near',
+    'best'
+  ]);
   const tokens = name
     .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 4 && !['ltd', 'limited', 'services', 'service', 'the', 'and'].includes(t));
+    .filter((t) => t.length >= 3 && !stop.has(t));
   if (!tokens.length) return false;
+
+  // Strong hit: distinctive multi-word core without the city suffix (e.g. "eleven plus tutors").
+  const core = tokens.filter((t) => !/^(manchester|london|birmingham|leeds|liverpool|glasgow|edinburgh|bristol)$/i.test(t));
+  if (core.length >= 2 && core.every((t) => text.includes(t))) return true;
+
   return tokens.every((t) => text.includes(t));
 }
 
 function shortCityForWebSearch(city?: string): string | undefined {
   const raw = String(city || '').trim();
   if (!raw) return undefined;
-  
+
   const first = raw.split(/[·|,]/)[0]?.trim() || raw;
   if (first.length > 48) return first.slice(0, 48).trim();
-  
+
   if (/\d{1,5}\s+\w+/.test(first) && first.length > 28) {
     const parts = first.split(/\s+/);
     return parts.slice(-2).join(' ') || undefined;
@@ -893,13 +912,53 @@ function shortCityForWebSearch(city?: string): string | undefined {
   return first || undefined;
 }
 
+/**
+ * Prefer a real town/city from the address (e.g. Manchester) over a building label
+ * like "Swan Buildings" — DataForSEO web_search_city needs a place people search.
+ */
+export function placeForGeoWebSearch(opts: { city?: string; address?: string | null }): string {
+  const parts = String(opts.address || '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i];
+    if (/^(uk|united kingdom|england|scotland|wales)$/i.test(part)) continue;
+    if (UK_POSTCODE_RE.test(part) && part.replace(UK_POSTCODE_RE, '').trim().length <= 1) continue;
+    const withoutPc = part.replace(UK_POSTCODE_RE, '').replace(/\s+/g, ' ').trim();
+    if (!withoutPc || withoutPc.length < 3 || withoutPc.length > 40) continue;
+    if (/\d/.test(withoutPc)) continue;
+    if (
+      /building|buildings|street|road|lane|avenue|floor|suite|unit|centre|center|\bst\b/i.test(
+        withoutPc
+      )
+    ) {
+      continue;
+    }
+    if (/^[A-Za-z][A-Za-z\s'-]*$/.test(withoutPc)) return withoutPc;
+  }
+  return shortCityForWebSearch(opts.city) || 'the local area in the UK';
+}
 
-function geoLlmSystemMessage(city?: string): string {
-  const place = shortCityForWebSearch(city) || 'the local area in the UK';
+function geoLlmSystemMessage(place?: string): string {
+  const loc = String(place || 'the local area in the UK').replace(/\s+/g, ' ').trim();
   return (
-    `UK local search helper. Use web search. Location: ${place} (if query says "near me", use that place). ` +
-    `Reply in under 80 words. Numbered list of up to 5 real business names only, one per line. ` +
-    `No addresses, ratings, URLs, paragraphs, or blank lines. Do not say you lack maps or location.`
+    `UK local business finder. Always use web search. Focus on ${loc} / United Kingdom. ` +
+    `Return a numbered list of up to 5 REAL businesses that match the user query from search results. ` +
+    `Use exact trading names only — never invent, guess, or invent similar-sounding brands. ` +
+    `If search is thin, say so briefly and list only verified names. One business per line; short area tip OK. Under 160 words.`
+  ).slice(0, 500);
+}
+
+/** Strengthen the user prompt so API answers stay grounded (closer to consumer ChatGPT). */
+function geoLlmUserPrompt(prompt: string, place?: string): string {
+  const q = String(prompt || '').replace(/\s+/g, ' ').trim();
+  const loc = String(place || '').replace(/\s+/g, ' ').trim();
+  const locBit = loc ? ` near ${loc}, United Kingdom` : ' in the United Kingdom';
+  return (
+    `Web-search for real local businesses${locBit}. ` +
+    `Query: ${q}. ` +
+    `List only businesses that appear in current search results. Do not invent names.`
   ).slice(0, 500);
 }
 
@@ -1727,6 +1786,7 @@ async function fetchLlmResponseLive(opts: {
   modelName: string;
   prompt: string;
   city?: string;
+  address?: string | null;
   timeoutMs?: number;
   withTemperature?: boolean;
 }): Promise<{ text: string; error?: string }> {
@@ -1734,22 +1794,22 @@ async function fetchLlmResponseLive(opts: {
   const prompt = String(opts.prompt || '').trim().slice(0, 500);
   if (!prompt) return { text: '', error: 'Empty prompt' };
 
+  const place = placeForGeoWebSearch({ city: opts.city, address: opts.address });
   const task: Record<string, unknown> = {
-    user_prompt: prompt,
+    user_prompt: geoLlmUserPrompt(prompt, place),
     model_name: opts.modelName,
-    max_output_tokens: opts.platform === 'claude' ? 320 : 280,
+    max_output_tokens: opts.platform === 'claude' ? 560 : 480,
     web_search: true,
-    system_message: geoLlmSystemMessage(opts.city)
+    system_message: geoLlmSystemMessage(place)
   };
   if (opts.withTemperature !== false && opts.platform !== 'claude') {
     task.temperature = 0.2;
   }
-  
+
   if (opts.platform !== 'gemini') {
     task.web_search_country_iso_code = 'GB';
     task.force_web_search = true;
-    const city = shortCityForWebSearch(opts.city);
-    if (city) task.web_search_city = city;
+    if (place) task.web_search_city = place.slice(0, 48);
   }
 
   const path =
@@ -1800,6 +1860,7 @@ async function fetchLlmWithModelFallback(opts: {
   models: string[];
   prompt: string;
   city?: string;
+  address?: string | null;
   timeoutMs?: number;
 }): Promise<{ text: string; error?: string }> {
   let last: { text: string; error?: string } = { text: '', error: 'No model tried' };
@@ -1809,6 +1870,7 @@ async function fetchLlmWithModelFallback(opts: {
       modelName,
       prompt: opts.prompt,
       city: opts.city,
+      address: opts.address,
       timeoutMs: opts.timeoutMs
     });
     if (last.text) return last;
@@ -1821,6 +1883,7 @@ async function fetchLlmWithModelFallback(opts: {
         modelName,
         prompt: opts.prompt,
         city: opts.city,
+        address: opts.address,
         timeoutMs: opts.timeoutMs
       });
       if (last.text) return last;
@@ -1831,6 +1894,7 @@ async function fetchLlmWithModelFallback(opts: {
         platform: opts.platform,
         modelName,
         prompt: opts.prompt,
+        address: opts.address,
         timeoutMs: opts.timeoutMs
       });
       if (last.text) return last;
@@ -1839,16 +1903,176 @@ async function fetchLlmWithModelFallback(opts: {
   return last;
 }
 
+function collectScraperMarkdown(result: any): string {
+  const chunks: string[] = [];
+  const root = String(result?.markdown || '').trim();
+  if (root) chunks.push(root);
+  const items = Array.isArray(result?.items) ? result.items : [];
+  for (const item of items) {
+    const md = String(item?.markdown || '').trim();
+    if (md) chunks.push(md);
+  }
+  return chunks.join('\n\n').trim();
+}
+
+function extractLocalBusinessTitlesFromScraper(result: any): string[] {
+  const titles: string[] = [];
+  const seen = new Set<string>();
+  const walk = (nodes: any[]) => {
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object') continue;
+      const type = String(node.type || '');
+      if (
+        type === 'chat_gpt_local_businesses' ||
+        type === 'gemini_local_businesses' ||
+        /local_businesses$/i.test(type)
+      ) {
+        const nested = Array.isArray(node.items) ? node.items : [];
+        for (const el of nested) {
+          const title = String(el?.title || '').replace(/\s+/g, ' ').trim();
+          if (!title) continue;
+          const key = title.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          titles.push(title);
+        }
+      }
+      if (Array.isArray(node.items)) walk(node.items);
+    }
+  };
+  walk(Array.isArray(result?.items) ? result.items : []);
+  return titles;
+}
+
+function extractRankedLinesFromMarkdown(markdown: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of String(markdown || '').split(/\n/)) {
+    const line = raw.replace(/\r/g, '');
+    const m = line.match(/^\s*(?:\d+[.)]\s+|[-–—*•]\s+)(.+)$/);
+    if (!m) continue;
+    let title = m[1]
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/^#+\s*/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    // Drop trailing rating/noise like "— 4.8★"
+    title = title.replace(/\s*[—–-]\s*[\d.]+\s*[★⭐].*$/u, '').trim();
+    if (!title || title.length < 2) continue;
+    const key = title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(title);
+  }
+  return out;
+}
+
+function formatTop5List(names: string[]): string {
+  return names
+    .slice(0, 5)
+    .map((n, i) => `${i + 1}. ${n}`)
+    .join('\n');
+}
+
+/** Prefer ChatGPT local-business cards; else numbered/bullet lines from scraped markdown. */
+function normalizeScraperTop5(result: any): { top5: string; fullText: string } {
+  const fullText = collectScraperMarkdown(result);
+  const fromCards = extractLocalBusinessTitlesFromScraper(result);
+  if (fromCards.length) {
+    return { top5: formatTop5List(fromCards), fullText: fullText || formatTop5List(fromCards) };
+  }
+  const fromLines = extractRankedLinesFromMarkdown(fullText);
+  if (fromLines.length) {
+    return { top5: formatTop5List(fromLines), fullText };
+  }
+  if (fullText) {
+    // Last resort: keep a short prose excerpt (not a fake ranked list).
+    return { top5: sanitizeLlmExcerpt(fullText, 420), fullText };
+  }
+  return { top5: '', fullText: '' };
+}
+
+async function fetchLlmScraperLive(opts: {
+  platform: 'chat_gpt' | 'gemini';
+  keyword: string;
+  timeoutMs?: number;
+}): Promise<{ text: string; top5: string; error?: string }> {
+  if (!requireDataForSeoConfigured()) {
+    return { text: '', top5: '', error: 'DataForSEO not configured' };
+  }
+  const keyword = String(opts.keyword || '').trim().slice(0, 2000);
+  if (!keyword) return { text: '', top5: '', error: 'Empty keyword' };
+
+  const task: Record<string, unknown> = {
+    keyword,
+    language_code: 'en',
+    location_code: 2826
+  };
+  if (opts.platform === 'chat_gpt') {
+    task.force_web_search = true;
+  }
+
+  const path =
+    opts.platform === 'gemini'
+      ? 'https://api.dataforseo.com/v3/ai_optimization/gemini/llm_scraper/live/advanced'
+      : 'https://api.dataforseo.com/v3/ai_optimization/chat_gpt/llm_scraper/live/advanced';
+
+  const controller = new AbortController();
+  const timeoutMs = opts.timeoutMs ?? 90000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: {
+        Authorization: basicAuthHeader(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify([task]),
+      signal: controller.signal
+    });
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        text: '',
+        top5: '',
+        error: `HTTP ${res.status} ${data?.status_message || ''}`.trim()
+      };
+    }
+    const taskResult = Array.isArray(data?.tasks) ? data.tasks[0] : null;
+    if (!taskResult || taskResult.status_code !== 20000) {
+      return {
+        text: '',
+        top5: '',
+        error: String(taskResult?.status_message || data?.status_message || 'LLM scraper task failed')
+      };
+    }
+    const result = Array.isArray(taskResult.result) ? taskResult.result[0] : taskResult.result;
+    const { top5, fullText } = normalizeScraperTop5(result);
+    if (!top5 && !fullText) {
+      return { text: '', top5: '', error: 'Empty scraper answer' };
+    }
+    return { text: fullText || top5, top5: top5 || sanitizeLlmExcerpt(fullText, 420) };
+  } catch (err: any) {
+    const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
+    return { text: '', top5: '', error: msg || 'LLM scraper request failed' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export async function checkAiEngineMentions(opts: {
   prompt: string;
   businessName: string;
   city?: string;
+  address?: string | null;
   promptKey?: GeoAiPromptKey;
 }): Promise<AiEngineCheckResult[]> {
   const prompt = String(opts.prompt || '').trim();
   const businessName = String(opts.businessName || '').trim();
   const city = String(opts.city || '').trim() || undefined;
+  const address = opts.address;
   const promptKey = opts.promptKey;
   const capturedAt = new Date().toISOString();
 
@@ -1873,37 +2097,58 @@ export async function checkAiEngineMentions(opts: {
   if (!prompt || !businessName) {
     return [
       skippedRow('chatgpt', 'ChatGPT', 'Missing prompt or business name'),
-      skippedRow('claude', 'Claude', 'Missing prompt or business name'),
+      skippedRow('claude', 'Claude (API)', 'Missing prompt or business name'),
       skippedRow('gemini', 'Gemini', 'Missing prompt or business name')
     ];
   }
 
-  
+  // ChatGPT + Gemini: consumer UI via LLM Scraper. Claude: LLM Responses API only.
   const [gpt, claude] = await Promise.all([
-    fetchLlmWithModelFallback({
+    fetchLlmScraperLive({
       platform: 'chat_gpt',
-      models: ['gpt-4.1-mini', 'gpt-4o-mini'],
-      prompt,
-      city,
-      timeoutMs: 55000
+      keyword: prompt,
+      timeoutMs: 90000
     }),
     fetchLlmWithModelFallback({
       platform: 'claude',
-      models: ['claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-sonnet-4-6'],
+      models: ['claude-sonnet-4-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
       prompt,
       city,
-      timeoutMs: 55000
+      address,
+      timeoutMs: 60000
     })
   ]);
-  const gemini = await fetchLlmWithModelFallback({
+  const gemini = await fetchLlmScraperLive({
     platform: 'gemini',
-    models: ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.5-flash-lite'],
-    prompt,
-    city,
-    timeoutMs: 55000
+    keyword: prompt,
+    timeoutMs: 90000
   });
 
-  const toRow = (
+  const toScraperRow = (
+    engine: AiEngineCheckResult['engine'],
+    label: string,
+    res: { text: string; top5: string; error?: string }
+  ): AiEngineCheckResult => {
+    if (!res.top5 && !res.text) {
+      return skippedRow(engine, label, res.error || 'No answer');
+    }
+    const mentionSource = res.text || res.top5;
+    const excerpt = res.top5 || sanitizeLlmExcerpt(res.text, 420);
+    const mentioned = brandMentionedInText(mentionSource, businessName);
+    return {
+      engine,
+      label,
+      prompt,
+      promptKey,
+      mentioned,
+      recommendedLikely: recommendedLikelyInText(mentionSource, mentioned),
+      citedHosts: extractCitedHostsFromText(mentionSource),
+      answerExcerpt: excerpt,
+      capturedAt
+    };
+  };
+
+  const toApiRow = (
     engine: AiEngineCheckResult['engine'],
     label: string,
     res: { text: string; error?: string }
@@ -1927,9 +2172,9 @@ export async function checkAiEngineMentions(opts: {
   };
 
   return [
-    toRow('chatgpt', 'ChatGPT', gpt),
-    toRow('claude', 'Claude', claude),
-    toRow('gemini', 'Gemini', gemini)
+    toScraperRow('chatgpt', 'ChatGPT', gpt),
+    toApiRow('claude', 'Claude (API)', claude),
+    toScraperRow('gemini', 'Gemini', gemini)
   ];
 }
 
@@ -1954,6 +2199,7 @@ export async function checkAiEngineMentionsMulti(opts: {
       prompt,
       businessName,
       city,
+      address: opts.address,
       promptKey: key
     });
     out.push(...batch);
