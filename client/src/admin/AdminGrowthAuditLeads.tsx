@@ -221,6 +221,101 @@ function fmtDate(value?: string | null) {
     return time ? `${date} ${time}` : date;
 }
 
+export type StatusDateFilter = 'all' | 'today' | 'yesterday' | '7days' | '30days' | 'custom';
+
+export function matchesStatusDateFilter(
+    dateStr: string | null | undefined,
+    filter: StatusDateFilter,
+    customDate?: string
+): boolean {
+    if (filter === 'all' || !dateStr) return true;
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return false;
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const targetTime = d.getTime();
+
+    if (filter === 'today') {
+        return targetTime >= todayStart;
+    }
+    if (filter === 'yesterday') {
+        const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+        return targetTime >= yesterdayStart && targetTime < todayStart;
+    }
+    if (filter === '7days') {
+        const sevenDaysAgo = todayStart - 7 * 24 * 60 * 60 * 1000;
+        return targetTime >= sevenDaysAgo;
+    }
+    if (filter === '30days') {
+        const thirtyDaysAgo = todayStart - 30 * 24 * 60 * 60 * 1000;
+        return targetTime >= thirtyDaysAgo;
+    }
+    if (filter === 'custom' && customDate) {
+        const targetIso = d.toISOString().slice(0, 10);
+        return targetIso === customDate;
+    }
+    return true;
+}
+
+export function normalizeBusinessCategory(raw?: string | null): string | null {
+    if (!raw) return null;
+    const clean = String(raw).trim().replace(/\s+/g, ' ');
+    if (!clean || /^sheet\s*\d+$/i.test(clean)) return null;
+
+    const lower = clean.toLowerCase();
+
+    if (lower === 'garage' || lower === 'garages') return 'Garage';
+    if (lower.includes('dog grooming') || lower.includes('pet service')) return 'Dog Grooming Pet Services';
+    if (lower.includes('plumb')) return 'Plumbing';
+    if (lower.includes('beauty') || lower.includes('aesthetics') || lower.includes('hair')) return 'Beauty Hair Aesthetics';
+    if (lower.includes('physio') || lower.includes('sports therapy')) return 'Physiotherapy Sports Therapy';
+    if (lower.includes('driving school') || lower.includes('driving instructor')) return 'Driving Schools';
+    if (lower.includes('pest')) return 'Pestcontrol';
+    if (lower.includes('landscap') || lower.includes('garden')) return 'Landscaping';
+    if (lower.includes('dent')) return 'Dental';
+    if (lower.includes('damp')) return 'Dampproofing';
+    if (lower.includes('skin')) return 'Skin Care';
+    if (lower.includes('care home') || lower.includes('nursing home')) return 'Care Homes';
+    if (lower.includes('personal trainer') || lower.includes('fitness trainer')) return 'Personal Trainers';
+    if (lower.includes('clean')) return 'Cleaning Services';
+    if (lower.includes('electric')) return 'Electricians';
+    if (lower.includes('tutor') || lower.includes('tuition')) return 'Private Tutors & Tuition Centre';
+
+    return clean
+        .split(' ')
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
+}
+
+const DEFAULT_BUSINESS_CATEGORIES = [
+    'Plumbing',
+    'Beauty Hair Aesthetics',
+    'Physiotherapy Sports Therapy',
+    'Driving Schools',
+    'Pestcontrol',
+    'Landscaping',
+    'Dental',
+    'Dampproofing',
+    'Skin Care',
+    'Care Homes',
+    'Personal Trainers',
+    'Cleaning Services',
+    'Electricians',
+    'Dog Grooming Pet Services',
+    'Private Tutors & Tuition Centre',
+    'Garage'
+];
+
+export function getLeadBusinessCategory(lead: {
+    service?: string | null;
+    serviceLabel?: string | null;
+    industry?: string | null;
+}): string | null {
+    const raw = String(lead.service || lead.serviceLabel || lead.industry || '').trim();
+    return normalizeBusinessCategory(raw);
+}
+
 export default function AdminGrowthAuditLeads() {
     const [leads, setLeads] = useState<AdminLead[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
@@ -245,6 +340,12 @@ export default function AdminGrowthAuditLeads() {
     const [selectedStatusLead, setSelectedStatusLead] = useState<AdminLead | null>(null);
     const [excelBatches, setExcelBatches] = useState<ExcelImportBatch[]>([]);
     const [excelBatchFilter, setExcelBatchFilter] = useState<string>('all');
+    const [businessFilter, setBusinessFilter] = useState<string>('all');
+    const [selectedAgent, setSelectedAgent] = useState<string>('all');
+    const [selectedStatus, setSelectedStatus] = useState<string>('all');
+    const [selectedPriority, setSelectedPriority] = useState<string>('all');
+    const [statusDateFilter, setStatusDateFilter] = useState<StatusDateFilter>('all');
+    const [statusCustomDate, setStatusCustomDate] = useState<string>('');
 
     const handleSetSourceCategory = (cat: SourceCategoryFilter) => {
         setSourceCategory(cat);
@@ -320,6 +421,21 @@ export default function AdminGrowthAuditLeads() {
         return String(lead.importBatchId || '') === batchId;
     };
 
+    const businessFilterOptions = useMemo(() => {
+        const set = new Set<string>();
+        DEFAULT_BUSINESS_CATEGORIES.forEach((cat) => set.add(cat));
+        leads.forEach((l) => {
+            const cat = getLeadBusinessCategory(l);
+            if (cat) {
+                const existing = Array.from(set).find((item) => item.toLowerCase() === cat.toLowerCase());
+                if (!existing) {
+                    set.add(cat);
+                }
+            }
+        });
+        return Array.from(set).sort((a, b) => a.localeCompare(b));
+    }, [leads]);
+
     const filteredLeads = useMemo(() => {
         return leads.filter((lead) => {
             const added = isLeadAdded(lead);
@@ -328,12 +444,61 @@ export default function AdminGrowthAuditLeads() {
                 if (!added) return false;
             }
             if (excelBatchFilter !== 'all') {
-                return leadMatchesExcelBatch(lead, excelBatchFilter);
+                if (!leadMatchesExcelBatch(lead, excelBatchFilter)) return false;
             }
-            if (sourceCategory === 'added') return added;
+            if (businessFilter !== 'all') {
+                const cat = getLeadBusinessCategory(lead);
+                if (!cat || cat.toLowerCase().trim() !== businessFilter.toLowerCase().trim()) {
+                    return false;
+                }
+            }
+            if (selectedAgent !== 'all') {
+                if (selectedAgent === 'unassigned') {
+                    if (lead.assignedAgentName || (lead as any).assignedToUserId) return false;
+                } else {
+                    const agent = salesAgents.find((a) => a.id === selectedAgent);
+                    const agentName = agent?.name || agent?.email || '';
+                    const leadAgentName = lead.assignedAgentName || (lead as any).assignedToName || '';
+                    const leadAgentId = (lead as any).assignedToUserId || '';
+                    if (
+                        leadAgentId !== selectedAgent &&
+                        (!agentName || !leadAgentName.toLowerCase().includes(agentName.toLowerCase()))
+                    ) {
+                        return false;
+                    }
+                }
+            }
+            if (selectedStatus !== 'all') {
+                const leadStat = (displayLeadStatus(lead) || lead.status || '').toLowerCase().trim().replace(/[-\s]/g, '_');
+                const target = selectedStatus.toLowerCase().trim().replace(/[-\s]/g, '_');
+                if (target === 'new') {
+                    if (leadStat && leadStat !== 'new' && leadStat !== 'submitted') return false;
+                } else if (!leadStat.includes(target) && leadStat !== target) {
+                    return false;
+                }
+            }
+            if (selectedPriority !== 'all') {
+                const prio = ((lead as any).priority || '').toLowerCase().trim();
+                if (prio && prio !== selectedPriority) return false;
+            }
+            const statusDate = lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt;
+            if (!matchesStatusDateFilter(statusDate, statusDateFilter, statusCustomDate)) {
+                return false;
+            }
             return true;
         });
-    }, [leads, sourceCategory, excelBatchFilter]);
+    }, [
+        leads,
+        sourceCategory,
+        excelBatchFilter,
+        businessFilter,
+        selectedAgent,
+        selectedStatus,
+        selectedPriority,
+        statusDateFilter,
+        statusCustomDate,
+        salesAgents
+    ]);
 
     const excelBatchLeadIds = useMemo(() => {
         if (excelBatchFilter === 'all') return [] as string[];
@@ -492,140 +657,256 @@ export default function AdminGrowthAuditLeads() {
             )}
 
             <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
-                {/* Source Category Segmented Bar & Action Buttons */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 sm:px-4 py-3 bg-slate-50/80 border-b border-[#E2E8F0]">
-                    <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-bold text-[#64748B] whitespace-nowrap">Source:</span>
-                        <select
-                            value={sourceCategory}
-                            onChange={(e) => handleSetSourceCategory(e.target.value as SourceCategoryFilter)}
-                            className="bg-white border border-[#CBD5E1] text-[#0F172A] font-bold text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:border-amber-500 shadow-2xs cursor-pointer hover:border-slate-400 transition-colors"
-                        >
-                            <option value="all">All Leads ({leads.length})</option>
-                            <option value="added">Added / Uploaded Leads ({addedCount})</option>
-                            <option value="growth_audit">Growth Audit & Funnels ({growthAuditCount})</option>
-                        </select>
+                {/* Search Bar & Filter Controls Header (Matches Admin CRM Task layout) */}
+                <div className="p-3 sm:p-4 border-b border-[#E2E8F0] bg-[#FCFDFE] space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div className="relative flex-1 max-w-md min-w-0">
+                            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94A3B8]" />
+                            <input
+                                value={draftQuery}
+                                onChange={(e) => setDraftQuery(e.target.value)}
+                                placeholder="Search tasks, notes, or telecaller..."
+                                className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-[#E2E8F0] text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 bg-slate-50 focus:bg-white"
+                            />
+                        </div>
 
-                        <select
-                            value={excelBatchFilter}
-                            onChange={(e) => {
-                                setExcelBatchFilter(e.target.value);
-                                setPage(1);
-                                setSelectedLeadIds(new Set());
-                                if (e.target.value !== 'all') {
-                                    setSourceCategory('added');
-                                }
-                            }}
-                            className="bg-white border border-[#CBD5E1] text-[#0F172A] font-bold text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:border-amber-500 shadow-2xs cursor-pointer hover:border-slate-400 transition-colors max-w-[240px]"
-                            title="Filter by uploaded Excel file"
-                        >
-                            <option value="all">All Excels ({excelBatches.length})</option>
-                            {excelBatches.map((b) => {
-                                const when = b.uploadedAt
-                                    ? new Date(b.uploadedAt).toLocaleDateString(undefined, {
-                                          day: '2-digit',
-                                          month: 'short',
-                                          year: 'numeric'
-                                      })
-                                    : '';
-                                const label = when
-                                    ? `${b.fileName} · ${when} (${b.leadCount})`
-                                    : `${b.fileName} (${b.leadCount})`;
-                                return (
-                                    <option key={b.batchId} value={b.batchId}>
-                                        {label}
+                        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                            {excelBatchFilter !== 'all' && excelBatchLeadIds.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={handleAssignThisExcel}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 transition-colors shadow-2xs"
+                                    title="Assign all leads from this Excel to one agent"
+                                >
+                                    <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Assign this Excel</span>
+                                </button>
+                            )}
+
+                            {excelBatchFilter !== 'all' && selectedExcelBatch && (
+                                <button
+                                    type="button"
+                                    disabled={isDeletingExcel}
+                                    onClick={handleDeleteExcelLeads}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors shadow-2xs"
+                                    title="Delete only leads from the selected Excel file"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                                    <span>{isDeletingExcel ? 'Deleting...' : 'Delete this Excel'}</span>
+                                </button>
+                            )}
+
+                            <button
+                                type="button"
+                                onClick={() => downloadLeadsExcelTemplate()}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-sky-300 bg-sky-50 text-sky-800 hover:bg-sky-100 transition-colors shadow-2xs"
+                                title="Download Excel template with column headers and two example rows"
+                            >
+                                <Download className="w-3.5 h-3.5 text-sky-600" />
+                                <span>Template</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setIsUploadModalOpen(true)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-colors shadow-2xs"
+                            >
+                                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Upload Excel</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setIsAddLeadModalOpen(true)}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#F59E0B] text-white hover:bg-[#D97706] transition-colors shadow-2xs"
+                            >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Add Lead</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={load}
+                                disabled={loading}
+                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all"
+                            >
+                                <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
+                                <span>Refresh</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Filter Grid (Matches Admin CRM filters: Business, Sales Agent, Task Type/Source, Status, Status Date, Priority) */}
+                    <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 pt-2.5 border-t border-slate-100">
+                        <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                Business
+                            </label>
+                            <select
+                                value={businessFilter}
+                                onChange={(e) => {
+                                    setBusinessFilter(e.target.value);
+                                    setPage(1);
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                                title="Filter by Business category"
+                            >
+                                <option value="all">All Businesses</option>
+                                {businessFilterOptions.map((cat) => {
+                                    const count = leads.filter((l) => {
+                                        const c = getLeadBusinessCategory(l);
+                                        return c && c.toLowerCase().trim() === cat.toLowerCase().trim();
+                                    }).length;
+                                    return (
+                                        <option key={cat} value={cat}>
+                                            {cat} {count > 0 ? `(${count})` : ''}
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                Sales Agent
+                            </label>
+                            <select
+                                value={selectedAgent}
+                                onChange={(e) => {
+                                    setSelectedAgent(e.target.value);
+                                    setPage(1);
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                            >
+                                <option value="all">All Agents</option>
+                                <option value="unassigned">Unassigned</option>
+                                {salesAgents.map((agent) => (
+                                    <option key={agent.id} value={agent.id}>
+                                        {agent.name || agent.email}
                                     </option>
-                                );
-                            })}
-                        </select>
-                    </div>
+                                ))}
+                            </select>
+                        </div>
 
-                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                        {excelBatchFilter !== 'all' && excelBatchLeadIds.length > 0 && (
-                            <button
-                                type="button"
-                                onClick={handleAssignThisExcel}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 transition-colors shadow-2xs"
-                                title="Assign all leads from this Excel to one agent"
+                        <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                Task Type
+                            </label>
+                            <select
+                                value={excelBatchFilter !== 'all' ? excelBatchFilter : sourceCategory}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === 'all' || val === 'added' || val === 'growth_audit') {
+                                        handleSetSourceCategory(val as SourceCategoryFilter);
+                                        setExcelBatchFilter('all');
+                                    } else {
+                                        setExcelBatchFilter(val);
+                                        setSourceCategory('added');
+                                    }
+                                    setPage(1);
+                                    setSelectedLeadIds(new Set());
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             >
-                                <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
-                                <span>Assign this Excel</span>
-                            </button>
-                        )}
+                                <option value="all">All Task Types</option>
+                                <option value="added">Added / Uploaded Leads ({addedCount})</option>
+                                <option value="growth_audit">Growth Audit & Funnels ({growthAuditCount})</option>
+                                {excelBatches.map((b) => (
+                                    <option key={b.batchId} value={b.batchId}>
+                                        Excel: {b.fileName} ({b.leadCount})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
 
-                        {excelBatchFilter !== 'all' && selectedExcelBatch && (
-                            <button
-                                type="button"
-                                disabled={isDeletingExcel}
-                                onClick={handleDeleteExcelLeads}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors shadow-2xs"
-                                title="Delete only leads from the selected Excel file"
+                        <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                Status
+                            </label>
+                            <select
+                                value={selectedStatus}
+                                onChange={(e) => {
+                                    setSelectedStatus(e.target.value);
+                                    setPage(1);
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             >
-                                <Trash2 className="w-3.5 h-3.5 text-red-600" />
-                                <span>{isDeletingExcel ? 'Deleting...' : 'Delete this Excel'}</span>
-                            </button>
-                        )}
+                                <option value="all">All Statuses</option>
+                                <option value="new">New</option>
+                                <option value="in_progress">In Progress</option>
+                                <option value="contacted">Contacted</option>
+                                <option value="follow_up">Follow Up</option>
+                                <option value="interested">Interested</option>
+                                <option value="not_interested">Not Interested</option>
+                                <option value="converted">Converted</option>
+                                <option value="completed">Completed</option>
+                                <option value="voicemail">Voicemail</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                        </div>
 
-                        <button
-                            type="button"
-                            onClick={() => downloadLeadsExcelTemplate()}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-sky-300 bg-sky-50 text-sky-800 hover:bg-sky-100 transition-colors shadow-2xs"
-                            title="Download Excel template with column headers and two example rows"
-                        >
-                            <Download className="w-3.5 h-3.5 text-sky-600" />
-                            <span>Template</span>
-                        </button>
+                        <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                Status Date
+                            </label>
+                            <select
+                                value={statusDateFilter}
+                                onChange={(e) => {
+                                    setStatusDateFilter(e.target.value as StatusDateFilter);
+                                    setPage(1);
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                                title="Filter leads by updated status date"
+                            >
+                                <option value="all">📅 All Dates</option>
+                                <option value="today">Today</option>
+                                <option value="yesterday">Yesterday</option>
+                                <option value="7days">Last 7 Days</option>
+                                <option value="30days">Last 30 Days</option>
+                                <option value="custom">Custom Date…</option>
+                            </select>
+                            {statusDateFilter === 'custom' && (
+                                <input
+                                    type="date"
+                                    value={statusCustomDate}
+                                    onChange={(e) => {
+                                        setStatusCustomDate(e.target.value);
+                                        setPage(1);
+                                    }}
+                                    className="w-full mt-1 px-2 py-1 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                                />
+                            )}
+                        </div>
 
-                        <button
-                            type="button"
-                            onClick={() => setIsUploadModalOpen(true)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-colors shadow-2xs"
-                        >
-                            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>Upload Excel</span>
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={() => setIsAddLeadModalOpen(true)}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#F59E0B] text-white hover:bg-[#D97706] transition-colors shadow-2xs"
-                        >
-                            <Plus className="w-3.5 h-3.5" />
-                            <span>Add Lead</span>
-                        </button>
-                    </div>
-                </div>
-
-                <div className="p-3 sm:p-4 border-b border-[#E2E8F0] bg-[#FCFDFE] flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="relative flex-1 max-w-md min-w-0">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94A3B8]" />
-                        <input
-                            value={draftQuery}
-                            onChange={(e) => setDraftQuery(e.target.value)}
-                            placeholder="Search name, business, email, phone…"
-                            className="w-full pl-9 pr-3 py-2 rounded-xl border border-[#E2E8F0] text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25 bg-white"
-                        />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 shrink-0">
-                        <select
-                            value={hasContact}
-                            onChange={(e) => setHasContact(e.target.value as ContactFilter)}
-                            className="bg-white border border-[#CBD5E1] text-[#0F172A] font-bold text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-amber-500 shadow-2xs cursor-pointer hover:border-slate-400 transition-colors"
-                        >
-                            <option value="any">Contact: All</option>
-                            <option value="email">Has email</option>
-                            <option value="phone">Has phone</option>
-                            <option value="both">Both email & phone</option>
-                        </select>
-
-                        <button
-                            type="button"
-                            onClick={load}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border border-[#E2E8F0] bg-white text-[#475569] hover:bg-[#F8FAFC] shadow-2xs transition-colors"
-                        >
-                            <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
-                            Refresh
-                        </button>
+                        <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                Priority
+                            </label>
+                            <select
+                                value={selectedPriority !== 'all' ? selectedPriority : hasContact !== 'any' ? `contact_${hasContact}` : 'all'}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val.startsWith('contact_')) {
+                                        setHasContact(val.replace('contact_', '') as ContactFilter);
+                                        setSelectedPriority('all');
+                                    } else {
+                                        setSelectedPriority(val);
+                                        setHasContact('any');
+                                    }
+                                    setPage(1);
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                            >
+                                <option value="all">All Priorities</option>
+                                <option value="urgent">Urgent</option>
+                                <option value="high">High Priority</option>
+                                <option value="medium">Medium Priority</option>
+                                <option value="low">Low Priority</option>
+                                <option value="contact_email">Has Email</option>
+                                <option value="contact_phone">Has Phone</option>
+                                <option value="contact_both">Both Email & Phone</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
@@ -774,6 +1055,20 @@ export default function AdminGrowthAuditLeads() {
                                                              >
                                                                  {title}
                                                              </button>
+                                                             {(() => {
+                                                                 const cat = getLeadBusinessCategory(lead);
+                                                                 if (!cat) return null;
+                                                                 return (
+                                                                     <div className="mt-1">
+                                                                         <span
+                                                                             className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-200"
+                                                                             title={`Business: ${cat}`}
+                                                                         >
+                                                                             {cat}
+                                                                         </span>
+                                                                     </div>
+                                                                 );
+                                                             })()}
                                                              {lead.address ? (
                                                                  <div className="text-[11px] font-normal text-[#64748B] truncate w-full mt-0.5" title={lead.address}>
                                                                      {lead.address}

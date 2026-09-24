@@ -11,6 +11,7 @@ import {
     AlertTriangle,
     Download
 } from 'lucide-react';
+import { normalizeBusinessCategory } from '../admin/AdminGrowthAuditLeads';
 
 export interface ParsedLeadRow {
     businessName: string;
@@ -453,6 +454,10 @@ function parseWorkbookSheet(
         const spreadsheetStatus = statusParts.join(' · ');
 
         const industryFallback = sheet.includes(' › ') ? sheet.split(' › ').slice(-1)[0].trim() : sheet.trim();
+        const cleanRowIndustry = /^sheet\s*\d+$/i.test(rowIndustry) ? '' : rowIndustry;
+        const cleanFallback = /^sheet\s*\d+$/i.test(industryFallback) ? '' : industryFallback;
+        const rawInd = cleanRowIndustry || cleanFallback;
+        const finalIndustry = normalizeBusinessCategory(rawInd) || rawInd;
 
         rows.push({
             businessName: bName || 'Lead',
@@ -460,7 +465,7 @@ function parseWorkbookSheet(
             email,
             address,
             website,
-            industry: rowIndustry || industryFallback,
+            industry: finalIndustry,
             gbpObservation: gbp,
             aiVisibilityObservation: aiVis,
             leadOpportunity: opp,

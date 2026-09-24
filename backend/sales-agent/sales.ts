@@ -140,6 +140,15 @@ export async function ensureCrmTables() {
             );
             CREATE INDEX IF NOT EXISTS idx_audit_email_sends_audit ON audit_email_sends(audit_id, sent_at DESC);
             CREATE INDEX IF NOT EXISTS idx_audit_email_sends_token ON audit_email_sends(token);
+
+            UPDATE sales_leads SET industry = '' WHERE LOWER(TRIM(industry)) LIKE 'sheet%' OR LOWER(TRIM(industry)) ~ '^sheet\s*\d+$';
+            UPDATE sales_leads SET industry = 'Garage' WHERE LOWER(TRIM(industry)) IN ('garage', 'garages');
+            UPDATE sales_leads SET industry = 'Dog Grooming Pet Services' WHERE LOWER(TRIM(industry)) LIKE '%dog grooming%' OR LOWER(TRIM(industry)) LIKE '%pet service%';
+            UPDATE sales_leads SET industry = 'Plumbing' WHERE LOWER(TRIM(industry)) LIKE '%plumb%';
+            UPDATE sales_leads SET industry = 'Electricians' WHERE LOWER(TRIM(industry)) LIKE '%electric%';
+            UPDATE sales_leads SET industry = 'Cleaning Services' WHERE LOWER(TRIM(industry)) LIKE '%clean%';
+            UPDATE sales_leads SET industry = 'Pestcontrol' WHERE LOWER(TRIM(industry)) LIKE '%pest%';
+            UPDATE sales_leads SET industry = 'Landscaping' WHERE LOWER(TRIM(industry)) LIKE '%landscap%' OR LOWER(TRIM(industry)) LIKE '%garden%';
         `);
         crmTablesInitialized = true;
     } catch (err) {
@@ -532,6 +541,11 @@ export async function createSalesLead(data: {
     const isCustomer = status === 'converted';
     const convertedAt = isCustomer ? new Date() : null;
 
+    let industry = String(data.industry || '').trim();
+    if (/^sheet\s*\d+$/i.test(industry)) {
+        industry = '';
+    }
+
     const { rows } = await query(
         `INSERT INTO sales_leads (
             name, phone, email, notes, status, source, industry, address, website,
@@ -548,7 +562,7 @@ export async function createSalesLead(data: {
             String(data.notes || '').trim(),
             status,
             String(data.source || 'manual_entry').trim(),
-            String(data.industry || '').trim(),
+            industry,
             String(data.address || '').trim(),
             String(data.website || '').trim(),
             String(data.gbpObservation || '').trim(),

@@ -20,6 +20,10 @@ import {
 import TaskCompletionModal, { type CrmTaskStatus } from '../shared/TaskCompletionModal';
 import LeadStatusHistoryModal from '../admin/LeadStatusHistoryModal';
 import {
+    matchesStatusDateFilter,
+    type StatusDateFilter
+} from '../admin/AdminGrowthAuditLeads';
+import {
     type SalesLeadTask,
     type SalesTaskPriority,
     type SalesTaskStatus,
@@ -31,6 +35,27 @@ import {
     emailShareStatusLabel
 } from './salesApi';
 import { cn } from '../shared/utils';
+
+function formatDateParts(value?: string | null) {
+    if (!value) return { date: '—', time: '' };
+    try {
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return { date: '—', time: '' };
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        const hh = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        return { date: `${dd}/${mm}/${yyyy}`, time: `${hh}:${min}` };
+    } catch {
+        return { date: '—', time: '' };
+    }
+}
+
+function fmtDate(value?: string | null) {
+    const { date, time } = formatDateParts(value);
+    return time ? `${date} ${time}` : date;
+}
 
 const TASK_TYPE_CONFIG: Record<SalesTaskType, { label: string; icon: string; bg: string; text: string }> = {
     prepare_audit: { label: 'Prepare Audit', icon: '📊', bg: 'bg-indigo-50 border-indigo-200', text: 'text-indigo-700' },
@@ -49,7 +74,8 @@ const PRIORITY_BADGES: Record<SalesTaskPriority, { label: string; bg: string; te
 
 function normalizeTaskIndustry(task: SalesLeadTask): string {
     const raw = String(task.leadIndustry || '').trim();
-    return raw || 'General';
+    if (!raw || /^sheet\s*\d+$/i.test(raw)) return 'General';
+    return raw;
 }
 
 
@@ -81,6 +107,8 @@ export default function SalesTasks() {
     const [typeFilter, setTypeFilter] = useState<string>('all');
     const [leadKindFilter, setLeadKindFilter] = useState<'all' | 'full_audit' | 'leads'>('all');
     const [industryFilter, setIndustryFilter] = useState<string>('all');
+    const [statusDateFilter, setStatusDateFilter] = useState<StatusDateFilter>('all');
+    const [statusCustomDate, setStatusCustomDate] = useState<string>('');
     const [dueTodayOnly, setDueTodayOnly] = useState(false);
 
     // Pagination
@@ -243,6 +271,10 @@ export default function SalesTasks() {
     const filteredTasks = industryScopedTasks.filter((t) => {
         if (leadKindFilter === 'full_audit' && !isFullAuditTask(t)) return false;
         if (leadKindFilter === 'leads' && isFullAuditTask(t)) return false;
+        const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
+        if (!matchesStatusDateFilter(taskStatusDate, statusDateFilter, statusCustomDate)) {
+            return false;
+        }
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
         return (
@@ -491,6 +523,36 @@ export default function SalesTasks() {
                         <option value="low">Low</option>
                     </select>
 
+                    <div className="flex items-center gap-1.5">
+                        <select
+                            value={statusDateFilter}
+                            onChange={(e) => {
+                                setStatusDateFilter(e.target.value as StatusDateFilter);
+                                setCurrentPage(1);
+                            }}
+                            className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
+                            title="Filter by status updated date"
+                        >
+                            <option value="all">📅 Status Date: All</option>
+                            <option value="today">Today</option>
+                            <option value="yesterday">Yesterday</option>
+                            <option value="7days">Last 7 Days</option>
+                            <option value="30days">Last 30 Days</option>
+                            <option value="custom">Custom Date…</option>
+                        </select>
+                        {statusDateFilter === 'custom' && (
+                            <input
+                                type="date"
+                                value={statusCustomDate}
+                                onChange={(e) => {
+                                    setStatusCustomDate(e.target.value);
+                                    setCurrentPage(1);
+                                }}
+                                className="px-2 py-1 text-xs bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
+                            />
+                        )}
+                    </div>
+
                     <select
                         value={typeFilter}
                         onChange={(e) => { setTypeFilter(e.target.value); setCurrentPage(1); }}
@@ -628,24 +690,34 @@ export default function SalesTasks() {
 
                                         {/* Status Badge & Actions */}
                                         <div className="shrink-0 flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => setSelectedHistoryTask(task)}
-                                                className={cn(
-                                                    "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-md border cursor-pointer hover:shadow-xs hover:scale-105 transition-all group/badge",
-                                                    task.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100" :
-                                                    task.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100" :
-                                                    task.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100" :
-                                                    "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                                                )}
-                                                title="Click to view full lead status history timeline"
-                                            >
-                                                {task.status === 'completed' && <Check className="w-3 h-3 text-emerald-600" />}
-                                                {task.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600" />}
-                                                {task.status === 'cancelled' && <X className="w-3 h-3 text-rose-600" />}
-                                                <span className="capitalize">{task.status.replace('_', ' ')}</span>
-                                                <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100 shrink-0 ml-0.5" />
-                                            </button>
+                                            <div className="flex flex-col items-end">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedHistoryTask(task)}
+                                                    className={cn(
+                                                        "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-md border cursor-pointer hover:shadow-xs hover:scale-105 transition-all group/badge",
+                                                        task.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100" :
+                                                        task.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100" :
+                                                        task.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100" :
+                                                        "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                                                    )}
+                                                    title="Click to view full lead status history timeline"
+                                                >
+                                                    {task.status === 'completed' && <Check className="w-3 h-3 text-emerald-600" />}
+                                                    {task.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600" />}
+                                                    {task.status === 'cancelled' && <X className="w-3 h-3 text-rose-600" />}
+                                                    <span className="capitalize">{task.status.replace('_', ' ')}</span>
+                                                    <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100 shrink-0 ml-0.5" />
+                                                </button>
+
+                                                <div
+                                                    className="flex items-center gap-1 text-[10px] text-[#94A3B8] font-medium mt-1 whitespace-nowrap"
+                                                    title="Date when status was last updated"
+                                                >
+                                                    <Clock className="w-2.5 h-2.5 text-[#94A3B8] shrink-0" />
+                                                    <span>{fmtDate(task.updatedAt || task.completedAt || task.createdAt)}</span>
+                                                </div>
+                                            </div>
 
                                             <button
                                                 type="button"
