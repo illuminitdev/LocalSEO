@@ -43,6 +43,16 @@ function basicAuthHeader(): string {
   return `Basic ${Buffer.from(`${login}:${password}`).toString('base64')}`;
 }
 
+function normalizeUkLocationName(raw: string): string {
+  const name = String(raw || '').trim();
+  if (!name) return '';
+  if (/united\s*kingdom|\buk\b|england|scotland|wales|northern\s*ireland/i.test(name)) {
+    return name;
+  }
+  // DataForSEO prefers City,Region,Country — city-only labels often return empty.
+  return `${name},England,United Kingdom`;
+}
+
 function applyLocalLocation(
   task: Record<string, unknown>,
   opts: {
@@ -63,7 +73,7 @@ function applyLocalLocation(
     return;
   }
   if (opts.locationName && String(opts.locationName).trim()) {
-    task.location_name = String(opts.locationName).trim();
+    task.location_name = normalizeUkLocationName(String(opts.locationName).trim());
     return;
   }
 
@@ -692,6 +702,7 @@ export function buildDeepLocalRank(opts: {
 
   return {
     query: opts.query,
+    measured: true,
     position,
     totalChecked: topResults.length,
     topResults,
@@ -700,7 +711,7 @@ export function buildDeepLocalRank(opts: {
         ? `DataForSEO Maps: appears at #${position} for “${opts.query}”`
         : topResults.length
           ? `DataForSEO Maps: not in top ${topResults.length} for “${opts.query}”`
-          : `DataForSEO Maps: no results for “${opts.query}”`,
+          : `DataForSEO Maps: not in results for “${opts.query}”`,
     source: 'dataforseo-maps'
   };
 }

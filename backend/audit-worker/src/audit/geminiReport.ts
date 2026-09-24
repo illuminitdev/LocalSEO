@@ -107,6 +107,30 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
   const measuredNames = measuredMaps.map((r) => r.name);
   const measuredQuery = String(localRank?.query || '').trim();
   const aeoMapsOnly = measuredMaps.filter((r) => !r.isProspect).slice(0, 3);
+  const inPackMeasured = typeof localRank?.position === 'number';
+
+  // Always attach factual Maps ranking (yes/no + list) — never leave "not measured"
+  if (measuredQuery || measuredMaps.length || out.localSeoFixes) {
+    out.localSeoFixes = {
+      ...(out.localSeoFixes || {}),
+      mapsRanking: {
+        title: 'Google Map Ranking',
+        measured: true,
+        query: measuredQuery,
+        inPack: inPackMeasured,
+        status: inPackMeasured ? 'yes' : 'no',
+        evidence: inPackMeasured
+          ? `Appears at #${localRank?.position} for “${measuredQuery}”`
+          : measuredMaps.length
+            ? `Not in Maps results for “${measuredQuery}” — showing ${measuredMaps.length} other listings`
+            : measuredQuery
+              ? `Not in Maps results for “${measuredQuery}”`
+              : 'Not found in Google Maps results for the local query',
+        results: measuredMaps,
+        mapsResults: measuredMaps
+      }
+    };
+  }
 
   if (out.aeoFixes?.queryCards) {
     out.aeoFixes = {
@@ -134,20 +158,22 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
     };
   }
   if (out.geoFixes) {
+    const q = measuredQuery || restQuery(out.geoFixes);
+    const inPack = typeof localRank?.position === 'number';
     out.geoFixes = {
       ...out.geoFixes,
       title: out.geoFixes.title || 'GEO: Google + AI visibility',
-      queryCards: measuredMaps.length
-        ? [
-            {
-              query: measuredQuery || restQuery(out.geoFixes),
-              competitorsShown: measuredNames.slice(0, 5),
-              competitorsDetailed: measuredMaps,
-              mapsResults: measuredMaps,
-              measured: true
-            }
-          ]
-        : [],
+      queryCards: [
+        {
+          query: q,
+          competitorsShown: measuredNames.slice(0, 5),
+          competitorsDetailed: measuredMaps,
+          mapsResults: measuredMaps,
+          measured: true,
+          inPack,
+          prospectFound: inPack
+        }
+      ],
       aiEngines: Array.isArray(out.geoFixes.aiEngines) ? out.geoFixes.aiEngines : undefined,
       geoChecklist: out.geoFixes.geoChecklist || undefined
     };

@@ -232,7 +232,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   if (mapsVis.status === 'unknown') {
     if (inPack) mapsSe = { status: 'yes', evidence: `Maps / pack #${localRank.position}` };
     else if (localRank.query) mapsSe = { status: 'no', evidence: `Not in top results for “${localRank.query}”` };
-    else mapsSe = { status: 'unknown', evidence: 'Maps ranking not measured' };
+    else mapsSe = { status: 'no', evidence: 'Not found in Google Maps results for the local query' };
   }
 
   const packVis = fromCheck(checkById(checks, 'maps_vis_1') || checkByLabel(checks, /local pack visibility/i));
@@ -240,20 +240,22 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   if (packVis.status === 'unknown') {
     if (inPack) packSe = { status: 'yes', evidence: `In Local Pack at #${localRank.position}` };
     else if (localRank.query) packSe = { status: 'no', evidence: `Not in Local Pack for “${localRank.query}”` };
-    else packSe = { status: 'unknown', evidence: 'Local Pack not measured' };
+    else packSe = { status: 'no', evidence: 'Not found in Local Pack for the local query' };
   }
 
   const top = Array.isArray(localRank.topResults) ? localRank.topResults : [];
   const competitorSe: StatusEv = top.length
     ? { status: 'yes', evidence: `${top.length} competitors captured for measured query` }
-    : { status: 'unknown', evidence: 'Competitor pack not captured' };
+    : localRank.query
+      ? { status: 'no', evidence: `No competitors returned for “${localRank.query}”` }
+      : { status: 'no', evidence: 'No competitors returned for the local query' };
 
   const serviceVisSe: StatusEv = localRank.query
     ? {
         status: inPack ? 'yes' : 'no',
-        evidence: `Measured query: “${localRank.query}”${inPack ? ` (#${localRank.position})` : ''}`
+        evidence: `Measured query: “${localRank.query}”${inPack ? ` (#${localRank.position})` : ' — not in results'}`
       }
-    : { status: 'unknown', evidence: 'Service-level query not measured' };
+    : { status: 'no', evidence: 'Not found for the local service query' };
 
   const ratingSe: StatusEv =
     gbp.rating != null
