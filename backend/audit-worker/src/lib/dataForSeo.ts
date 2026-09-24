@@ -721,19 +721,92 @@ export type AiEngineCheckResult = {
   capturedAt?: string;
 };
 
+const UK_POSTCODE_RE =
+  /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i;
+
+/** Light cleanup of a few common short forms; otherwise keep the address text as-is. */
+const COUNTRY_SHORT_FORMS: Record<string, string> = {
+  uk: 'UK',
+  'u.k.': 'UK',
+  'u.k': 'UK',
+  gb: 'UK',
+  usa: 'United States',
+  us: 'United States',
+  'u.s.': 'United States',
+  'u.s.a.': 'United States',
+  'u.s.a': 'United States',
+  uae: 'United Arab Emirates',
+  'u.a.e.': 'United Arab Emirates',
+  nz: 'New Zealand'
+};
+
+function looksLikePostcodeOnly(segment: string): boolean {
+  const s = String(segment || '').trim();
+  if (!s) return true;
+  if (UK_POSTCODE_RE.test(s) && s.replace(UK_POSTCODE_RE, '').trim().length <= 1) return true;
+  if (/^\d{4,6}(-\d{4})?$/.test(s)) return true;
+  if (/^[A-Z]{1,2}\d[\s\dA-Z-]{2,10}$/i.test(s) && /\d/.test(s)) return true;
+  return false;
+}
+
+/**
+ * Take whatever country is on the business/GBP address (last comma segment).
+ * No country whitelist — address text is the source of truth.
+ */
+export function countryFromAddress(address?: string | null): string {
+  const parts = String(address || '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i];
+    if (looksLikePostcodeOnly(part)) continue;
+    const cleaned = part
+      .replace(UK_POSTCODE_RE, '')
+      .replace(/\b\d{4,}\b/g, '')
+      .replace(/[./]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    // Skip street-like bits (numbers) — keep walking left
+    if (!cleaned || /\d/.test(cleaned)) continue;
+    if (cleaned.length < 2 || cleaned.length > 56) continue;
+    if (!/^[A-Za-z][A-Za-z\s'-]*$/.test(cleaned)) continue;
+    const key = cleaned.toLowerCase();
+    if (COUNTRY_SHORT_FORMS[key]) return COUNTRY_SHORT_FORMS[key];
+    // Use the address segment as written (title-case words)
+    return cleaned
+      .split(/\s+/)
+      .map((w) => {
+        if (/^(of|and|the)$/i.test(w)) return w.toLowerCase();
+        return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      })
+      .join(' ');
+  }
+
+  if (UK_POSTCODE_RE.test(String(address || ''))) return 'UK';
+  return 'UK';
+}
+
 /** Three GEO prompts asked of ChatGPT / Claude / Gemini for cross-checkable visibility. */
 export function buildGeoAiPrompts(opts: {
   service?: string;
   city?: string;
+  address?: string | null;
+  country?: string | null;
 }): Array<{ key: GeoAiPromptKey; prompt: string }> {
   const service = String(opts.service || 'local business').replace(/\s+/g, ' ').trim() || 'local business';
   const city = String(opts.city || '').replace(/\s+/g, ' ').trim();
-  const near = city ? `${service} near ${city}` : `${service} near me`;
-  const best = city ? `best ${service} in ${city}` : `best ${service}`;
-  const nearMe = `${service} near me`;
+  const country =
+    String(opts.country || countryFromAddress(opts.address)).replace(/\s+/g, ' ').trim() || 'UK';
+  const withCountry = (q: string) => `${q}, ${country}`;
+
+  const nearBase = city ? `${service} near ${city}` : `${service} near me`;
+  const bestBase = city ? `best ${service} in ${city}` : `best ${service}`;
+  const nearMe = `${service} near me in ${country}`;
   return [
-    { key: 'near', prompt: near },
-    { key: 'best', prompt: best },
+    { key: 'near', prompt: withCountry(nearBase) },
+    { key: 'best', prompt: withCountry(bestBase) },
     { key: 'near_me', prompt: nearMe }
   ];
 }
@@ -1863,11 +1936,16 @@ export async function checkAiEngineMentions(opts: {
 export async function checkAiEngineMentionsMulti(opts: {
   service?: string;
   city?: string;
+  address?: string | null;
   businessName: string;
 }): Promise<AiEngineCheckResult[]> {
   const businessName = String(opts.businessName || '').trim();
   const city = String(opts.city || '').trim() || undefined;
-  const prompts = buildGeoAiPrompts({ service: opts.service, city });
+  const prompts = buildGeoAiPrompts({
+    service: opts.service,
+    city,
+    address: opts.address
+  });
   const out: AiEngineCheckResult[] = [];
   for (let i = 0; i < prompts.length; i++) {
     if (i > 0) await sleepMs(2000);
