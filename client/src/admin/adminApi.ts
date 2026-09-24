@@ -120,6 +120,8 @@ export type LeadTask = {
     leadScoreTotal?: number | null;
     leadReportUrl?: string | null;
     leadSource?: string | null;
+    leadIndustry?: string | null;
+    leadAuditId?: string | null;
 };
 
 export type LeadActivity = {

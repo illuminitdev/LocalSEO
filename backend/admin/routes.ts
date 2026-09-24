@@ -716,8 +716,39 @@ function mapAdminLead(row: any, origin: string) {
     };
 }
 
+function cleanBusinessCategory(raw: any): string | null {
+    if (!raw) return null;
+    const clean = String(raw).trim().replace(/\s+/g, ' ');
+    if (!clean || /^sheet\s*\d+$/i.test(clean)) return null;
+
+    const lower = clean.toLowerCase();
+
+    if (lower === 'garage' || lower === 'garages') return 'Garage';
+    if (lower.includes('dog grooming') || lower.includes('pet service')) return 'Dog Grooming Pet Services';
+    if (lower.includes('plumb')) return 'Plumbing';
+    if (lower.includes('beauty') || lower.includes('aesthetics') || lower.includes('hair')) return 'Beauty Hair Aesthetics';
+    if (lower.includes('physio') || lower.includes('sports therapy')) return 'Physiotherapy Sports Therapy';
+    if (lower.includes('driving school') || lower.includes('driving instructor')) return 'Driving Schools';
+    if (lower.includes('pest')) return 'Pestcontrol';
+    if (lower.includes('landscap') || lower.includes('garden')) return 'Landscaping';
+    if (lower.includes('dent')) return 'Dental';
+    if (lower.includes('damp')) return 'Dampproofing';
+    if (lower.includes('skin')) return 'Skin Care';
+    if (lower.includes('care home') || lower.includes('nursing home')) return 'Care Homes';
+    if (lower.includes('personal trainer') || lower.includes('fitness trainer')) return 'Personal Trainers';
+    if (lower.includes('clean')) return 'Cleaning Services';
+    if (lower.includes('electric')) return 'Electricians';
+    if (lower.includes('tutor') || lower.includes('tuition')) return 'Private Tutors & Tuition Centre';
+
+    return clean
+        .split(' ')
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
+}
+
 function mapSalesLeadToAdminLead(row: any) {
     const isExcel = row.source === 'excel_import' || String(row.source || '').toLowerCase().includes('excel');
+    const ind = cleanBusinessCategory(row.industry);
     return {
         id: row.id,
         createdAt: row.created_at,
@@ -726,9 +757,9 @@ function mapSalesLeadToAdminLead(row: any) {
         status: row.status || 'new',
         name: row.contact_name || row.name || null,
         businessName: row.company_name || row.name || null,
-        service: row.industry || null,
-        serviceLabel: row.industry || null,
-        industry: row.industry || null,
+        service: ind,
+        serviceLabel: ind,
+        industry: ind,
         address: String(row.address || '').trim() || null,
         city: String(row.city || '').trim() || null,
         website: String(row.website || '').trim() || null,

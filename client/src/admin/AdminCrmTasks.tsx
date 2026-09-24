@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     Check,
     Calendar,
@@ -27,7 +27,33 @@ import {
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import EditTaskModal from './EditTaskModal';
 import LeadStatusHistoryModal from './LeadStatusHistoryModal';
+import {
+    normalizeBusinessCategory,
+    matchesStatusDateFilter,
+    type StatusDateFilter
+} from './AdminGrowthAuditLeads';
 import { cn } from '../shared/utils';
+
+function formatDateParts(value?: string | null) {
+    if (!value) return { date: '—', time: '' };
+    try {
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return { date: '—', time: '' };
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        const hh = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        return { date: `${dd}/${mm}/${yyyy}`, time: `${hh}:${min}` };
+    } catch {
+        return { date: '—', time: '' };
+    }
+}
+
+function fmtDate(value?: string | null) {
+    const { date, time } = formatDateParts(value);
+    return time ? `${date} ${time}` : date;
+}
 
 export default function AdminCrmTasks() {
     const [tasks, setTasks] = useState<LeadTask[]>([]);
@@ -42,6 +68,9 @@ export default function AdminCrmTasks() {
     const [selectedType, setSelectedType] = useState<string>('all');
     const [selectedStatus, setSelectedStatus] = useState<string>('all');
     const [selectedPriority, setSelectedPriority] = useState<string>('all');
+    const [selectedBusiness, setSelectedBusiness] = useState<string>('all');
+    const [statusDateFilter, setStatusDateFilter] = useState<StatusDateFilter>('all');
+    const [statusCustomDate, setStatusCustomDate] = useState<string>('');
     const [searchQuery, setSearchQuery] = useState('');
 
     const [activeLead, setActiveLead] = useState<GrowthAuditLeadRef | null>(null);
@@ -112,22 +141,56 @@ export default function AdminCrmTasks() {
     const completedCount = tasks.filter((t) => t.status === 'completed').length;
 
     
-    const filteredTasks = tasks.filter((t) => {
-        if (!searchQuery.trim()) return true;
-        const q = searchQuery.toLowerCase();
-        return (
-            t.title.toLowerCase().includes(q) ||
-            t.notes.toLowerCase().includes(q) ||
-            (t.leadBusinessName && t.leadBusinessName.toLowerCase().includes(q)) ||
-            (t.assignedToName && t.assignedToName.toLowerCase().includes(q))
-        );
-    });
-
     const getLeadName = (leadId: string, task?: LeadTask) => {
         if (task?.leadBusinessName) return task.leadBusinessName;
         const match = leads.find((l) => l.id === leadId);
         return match?.businessName || `Lead #${leadId.slice(0, 8)}`;
     };
+
+    const getTaskBusinessCategory = (task: LeadTask): string | null => {
+        const matchedLead = leads.find((l) => l.id === task.leadId);
+        const raw = task.leadIndustry || matchedLead?.industry || matchedLead?.service || matchedLead?.serviceLabel;
+        return normalizeBusinessCategory(raw);
+    };
+
+    const businessFilterOptions = useMemo(() => {
+        const set = new Set<string>();
+        tasks.forEach((t) => {
+            const cat = getTaskBusinessCategory(t);
+            if (cat) set.add(cat);
+        });
+        leads.forEach((l) => {
+            const cat = normalizeBusinessCategory(l.service || l.serviceLabel || l.industry);
+            if (cat) set.add(cat);
+        });
+        return Array.from(set).sort((a, b) => a.localeCompare(b));
+    }, [tasks, leads]);
+
+    const filteredTasks = tasks.filter((t) => {
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            const matchesQuery =
+                t.title.toLowerCase().includes(q) ||
+                t.notes.toLowerCase().includes(q) ||
+                (t.leadBusinessName && t.leadBusinessName.toLowerCase().includes(q)) ||
+                (t.assignedToName && t.assignedToName.toLowerCase().includes(q));
+            if (!matchesQuery) return false;
+        }
+
+        if (selectedBusiness !== 'all') {
+            const cat = getTaskBusinessCategory(t);
+            if (!cat || cat.toLowerCase().trim() !== selectedBusiness.toLowerCase().trim()) {
+                return false;
+            }
+        }
+
+        const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
+        if (!matchesStatusDateFilter(taskStatusDate, statusDateFilter, statusCustomDate)) {
+            return false;
+        }
+
+        return true;
+    });
 
     const handleDeleteTask = async (taskId: string, taskTitle: string) => {
         if (!window.confirm(`Are you sure you want to delete task "${taskTitle}"?`)) return;
@@ -205,8 +268,26 @@ export default function AdminCrmTasks() {
                 </div>
 
                 {}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-2 border-t border-slate-100">
-                    {}
+                <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 pt-2 border-t border-slate-100">
+                    <div>
+                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                            Business
+                        </label>
+                        <select
+                            value={selectedBusiness}
+                            onChange={(e) => setSelectedBusiness(e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                            title="Filter by business category"
+                        >
+                            <option value="all">All Businesses</option>
+                            {businessFilterOptions.map((cat) => (
+                                <option key={cat} value={cat}>
+                                    {cat}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Sales Agent
@@ -225,7 +306,6 @@ export default function AdminCrmTasks() {
                         </select>
                     </div>
 
-                    {}
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Task Type
@@ -244,7 +324,6 @@ export default function AdminCrmTasks() {
                         </select>
                     </div>
 
-                    {}
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Status
@@ -262,7 +341,33 @@ export default function AdminCrmTasks() {
                         </select>
                     </div>
 
-                    {}
+                    <div>
+                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                            Status Date
+                        </label>
+                        <select
+                            value={statusDateFilter}
+                            onChange={(e) => setStatusDateFilter(e.target.value as StatusDateFilter)}
+                            className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                            title="Filter by status updated date"
+                        >
+                            <option value="all">📅 All Dates</option>
+                            <option value="today">Today</option>
+                            <option value="yesterday">Yesterday</option>
+                            <option value="7days">Last 7 Days</option>
+                            <option value="30days">Last 30 Days</option>
+                            <option value="custom">Custom Date…</option>
+                        </select>
+                        {statusDateFilter === 'custom' && (
+                            <input
+                                type="date"
+                                value={statusCustomDate}
+                                onChange={(e) => setStatusCustomDate(e.target.value)}
+                                className="w-full mt-1 px-2 py-1 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                            />
+                        )}
+                    </div>
+
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Priority
@@ -422,6 +527,13 @@ export default function AdminCrmTasks() {
                                                         <span className="capitalize">{task.status.replace('_', ' ')}</span>
                                                         <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100 shrink-0 ml-0.5" />
                                                     </button>
+                                                    <div
+                                                        className="flex items-center gap-1 text-[10px] text-slate-400 font-medium mt-1 whitespace-nowrap"
+                                                        title="Date when status was last updated"
+                                                    >
+                                                        <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                                        <span>{fmtDate(task.updatedAt || task.createdAt)}</span>
+                                                    </div>
 
                                                     {task.notes && (
                                                         <div
