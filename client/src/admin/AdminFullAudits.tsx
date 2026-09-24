@@ -245,6 +245,10 @@ export default function AdminFullAudits() {
             setError('Business name and address are required');
             return;
         }
+        if (!form.city.trim()) {
+            setError('City is required');
+            return;
+        }
         if (!isValidEmailOrPhone(form.emailOrPhone)) {
             setError('Email or phone is required (enter a valid email or phone number)');
             return;
@@ -275,7 +279,7 @@ export default function AdminFullAudits() {
                 phone,
                 email,
                 address: form.address.trim(),
-                city: form.city.trim() || form.address.trim(),
+                city: form.city.trim(),
                 contactName: form.contactName.trim(),
                 tradeId: resolved.tradeId,
                 serviceId: resolved.serviceId,
@@ -578,10 +582,12 @@ export default function AdminFullAudits() {
                                 />
                             </label>
                             <label className="block text-sm font-semibold text-[#0F172A]">
-                                City
+                                City <span className="text-red-500">*</span>
                                 <input
+                                    required
                                     value={form.city}
                                     onChange={(e) => setForm({ ...form, city: e.target.value })}
+                                    placeholder="e.g. Manchester"
                                     className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
                                 />
                             </label>

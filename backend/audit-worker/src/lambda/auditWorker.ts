@@ -245,6 +245,8 @@ async function enrichFromDataForSeo(audit: any) {
   const service =
     String(business.service || business.serviceLabel || business.primaryService || '').trim() ||
     'local business';
+  // Preserve form city before search-area resolution (do not overwrite with suburb/building).
+  const intakeCity = String(business.city || '').trim();
   const area = resolveSearchArea({
     city: business.searchAreaLabel || business.city,
     address: business.address
@@ -252,16 +254,37 @@ async function enrichFromDataForSeo(audit: any) {
   const searchArea = String(business.searchAreaLabel || area.label || '').trim();
   if (searchArea && searchArea !== 'the local area') {
     business.searchAreaLabel = searchArea;
-    business.city = searchArea;
     if (area.postcode) business.postcode = area.postcode;
+    // Keep intake city for "in {city}" Maps prompts; only fill city if empty.
+    if (!intakeCity) business.city = searchArea;
+    else business.city = intakeCity;
     audit.business = business;
   }
-  const locationLabel = searchArea || String(business.city || '').trim() || String(business.address || '').trim();
+  const nearPlace =
+    (searchArea && searchArea !== 'the local area' ? searchArea : '') ||
+    intakeCity ||
+    String(business.address || '').trim();
+  const formCity = intakeCity || String(business.city || '').trim();
   const businessName = String(business.businessName || '').trim();
 
-  const packQuery = locationLabel
-    ? `${service} near ${locationLabel}`.replace(/\s+/g, ' ').trim()
-    : '';
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  const nearNorm = norm(nearPlace);
+  const cityNorm = norm(formCity);
+  const cityAlreadyInNear =
+    Boolean(cityNorm) &&
+    Boolean(nearNorm) &&
+    (nearNorm === cityNorm || nearNorm.endsWith(` ${cityNorm}`) || nearNorm.includes(cityNorm));
+
+  let packQuery = '';
+  if (nearPlace && formCity && !cityAlreadyInNear) {
+    packQuery = `${service} near ${nearPlace} in ${formCity}`.replace(/\s+/g, ' ').trim();
+  } else if (nearPlace) {
+    packQuery = `${service} near ${nearPlace}`.replace(/\s+/g, ' ').trim();
+  } else if (formCity) {
+    packQuery = `${service} near ${formCity}`.replace(/\s+/g, ' ').trim();
+  }
+
+  const locationLabel = nearPlace || formCity;
   const brandQuery = [businessName, locationLabel || business.address]
     .filter(Boolean)
     .join(' ')
@@ -704,7 +727,7 @@ async function enrichFromDataForSeo(audit: any) {
         '[auditWorker] AI engine checks:',
         aiEngineChecks.length,
         'rows,',
-        [...new Set(aiEngineChecks.map((r) => r.promptKey || r.prompt))].join(' | ')
+        [...new Set(aiEngineChecks.map((r) => r.prompt || r.promptKey))].join(' | ')
       );
       if (aiEngineChecks.length !== 9) {
         console.warn(
@@ -728,7 +751,7 @@ async function enrichFromDataForSeo(audit: any) {
       });
       const engines = [
         ['chatgpt', 'ChatGPT'],
-        ['claude', 'Claude'],
+        ['claude', 'Claude (API)'],
         ['gemini', 'Gemini']
       ] as const;
       audit.gbpLookup = {
