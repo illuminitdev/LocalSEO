@@ -488,7 +488,7 @@ async function enrichFromDataForSeo(audit: any) {
         lat: typeof gbp.latitude === 'number' ? gbp.latitude : typeof lat === 'number' ? lat : null,
         lng: typeof gbp.longitude === 'number' ? gbp.longitude : typeof lng === 'number' ? lng : null,
         locationName: locationLabel || undefined,
-        timeoutMs: 22000
+        timeoutMs: 60000
       };
       const organicKw = packQuery || `${service} ${locationLabel}`.trim();
 

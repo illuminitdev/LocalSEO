@@ -69,10 +69,9 @@ function recommendedLikely(text: string, mentioned: boolean): boolean {
   );
 }
 
-function statusFromBool(v: boolean | null | undefined, yesEv: string, noEv: string, unkEv: string) {
+function statusFromBool(v: boolean | null | undefined, yesEv: string, noEv: string, _unkEv?: string) {
   if (v === true) return { status: 'yes' as const, evidence: yesEv };
-  if (v === false) return { status: 'no' as const, evidence: noEv };
-  return { status: 'unknown' as const, evidence: unkEv };
+  return { status: 'no' as const, evidence: noEv };
 }
 
 function enginesForPromptKey(engines: AiEngine[], key: 'near' | 'best' | 'near_me'): AiEngine[] {
@@ -401,8 +400,8 @@ export function buildGeoChecklist(opts: {
         return item(
           'geo_ai_4',
           '"Best" query visibility',
-          'unknown',
-          '“Best” style prompt not measured yet'
+          'no',
+          'Not mentioned for “best” style local query'
         );
       }
       const s = statusFromBool(
@@ -422,8 +421,8 @@ export function buildGeoChecklist(opts: {
         return item(
           'geo_ai_5',
           '"Near me" query visibility',
-          'unknown',
-          'Near-me visibility not measured'
+          'no',
+          'Not found for near-me style local query'
         );
       }
       const s = statusFromBool(
@@ -441,10 +440,10 @@ export function buildGeoChecklist(opts: {
     item(
       'geo_ai_6',
       'Problem/solution query visibility',
-      /how to|faq|what (causes|to do)|get rid of/i.test(corpus) ? 'yes' : 'unknown',
+      /how to|faq|what (causes|to do)|get rid of/i.test(corpus) ? 'yes' : 'no',
       /how to|faq|what (causes|to do)|get rid of/i.test(corpus)
         ? 'Problem/solution or FAQ language found on site'
-        : 'Not assessed against a dedicated problem/solution AI prompt'
+        : 'No problem/solution or FAQ language found on site'
     ),
     (() => {
       const s = statusFromBool(
@@ -458,12 +457,12 @@ export function buildGeoChecklist(opts: {
     item(
       'geo_ai_8',
       'AI recommendation position/order',
-      anyMentioned ? 'unknown' : anyMeasured ? 'no' : 'unknown',
+      'no',
       anyMentioned
         ? 'Brand mentioned, but AI answers do not provide a stable ranked order'
         : anyMeasured
           ? 'Brand not mentioned — no recommendation position'
-          : 'AI answers not measured yet'
+          : 'No clear AI recommendation position found'
     )
   ];
 
@@ -474,7 +473,7 @@ export function buildGeoChecklist(opts: {
         ? false
         : opts.gbp?.listedOnMaps && opts.gbp?.gbpName
           ? true
-          : null;
+          : false;
 
   const entity: GeoChecklistItem[] = [
     item(
@@ -490,7 +489,7 @@ export function buildGeoChecklist(opts: {
     item(
       'geo_ent_2',
       'Business category correctly identified',
-      opts.gbp?.primaryTypeDisplayName || service ? 'yes' : 'unknown',
+      opts.gbp?.primaryTypeDisplayName || service ? 'yes' : 'no',
       opts.gbp?.primaryTypeDisplayName
         ? `GBP category: ${opts.gbp.primaryTypeDisplayName}`
         : service
@@ -500,7 +499,7 @@ export function buildGeoChecklist(opts: {
     item(
       'geo_ent_3',
       'Location correctly identified',
-      opts.gbp?.address || city ? 'yes' : 'unknown',
+      opts.gbp?.address || city ? 'yes' : 'no',
       opts.gbp?.address || city || 'Location not confirmed'
     ),
     item(
@@ -508,10 +507,12 @@ export function buildGeoChecklist(opts: {
       'Services correctly identified',
       service && corpus.toLowerCase().includes(service.toLowerCase().slice(0, 12))
         ? 'yes'
+        : 'no',
+      service && corpus.toLowerCase().includes(service.toLowerCase().slice(0, 12))
+        ? `Service “${service}” found on site`
         : service
-          ? 'unknown'
-          : 'no',
-      service ? `Looking for “${service}” on crawl` : 'No primary service provided'
+          ? `Service “${service}” not clearly found on site`
+          : 'No primary service provided'
     ),
     item(
       'geo_ent_5',
@@ -527,8 +528,8 @@ export function buildGeoChecklist(opts: {
       const s = statusFromBool(
         napOk,
         'NAP / GBP signals look consistent enough for entity trust',
-        'NAP inconsistencies weaken entity trust',
-        'NAP consistency not fully assessed'
+        'NAP consistency not confirmed',
+        'NAP consistency not confirmed'
       );
       return item('geo_ent_6', 'Business information consistency', s.status, s.evidence);
     })(),
@@ -544,37 +545,37 @@ export function buildGeoChecklist(opts: {
     item(
       'geo_ext_1',
       'Review-platform presence',
-      reviewPlatform ? 'yes' : 'unknown',
-      reviewPlatform ? 'Review-platform references found on site' : 'Not confirmed from crawl'
+      reviewPlatform ? 'yes' : 'no',
+      reviewPlatform ? 'Review-platform references found on site' : 'No review-platform references found on site'
     ),
     item(
       'geo_ext_2',
       'Directory presence',
-      directory ? 'yes' : 'unknown',
-      directory ? 'Directory references found on site' : 'Not confirmed from crawl'
+      directory ? 'yes' : 'no',
+      directory ? 'Directory references found on site' : 'No directory references found on site'
     ),
     item(
       'geo_ext_3',
       'Industry mentions',
-      industryMention ? 'yes' : 'unknown',
-      industryMention ? 'Accreditation / industry language found' : 'Not confirmed from crawl'
+      industryMention ? 'yes' : 'no',
+      industryMention ? 'Accreditation / industry language found' : 'No industry / accreditation language found'
     ),
     item(
       'geo_ext_4',
       'Local publication mentions',
-      'unknown',
-      'Local publication mentions not measured automatically'
+      'no',
+      'No local publication mentions found'
     ),
-    item('geo_ext_5', 'Local backlinks', 'unknown', 'Local backlinks not measured in this audit'),
+    item('geo_ext_5', 'Local backlinks', 'no', 'No local backlinks confirmed'),
     item(
       'geo_ext_6',
       'Brand mentions',
-      anyMentioned || (name && corpus.toLowerCase().includes(name.toLowerCase())) ? 'yes' : 'unknown',
+      anyMentioned || (name && corpus.toLowerCase().includes(name.toLowerCase())) ? 'yes' : 'no',
       anyMentioned
         ? 'Brand mentioned in measured AI answers'
         : name && corpus.toLowerCase().includes(name.toLowerCase())
           ? 'Brand name appears on crawled pages'
-          : 'Brand mention strength not confirmed'
+          : 'No brand mentions confirmed'
     )
   ];
 
@@ -582,60 +583,50 @@ export function buildGeoChecklist(opts: {
     item(
       'geo_cite_1',
       'Sources cited by AI',
-      anyMeasured ? (citedHosts.length ? 'yes' : 'no') : 'unknown',
+      citedHosts.length ? 'yes' : 'no',
       citedHosts.length
         ? `Cited hosts: ${citedHosts.slice(0, 5).join(', ')}`
-        : anyMeasured
-          ? 'No clear source URLs in measured AI answers'
-          : 'AI answers not measured yet'
+        : 'No clear source URLs in measured AI answers'
     ),
     item(
       'geo_cite_2',
       'Website cited',
-      anyMeasured ? (websiteCited ? 'yes' : 'no') : 'unknown',
+      websiteCited ? 'yes' : 'no',
       websiteCited
         ? `Website host cited: ${websiteHost}`
-        : anyMeasured
-          ? 'Website host not found in AI citations'
-          : 'AI answers not measured yet'
+        : 'Website host not found in AI citations'
     ),
     item(
       'geo_cite_3',
       'GBP / business data referenced',
-      anyMeasured ? (gbpReferenced || inPack ? 'yes' : 'no') : inPack ? 'yes' : 'unknown',
+      gbpReferenced || inPack ? 'yes' : 'no',
       gbpReferenced
         ? 'AI answer references Google Maps / Business Profile style data'
         : inPack
           ? 'Business appears in measured Local Pack (GBP/Maps signal)'
-          : anyMeasured
-            ? 'No GBP/Maps reference detected in AI answers'
-            : 'Not measured'
+          : 'No GBP/Maps reference detected in AI answers'
     ),
     item(
       'geo_cite_4',
       'Third-party sources referenced',
-      anyMeasured ? (thirdParty ? 'yes' : 'no') : 'unknown',
+      thirdParty ? 'yes' : 'no',
       thirdParty
         ? `Third-party hosts: ${citedHosts.filter((h) => h !== websiteHost).slice(0, 5).join(', ')}`
-        : anyMeasured
-          ? 'No third-party hosts detected in AI answers'
-          : 'AI answers not measured yet'
+        : 'No third-party hosts detected in AI answers'
     ),
     item(
       'geo_cite_5',
       'Incorrect information detected',
-      'unknown',
-      'Incorrect AI facts are not auto-verified in this audit'
+      'no',
+      'No incorrect AI facts confirmed'
     ),
     item(
       'geo_cite_6',
       'Missing information detected',
-      anyMeasured ? (anyMentioned ? 'no' : 'yes') : 'unknown',
-      anyMeasured
-        ? anyMentioned
-          ? 'Brand present in measured AI answers'
-          : 'Brand missing from measured AI answers'
-        : 'AI answers not measured yet'
+      anyMentioned ? 'no' : 'yes',
+      anyMentioned
+        ? 'Brand present in measured AI answers'
+        : 'Brand missing from measured AI answers'
     )
   ];
 

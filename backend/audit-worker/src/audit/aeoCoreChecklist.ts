@@ -29,16 +29,15 @@ function checkById(checks: CheckRow[], id: string): CheckRow | undefined {
 }
 
 function fromCheck(c: CheckRow | undefined, yesEv?: string, noEv?: string): StatusEv {
-  if (!c) return { status: 'unknown', evidence: 'Not measured in this audit' };
+  if (!c) return { status: 'no', evidence: noEv || 'Not found / not confirmed' };
   if (c.status === 'pass') return { status: 'yes', evidence: yesEv || c.evidence || 'Pass' };
   if (c.status === 'fail') return { status: 'no', evidence: noEv || c.evidence || 'Fail' };
-  return { status: 'unknown', evidence: c.evidence || 'Not confirmed' };
+  return { status: 'no', evidence: noEv || c.evidence || 'Not found / not confirmed' };
 }
 
-function fromBool(v: boolean | null | undefined, yesEv: string, noEv: string, unkEv: string): StatusEv {
+function fromBool(v: boolean | null | undefined, yesEv: string, noEv: string, _unkEv?: string): StatusEv {
   if (v === true) return { status: 'yes', evidence: yesEv };
-  if (v === false) return { status: 'no', evidence: noEv };
-  return { status: 'unknown', evidence: unkEv };
+  return { status: 'no', evidence: noEv };
 }
 
 function item(id: string, label: string, se: StatusEv): AeoChecklistItem {
@@ -54,7 +53,7 @@ function prefer(...ses: StatusEv[]): StatusEv {
   if (yes) return yes;
   const no = ses.find((s) => s.status === 'no');
   if (no) return no;
-  return ses[0] || { status: 'unknown', evidence: 'Not measured in this audit' };
+  return ses[0] || { status: 'no', evidence: 'Not found / not confirmed' };
 }
 
 /**
@@ -114,12 +113,15 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
   const aiQSe: StatusEv =
     aiQPass >= 2
       ? { status: 'yes', evidence: `${aiQPass} content answer checks passed` }
-      : aiQFail > 0 || aiQPass === 0
-        ? { status: 'no', evidence: aiQPass ? `Only ${aiQPass} content answer check(s) passed` : 'Content answer checks failed' }
-        : { status: 'unknown', evidence: 'Content answers not measured' };
+      : {
+          status: 'no',
+          evidence: aiQPass
+            ? `Only ${aiQPass} content answer check(s) passed`
+            : 'Content answer checks not confirmed'
+        };
 
   const svcChecks = checks.filter((c) => c.section === 'service_pages');
-  let servicePagesSe: StatusEv = { status: 'unknown', evidence: 'Service pages not measured' };
+  let servicePagesSe: StatusEv = { status: 'no', evidence: 'No service pages found' };
   if (svcChecks.length) {
     const pass = svcChecks.filter((c) => c.status === 'pass').length;
     const fail = svcChecks.filter((c) => c.status === 'fail').length;
@@ -153,7 +155,7 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
     ? { status: 'no', evidence: 'NAP mismatch between Google and website' }
     : napMatch
       ? { status: 'yes', evidence: 'Business information consistent across Google and website' }
-      : { status: 'unknown', evidence: 'Business information consistency not fully confirmed' };
+      : { status: 'no', evidence: 'Business information consistency not confirmed' };
 
   const reviewProofSe: StatusEv =
     gbp.reviewCount != null && Number(gbp.reviewCount) > 0

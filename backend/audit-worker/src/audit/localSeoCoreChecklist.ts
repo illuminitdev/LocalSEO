@@ -148,14 +148,14 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
       ? { status: 'yes', evidence: gbp.qaEvidence || 'GBP Q&A present' }
       : gbp.hasQa === false
         ? { status: 'no', evidence: gbp.qaEvidence || 'No GBP Q&A found' }
-        : { status: 'unknown', evidence: 'Q&A not measured' };
+        : { status: 'no', evidence: 'No GBP Q&A found' };
 
   const reviewRecencySe: StatusEv =
     gbp.reviewsLookRecent === true
       ? { status: 'yes', evidence: gbp.reviewRecencyEvidence || 'Recent reviews found' }
       : gbp.reviewsLookRecent === false
         ? { status: 'no', evidence: gbp.reviewRecencyEvidence || 'No recent reviews' }
-        : fromCheck(checkByLabel(checks, /reviews recent/i) || checkById(checks, 'gbp_10'));
+        : { status: 'no', evidence: 'No recent reviews found' };
 
   const photosCheck = fromCheck(
     checkByLabel(checks, /photos updated|photos\b/i) || checkById(checks, 'gbp_13')
@@ -179,6 +179,8 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
     reviewResponseSe = { status: 'yes', evidence: gbp.ownerRepliesEvidence || 'Owner replies detected' };
   } else if (gbp.ownerRepliesLikely === false) {
     reviewResponseSe = { status: 'no', evidence: gbp.ownerRepliesEvidence || 'Few or no owner replies' };
+  } else {
+    reviewResponseSe = { status: 'no', evidence: 'Few or no owner replies found' };
   }
 
   const postsCheck = fromCheck(
@@ -189,6 +191,8 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
     postsSe = { status: 'yes', evidence: gbp.postsEvidence || 'Recent Google Posts found' };
   } else if (gbp.hasRecentPosts === false) {
     postsSe = { status: 'no', evidence: gbp.postsEvidence || 'No recent Google Posts' };
+  } else {
+    postsSe = { status: 'no', evidence: 'No recent Google Posts found' };
   }
 
   const svcChecks = checks.filter((c) => c.section === 'service_pages');

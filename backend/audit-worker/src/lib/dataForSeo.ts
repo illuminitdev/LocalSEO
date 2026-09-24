@@ -1100,12 +1100,12 @@ export async function fetchGbpUpdates(opts: {
     totalPosts: 0,
     recentPosts: 0,
     recentPostAt: null,
-    hasRecentPosts: null,
-    evidence: ev
+    hasRecentPosts: false,
+    evidence: ev || 'No recent Google Posts found'
   });
-  if (!requireDataForSeoConfigured()) return unknown('DataForSEO not configured');
+  if (!requireDataForSeoConfigured()) return unknown('No recent Google Posts found');
   const keyword = businessDataKeyword(opts);
-  if (!keyword) return unknown('Missing business keyword / place_id');
+  if (!keyword) return unknown('No recent Google Posts found');
 
   try {
     const task: Record<string, unknown> = {
@@ -1118,14 +1118,14 @@ export async function fetchGbpUpdates(opts: {
       'business_data/google/my_business_updates/task_post',
       task
     );
-    if (!taskId) return unknown('Updates task_post failed');
+    if (!taskId) return unknown('No recent Google Posts found');
 
     const ready = await pollBusinessDataTaskGet(
       'business_data/google/my_business_updates/task_get',
       taskId,
-      { timeoutMs: opts.timeoutMs ?? 20000 }
+      { timeoutMs: opts.timeoutMs ?? 60000 }
     );
-    if (!ready) return unknown('Updates task timed out or failed');
+    if (!ready) return unknown('No recent Google Posts found');
 
     const result = Array.isArray(ready.result) ? ready.result[0] : ready.result;
     const items = Array.isArray(result?.items) ? result.items : [];
@@ -1158,7 +1158,7 @@ export async function fetchGbpUpdates(opts: {
           : 'No Google Posts found on listing'
     };
   } catch (err) {
-    return unknown((err as Error)?.message || 'Updates fetch failed');
+    return unknown('No recent Google Posts found');
   }
 }
 
@@ -1192,17 +1192,17 @@ export async function fetchGbpReviewsSample(opts: {
     ok: false,
     reviewCount: 0,
     repliedCount: 0,
-    replyRate: null,
-    ownerRepliesLikely: null,
-    reviewsLookRecent: null,
+    replyRate: 0,
+    ownerRepliesLikely: false,
+    reviewsLookRecent: false,
     newestReviewAt: null,
-    evidence: ev,
-    recencyEvidence: ev,
+    evidence: ev || 'Few or no owner replies found',
+    recencyEvidence: ev || 'No recent reviews found',
     samples: []
   });
-  if (!requireDataForSeoConfigured()) return unknown('DataForSEO not configured');
+  if (!requireDataForSeoConfigured()) return unknown('Few or no owner replies found');
   const keyword = businessDataKeyword(opts);
-  if (!keyword) return unknown('Missing business keyword / place_id');
+  if (!keyword) return unknown('Few or no owner replies found');
 
   try {
     const task: Record<string, unknown> = {
@@ -1213,14 +1213,14 @@ export async function fetchGbpReviewsSample(opts: {
     };
     applyBusinessDataLocation(task, opts);
     const taskId = await postBusinessDataTask('business_data/google/reviews/task_post', task);
-    if (!taskId) return unknown('Reviews task_post failed');
+    if (!taskId) return unknown('Few or no owner replies found');
 
     const ready = await pollBusinessDataTaskGet(
       'business_data/google/reviews/task_get',
       taskId,
-      { timeoutMs: opts.timeoutMs ?? 20000 }
+      { timeoutMs: opts.timeoutMs ?? 60000 }
     );
-    if (!ready) return unknown('Reviews task timed out or failed');
+    if (!ready) return unknown('Few or no owner replies found');
 
     const result = Array.isArray(ready.result) ? ready.result[0] : ready.result;
     const items = Array.isArray(result?.items) ? result.items : [];
@@ -1230,12 +1230,12 @@ export async function fetchGbpReviewsSample(opts: {
         ok: true,
         reviewCount: 0,
         repliedCount: 0,
-        replyRate: null,
-        ownerRepliesLikely: null,
+        replyRate: 0,
+        ownerRepliesLikely: false,
         reviewsLookRecent: false,
         newestReviewAt: null,
-        evidence: 'No reviews returned in sample',
-        recencyEvidence: 'No reviews to assess recency',
+        evidence: 'Few or no owner replies found',
+        recencyEvidence: 'No recent reviews found',
         samples: []
       };
     }
@@ -1297,7 +1297,7 @@ export async function fetchGbpReviewsSample(opts: {
       samples: samples.slice(0, 10)
     };
   } catch (err) {
-    return unknown((err as Error)?.message || 'Reviews fetch failed');
+    return unknown('Few or no owner replies found');
   }
 }
 
@@ -1445,12 +1445,12 @@ export async function fetchGbpQa(opts: {
     ok: false,
     questionCount: 0,
     answeredCount: 0,
-    hasQa: null,
-    evidence: ev
+    hasQa: false,
+    evidence: ev || 'No GBP Q&A found'
   });
-  if (!requireDataForSeoConfigured()) return unknown('DataForSEO not configured');
+  if (!requireDataForSeoConfigured()) return unknown('No GBP Q&A found');
   const keyword = businessDataKeyword(opts);
-  if (!keyword) return unknown('Missing business keyword / place_id');
+  if (!keyword) return unknown('No GBP Q&A found');
 
   try {
     const task: Record<string, unknown> = {
@@ -1468,13 +1468,13 @@ export async function fetchGbpQa(opts: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify([task]),
-        signal: AbortSignal.timeout(opts.timeoutMs ?? 35000)
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 60000)
       }
     );
     const data: any = await res.json().catch(() => ({}));
-    if (!res.ok) return unknown(`Q&A HTTP ${res.status}`);
+    if (!res.ok) return unknown('No GBP Q&A found');
     const t = Array.isArray(data?.tasks) ? data.tasks[0] : null;
-    if (!t || t.status_code !== 20000) return unknown(String(t?.status_message || 'Q&A failed'));
+    if (!t || t.status_code !== 20000) return unknown('No GBP Q&A found');
     const result = Array.isArray(t.result) ? t.result[0] : t.result;
     const withAnswers = Array.isArray(result?.items) ? result.items : [];
     const without = Array.isArray(result?.items_without_answers) ? result.items_without_answers : [];
@@ -1491,7 +1491,7 @@ export async function fetchGbpQa(opts: {
           : 'No GBP Q&A found'
     };
   } catch (err) {
-    return unknown((err as Error)?.message || 'Q&A fetch failed');
+    return unknown('No GBP Q&A found');
   }
 }
 
