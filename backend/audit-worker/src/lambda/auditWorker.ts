@@ -61,7 +61,6 @@ async function staticMapDataUrl(lat: number, lng: number): Promise<string | null
   }
 }
 
-/** Google KP “See outside” — Street View at the listing pin (distinct from Search photos). */
 async function streetViewDataUrl(lat: number, lng: number): Promise<string | null> {
   const key = String(process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '').trim();
   if (!key || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -133,8 +132,7 @@ async function mergeGbpFromMapsHit(
     if (photoUrls.length) photoSource = 'google-search';
   }
 
-  // If Search gave fewer than 2 distinct images, fill remaining collage slots from Places
-  // (outside / "See outside") — never replace Search main with Maps main_image when Search exists
+
   if (photoUrls.length < 2 && place) {
     const resolved = await photoUrlsFromPlace(place, 2);
     for (const u of resolved) {
@@ -699,6 +697,7 @@ async function enrichFromDataForSeo(audit: any) {
       const aiEngineChecks = await checkAiEngineMentionsMulti({
         service,
         city: locationLabel || undefined,
+        address: business.address || (audit.gbpLookup as { address?: string } | undefined)?.address,
         businessName
       });
       console.log(
@@ -724,7 +723,8 @@ async function enrichFromDataForSeo(audit: any) {
       const reason = err.message || 'AI check failed';
       const prompts = buildGeoAiPrompts({
         service,
-        city: locationLabel || undefined
+        city: locationLabel || undefined,
+        address: business.address || (audit.gbpLookup as { address?: string } | undefined)?.address
       });
       const engines = [
         ['chatgpt', 'ChatGPT'],
