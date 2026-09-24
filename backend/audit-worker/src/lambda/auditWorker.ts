@@ -245,7 +245,7 @@ async function enrichFromDataForSeo(audit: any) {
   const service =
     String(business.service || business.serviceLabel || business.primaryService || '').trim() ||
     'local business';
-  // Preserve form city before search-area resolution (do not overwrite with suburb/building).
+
   const intakeCity = String(business.city || '').trim();
   const area = resolveSearchArea({
     city: business.searchAreaLabel || business.city,
@@ -255,7 +255,7 @@ async function enrichFromDataForSeo(audit: any) {
   if (searchArea && searchArea !== 'the local area') {
     business.searchAreaLabel = searchArea;
     if (area.postcode) business.postcode = area.postcode;
-    // Keep intake city for "in {city}" Maps prompts; only fill city if empty.
+    
     if (!intakeCity) business.city = searchArea;
     else business.city = intakeCity;
     audit.business = business;

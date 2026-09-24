@@ -1,9 +1,4 @@
 
-
-
-
-
-
 export const BOOKING_INDUSTRY_IDS = [
     'plumbing',
     'electricians',

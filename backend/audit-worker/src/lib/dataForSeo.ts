@@ -788,7 +788,7 @@ export function countryFromAddress(address?: string | null): string {
   return 'UK';
 }
 
-/** Three GEO prompts asked of ChatGPT / Claude / Gemini for cross-checkable visibility. */
+
 export function buildGeoAiPrompts(opts: {
   service?: string;
   city?: string;
