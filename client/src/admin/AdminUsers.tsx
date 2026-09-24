@@ -42,6 +42,7 @@ type AdminUser = {
     } | null;
     serviceLabel?: string | null;
     subscription: {
+        planId?: string | null;
         planName: string;
         status: string;
         priceLabel: string | null;
@@ -105,6 +106,8 @@ export default function AdminUsers() {
     const [msg, setMsg] = useState('');
     const [query, setQuery] = useState('');
     const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
+    const [serviceFilter, setServiceFilter] = useState('');
+    const [planFilter, setPlanFilter] = useState('');
     const [page, setPage] = useState(1);
     const [addOpen, setAddOpen] = useState(false);
     const [addBusy, setAddBusy] = useState(false);
@@ -137,14 +140,45 @@ export default function AdminUsers() {
     const salesAgentsCount = users.filter((u) => roleOf(u) === 'sales_agent').length;
     const convertedLeads = users.filter((u) => roleOf(u) === 'converted_lead').length;
 
+    const industryOptions = useMemo(() => bookingIndustrySelectOptions(), []);
+
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
+        const selectedServiceShort =
+            (serviceFilter && industryOptions.find((p) => p.id === serviceFilter)?.label) || '';
+        const selectedServiceFull =
+            (serviceFilter && bookingIndustryLabel(serviceFilter)) || '';
+        const selectedPlanName = planFilter
+            ? PLANS.find((p) => p.id === planFilter)?.name || ''
+            : '';
+
         return users.filter((u) => {
             const role = roleOf(u);
             if (roleFilter === 'customer' && role !== 'customer') return false;
             if (roleFilter === 'sales_agent' && role !== 'sales_agent') return false;
             if (roleFilter === 'converted_lead' && role !== 'converted_lead') return false;
             if (roleFilter === 'invite' && role !== 'invite') return false;
+
+            if (serviceFilter) {
+                const industryId = u.organization?.bookingIndustryId || '';
+                const service = (serviceOf(u) || '').toLowerCase();
+                const matchesId = industryId === serviceFilter;
+                const matchesLabel =
+                    (selectedServiceShort && service === selectedServiceShort.toLowerCase()) ||
+                    (selectedServiceFull && service === selectedServiceFull.toLowerCase());
+                if (!matchesId && !matchesLabel) return false;
+            }
+
+            if (planFilter) {
+                const planId = u.subscription?.planId || '';
+                const planName = u.subscription?.planName || '';
+                const matchesId = planId === planFilter;
+                const matchesName =
+                    selectedPlanName &&
+                    planName.toLowerCase() === selectedPlanName.toLowerCase();
+                if (!matchesId && !matchesName) return false;
+            }
+
             if (!q) return true;
             const service = serviceOf(u) || '';
             return (
@@ -158,11 +192,11 @@ export default function AdminUsers() {
                 roleLabel(u).toLowerCase().includes(q)
             );
         });
-    }, [users, query, roleFilter]);
+    }, [users, query, roleFilter, serviceFilter, planFilter, industryOptions]);
 
     useEffect(() => {
         setPage(1);
-    }, [query, roleFilter]);
+    }, [query, roleFilter, serviceFilter, planFilter]);
 
     const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
     const safePage = Math.min(page, totalPages);
@@ -190,7 +224,6 @@ export default function AdminUsers() {
     };
 
     const servicesRequired = form.role === 'customer' && isBookingPlanId(form.planId);
-    const industryOptions = bookingIndustrySelectOptions();
     const selectedIndustryLabel = industryOptions.find((p) => p.id === form.bookingIndustryId)?.label;
 
     const handleAddUser = async (e: FormEvent) => {
@@ -345,7 +378,7 @@ export default function AdminUsers() {
                                 className="w-full rounded-xl border border-[#E2E8F0] bg-white pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
                             />
                         </div>
-                        <label className="block text-xs font-semibold text-[#64748B] lg:w-64 shrink-0">
+                        <label className="block text-xs font-semibold text-[#64748B] lg:w-44 shrink-0">
                             Filter by Role
                             <select
                                 value={roleFilter}
@@ -357,6 +390,36 @@ export default function AdminUsers() {
                                 <option value="sales_agent">Sales Agents</option>
                                 <option value="converted_lead">Converted by Telecallers</option>
                                 <option value="invite">Pending invites</option>
+                            </select>
+                        </label>
+                        <label className="block text-xs font-semibold text-[#64748B] lg:w-44 shrink-0">
+                            Filter by Service
+                            <select
+                                value={serviceFilter}
+                                onChange={(e) => setServiceFilter(e.target.value)}
+                                className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                            >
+                                <option value="">All services</option>
+                                {industryOptions.map((opt) => (
+                                    <option key={opt.id} value={opt.id}>
+                                        {opt.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="block text-xs font-semibold text-[#64748B] lg:w-44 shrink-0">
+                            Filter by Plan
+                            <select
+                                value={planFilter}
+                                onChange={(e) => setPlanFilter(e.target.value)}
+                                className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                            >
+                                <option value="">All plans</option>
+                                {PLANS.map((plan) => (
+                                    <option key={plan.id} value={plan.id}>
+                                        {plan.name}
+                                    </option>
+                                ))}
                             </select>
                         </label>
                     </div>
