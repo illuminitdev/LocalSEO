@@ -266,6 +266,20 @@ export function fallbackPillarDecks(audit) {
       takeaway: `Standardise Name, Address and Phone across Google and the website so ${name} builds trust in ${city}.`,
       inconsistencies: buildLocalSeoInconsistencies(audit),
       coreChecklist: buildLocalSeoCoreChecklist(audit),
+      mapsRanking: {
+        title: 'Google Map Ranking',
+        measured: true,
+        query: measuredQuery,
+        inPack,
+        status: inPack ? 'yes' : 'no',
+        evidence: inPack
+          ? `Appears at #${audit?.gbpLookup?.localRank?.position} for “${measuredQuery}”`
+          : mapsResults.length
+            ? `Not in Maps results for “${measuredQuery}” — showing ${mapsResults.length} other listings`
+            : `Not in Maps results for “${measuredQuery}”`,
+        results: mapsResults,
+        mapsResults
+      },
       actions:
         toActions(localFails, 'Medium').length > 0
           ? toActions(localFails, 'Medium')
@@ -349,17 +363,17 @@ export function fallbackPillarDecks(audit) {
         'ChatGPT and Gemini are measured via DataForSEO LLM Scraper (consumer UI). Claude is measured via the LLM Responses API. Re-check with the same prompts on each product if you want to compare.',
       goalLine: `Win Local Pack for “${measuredQuery}” and get cited in ChatGPT / Claude / Gemini for ${geoPromptSummary}.`,
       verifyHint: `ChatGPT / Gemini = scraped UI Top 5; Claude = API + web search. Re-check yourself: search Google for “${measuredQuery}”, then ask ChatGPT / Claude / Gemini: ${geoPromptSummary}.`,
-      queryCards: mapsResults.length
-        ? [
+      queryCards: [
             {
               query: measuredQuery,
               competitorsShown: mapsResults.map((r) => r.name),
               competitorsDetailed: mapsResults,
               mapsResults,
-              measured: true
+              measured: true,
+              inPack,
+              prospectFound: inPack
             }
-          ]
-        : [],
+          ],
       aiEngines: aiEngineChecks,
       geoChecklist,
       opportunity: (() => {
@@ -374,8 +388,10 @@ export function fallbackPillarDecks(audit) {
           )
         ];
         const googleBit = inPack
-          ? `${name} is in the measured Google Local Pack for “${measuredQuery}”.`
-          : `${name} is not in the measured Google Local Pack for “${measuredQuery}”.`;
+          ? `${name} is in the Google Local Pack / Maps results for “${measuredQuery}”.`
+          : mapsResults.length
+            ? `${name} is not in the Google Maps results for “${measuredQuery}” (showing ${mapsResults.length} other listings).`
+            : `${name} is not in the Google Maps results for “${measuredQuery}”.`;
         const aiBit = mentioned.length
           ? ` Mentioned in ${mentioned.join(' / ')} across measured GEO prompts.`
           : missed.length

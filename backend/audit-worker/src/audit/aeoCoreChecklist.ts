@@ -172,10 +172,10 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
   const bestSe: StatusEv = prefer(
     aeo4,
     fromBool(
-      inPack ? true : measuredQuery ? false : null,
+      inPack ? true : measuredQuery ? false : false,
       `Visible for measured local query “${measuredQuery || `best ${service} near ${city}`}”`,
       `Not visible for measured “best / near” style local query`,
-      'Best-query visibility not measured'
+      'Not found for the local best / near query'
     )
   );
 
@@ -214,7 +214,7 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
 
   return {
     title: 'Local AEO — Core Checklist',
-    
+    principle: 'Answer real local questions clearly so search and AI can cite this business.',
     builtAt: new Date().toISOString(),
     groups: [
       {

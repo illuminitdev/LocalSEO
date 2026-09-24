@@ -77,7 +77,7 @@ async function streetViewDataUrl(lat: number, lng: number): Promise<string | nul
     const buf = Buffer.from(await res.arrayBuffer());
     const ct = (res.headers.get('content-type') || 'image/jpeg').split(';')[0];
     if (!buf.length || !/^image\//i.test(ct)) return null;
-    // Skip tiny “sorry” placeholders when Street View is missing
+    
     if (buf.length < 4000) return null;
     return `data:${ct};base64,${buf.toString('base64')}`;
   } catch {
@@ -121,7 +121,7 @@ async function mergeGbpFromMapsHit(
   const place = hit.placeId ? await fetchPlaceDetailsById(hit.placeId) : null;
   const fromPlace = place ? gbpFieldsFromPlaceDetails(place) : null;
 
-  // Prefer Google Search brand images for collage main slot
+  
   let photoUrls: string[] = (opts?.searchPhotoUrls || []).filter((u) =>
     String(u || '').startsWith('data:image/')
   );
@@ -188,7 +188,7 @@ async function mergeGbpFromMapsHit(
       ? `https://www.google.com/search?q=${encodeURIComponent(gbpName)}`
       : '');
 
-  // “See outside” = Street View at pin (Google KP style), never the same as main Search photo
+  
   let outsideImageUrl: string | null = null;
   if (typeof latitude === 'number' && typeof longitude === 'number') {
     outsideImageUrl = await streetViewDataUrl(latitude, longitude);
@@ -275,15 +275,6 @@ async function enrichFromDataForSeo(audit: any) {
     Boolean(nearNorm) &&
     (nearNorm === cityNorm || nearNorm.endsWith(` ${cityNorm}`) || nearNorm.includes(cityNorm));
 
-  let packQuery = '';
-  if (nearPlace && formCity && !cityAlreadyInNear) {
-    packQuery = `${service} near ${nearPlace} in ${formCity}`.replace(/\s+/g, ' ').trim();
-  } else if (nearPlace) {
-    packQuery = `${service} near ${nearPlace}`.replace(/\s+/g, ' ').trim();
-  } else if (formCity) {
-    packQuery = `${service} near ${formCity}`.replace(/\s+/g, ' ').trim();
-  }
-
   const locationLabel = nearPlace || formCity;
   const brandQuery = [businessName, locationLabel || business.address]
     .filter(Boolean)
@@ -291,38 +282,66 @@ async function enrichFromDataForSeo(audit: any) {
     .replace(/\s+/g, ' ')
     .trim();
 
+  const cityForQuery = formCity || nearPlace;
+  const packQueryVariants: string[] = [];
+  const pushQ = (q: string) => {
+    const cleaned = q.replace(/\s+/g, ' ').trim();
+    if (cleaned && !packQueryVariants.includes(cleaned)) packQueryVariants.push(cleaned);
+  };
+  if (nearPlace && formCity && !cityAlreadyInNear) {
+    pushQ(`${service} near ${nearPlace} in ${formCity}`);
+    pushQ(`${service} in ${formCity}`);
+    pushQ(`${service} near ${nearPlace}`);
+  } else if (cityForQuery) {
+    pushQ(`${service} near ${cityForQuery}`);
+    pushQ(`${service} in ${cityForQuery}`);
+    pushQ(`${service} ${cityForQuery}`);
+  }
+  if (brandQuery) pushQ(brandQuery);
+
+  let packQuery = packQueryVariants[0] || '';
+
   let lat = audit.gbpLookup?.latitude ?? audit.gbpLookup?.lat ?? null;
   let lng = audit.gbpLookup?.longitude ?? audit.gbpLookup?.lng ?? null;
 
+  const mapsOptsBase = {
+    lat: typeof lat === 'number' ? lat : null,
+    lng: typeof lng === 'number' ? lng : null,
+    locationName: locationLabel || undefined,
+    depth: 10,
+    timeoutMs: 35000
+  };
+
   let packItems: DataForSeoMapsItem[] = [];
   let packTaskId: string | null = null;
-  if (packQuery) {
+  for (const keyword of packQueryVariants) {
     const pack = await fetchMapsLocalPack({
-      keyword: packQuery,
-      lat: typeof lat === 'number' ? lat : null,
-      lng: typeof lng === 'number' ? lng : null,
-      locationName: locationLabel || undefined,
-      depth: 10,
-      timeoutMs: 20000
+      ...mapsOptsBase,
+      keyword
     });
-    packItems = pack.items;
-    packTaskId = pack.taskId;
+    if (pack.items.length) {
+      packItems = pack.items;
+      packTaskId = pack.taskId;
+      packQuery = keyword;
+      break;
+    }
+    
+    packQuery = keyword;
+    packTaskId = pack.taskId || packTaskId;
   }
 
   let brandItems: DataForSeoMapsItem[] = [];
-  if (brandQuery) {
+  if (brandQuery && brandQuery !== packQuery) {
     const brand = await fetchMapsLocalPack({
-      keyword: brandQuery,
-      lat: typeof lat === 'number' ? lat : null,
-      lng: typeof lng === 'number' ? lng : null,
-      locationName: locationLabel || undefined,
-      depth: 10,
-      timeoutMs: 20000
+      ...mapsOptsBase,
+      keyword: brandQuery
     });
     brandItems = brand.items;
+  } else if (brandQuery === packQuery && packItems.length) {
+    brandItems = packItems;
   }
 
-  // Google Search (business name) images for KP collage — not Maps/Places photos
+  
   let searchPhotoUrls: string[] = [];
   const googleSearchUrl = brandQuery
     ? `https://www.google.com/search?q=${encodeURIComponent(brandQuery)}`
@@ -339,7 +358,7 @@ async function enrichFromDataForSeo(audit: any) {
         limit: 3,
         timeoutMs: 25000
       });
-      // Retry with bare business name if location-qualified query returned nothing
+      
       if (!searchPhotoUrls.length && businessName && businessName !== brandQuery) {
         searchPhotoUrls = await fetchOrganicBrandImages({
           keyword: businessName,
@@ -356,10 +375,11 @@ async function enrichFromDataForSeo(audit: any) {
   }
 
   const attachLocalRank = (items: DataForSeoMapsItem[], query: string) => {
-    if (!items.length) return;
+    const q = String(query || '').trim();
+    if (!q) return;
     const localRank = buildDeepLocalRank({
-      query,
-      items,
+      query: q,
+      items: Array.isArray(items) ? items : [],
       businessName,
       placeId: audit.gbpLookup?.placeId || '',
       phone: business.phone,
@@ -368,15 +388,19 @@ async function enrichFromDataForSeo(audit: any) {
     audit.gbpLookup = {
       ...(audit.gbpLookup || {}),
       localRank,
-      serviceQuery: query
+      serviceQuery: q
     };
   };
 
   const rankItems = packItems.length ? packItems : brandItems;
-  if (rankItems.length) {
-    attachLocalRank(rankItems, packQuery || brandQuery);
+  const rankQuery = packItems.length ? packQuery : brandQuery || packQuery;
+  if (rankQuery) {
+    attachLocalRank(rankItems, rankQuery);
+    if (!rankItems.length) {
+      console.warn('[auditWorker] DataForSEO Maps empty for', rankQuery, '— saved measured No');
+    }
   } else {
-    console.warn('[auditWorker] DataForSEO returned no Maps results for', packQuery || brandQuery);
+    console.warn('[auditWorker] No Maps query could be built for', businessName);
   }
 
   const needsGbp =
@@ -403,7 +427,7 @@ async function enrichFromDataForSeo(audit: any) {
       console.warn('[auditWorker] DataForSEO Maps: no GBP match for', businessName);
     }
   } else if (searchPhotoUrls.length || googleSearchUrl) {
-    // GBP already present — Search images for main; Street View for “See outside”
+    
     const prev = audit.gbpLookup || {};
     const merged = searchPhotoUrls.length
       ? searchPhotoUrls.filter((u) => String(u || '').startsWith('data:image/')).slice(0, 3)
@@ -434,7 +458,6 @@ async function enrichFromDataForSeo(audit: any) {
     };
   }
 
-  // Ensure “See outside” is Street View whenever we have coords (Google KP layout)
   {
     const gbp = audit.gbpLookup || {};
     const olat = typeof gbp.latitude === 'number' ? gbp.latitude : typeof lat === 'number' ? lat : null;
@@ -452,7 +475,7 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  // Best-effort full Local SEO signals (DataForSEO + Gemini) — soft-fail
+  //  Local SEO signals (DataForSEO + Gemini) 
   try {
     const gbp = audit.gbpLookup || {};
     const placeId = String(gbp.placeId || '').trim();
@@ -625,11 +648,13 @@ async function enrichFromDataForSeo(audit: any) {
       lng,
       locationName: locationLabel || undefined,
       depth: 10,
-      timeoutMs: 20000
+      timeoutMs: 35000
     });
     if (refreshed.items.length) {
       attachLocalRank(refreshed.items, packQuery);
       packTaskId = refreshed.taskId || packTaskId;
+    } else if (!audit.gbpLookup?.localRank) {
+      attachLocalRank([], packQuery);
     }
   }
 
@@ -649,7 +674,7 @@ async function enrichFromDataForSeo(audit: any) {
     );
   }
 
-  // Real Google Local Pack + Maps screenshots (same measured query users can re-type)
+  
   const measuredQuery =
     String((audit.gbpLookup?.localRank as { query?: string } | undefined)?.query || '').trim() ||
     packQuery ||
@@ -672,7 +697,7 @@ async function enrichFromDataForSeo(audit: any) {
         mapsScreenshot: { ...mapsScreenshot, query: measuredQuery }
       };
 
-      // If Maps SERP screenshot missing, store a Static Map tile for the KP map image
+      
       const mapsShotOk =
         mapsScreenshot?.dataUrl && String(mapsScreenshot.dataUrl).startsWith('data:image/');
       if (!mapsShotOk && typeof lat === 'number' && typeof lng === 'number') {
@@ -911,11 +936,32 @@ export const main: SQSHandler = async (event: SQSEvent) => {
         }
         try {
           const decks = fallbackPillarDecks(audit);
+          const aiLocal: any = audit.aiReport?.localSeoFixes || {};
+          const aiGeo: any = audit.aiReport?.geoFixes || {};
+          const deckLocal: any = decks.localSeoFixes || {};
+          const deckGeo: any = decks.geoFixes || {};
           audit.aiReport = {
             ...(audit.aiReport || {}),
-            localSeoFixes: audit.aiReport?.localSeoFixes || decks.localSeoFixes,
+            localSeoFixes: {
+              ...deckLocal,
+              ...aiLocal,
+              // Always keep factual Maps ranking yes/no + list from measured localRank
+              mapsRanking: deckLocal.mapsRanking || aiLocal.mapsRanking,
+              coreChecklist: aiLocal.coreChecklist || deckLocal.coreChecklist,
+              inconsistencies: Array.isArray(aiLocal.inconsistencies) && aiLocal.inconsistencies.length
+                ? aiLocal.inconsistencies
+                : deckLocal.inconsistencies
+            },
             aeoFixes: audit.aiReport?.aeoFixes || decks.aeoFixes,
-            geoFixes: audit.aiReport?.geoFixes || decks.geoFixes
+            geoFixes: {
+              ...deckGeo,
+              ...aiGeo,
+              queryCards:
+                Array.isArray(aiGeo.queryCards) &&
+                aiGeo.queryCards.some((c: any) => Array.isArray(c?.mapsResults) && c.mapsResults.length)
+                  ? aiGeo.queryCards
+                  : deckGeo.queryCards
+            }
           };
         } catch {
           

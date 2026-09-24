@@ -22,7 +22,7 @@ function fallbackReport(ctx: VisibilityAuditResult): AiReport {
         ? pos.position != null
             ? `#${pos.position} for “${pos.query}”`
             : `not in the top 10 for “${pos.query}”`
-        : 'near-me ranking was not measured';
+        : 'not in Maps results for the local query';
 
     const fails = ctx.score.checks.filter((c) => c.status === 'fail').slice(0, 6);
     const findings: AiReport['findings'] = fails.map((f) => ({

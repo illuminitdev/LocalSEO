@@ -386,12 +386,15 @@ export function applyWebsiteChecks(
         query?: string;
         position?: number | null;
         evidence?: string;
+        measured?: boolean;
         topResults?: Array<{ position?: number; name?: string; isProspect?: boolean }>;
       }
     | null
     | undefined;
-  if (localRank && (localRank.query || localRank.evidence || Array.isArray(localRank.topResults))) {
+  const measuredQuery = String(localRank?.query || context.gbpLookup?.serviceQuery || '').trim();
+  if (localRank && (measuredQuery || localRank.evidence || Array.isArray(localRank.topResults))) {
     const inPack = typeof localRank.position === 'number';
+    const q = measuredQuery || 'local query';
     const topNames = (localRank.topResults || [])
       .slice(0, 3)
       .map((r) => `#${r.position ?? '—'} ${r.name || ''}`)
@@ -402,39 +405,40 @@ export function applyWebsiteChecks(
       inPack ? 'pass' : 'fail',
       localRank.evidence ||
         (inPack
-          ? `In Local Pack at #${localRank.position} for “${localRank.query || 'local query'}”`
-          : `Not in measured Local Pack for “${localRank.query || 'local query'}”`)
+          ? `In Local Pack at #${localRank.position} for “${q}”`
+          : `Not in Local Pack for “${q}”`)
     );
     setCheck(
       byId,
       'maps_vis_2',
-      inPack ? 'pass' : Array.isArray(localRank.topResults) && localRank.topResults.length ? 'fail' : 'unknown',
+      inPack ? 'pass' : 'fail',
       inPack
-        ? `Maps position #${localRank.position} for “${localRank.query || 'local query'}”`
+        ? `Maps position #${localRank.position} for “${q}”`
         : topNames
-          ? `Top Maps results: ${topNames}`
-          : localRank.evidence || 'No Maps pack measured'
+          ? `Not in Maps results for “${q}”. Top results: ${topNames}`
+          : localRank.evidence || `Not in Maps results for “${q}”`
     );
     setCheck(
       byId,
       'geo_5',
       inPack ? 'pass' : 'fail',
       inPack
-        ? `Listed in measured near-me / local results (#${localRank.position})`
-        : `Not listed in measured near-me / local results for “${localRank.query || 'local query'}”`
+        ? `Listed in near-me / local results (#${localRank.position})`
+        : `Not listed in near-me / local results for “${q}”`
     );
     if (byId.has('maps_obs_8')) {
       setCheck(
         byId,
         'maps_obs_8',
-        topNames ? 'pass' : 'unknown',
-        topNames || 'No top-3 competitors captured'
+        topNames ? 'pass' : 'fail',
+        topNames || `No competitors found for “${q}”`
       );
     }
   } else {
-    setCheck(byId, 'maps_vis_1', 'unknown', 'Local Pack not measured');
-    setCheck(byId, 'maps_vis_2', 'unknown', 'Maps ranking not measured');
-    setCheck(byId, 'geo_5', 'unknown', 'Near-me visibility not measured');
+    // Still answer yes/no — treat missing Maps data as No (not "not measured")
+    setCheck(byId, 'maps_vis_1', 'fail', 'Not found in Local Pack for the measured local query');
+    setCheck(byId, 'maps_vis_2', 'fail', 'Not found in Google Maps results for the measured local query');
+    setCheck(byId, 'geo_5', 'fail', 'Not listed in near-me / local results for the measured query');
   }
 
   
