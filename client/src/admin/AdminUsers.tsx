@@ -594,125 +594,144 @@ export default function AdminUsers() {
                 )}
             </div>
             {addOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-                    <div className="w-full max-w-md rounded-2xl bg-white border border-[#E2E8F0] shadow-xl">
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E2E8F0]">
-                            <h2 className="text-base font-black text-[#0F172A]">Create User</h2>
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/40 backdrop-blur-[2px]">
+                    <div className="w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl bg-white border border-[#E2E8F0] shadow-2xl">
+                        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 px-6 sm:px-8 py-5 border-b border-[#E2E8F0] bg-white">
+                            <div className="min-w-0">
+                                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#94A3B8]">
+                                    Admin · Users
+                                </p>
+                                <h2 className="mt-1 text-xl sm:text-2xl font-black tracking-tight text-[#0F172A]">
+                                    Create User
+                                </h2>
+                                <p className="mt-1 text-sm text-[#64748B]">
+                                    Add a platform user and optionally assign a plan and industry.
+                                </p>
+                            </div>
                             <button
                                 type="button"
                                 onClick={() => !addBusy && setAddOpen(false)}
-                                className="p-1.5 rounded-lg hover:bg-[#F1F5F9] text-[#64748B]"
+                                className="shrink-0 p-2 rounded-xl hover:bg-[#F1F5F9] text-[#64748B]"
+                                aria-label="Close"
                             >
-                                <X className="w-4 h-4" />
+                                <X className="w-5 h-5" />
                             </button>
                         </div>
-                        <form onSubmit={handleAddUser} className="p-5 space-y-3">
-                            <label className="block text-xs font-semibold text-[#475569]">
-                                Name
-                                <input
-                                    required
-                                    value={form.name}
-                                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
-                                />
-                            </label>
-                            <label className="block text-xs font-semibold text-[#475569]">
-                                Email
-                                <input
-                                    required
-                                    type="email"
-                                    value={form.email}
-                                    onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
-                                />
-                            </label>
-                            <label className="block text-xs font-semibold text-[#475569]">
-                                Password
-                                <input
-                                    required
-                                    type="text"
-                                    minLength={8}
-                                    value={form.password}
-                                    onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
-                                />
-                            </label>
-                            <label className="block text-xs font-semibold text-[#475569]">
-                                Role
-                                <select
-                                    required
-                                    value={form.role}
-                                    onChange={(e) => {
-                                        const role = e.target.value as '' | 'customer' | 'sales_agent';
-                                        setForm((f) => ({
-                                            ...f,
-                                            role,
-                                            planId: role === 'sales_agent' ? '' : f.planId,
-                                            businessName: role === 'sales_agent' ? '' : f.businessName,
-                                            bookingIndustryId:
-                                                role === 'sales_agent' ? '' : f.bookingIndustryId
-                                        }));
-                                    }}
-                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
-                                >
-                                    <option value="">Select role</option>
-                                    <option value="customer">User</option>
-                                    <option value="sales_agent">Sales Agent</option>
-                                </select>
-                            </label>
+                        <form onSubmit={handleAddUser} className="px-6 sm:px-8 py-6 sm:py-8">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+                                <label className="block text-xs font-semibold text-[#475569]">
+                                    Name
+                                    <input
+                                        required
+                                        value={form.name}
+                                        onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                                        className="mt-1.5 w-full rounded-xl border border-[#E2E8F0] bg-[#FCFDFE] px-3.5 py-3 text-sm text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                    />
+                                </label>
+                                <label className="block text-xs font-semibold text-[#475569]">
+                                    Email
+                                    <input
+                                        required
+                                        type="email"
+                                        value={form.email}
+                                        onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                                        className="mt-1.5 w-full rounded-xl border border-[#E2E8F0] bg-[#FCFDFE] px-3.5 py-3 text-sm text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                    />
+                                </label>
+                                <label className="block text-xs font-semibold text-[#475569]">
+                                    Password
+                                    <input
+                                        required
+                                        type="text"
+                                        minLength={8}
+                                        value={form.password}
+                                        onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                                        className="mt-1.5 w-full rounded-xl border border-[#E2E8F0] bg-[#FCFDFE] px-3.5 py-3 text-sm text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                    />
+                                </label>
+                                <label className="block text-xs font-semibold text-[#475569]">
+                                    Role
+                                    <select
+                                        required
+                                        value={form.role}
+                                        onChange={(e) => {
+                                            const role = e.target.value as '' | 'customer' | 'sales_agent';
+                                            setForm((f) => ({
+                                                ...f,
+                                                role,
+                                                planId: role === 'sales_agent' ? '' : f.planId,
+                                                businessName: role === 'sales_agent' ? '' : f.businessName,
+                                                bookingIndustryId:
+                                                    role === 'sales_agent' ? '' : f.bookingIndustryId
+                                            }));
+                                        }}
+                                        className="mt-1.5 w-full rounded-xl border border-[#E2E8F0] bg-[#FCFDFE] px-3.5 py-3 text-sm text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                    >
+                                        <option value="">Select role</option>
+                                        <option value="customer">User</option>
+                                        <option value="sales_agent">Sales Agent</option>
+                                    </select>
+                                </label>
+                            </div>
+
                             {form.role === 'customer' && (
-                                <>
-                                    <label className="block text-xs font-semibold text-[#475569]">
-                                        Business name (optional)
-                                        <input
-                                            value={form.businessName}
-                                            onChange={(e) =>
-                                                setForm((f) => ({ ...f, businessName: e.target.value }))
-                                            }
-                                            className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
-                                        />
-                                    </label>
-                                    <label className="block text-xs font-semibold text-[#475569]">
-                                        Plan (optional)
-                                        <select
-                                            value={form.planId}
-                                            onChange={(e) =>
-                                                setForm((f) => ({ ...f, planId: e.target.value }))
-                                            }
-                                            className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
-                                        >
-                                            <option value="">No plan</option>
-                                            {PLANS.map((p) => (
-                                                <option key={p.id} value={p.id}>
-                                                    {p.name}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </label>
-                                    <label className="block text-xs font-semibold text-[#475569]">
-                                        Services / industry
-                                        {servicesRequired ? ' *' : ' (optional)'}
-                                        <select
-                                            required={servicesRequired}
-                                            value={form.bookingIndustryId}
-                                            onChange={(e) =>
-                                                setForm((f) => ({
-                                                    ...f,
-                                                    bookingIndustryId: e.target.value
-                                                }))
-                                            }
-                                            className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
-                                        >
-                                            <option value="">Select services</option>
-                                            {industryOptions.map((p) => (
-                                                <option key={p.id} value={p.id}>
-                                                    {p.label}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </label>
+                                <div className="mt-6 pt-6 border-t border-[#E2E8F0]">
+                                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#94A3B8]">
+                                        Business & plan
+                                    </p>
+                                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+                                        <label className="block text-xs font-semibold text-[#475569] sm:col-span-2">
+                                            Business name (optional)
+                                            <input
+                                                value={form.businessName}
+                                                onChange={(e) =>
+                                                    setForm((f) => ({ ...f, businessName: e.target.value }))
+                                                }
+                                                className="mt-1.5 w-full rounded-xl border border-[#E2E8F0] bg-[#FCFDFE] px-3.5 py-3 text-sm text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                            />
+                                        </label>
+                                        <label className="block text-xs font-semibold text-[#475569]">
+                                            Plan (optional)
+                                            <select
+                                                value={form.planId}
+                                                onChange={(e) =>
+                                                    setForm((f) => ({ ...f, planId: e.target.value }))
+                                                }
+                                                className="mt-1.5 w-full rounded-xl border border-[#E2E8F0] bg-[#FCFDFE] px-3.5 py-3 text-sm text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                            >
+                                                <option value="">No plan</option>
+                                                {PLANS.map((p) => (
+                                                    <option key={p.id} value={p.id}>
+                                                        {p.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                        <label className="block text-xs font-semibold text-[#475569]">
+                                            Services / industry
+                                            {servicesRequired ? ' *' : ' (optional)'}
+                                            <select
+                                                required={servicesRequired}
+                                                value={form.bookingIndustryId}
+                                                onChange={(e) =>
+                                                    setForm((f) => ({
+                                                        ...f,
+                                                        bookingIndustryId: e.target.value
+                                                    }))
+                                                }
+                                                className="mt-1.5 w-full rounded-xl border border-[#E2E8F0] bg-[#FCFDFE] px-3.5 py-3 text-sm text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
+                                            >
+                                                <option value="">Select services</option>
+                                                {industryOptions.map((p) => (
+                                                    <option key={p.id} value={p.id}>
+                                                        {p.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                    </div>
                                     {form.bookingIndustryId && (
-                                        <p className="text-[11px] text-[#64748B] -mt-1">
+                                        <p className="mt-3 text-xs text-[#64748B] leading-relaxed">
                                             Same industry as checkout — booking demo and default treatments
                                             follow{' '}
                                             <span className="font-semibold text-[#0F172A]">
@@ -721,21 +740,22 @@ export default function AdminUsers() {
                                             .
                                         </p>
                                     )}
-                                </>
+                                </div>
                             )}
-                            <div className="flex justify-end gap-2 pt-2">
+
+                            <div className="mt-8 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 sm:gap-3 pt-2 border-t border-[#E2E8F0]">
                                 <button
                                     type="button"
                                     disabled={addBusy}
                                     onClick={() => setAddOpen(false)}
-                                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm font-semibold hover:bg-[#F8FAFC]"
+                                    className="rounded-xl border border-[#E2E8F0] px-5 py-2.5 text-sm font-semibold text-[#0F172A] hover:bg-[#F8FAFC]"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={addBusy}
-                                    className="rounded-xl bg-[#0F172A] text-white px-3 py-2 text-sm font-semibold hover:bg-[#1E293B] disabled:opacity-50"
+                                    className="rounded-xl bg-[#0F172A] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[#1E293B] disabled:opacity-50"
                                 >
                                     {addBusy ? 'Creating…' : 'Create user'}
                                 </button>

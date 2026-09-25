@@ -6,6 +6,7 @@ import { resolveMarketingUrl } from '../../shared/apiConfig';
 import { clearToken, setMustChangePassword, setPlatformRole, setToken } from './auth';
 import { clearAdminToken, setAdminToken } from '../../admin/adminApi';
 import { useEntitlements } from '../../shared/EntitlementsContext';
+import { clearBookingOrgSlug, setBookingOrgSlug } from '../bookings/shared/bookingUtils';
 import AuthShell from './AuthShell';
 
 
@@ -64,6 +65,9 @@ export default function Login() {
                 const data = await apiPost('/api/auth/login', payload);
                 clearAdminToken();
                 setToken(data.token);
+                const orgSlug = String(data.organization?.slug || '').trim();
+                if (orgSlug) setBookingOrgSlug(orgSlug);
+                else clearBookingOrgSlug();
                 const mustChange = Boolean(data.user?.mustChangePassword);
                 setMustChangePassword(mustChange);
                 setPlatformRole(data.user?.platformRole || 'customer');

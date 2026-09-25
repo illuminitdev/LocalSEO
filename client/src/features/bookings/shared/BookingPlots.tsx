@@ -45,7 +45,9 @@ function intakeAnswersList(raw: unknown): { key: string; label: string; value: s
         patchTest: 'Patch test',
         patientType: 'Patient Status',
         priceListItemId: 'Treatment',
-        propertyType: 'Property'
+        propertyType: 'Property',
+        fuseboxType: 'Consumer Unit / Fusebox',
+        propertySize: 'Property Size'
     };
     return Object.entries(raw as Record<string, unknown>)
         .map(([key, value]) => ({
@@ -328,9 +330,9 @@ export default function BookingPlots() {
 
     const hostUrl = org?.slug ? `${window.location.origin}/book/${org.slug}` : '';
     const qrUrl = hostUrl ? `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(hostUrl)}` : '';
-    const displayName = org?.name || 'Dr Carmen Aesthetics';
+    const displayName = org?.name || 'Your business';
     const subtitleParts = [org?.host_name, org?.trade_type || data?.bookingIndustry?.name].filter(Boolean);
-    const locationPart = org?.service_area || 'Brackley Way, Basingstoke, RG22 6LL';
+    const locationPart = org?.service_area || 'Add your service area';
 
     const copyLink = async () => {
         if (!hostUrl) return;
@@ -969,9 +971,7 @@ export default function BookingPlots() {
                             </div>
                             <div className="min-w-0">
                                 <p className="text-xl sm:text-2xl font-black text-slate-900 leading-none">
-                                    {kpiMetrics.revenueDepositsCents > 0
-                                        ? formatCents(kpiMetrics.revenueDepositsCents)
-                                        : '£45'}
+                                    {formatCents(kpiMetrics.revenueDepositsCents)}
                                 </p>
                                 <p className="text-xs text-slate-500 font-semibold mt-1 truncate">Revenue (deposits)</p>
                             </div>
@@ -1301,7 +1301,7 @@ export default function BookingPlots() {
                                                 ? formatCents(b.deposit_cents)
                                                 : b.total_cents
                                                   ? formatCents(b.total_cents)
-                                                  : '£45.00';
+                                                  : formatCents(0);
                                         const totalAmount =
                                             Number(b.total_cents) > 0
                                                 ? formatCents(b.total_cents)
@@ -1712,15 +1712,7 @@ export default function BookingPlots() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
-                                        {(eventTypes.length > 0
-                                            ? eventTypes
-                                            : getBookingPreset(org?.booking_industry_id || 'dentists').services.map((s, idx) => ({
-                                                  id: `fallback-${idx}`,
-                                                  name: s,
-                                                  deposit_cents: 4500,
-                                                  duration_minutes: 60
-                                              }))
-                                        )
+                                        {(eventTypes.length > 0 ? eventTypes : [])
                                             .slice(0, 6)
                                             .map((et: any) => (
                                                 <tr key={et.id} className="hover:bg-slate-50/80 transition-colors">

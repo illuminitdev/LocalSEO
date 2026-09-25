@@ -410,39 +410,7 @@ export default function Field() {
     const load = async () => {
         try {
             const res = await apiGet('/api/host/field/jobs').catch(() => ({ jobs: [] }));
-            const fetched = res.jobs || [];
-
-            if (!fetched.length) {
-                // Seed fallback demo field jobs matching screenshot
-                setJobs([
-                    {
-                        id: 'field-demo-1',
-                        customer_name: 'robert kim',
-                        customer_address: 'uk 9378',
-                        start_at: '2026-09-17T17:00:00Z',
-                        status: 'scheduled',
-                        job_status: 'scheduled'
-                    },
-                    {
-                        id: 'field-demo-2',
-                        customer_name: 'sai manikanta',
-                        customer_address: '5654',
-                        start_at: '2026-09-17T22:30:00Z',
-                        status: 'scheduled',
-                        job_status: 'scheduled'
-                    },
-                    {
-                        id: 'field-demo-3',
-                        customer_name: 'mani',
-                        customer_address: '57 Brackley way, Basingstoke, RG22 6LL',
-                        start_at: '2026-09-18T22:30:00Z',
-                        status: 'scheduled',
-                        job_status: 'scheduled'
-                    }
-                ]);
-            } else {
-                setJobs(fetched);
-            }
+            setJobs(res.jobs || []);
             setError('');
         } catch (e: any) {
             setError(e.message || 'Could not load field jobs');
@@ -494,58 +462,31 @@ export default function Field() {
 
     const handleCreateJob = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!form.customerName.trim()) return;
-
-        const startAt = new Date(`${form.date}T${form.time}:00`).toISOString();
-        const endAt = new Date(new Date(startAt).getTime() + 60 * 60 * 1000).toISOString();
-
-        const newJob = {
-            id: `field-demo-${Date.now()}`,
-            customer_name: form.customerName.trim(),
-            customer_address: form.address.trim() || 'Basingstoke, UK',
-            start_at: startAt,
-            end_at: endAt,
-            status: form.status,
-            job_status: form.status
-        };
-
-        setJobs((prev) => [newJob, ...prev]);
+        setError('Field jobs come from real bookings. Add a job on the booking board or wait for a customer booking.');
         setShowCreateModal(false);
-        setForm({
-            customerName: '',
-            address: '',
-            date: '2026-09-17',
-            time: '17:00',
-            status: 'scheduled',
-            notes: ''
-        });
     };
 
     const updateJobStatus = async (id: string, newStatus: string) => {
         setActiveActionId(null);
-        if (!id.startsWith('field-demo-')) {
-            try {
-                await apiPatch(`/api/host/bookings/${id}`, { status: newStatus, jobStatus: newStatus });
-            } catch (err) {
-                console.error(err);
-            }
+        try {
+            await apiPatch(`/api/host/bookings/${id}`, { status: newStatus, jobStatus: newStatus });
+            setJobs((prev) =>
+                prev.map((j) => (j.id === id ? { ...j, status: newStatus, job_status: newStatus } : j))
+            );
+        } catch (err: any) {
+            setError(err.message || 'Could not update job status');
         }
-        setJobs((prev) =>
-            prev.map((j) => (j.id === id ? { ...j, status: newStatus, job_status: newStatus } : j))
-        );
     };
 
     const deleteJob = async (id: string) => {
         setActiveActionId(null);
         if (!window.confirm('Delete this field job?')) return;
-        if (!id.startsWith('field-demo-')) {
-            try {
-                await apiDelete(`/api/host/bookings/${id}`);
-            } catch (err) {
-                console.error(err);
-            }
+        try {
+            await apiDelete(`/api/host/bookings/${id}`);
+            setJobs((prev) => prev.filter((j) => j.id !== id));
+        } catch (err: any) {
+            setError(err.message || 'Could not delete job');
         }
-        setJobs((prev) => prev.filter((j) => j.id !== id));
     };
 
     if (bookingId) return <FieldJobDetail />;

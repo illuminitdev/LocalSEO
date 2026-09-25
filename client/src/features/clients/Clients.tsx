@@ -66,13 +66,13 @@ function getAvatarStyle(name: string) {
 }
 
 function formatClientJoinDate(dateStr?: string) {
-    if (!dateStr) return 'Sep 10, 2026';
+    if (!dateStr) return '—';
     try {
         const d = new Date(dateStr);
-        if (isNaN(d.getTime())) return 'Sep 10, 2026';
+        if (isNaN(d.getTime())) return '—';
         return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
     } catch {
-        return 'Sep 10, 2026';
+        return '—';
     }
 }
 
@@ -106,45 +106,7 @@ function ClientsList() {
             if (query.trim()) params.set('q', query.trim());
             if (st) params.set('status', st);
             const res = await apiGet(`/api/host/clients${params.toString() ? `?${params}` : ''}`);
-            const fetched = res.clients || [];
-            
-            // If empty, provide seeded demo clients so the user immediately sees the rich layout
-            if (!fetched.length && !query.trim() && !st) {
-                setClients([
-                    {
-                        id: 'demo-1',
-                        name: 'mani',
-                        email: 'mani@email.com',
-                        phone: '98765678876',
-                        address: '57 Brackley way, Basingstoke, RG22 6LL',
-                        status: 'active',
-                        booking_count: 1,
-                        created_at: '2026-09-10T10:00:00Z'
-                    },
-                    {
-                        id: 'demo-2',
-                        name: 'sai',
-                        email: 'sai1754205@gmail.com',
-                        phone: '86543454343',
-                        address: '5654',
-                        status: 'active',
-                        booking_count: 2,
-                        created_at: '2026-09-09T10:00:00Z'
-                    },
-                    {
-                        id: 'demo-3',
-                        name: 'robert kim',
-                        email: 'grujeuquanepe-8542@yopmail.com',
-                        phone: '08765676567',
-                        address: 'uk 9378',
-                        status: 'active',
-                        booking_count: 1,
-                        created_at: '2026-09-08T10:00:00Z'
-                    }
-                ]);
-            } else {
-                setClients(fetched);
-            }
+            setClients(res.clients || []);
         } catch (e: any) {
             setError(e.message || 'Could not load clients');
         } finally {
@@ -160,8 +122,8 @@ function ClientsList() {
         const total = clients.length;
         const active = clients.filter((c) => c.status === 'active').length;
         const activePct = total > 0 ? Math.round((active / total) * 100) : 100;
-        const totalJobs = clients.reduce((sum, c) => sum + (c.booking_count || 1), 0);
-        const revenue = totalJobs * 612.5; // approx £2,450 for demo or calculated
+        const totalJobs = clients.reduce((sum, c) => sum + (Number(c.booking_count) || 0), 0);
+        const revenue = 0;
 
         return {
             total,
@@ -236,10 +198,6 @@ function ClientsList() {
 
     const deleteClientRow = async (id: string) => {
         if (!window.confirm('Delete this client record?')) return;
-        if (id.startsWith('demo-')) {
-            setClients((prev) => prev.filter((c) => c.id !== id));
-            return;
-        }
         try {
             await apiDelete(`/api/host/clients/${id}`);
             await load();
@@ -291,7 +249,9 @@ function ClientsList() {
                     <div className="min-w-0">
                         <p className="text-xs font-semibold text-slate-500">Total Clients</p>
                         <p className="text-2xl font-black text-slate-900 leading-tight">{metrics.total}</p>
-                        <p className="text-[11px] font-semibold text-emerald-600 mt-0.5">↑ +{metrics.total} this month</p>
+                        <p className="text-[11px] font-medium text-slate-400 mt-0.5">
+                            {metrics.total === 0 ? 'No clients yet' : 'In your CRM'}
+                        </p>
                     </div>
                 </div>
 
@@ -315,7 +275,9 @@ function ClientsList() {
                     <div className="min-w-0">
                         <p className="text-xs font-semibold text-slate-500">Total Jobs</p>
                         <p className="text-2xl font-black text-slate-900 leading-tight">{metrics.totalJobs}</p>
-                        <p className="text-[11px] font-semibold text-emerald-600 mt-0.5">+{metrics.totalJobs > 1 ? 2 : 1} this month</p>
+                        <p className="text-[11px] font-medium text-slate-400 mt-0.5">
+                            {metrics.totalJobs === 0 ? 'No jobs yet' : 'Linked bookings'}
+                        </p>
                     </div>
                 </div>
 
@@ -326,7 +288,7 @@ function ClientsList() {
                     </div>
                     <div className="min-w-0">
                         <p className="text-xs font-semibold text-slate-500">Revenue (YTD)</p>
-                        <p className="text-2xl font-black text-slate-900 leading-tight">£2,450</p>
+                        <p className="text-2xl font-black text-slate-900 leading-tight">{metrics.revenueFormatted}</p>
                         <p className="text-[11px] font-medium text-slate-400 mt-0.5">From client jobs</p>
                     </div>
                 </div>

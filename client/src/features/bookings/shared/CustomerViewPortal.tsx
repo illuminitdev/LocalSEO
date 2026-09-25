@@ -111,6 +111,8 @@ type Props = {
     onSuccess?: () => void;
 };
 
+export type CustomerViewPortalProps = Props;
+
 function isDateSelectable(dateStr: string, maxDaysAhead: number) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
