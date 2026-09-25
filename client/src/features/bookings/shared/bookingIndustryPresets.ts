@@ -45,6 +45,10 @@ export type BookingFlowConfig = {
     staffStep: 'team' | 'field' | false;
     requestMode: boolean;
     catalogMode: 'none' | 'priceList';
+    /** First step: choose property type (e.g. electricians). */
+    propertyStep: boolean;
+    /** Collect postcode on details and send as booking address. */
+    requirePostcode: boolean;
     labels: {
         services: string;
         staff: string;
@@ -55,8 +59,39 @@ export type BookingFlowConfig = {
         selectionTitle: string;
         emptyServices: string;
         addressFallback: string;
+        property?: string;
+        propertyTitle?: string;
+        propertyHint?: string;
     };
 };
+
+/** Property choices for electrician customer flow (first step). */
+export const ELECTRICIAN_PROPERTY_OPTIONS = [
+    { id: 'house', label: 'House' },
+    { id: 'apartment', label: 'Apartment' },
+    { id: 'shopping-mall', label: 'Shopping mall' },
+    { id: 'school', label: 'School' },
+    { id: 'other', label: 'Other' }
+] as const;
+
+export type ElectricianPropertyId = (typeof ELECTRICIAN_PROPERTY_OPTIONS)[number]['id'];
+
+export function isOtherProperty(id: string | null | undefined): boolean {
+    return id === 'other';
+}
+
+export function propertyDisplayLabel(
+    propertyType: string | null | undefined,
+    propertyOther?: string | null
+): string {
+    if (!propertyType) return '';
+    if (propertyType === 'other') {
+        const other = String(propertyOther || '').trim();
+        return other ? `Other — ${other}` : 'Other';
+    }
+    const found = ELECTRICIAN_PROPERTY_OPTIONS.find((o) => o.id === propertyType);
+    return found?.label || propertyType;
+}
 
 export type BookingIndustryPreset = {
     id: BookingIndustryId;
@@ -165,17 +200,6 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
                     'Old Rewirable Fusebox',
                     'Dual RCD Board',
                     'Not Sure / Need Survey'
-                ]
-            },
-            {
-                id: 'propertySize',
-                label: 'Property Size *',
-                type: 'select',
-                options: [
-                    '1-2 Bedroom Property',
-                    '3-4 Bedroom House',
-                    '5+ Bedroom / HMO',
-                    'Commercial Unit'
                 ]
             }
         ],
@@ -889,6 +913,8 @@ export function getBookingFlowConfig(
             staffStep: 'team',
             requestMode: false,
             catalogMode: 'none',
+            propertyStep: false,
+            requirePostcode: false,
             labels: {
                 ...DEFAULT_FLOW_LABELS,
                 staff: 'Stylist',
@@ -906,6 +932,8 @@ export function getBookingFlowConfig(
             staffStep: false,
             requestMode: true,
             catalogMode: 'priceList',
+            propertyStep: false,
+            requirePostcode: false,
             labels: {
                 ...DEFAULT_FLOW_LABELS,
                 services: 'Visit',
@@ -923,6 +951,8 @@ export function getBookingFlowConfig(
             staffStep: false,
             requestMode: false,
             catalogMode: 'none',
+            propertyStep: false,
+            requirePostcode: false,
             labels: {
                 ...DEFAULT_FLOW_LABELS,
                 services: 'Table',
@@ -940,6 +970,8 @@ export function getBookingFlowConfig(
             staffStep: 'field',
             requestMode: false,
             catalogMode: 'none',
+            propertyStep: false,
+            requirePostcode: false,
             labels: {
                 ...DEFAULT_FLOW_LABELS,
                 staff: 'Trainer',
@@ -950,9 +982,29 @@ export function getBookingFlowConfig(
         };
     }
 
+    if (id === 'electricians') {
+        return {
+            selection: 'single',
+            categories: false,
+            staffStep: false,
+            requestMode: false,
+            catalogMode: 'none',
+            propertyStep: true,
+            requirePostcode: true,
+            labels: {
+                ...DEFAULT_FLOW_LABELS,
+                browseTitle: 'Choose a service',
+                emptyServices: 'No services are published yet.',
+                addressFallback: 'Electrical visit',
+                property: 'Property',
+                propertyTitle: 'What type of property?',
+                propertyHint: 'Choose where the electrical work is needed.'
+            }
+        };
+    }
+
     const tradeLike = [
         'plumbing',
-        'electricians',
         'cleaners',
         'valeting',
         'pressure-washing',
@@ -968,6 +1020,8 @@ export function getBookingFlowConfig(
         staffStep: false,
         requestMode: tradeLike,
         catalogMode: 'none',
+        propertyStep: false,
+        requirePostcode: false,
         labels: {
             ...DEFAULT_FLOW_LABELS,
             browseTitle: tradeLike ? 'Choose a service' : 'Browse services',

@@ -3,8 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Download, Mail, ShieldCheck } from 'lucide-react';
 import { API_BASE, apiGet, apiPost, cn, restrictPhoneInput } from '../../../shared/utils';
 import { getBookingPreset, normalizeBookingIndustryId, resolveSalonServiceCategory } from './bookingIndustryPresets';
-import CustomerViewPortal, { type CustomerViewPortalProps } from './CustomerViewPortal';
-import { ElectriciansCustomerViewPortal } from '../electricians/Electricians';
+import CustomerViewPortal from './CustomerViewPortal';
 import FoodOrderFlow from '../restaurants/FoodOrderFlow';
 import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
 import { PaymentPaidCard } from '../../payments/PaymentPaidCard';
@@ -19,13 +18,17 @@ type EventType = {
     category?: string;
 };
 
-function PublicCustomerPortal(props: CustomerViewPortalProps) {
-    const industryId =
-        normalizeBookingIndustryId(props.industry?.id) ||
-        getBookingPreset(props.host?.tradeType).id;
-    if (industryId === 'electricians') {
-        return <ElectriciansCustomerViewPortal {...props} />;
-    }
+type PortalProps = {
+    hostSlug: string;
+    host: any;
+    eventTypes: EventType[];
+    menuItems?: any[];
+    industry?: any;
+    mediaUploadsEnabled?: boolean;
+    eventSlug?: string;
+};
+
+function PublicCustomerPortal(props: PortalProps) {
     return <CustomerViewPortal {...props} />;
 }
 
