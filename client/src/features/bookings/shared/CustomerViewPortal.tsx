@@ -3,30 +3,39 @@ import {
     ArrowLeft,
     ArrowRight,
     BookOpen,
+    Building2,
     Calendar,
     Check,
     ChevronLeft,
     ChevronRight,
     Clock,
+    Home,
     LayoutGrid,
     Paintbrush,
     Palette,
     Scissors,
+    School,
+    Store,
     Syringe,
     Trash2,
     User,
+    Zap,
     type LucideIcon
 } from 'lucide-react';
 import { apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../../shared/utils';
 import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
 import { monthDays, todayStr } from './bookingUtils';
 import {
+    ELECTRICIAN_PROPERTY_OPTIONS,
     getBookingPreset,
     getBookingFlowConfig,
+    isOtherProperty,
     normalizeBookingIndustryId,
+    propertyDisplayLabel,
     resolveSalonServiceCategory,
     SALON_SERVICE_CATEGORIES,
-    type BookingCustomField
+    type BookingCustomField,
+    type ElectricianPropertyId
 } from './bookingIndustryPresets';
 
 const CATEGORY_ICONS: Record<string, LucideIcon> = {
@@ -36,6 +45,14 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
     Makeup: Paintbrush,
     Courses: BookOpen,
     Other: LayoutGrid
+};
+
+const PROPERTY_ICONS: Record<ElectricianPropertyId, LucideIcon> = {
+    house: Home,
+    apartment: Building2,
+    'shopping-mall': Store,
+    school: School,
+    other: Zap
 };
 
 function categoryIcon(category: string): LucideIcon {
@@ -95,7 +112,7 @@ type IndustryConfig = {
 };
 
 /** Single browse step replaces separate category + service steps */
-type Step = 'services' | 'stylist' | 'when' | 'details' | 'payment';
+type Step = 'property' | 'services' | 'stylist' | 'when' | 'details' | 'payment';
 type IntakeMode = 'instant' | 'request';
 type CatalogBrowseTab = 'appointments' | 'treatments';
 
@@ -141,7 +158,7 @@ export default function CustomerViewPortal({
         ...preset,
         ...(industryProp || {}),
         customFields: (industryProp?.customFields || preset.customFields || []).filter(
-            (f) => f.id !== 'enquiryType'
+            (f) => f.id !== 'enquiryType' && f.id !== 'propertyType' && f.id !== 'propertySize'
         )
     };
 
@@ -233,11 +250,14 @@ export default function CustomerViewPortal({
     );
 
     const [step, setStep] = useState<Step>(() => {
+        if (flowConfig.propertyStep) return 'property';
         if (preselected && flowConfig.selection === 'single') {
             return initialNeedsStaff ? 'stylist' : 'when';
         }
         return 'services';
     });
+    const [propertyType, setPropertyType] = useState<ElectricianPropertyId | ''>('');
+    const [propertyOther, setPropertyOther] = useState('');
     const [activeCategory, setActiveCategory] = useState<string>('All');
     const [catalogTab, setCatalogTab] = useState<CatalogBrowseTab>('appointments');
     const [cart, setCart] = useState<ShellEventType[]>(() => (preselected ? [preselected] : []));
@@ -264,6 +284,7 @@ export default function CustomerViewPortal({
     const [stripePaymentsReady, setStripePaymentsReady] = useState(true);
     const [customerName, setCustomerName] = useState('');
     const [contact, setContact] = useState('');
+    const [postcode, setPostcode] = useState('');
     const [description, setDescription] = useState('');
     const [photoUrl, setPhotoUrl] = useState('');
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -410,29 +431,33 @@ export default function CustomerViewPortal({
     }, [step, needsStylist]);
 
     const stepOrder = useMemo((): Step[] => {
-        const order: Step[] = ['services'];
+        const order: Step[] = [];
+        if (flowConfig.propertyStep) order.push('property');
+        order.push('services');
         if (needsStylist) order.push('stylist');
         order.push('when', 'details');
         if (!(flowConfig.requestMode && intakeMode === 'request')) {
             order.push('payment');
         }
         return order;
-    }, [needsStylist, flowConfig.requestMode, intakeMode]);
+    }, [needsStylist, flowConfig.propertyStep, flowConfig.requestMode, intakeMode]);
 
     const visibleSteps = useMemo(
         () =>
             stepOrder.map((key) => ({
                 key,
                 label:
-                    key === 'services'
-                        ? flowConfig.labels.services
-                        : key === 'stylist'
-                          ? flowConfig.labels.staff
-                          : key === 'when'
-                            ? flowConfig.labels.when
-                            : key === 'details'
-                              ? flowConfig.labels.details
-                              : flowConfig.labels.confirm
+                    key === 'property'
+                        ? flowConfig.labels.property || 'Property'
+                        : key === 'services'
+                          ? flowConfig.labels.services
+                          : key === 'stylist'
+                            ? flowConfig.labels.staff
+                            : key === 'when'
+                              ? flowConfig.labels.when
+                              : key === 'details'
+                                ? flowConfig.labels.details
+                                : flowConfig.labels.confirm
             })),
         [stepOrder, flowConfig.labels]
     );
@@ -458,6 +483,9 @@ export default function CustomerViewPortal({
         if (!customerName.trim()) errors.customerName = 'Full name is required.';
         const parsed = parseContact(contact);
         if (parsed.error) errors.contact = parsed.error;
+        if (flowConfig.requirePostcode && !postcode.trim()) {
+            errors.postcode = 'Postcode is required.';
+        }
         for (const field of otherFields) {
             if (!String(intakeAnswers[field.id] || '').trim()) {
                 errors[field.id] = `${field.label.replace(/\s*\*$/, '')} is required.`;
@@ -473,11 +501,22 @@ export default function CustomerViewPortal({
                 ? { [stylistField.id]: stylist || stylistOptions[0]?.label || 'First Available' }
                 : {})
         };
+        if (flowConfig.propertyStep && propertyType) {
+            answers.propertyType = propertyDisplayLabel(propertyType, propertyOther);
+            if (isOtherProperty(propertyType) && propertyOther.trim()) {
+                answers.propertyOther = propertyOther.trim();
+            }
+        }
         if (selectedCatalog) {
             answers.catalogItemId = selectedCatalog.id;
             answers.catalogLabel = catalogLabel(selectedCatalog);
         }
         return answers;
+    };
+
+    const bookingAddress = () => {
+        if (flowConfig.requirePostcode && postcode.trim()) return postcode.trim();
+        return host.serviceArea || flowConfig.labels.addressFallback;
     };
 
     const uploadPhotoFile = async (file: File) => {
@@ -506,10 +545,27 @@ export default function CustomerViewPortal({
         setError('');
         const i = stepOrder.indexOf(step);
         if (i <= 0) {
-            setStep('services');
+            setStep(flowConfig.propertyStep ? 'property' : 'services');
             return;
         }
         setStep(stepOrder[i - 1]);
+    };
+
+    const continueFromProperty = () => {
+        if (!propertyType) {
+            setError('Choose a property type.');
+            return;
+        }
+        if (isOtherProperty(propertyType) && !propertyOther.trim()) {
+            setError('Please describe the place.');
+            return;
+        }
+        setError('');
+        if (preselected && flowConfig.selection === 'single' && cart.length) {
+            setStep(needsStylist ? 'stylist' : 'when');
+            return;
+        }
+        setStep('services');
     };
 
     const toggleService = (et: ShellEventType) => {
@@ -608,7 +664,7 @@ export default function CustomerViewPortal({
                 customerName: customerName.trim(),
                 email: parsed.email,
                 phone: parsed.phone,
-                address: host.serviceArea || flowConfig.labels.addressFallback,
+                address: bookingAddress(),
                 description: description.trim(),
                 photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
                 intakeAnswers: answers,
@@ -632,6 +688,13 @@ export default function CustomerViewPortal({
     };
 
     const stickyCta = (() => {
+        if (step === 'property') {
+            return {
+                label: 'Continue',
+                action: continueFromProperty,
+                disabled: !propertyType || (isOtherProperty(propertyType) && !propertyOther.trim())
+            };
+        }
         if (step === 'services') {
             return {
                 label: needsStylist
@@ -733,7 +796,7 @@ export default function CustomerViewPortal({
                 customerName: customerName.trim(),
                 email: parsed.email,
                 phone: parsed.phone,
-                address: host.serviceArea || flowConfig.labels.addressFallback,
+                address: bookingAddress(),
                 description: description.trim(),
                 photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
                 intakeAnswers: answers,
@@ -1128,9 +1191,102 @@ export default function CustomerViewPortal({
                     )}
                 >
                     <div className="min-w-0 space-y-5">
+                        {/* ——— Property type (electricians etc.) ——— */}
+                        {step === 'property' && flowConfig.propertyStep && (
+                            <div className="space-y-5">
+                                <div>
+                                    <p
+                                        className="text-[10px] font-black uppercase tracking-widest"
+                                        style={{ color: 'var(--brand-primary)' }}
+                                    >
+                                        Book an appointment
+                                    </p>
+                                    <h2 className="text-2xl font-black text-[#0F172A] mt-1">
+                                        {flowConfig.labels.propertyTitle || 'What type of property?'}
+                                    </h2>
+                                    {flowConfig.labels.propertyHint ? (
+                                        <p className="text-sm text-[#64748B] mt-1">
+                                            {flowConfig.labels.propertyHint}
+                                        </p>
+                                    ) : null}
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                                    {ELECTRICIAN_PROPERTY_OPTIONS.map((opt) => {
+                                        const Icon = PROPERTY_ICONS[opt.id];
+                                        const selected = propertyType === opt.id;
+                                        return (
+                                            <button
+                                                key={opt.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    setPropertyType(opt.id);
+                                                    if (opt.id !== 'other') setPropertyOther('');
+                                                    setError('');
+                                                }}
+                                                className={cn(
+                                                    'relative flex flex-col items-center gap-2 rounded-2xl border bg-white px-2 py-3.5 text-center shadow-sm transition',
+                                                    selected
+                                                        ? 'border-[#0F172A] ring-1 ring-[#0F172A]'
+                                                        : 'border-[#E2E8F0] hover:border-[#CBD5E1]'
+                                                )}
+                                            >
+                                                {selected && (
+                                                    <span
+                                                        className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full text-white shadow"
+                                                        style={{ background: 'var(--brand-primary)' }}
+                                                    >
+                                                        <Check className="h-3 w-3" strokeWidth={3} />
+                                                    </span>
+                                                )}
+                                                <Icon
+                                                    className="h-7 w-7"
+                                                    style={{ color: 'var(--brand-primary)' }}
+                                                />
+                                                <span className="text-xs font-bold text-[#0F172A] leading-tight">
+                                                    {opt.label}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                {isOtherProperty(propertyType) && (
+                                    <label className="block max-w-md">
+                                        <span className="text-xs font-bold text-[#64748B]">
+                                            Describe the place *
+                                        </span>
+                                        <input
+                                            value={propertyOther}
+                                            onChange={(e) => setPropertyOther(e.target.value)}
+                                            placeholder="e.g. Warehouse, church, office park…"
+                                            className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
+                                        />
+                                    </label>
+                                )}
+                                {!showCartPanel && stickyCta && (
+                                    <button
+                                        type="button"
+                                        disabled={stickyCta.disabled}
+                                        onClick={stickyCta.action}
+                                        className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40 text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
+                                    >
+                                        {stickyCta.label} <ArrowRight className="w-4 h-4" />
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
                         {/* ——— Browse services ——— */}
                         {step === 'services' && (
                             <div className="space-y-5">
+                                {flowConfig.propertyStep && (
+                                    <button
+                                        type="button"
+                                        onClick={goBack}
+                                        className="inline-flex items-center gap-1 text-xs font-bold text-[#64748B]"
+                                    >
+                                        <ArrowLeft className="w-3.5 h-3.5" /> Back
+                                    </button>
+                                )}
                                 <div>
                                     <p
                                         className="text-[10px] font-black uppercase tracking-widest"
@@ -1141,6 +1297,14 @@ export default function CustomerViewPortal({
                                     <h2 className="text-2xl font-black text-[#0F172A] mt-1">
                                         {flowConfig.labels.browseTitle}
                                     </h2>
+                                    {flowConfig.propertyStep && propertyType ? (
+                                        <p className="text-sm text-[#64748B] mt-1">
+                                            Property:{' '}
+                                            <span className="font-semibold text-[#0F172A]">
+                                                {propertyDisplayLabel(propertyType, propertyOther)}
+                                            </span>
+                                        </p>
+                                    ) : null}
                                 </div>
 
                                 {showCatalog && (
@@ -1249,7 +1413,7 @@ export default function CustomerViewPortal({
                         )}
 
                         {/* ——— Later steps ——— */}
-                        {step !== 'services' && (
+                        {step !== 'services' && step !== 'property' && (
                             <div className="rounded-2xl border border-[#E2E8F0] bg-white shadow-sm p-5 sm:p-6 space-y-5">
                                 <button
                                     type="button"
@@ -1572,6 +1736,25 @@ export default function CustomerViewPortal({
                                                     </p>
                                                 )}
                                             </label>
+                                            {flowConfig.requirePostcode && (
+                                                <label className="block">
+                                                    <span className="text-xs font-bold text-[#64748B]">
+                                                        Postcode *
+                                                    </span>
+                                                    <input
+                                                        value={postcode}
+                                                        onChange={(e) => setPostcode(e.target.value)}
+                                                        placeholder="e.g. M1 1AE"
+                                                        autoComplete="postal-code"
+                                                        className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm uppercase"
+                                                    />
+                                                    {detailsTouched && fieldErrors.postcode && (
+                                                        <p className="text-xs text-red-600 mt-1">
+                                                            {fieldErrors.postcode}
+                                                        </p>
+                                                    )}
+                                                </label>
+                                            )}
                                             {otherFields.map((field) => (
                                                 <label key={field.id} className="block">
                                                     <span className="text-xs font-bold text-[#64748B]">
@@ -1692,6 +1875,22 @@ export default function CustomerViewPortal({
                                                         {flowConfig.labels.staff}:
                                                     </span>{' '}
                                                     {stylist}
+                                                </p>
+                                            ) : null}
+                                            {flowConfig.propertyStep && propertyType ? (
+                                                <p>
+                                                    <span className="font-bold text-[#0F172A]">
+                                                        Property:
+                                                    </span>{' '}
+                                                    {propertyDisplayLabel(propertyType, propertyOther)}
+                                                </p>
+                                            ) : null}
+                                            {flowConfig.requirePostcode && postcode.trim() ? (
+                                                <p>
+                                                    <span className="font-bold text-[#0F172A]">
+                                                        Postcode:
+                                                    </span>{' '}
+                                                    {postcode.trim()}
                                                 </p>
                                             ) : null}
                                             <p>

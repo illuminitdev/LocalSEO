@@ -12,7 +12,7 @@ import VisibilityAuditReport from './features/visibility/VisibilityAuditReport';
 import MediaOptimization from './features/local-presence/MediaOptimization';
 import ReportGenerator from './features/report/ReportGenerator';
 import Citations from './features/local-presence/Citations';
-import BookingBoardRoute from './features/bookings/electricians/Electricians';
+import BookingPlots from './features/bookings/shared/BookingPlots';
 import PublicBookHost, { PublicBookEvent, BookSuccess, BookManage } from './features/bookings/shared/PublicBooking';
 import { FoodOrderTrack, FoodOrderSuccess } from './features/bookings/restaurants/FoodOrderTrack';
 import ClientPortal from './features/bookings/shared/ClientPortal';
@@ -135,7 +135,7 @@ export default function App() {
           <Route path="/media" element={<FeatureGate feature="local_presence"><MediaOptimization /></FeatureGate>} />
           <Route path="/report" element={<FeatureGate features={['local_growth', 'reporting']}><ReportGenerator /></FeatureGate>} />
           <Route path="/citations" element={<FeatureGate feature="local_presence"><Citations /></FeatureGate>} />
-          <Route path="/booking" element={<FeatureGate feature="bookings"><BookingBoardRoute /></FeatureGate>} />
+          <Route path="/booking" element={<FeatureGate feature="bookings"><BookingPlots /></FeatureGate>} />
           <Route path="/clients" element={<FeatureGate feature="bookings"><ClientsListPage /></FeatureGate>} />
           <Route path="/clients/:id" element={<FeatureGate feature="bookings"><ClientDetailPage /></FeatureGate>} />
           <Route path="/quotes" element={<FeatureGate feature="bookings"><QuotesListPage /></FeatureGate>} />
