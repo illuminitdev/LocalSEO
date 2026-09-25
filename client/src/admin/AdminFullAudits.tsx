@@ -66,11 +66,10 @@ const EMPTY_FORM = {
     website: '',
     emailOrPhone: '',
     address: '',
-    city: 'Manchester',
+    city: '',
     serviceId: '',
     serviceOther: '',
-    contactName: '',
-    operatorNotes: ''
+    contactName: ''
 };
 
 /** Split a combined contact value into email and/or phone for the API. */
@@ -286,7 +285,7 @@ export default function AdminFullAudits() {
                 serviceLabel: resolved.serviceLabel,
                 service: resolved.service,
                 primaryService: resolved.serviceLabel,
-                operatorNotes: form.operatorNotes.trim(),
+                operatorNotes: '',
                 skipLighthouse: false
             });
 
@@ -563,7 +562,7 @@ export default function AdminFullAudits() {
                     ) : (
                         <form className="grid grid-cols-1 sm:grid-cols-2 gap-4" onSubmit={handleCreate}>
                             <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
-                                Business name *
+                                Business name <span className="text-red-500">*</span>
                                 <input
                                     required
                                     value={form.businessName}
@@ -572,7 +571,7 @@ export default function AdminFullAudits() {
                                 />
                             </label>
                             <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
-                                Address *
+                                Address <span className="text-red-500">*</span>
                                 <input
                                     required
                                     placeholder="Street, town / area (used for Maps + NAP)"
@@ -592,7 +591,7 @@ export default function AdminFullAudits() {
                                 />
                             </label>
                             <label className="block text-sm font-semibold text-[#0F172A]">
-                                Email or phone *
+                                Email or phone <span className="text-red-500">*</span>
                                 <input
                                     required
                                     value={form.emailOrPhone}
@@ -611,7 +610,7 @@ export default function AdminFullAudits() {
                                 />
                             </label>
                             <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
-                                Service *
+                                Service <span className="text-red-500">*</span>
                                 <select
                                     required
                                     value={form.serviceId}
@@ -628,7 +627,7 @@ export default function AdminFullAudits() {
                             </label>
                             {showOther ? (
                                 <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
-                                    Describe the service *
+                                    Describe the service <span className="text-red-500">*</span>
                                     <input
                                         required
                                         value={form.serviceOther}
@@ -642,15 +641,6 @@ export default function AdminFullAudits() {
                                 <input
                                     value={form.contactName}
                                     onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-                                    className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
-                                />
-                            </label>
-                            <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
-                                Operator notes
-                                <textarea
-                                    rows={3}
-                                    value={form.operatorNotes}
-                                    onChange={(e) => setForm({ ...form, operatorNotes: e.target.value })}
                                     className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
                                 />
                             </label>

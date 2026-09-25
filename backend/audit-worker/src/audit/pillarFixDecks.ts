@@ -8,8 +8,10 @@ const COUNTRY_SUFFIX_ALIASES = [
     canon: 'unitedkingdom',
     keys: [
       'united kingdom of great britain and northern ireland',
+      'unitedkingdom',
       'united kingdom',
       'great britain',
+      'greatbritain',
       'u k',
       'uk',
       'g b',
@@ -18,17 +20,26 @@ const COUNTRY_SUFFIX_ALIASES = [
   },
   {
     canon: 'unitedstates',
-    keys: ['united states of america', 'united states', 'u s a', 'u s', 'usa', 'us']
+    keys: [
+      'united states of america',
+      'unitedstatesofamerica',
+      'united states',
+      'unitedstates',
+      'u s a',
+      'u s',
+      'usa',
+      'us'
+    ]
   },
   { canon: 'australia', keys: ['australia', 'au'] },
   { canon: 'canada', keys: ['canada', 'ca'] },
   { canon: 'ireland', keys: ['republic of ireland', 'ireland', 'ie'] },
-  { canon: 'newzealand', keys: ['new zealand', 'nz'] },
+  { canon: 'newzealand', keys: ['new zealand', 'newzealand', 'nz'] },
   { canon: 'germany', keys: ['germany', 'de'] },
   { canon: 'france', keys: ['france', 'fr'] },
   { canon: 'india', keys: ['india', 'in'] },
-  { canon: 'netherlands', keys: ['netherlands', 'the netherlands', 'nl'] },
-  { canon: 'southafrica', keys: ['south africa', 'za'] }
+  { canon: 'netherlands', keys: ['netherlands', 'the netherlands', 'thenetherlands', 'nl'] },
+  { canon: 'southafrica', keys: ['south africa', 'southafrica', 'za'] }
 ];
 
 /** Street type abbreviations → full forms (Rd ≈ Road, etc.). */
@@ -51,6 +62,8 @@ const STREET_ABBREV: Array<[RegExp, string]> = [
   [/\bpkwy\b/g, 'parkway'],
   [/\bcir\b/g, 'circle']
 ];
+
+const COUNTRY_CANONS = new Set(COUNTRY_SUFFIX_ALIASES.map((c) => c.canon));
 
 /** Normalize address text; UK ≈ United Kingdom; Rd ≈ Road. */
 function normAddress(s) {
@@ -76,9 +89,22 @@ function normAddress(s) {
   return t;
 }
 
+/** Drop trailing country so UK vs United Kingdom never blocks a match. */
+function stripTrailingCountry(normalized) {
+  const t = String(normalized || '').trim();
+  if (!t) return '';
+  for (const canon of COUNTRY_CANONS) {
+    if (t === canon) return '';
+    if (t.endsWith(` ${canon}`)) {
+      return t.slice(0, t.length - canon.length - 1).trim();
+    }
+  }
+  return t;
+}
+
 function addressesMatch(a, b) {
-  const na = normAddress(a);
-  const nb = normAddress(b);
+  const na = stripTrailingCountry(normAddress(a));
+  const nb = stripTrailingCountry(normAddress(b));
   if (!na || !nb) return false;
   if (na === nb || na.includes(nb) || nb.includes(na)) return true;
   // Token overlap for minor word-order / extra-locality differences
