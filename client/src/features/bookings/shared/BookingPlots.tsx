@@ -30,7 +30,7 @@ import { setBookingOrgSlug } from './bookingUtils';
 import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
 import BookingSettingsPanel from './BookingSettings';
 import FoodOrdersHostPanel from '../restaurants/FoodOrdersHostPanel';
-import { getBookingPreset, normalizeBookingIndustryId } from './bookingIndustryPresets';
+import { normalizeBookingIndustryId } from './bookingIndustryPresets';
 import {
     PaymentDocPrintables,
     downloadPaymentInvoice,

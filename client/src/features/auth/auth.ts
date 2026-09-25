@@ -1,4 +1,4 @@
-import { clearBookingOrgSlug, setBookingOrgSlug } from '../bookings/shared/bookingUtils';
+import { clearBookingOrgSlug } from '../bookings/shared/bookingUtils';
 
 const TOKEN_KEY = 'localpulse_token';
 const MUST_CHANGE_KEY = 'localpulse_must_change_password';
