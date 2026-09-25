@@ -72,3 +72,76 @@ export function slotsOverlap(a: { startTime: string; endTime: string }, b: { sta
     const bEnd = parseTimeToMinutes(b.endTime);
     return aStart < bEnd && bStart < aEnd;
 }
+
+const BOOKING_DRAFT_VERSION = 1;
+
+export type PublicBookingDraft = {
+    v: number;
+    step?: string;
+    propertyType?: string;
+    propertyOther?: string;
+    cartSlugs?: string[];
+    selectedCatalog?: {
+        id: string;
+        name: string;
+        description?: string;
+        priceCents?: number;
+        category?: string;
+    } | null;
+    stylist?: string;
+    stylistUserId?: string | null;
+    intakeAnswers?: Record<string, string>;
+    intakeMode?: 'instant' | 'request';
+    preferredAt?: string;
+    selectedDate?: string;
+    selectedSlot?: { startAt: string; endAt: string; date: string; label: string; assignedUserId?: string | null } | null;
+    customerName?: string;
+    email?: string;
+    phone?: string;
+    /** @deprecated legacy combined contact field */
+    contact?: string;
+    postcode?: string;
+    description?: string;
+    photoUrl?: string;
+    month?: { year: number; month: number };
+    activeCategory?: string;
+    catalogTab?: 'appointments' | 'treatments';
+};
+
+function bookingDraftKey(hostSlug: string) {
+    return `lp-book-draft:${hostSlug}`;
+}
+
+export function readBookingDraft(hostSlug: string): PublicBookingDraft | null {
+    if (!hostSlug || typeof sessionStorage === 'undefined') return null;
+    try {
+        const raw = sessionStorage.getItem(bookingDraftKey(hostSlug));
+        if (!raw) return null;
+        const data = JSON.parse(raw) as PublicBookingDraft;
+        if (!data || data.v !== BOOKING_DRAFT_VERSION) return null;
+        return data;
+    } catch {
+        return null;
+    }
+}
+
+export function writeBookingDraft(hostSlug: string, draft: Omit<PublicBookingDraft, 'v'>) {
+    if (!hostSlug || typeof sessionStorage === 'undefined') return;
+    try {
+        sessionStorage.setItem(
+            bookingDraftKey(hostSlug),
+            JSON.stringify({ ...draft, v: BOOKING_DRAFT_VERSION })
+        );
+    } catch {
+        /* quota / private mode */
+    }
+}
+
+export function clearBookingDraft(hostSlug: string) {
+    if (!hostSlug || typeof sessionStorage === 'undefined') return;
+    try {
+        sessionStorage.removeItem(bookingDraftKey(hostSlug));
+    } catch {
+        /* ignore */
+    }
+}

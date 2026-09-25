@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../../shared/utils';
 import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
-import { monthDays, todayStr } from './bookingUtils';
+import { monthDays, todayStr, readBookingDraft, writeBookingDraft, clearBookingDraft } from './bookingUtils';
 import {
     ELECTRICIAN_PROPERTY_OPTIONS,
     getBookingPreset,
@@ -249,44 +249,138 @@ export default function CustomerViewPortal({
         [priceListByCategory]
     );
 
+    const draft = useMemo(() => readBookingDraft(hostSlug), [hostSlug]);
+    const requireBothContacts = !isSalon;
+
+    const restoredCart = useMemo((): ShellEventType[] => {
+        if (draft?.selectedCatalog?.id && draft.cartSlugs?.[0]) {
+            const slotEt =
+                eventTypes.find((e) => e.slug === draft.cartSlugs![0]) || eventTypes[0] || null;
+            if (slotEt) {
+                const price = Number(draft.selectedCatalog.priceCents) || 0;
+                const cat = String(draft.selectedCatalog.category || '').trim();
+                const pounds = (price / 100).toFixed(2).replace(/\.00$/, '');
+                const label = cat
+                    ? `${cat}: ${draft.selectedCatalog.name} (£${pounds})`
+                    : `${draft.selectedCatalog.name} (£${pounds})`;
+                return [
+                    {
+                        slug: slotEt.slug,
+                        name: label,
+                        description: draft.selectedCatalog.description,
+                        durationMinutes: Number(slotEt.durationMinutes) || 30,
+                        depositCents: price,
+                        totalCents: price,
+                        category: draft.selectedCatalog.category
+                    }
+                ];
+            }
+        }
+        if (draft?.cartSlugs?.length) {
+            const fromDraft = draft.cartSlugs
+                .map((slug) => eventTypes.find((e) => e.slug === slug))
+                .filter(Boolean) as ShellEventType[];
+            if (fromDraft.length) return fromDraft;
+        }
+        return preselected ? [preselected] : [];
+    }, [draft, eventTypes, preselected]);
+
+    const validDraftSteps = useMemo(() => {
+        const order: Step[] = [];
+        if (flowConfig.propertyStep) order.push('property');
+        order.push('services');
+        if (initialNeedsStaff) order.push('stylist');
+        order.push('when', 'details', 'payment');
+        return order;
+    }, [flowConfig.propertyStep, initialNeedsStaff]);
+
     const [step, setStep] = useState<Step>(() => {
+        const dStep = draft?.step as Step | undefined;
+        if (dStep && validDraftSteps.includes(dStep)) return dStep;
         if (flowConfig.propertyStep) return 'property';
         if (preselected && flowConfig.selection === 'single') {
             return initialNeedsStaff ? 'stylist' : 'when';
         }
         return 'services';
     });
-    const [propertyType, setPropertyType] = useState<ElectricianPropertyId | ''>('');
-    const [propertyOther, setPropertyOther] = useState('');
-    const [activeCategory, setActiveCategory] = useState<string>('All');
-    const [catalogTab, setCatalogTab] = useState<CatalogBrowseTab>('appointments');
-    const [cart, setCart] = useState<ShellEventType[]>(() => (preselected ? [preselected] : []));
-    const [selectedCatalog, setSelectedCatalog] = useState<ShellMenuItem | null>(null);
+    const [propertyType, setPropertyType] = useState<ElectricianPropertyId | ''>(() => {
+        const id = String(draft?.propertyType || '');
+        const ok = ELECTRICIAN_PROPERTY_OPTIONS.some((o) => o.id === id);
+        return ok ? (id as ElectricianPropertyId) : '';
+    });
+    const [propertyOther, setPropertyOther] = useState(() => String(draft?.propertyOther || ''));
+    const [activeCategory, setActiveCategory] = useState<string>(
+        () => draft?.activeCategory || 'All'
+    );
+    const [catalogTab, setCatalogTab] = useState<CatalogBrowseTab>(
+        () => draft?.catalogTab || 'appointments'
+    );
+    const [cart, setCart] = useState<ShellEventType[]>(() => restoredCart);
+    const [selectedCatalog, setSelectedCatalog] = useState<ShellMenuItem | null>(() => {
+        if (!draft?.selectedCatalog?.id) return null;
+        const found = menuItems.find((m) => m.id === draft.selectedCatalog!.id);
+        if (found) return found;
+        return {
+            id: draft.selectedCatalog.id,
+            name: draft.selectedCatalog.name,
+            description: draft.selectedCatalog.description,
+            priceCents: Number(draft.selectedCatalog.priceCents) || 0,
+            category: String(draft.selectedCatalog.category || '')
+        };
+    });
     const [detailsOpen, setDetailsOpen] = useState<Record<string, boolean>>({});
-    const [stylist, setStylist] = useState('');
-    const [stylistUserId, setStylistUserId] = useState<string | null>(null);
+    const [stylist, setStylist] = useState(() => String(draft?.stylist || ''));
+    const [stylistUserId, setStylistUserId] = useState<string | null>(
+        () => draft?.stylistUserId ?? null
+    );
     const [teamsEnabled, setTeamsEnabled] = useState(false);
     const [teamMembers, setTeamMembers] = useState<BookableMember[]>([]);
-    const [intakeAnswers, setIntakeAnswers] = useState<Record<string, string>>({});
-    const [intakeMode, setIntakeMode] = useState<IntakeMode>('instant');
-    const [preferredAt, setPreferredAt] = useState('');
+    const [intakeAnswers, setIntakeAnswers] = useState<Record<string, string>>(
+        () => draft?.intakeAnswers || {}
+    );
+    const [intakeMode, setIntakeMode] = useState<IntakeMode>(
+        () => draft?.intakeMode || 'instant'
+    );
+    const [preferredAt, setPreferredAt] = useState(() => String(draft?.preferredAt || ''));
     const [month, setMonth] = useState(() => {
+        if (draft?.month?.year != null && draft?.month?.month != null) {
+            return { year: draft.month.year, month: draft.month.month };
+        }
         const n = new Date();
         return { year: n.getFullYear(), month: n.getMonth() };
     });
-    const [selectedDate, setSelectedDate] = useState('');
-    const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
+    const [selectedDate, setSelectedDate] = useState(() => String(draft?.selectedDate || ''));
+    const [selectedSlot, setSelectedSlot] = useState<Slot | null>(() => {
+        const s = draft?.selectedSlot;
+        if (!s?.startAt || !s?.endAt) return null;
+        return {
+            startAt: s.startAt,
+            endAt: s.endAt,
+            date: s.date || String(s.startAt).slice(0, 10),
+            label: s.label || '',
+            ...(s.assignedUserId ? { assignedUserId: s.assignedUserId } : {})
+        };
+    });
     const [daySlots, setDaySlots] = useState<Slot[]>([]);
     const [loadingSlots, setLoadingSlots] = useState(false);
     const [maxDaysAhead, setMaxDaysAhead] = useState(60);
     const [hasAvailabilityRules, setHasAvailabilityRules] = useState(false);
     const [paymentsMode, setPaymentsMode] = useState<'stripe' | 'simulated'>('stripe');
     const [stripePaymentsReady, setStripePaymentsReady] = useState(true);
-    const [customerName, setCustomerName] = useState('');
-    const [contact, setContact] = useState('');
-    const [postcode, setPostcode] = useState('');
-    const [description, setDescription] = useState('');
-    const [photoUrl, setPhotoUrl] = useState('');
+    const [customerName, setCustomerName] = useState(() => String(draft?.customerName || ''));
+    const [email, setEmail] = useState(() => {
+        if (draft?.email) return String(draft.email);
+        const legacy = String(draft?.contact || '');
+        return legacy.includes('@') ? legacy : '';
+    });
+    const [phone, setPhone] = useState(() => {
+        if (draft?.phone) return restrictPhoneInput(String(draft.phone));
+        const legacy = String(draft?.contact || '');
+        return legacy && !legacy.includes('@') ? restrictPhoneInput(legacy) : '';
+    });
+    const [postcode, setPostcode] = useState(() => String(draft?.postcode || ''));
+    const [description, setDescription] = useState(() => String(draft?.description || ''));
+    const [photoUrl, setPhotoUrl] = useState(() => String(draft?.photoUrl || ''));
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
     const [detailsTouched, setDetailsTouched] = useState(false);
@@ -347,6 +441,68 @@ export default function CustomerViewPortal({
                 setTeamMembers([]);
             });
     }, [hostSlug, flowConfig.staffStep]);
+
+    useEffect(() => {
+        if (done) {
+            clearBookingDraft(hostSlug);
+            return;
+        }
+        writeBookingDraft(hostSlug, {
+            step,
+            propertyType: propertyType || '',
+            propertyOther,
+            cartSlugs: cart.map((s) => s.slug),
+            selectedCatalog: selectedCatalog
+                ? {
+                      id: selectedCatalog.id,
+                      name: selectedCatalog.name,
+                      description: selectedCatalog.description,
+                      priceCents: selectedCatalog.priceCents,
+                      category: selectedCatalog.category
+                  }
+                : null,
+            stylist,
+            stylistUserId,
+            intakeAnswers,
+            intakeMode,
+            preferredAt,
+            selectedDate,
+            selectedSlot,
+            customerName,
+            email,
+            phone,
+            postcode,
+            description,
+            photoUrl,
+            month,
+            activeCategory,
+            catalogTab
+        });
+    }, [
+        hostSlug,
+        done,
+        step,
+        propertyType,
+        propertyOther,
+        cart,
+        selectedCatalog,
+        stylist,
+        stylistUserId,
+        intakeAnswers,
+        intakeMode,
+        preferredAt,
+        selectedDate,
+        selectedSlot,
+        customerName,
+        email,
+        phone,
+        postcode,
+        description,
+        photoUrl,
+        month,
+        activeCategory,
+        catalogTab
+    ]);
 
     useEffect(() => {
         if (!primaryService?.slug) return;
@@ -462,27 +618,31 @@ export default function CustomerViewPortal({
         [stepOrder, flowConfig.labels]
     );
 
-    const parseContact = (value: string) => {
-        const v = value.trim();
-        if (!v) return { email: '', phone: '', error: 'Email or phone is required.' };
-        if (v.includes('@')) {
-            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
-                return { email: '', phone: '', error: 'Enter a valid email or phone number.' };
-            }
-            return { email: v.toLowerCase(), phone: '', error: '' };
-        }
-        const digits = v.replace(/\D/g, '');
-        if (digits.length < 10) {
-            return { email: '', phone: '', error: 'Enter a valid email or phone number.' };
-        }
-        return { email: '', phone: restrictPhoneInput(v), error: '' };
-    };
-
     const validateDetails = () => {
         const errors: Record<string, string> = {};
         if (!customerName.trim()) errors.customerName = 'Full name is required.';
-        const parsed = parseContact(contact);
-        if (parsed.error) errors.contact = parsed.error;
+        const emailTrim = email.trim().toLowerCase();
+        const phoneDigits = phone.replace(/\D/g, '');
+        if (requireBothContacts) {
+            if (!emailTrim) errors.email = 'Email is required.';
+            else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+                errors.email = 'Enter a valid email.';
+            }
+            if (!phoneDigits) errors.phone = 'Phone is required.';
+            else if (phoneDigits.length < 10 || phoneDigits.length > 11) {
+                errors.phone = 'Enter a valid UK phone number (10–11 digits).';
+            }
+        } else {
+            if (!emailTrim && !phoneDigits) {
+                errors.email = 'Email or phone is required.';
+            }
+            if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+                errors.email = 'Enter a valid email.';
+            }
+            if (phoneDigits && (phoneDigits.length < 10 || phoneDigits.length > 11)) {
+                errors.phone = 'Enter a valid UK phone number (10–11 digits).';
+            }
+        }
         if (flowConfig.requirePostcode && !postcode.trim()) {
             errors.postcode = 'Postcode is required.';
         }
@@ -493,6 +653,11 @@ export default function CustomerViewPortal({
         }
         return errors;
     };
+
+    const contactPayload = () => ({
+        email: email.trim().toLowerCase(),
+        phone: phone ? restrictPhoneInput(phone) : ''
+    });
 
     const buildIntakeAnswers = () => {
         const answers = {
@@ -655,15 +820,15 @@ export default function CustomerViewPortal({
         setError('');
         try {
             const answers = buildIntakeAnswers();
-            const parsed = parseContact(contact);
+            const { email: bookEmail, phone: bookPhone } = contactPayload();
             const start = new Date(preferredAt);
             const end = new Date(
                 start.getTime() + (Number(primaryService.durationMinutes) || 60) * 60000
             );
             const result = await apiPost(`/api/public/${hostSlug}/${primaryService.slug}/book`, {
                 customerName: customerName.trim(),
-                email: parsed.email,
-                phone: parsed.phone,
+                email: bookEmail,
+                phone: bookPhone,
                 address: bookingAddress(),
                 description: description.trim(),
                 photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
@@ -675,6 +840,7 @@ export default function CustomerViewPortal({
                 serviceSlugs: cart.map((s) => s.slug)
             });
             if (result.success || result.mode === 'request') {
+                clearBookingDraft(hostSlug);
                 setDone(true);
                 onSuccess?.();
                 return;
@@ -788,14 +954,14 @@ export default function CustomerViewPortal({
         setError('');
         try {
             const answers = buildIntakeAnswers();
-            const parsed = parseContact(contact);
+            const { email: bookEmail, phone: bookPhone } = contactPayload();
             const useTeamAssign = flowConfig.staffStep === 'team' && teamsEnabled;
             const assignedFromSlot =
                 useTeamAssign && !stylistUserId ? selectedSlot.assignedUserId || null : stylistUserId;
             const result = await apiPost(`/api/public/${hostSlug}/${primaryService.slug}/book`, {
                 customerName: customerName.trim(),
-                email: parsed.email,
-                phone: parsed.phone,
+                email: bookEmail,
+                phone: bookPhone,
                 address: bookingAddress(),
                 description: description.trim(),
                 photoUrls: photoUrl.trim() ? [photoUrl.trim()] : [],
@@ -807,10 +973,12 @@ export default function CustomerViewPortal({
                 ...(useTeamAssign && assignedFromSlot ? { assignedUserId: assignedFromSlot } : {})
             });
             if (result.url) {
+                clearBookingDraft(hostSlug);
                 window.location.href = result.url;
                 return;
             }
             if (result.success || result.simulated) {
+                clearBookingDraft(hostSlug);
                 setDone(true);
                 onSuccess?.();
                 return;
@@ -1722,17 +1890,41 @@ export default function CustomerViewPortal({
                                             </label>
                                             <label className="block">
                                                 <span className="text-xs font-bold text-[#64748B]">
-                                                    Email or phone *
+                                                    Email{requireBothContacts ? ' *' : ' (or phone)'}
                                                 </span>
                                                 <input
-                                                    value={contact}
-                                                    onChange={(e) => setContact(e.target.value)}
-                                                    placeholder="name@email.com or 07…"
+                                                    type="email"
+                                                    value={email}
+                                                    onChange={(e) => setEmail(e.target.value)}
+                                                    placeholder="name@email.com"
+                                                    autoComplete="email"
                                                     className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
                                                 />
-                                                {detailsTouched && fieldErrors.contact && (
+                                                {detailsTouched && fieldErrors.email && (
                                                     <p className="text-xs text-red-600 mt-1">
-                                                        {fieldErrors.contact}
+                                                        {fieldErrors.email}
+                                                    </p>
+                                                )}
+                                            </label>
+                                            <label className="block">
+                                                <span className="text-xs font-bold text-[#64748B]">
+                                                    Phone{requireBothContacts ? ' *' : ' (or email)'}
+                                                </span>
+                                                <input
+                                                    type="tel"
+                                                    inputMode="numeric"
+                                                    value={phone}
+                                                    onChange={(e) =>
+                                                        setPhone(restrictPhoneInput(e.target.value, 11))
+                                                    }
+                                                    placeholder="07…"
+                                                    autoComplete="tel"
+                                                    maxLength={11}
+                                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
+                                                />
+                                                {detailsTouched && fieldErrors.phone && (
+                                                    <p className="text-xs text-red-600 mt-1">
+                                                        {fieldErrors.phone}
                                                     </p>
                                                 )}
                                             </label>
