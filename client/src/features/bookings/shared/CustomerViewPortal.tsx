@@ -111,7 +111,7 @@ type IndustryConfig = {
     notesPlaceholder?: string;
 };
 
-/** Single browse step replaces separate category + service steps */
+
 type Step = 'property' | 'services' | 'stylist' | 'when' | 'details' | 'payment';
 type IntakeMode = 'instant' | 'request';
 type CatalogBrowseTab = 'appointments' | 'treatments';
@@ -123,7 +123,7 @@ type Props = {
     menuItems?: ShellMenuItem[];
     industry?: IndustryConfig | null;
     mediaUploadsEnabled?: boolean;
-    /** Deep-link / restaurant table: preselect this event and skip browse if single+preselected */
+   
     eventSlug?: string;
     onSuccess?: () => void;
 };
@@ -1939,7 +1939,7 @@ export default function CustomerViewPortal({
                         )}
                     </div>
 
-                    {/* Right selection panel */}
+                    {}
                     {cartPanel}
                 </div>
             </div>

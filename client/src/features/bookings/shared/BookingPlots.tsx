@@ -46,10 +46,9 @@ function intakeAnswersList(raw: unknown): { key: string; label: string; value: s
         patientType: 'Patient Status',
         priceListItemId: 'Treatment',
         propertyType: 'Property',
+        propertyOther: 'Other property',
         fuseboxType: 'Consumer Unit / Fusebox',
-        propertySize: 'Property Size',
-        propertyType: 'Property type',
-        propertyOther: 'Other property'
+        propertySize: 'Property Size'
     };
     return Object.entries(raw as Record<string, unknown>)
         .map(([key, value]) => ({
