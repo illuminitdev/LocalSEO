@@ -139,17 +139,6 @@ export const bookingIndustryPresets: BookingIndustryPreset[] = [
                     'Dual RCD Board',
                     'Not Sure / Need Survey'
                 ]
-            },
-            {
-                id: 'propertySize',
-                label: 'Property Size *',
-                type: 'select',
-                options: [
-                    '1-2 Bedroom Property',
-                    '3-4 Bedroom House',
-                    '5+ Bedroom / HMO',
-                    'Commercial Unit'
-                ]
             }
         ],
         uploadPrompt: 'Upload a clear photo of your existing fusebox / consumer unit',
