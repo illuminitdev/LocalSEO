@@ -57,6 +57,7 @@ type Props = {
     onSettingsChange: (settings: AvailabilitySettings) => void;
     onSave: (payload: AvailabilitySavePayload) => Promise<void>;
     saving?: boolean;
+    saved?: boolean;
     title?: string;
     hideOrgSettings?: boolean;
 };
@@ -200,6 +201,7 @@ export default function AvailabilityEditor({
     onSettingsChange,
     onSave,
     saving,
+    saved,
     title = 'Your availability',
     hideOrgSettings = false
 }: Props) {
@@ -666,9 +668,15 @@ export default function AvailabilityEditor({
                 type="button"
                 disabled={saving}
                 onClick={handleSave}
-                className="px-5 py-2.5 rounded-xl bg-[#F59E0B] text-white font-bold text-sm disabled:opacity-60"
+                className={
+                    saving
+                        ? 'px-5 py-2.5 rounded-xl bg-[#F59E0B] text-white font-bold text-sm disabled:opacity-60'
+                        : saved
+                          ? 'px-5 py-2.5 rounded-xl bg-emerald-600 text-white font-bold text-sm disabled:opacity-60'
+                          : 'px-5 py-2.5 rounded-xl bg-[#F59E0B] text-white font-bold text-sm disabled:opacity-60'
+                }
             >
-                {saving ? 'Saving…' : 'Save availability'}
+                {saving ? 'Saving…' : saved ? 'Saved' : 'Save changes'}
             </button>
         </div>
     );

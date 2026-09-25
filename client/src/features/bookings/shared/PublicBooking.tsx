@@ -3,7 +3,8 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Download, Mail, ShieldCheck } from 'lucide-react';
 import { API_BASE, apiGet, apiPost, cn, restrictPhoneInput } from '../../../shared/utils';
 import { getBookingPreset, normalizeBookingIndustryId, resolveSalonServiceCategory } from './bookingIndustryPresets';
-import CustomerViewPortal from './CustomerViewPortal';
+import CustomerViewPortal, { type CustomerViewPortalProps } from './CustomerViewPortal';
+import { ElectriciansCustomerViewPortal } from '../electricians/Electricians';
 import FoodOrderFlow from '../restaurants/FoodOrderFlow';
 import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
 import { PaymentPaidCard } from '../../payments/PaymentPaidCard';
@@ -17,6 +18,16 @@ type EventType = {
     totalCents?: number;
     category?: string;
 };
+
+function PublicCustomerPortal(props: CustomerViewPortalProps) {
+    const industryId =
+        normalizeBookingIndustryId(props.industry?.id) ||
+        getBookingPreset(props.host?.tradeType).id;
+    if (industryId === 'electricians') {
+        return <ElectriciansCustomerViewPortal {...props} />;
+    }
+    return <CustomerViewPortal {...props} />;
+}
 
 export function PublicBookHost() {
     const { hostSlug } = useParams();
@@ -237,7 +248,7 @@ export function PublicBookHost() {
                     </button>
                 </div>
             )}
-            <CustomerViewPortal
+            <PublicCustomerPortal
                 hostSlug={hostSlug!}
                 host={{
                     name: data.name,
@@ -283,7 +294,7 @@ export function PublicBookEvent() {
     if (error || !data) return <div className="min-h-screen flex items-center justify-center text-red-600 p-6">{error || 'Not found'}</div>;
 
     return (
-        <CustomerViewPortal
+        <PublicCustomerPortal
             hostSlug={hostSlug!}
             host={data.host}
             industry={data.industry || getBookingPreset(data.host?.bookingIndustryId || data.host?.tradeType)}

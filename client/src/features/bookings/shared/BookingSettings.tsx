@@ -1357,6 +1357,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                             onSettingsChange={setSettings}
                             onSave={saveAvailability}
                             saving={savingAvailability || loadingMemberAvail}
+                            saved={saved}
                             title={
                                 availScope === 'org'
                                     ? teamsEnabled
@@ -1462,7 +1463,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                 onClick={saveZapier}
                                 className="px-3 py-2 rounded-xl bg-[#0F172A] text-white text-xs font-bold disabled:opacity-50"
                             >
-                                {zapierBusy ? 'Saving…' : 'Save Zapier'}
+                                {zapierBusy ? 'Saving…' : saved ? 'Saved' : 'Save Zapier'}
                             </button>
                         </div>
                         <div className="flex items-center justify-between gap-3 border border-[#E2E8F0] rounded-xl p-4">
@@ -1580,9 +1581,14 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                             type="button"
                             disabled={savingProfile}
                             onClick={saveProfile}
-                            className="px-5 py-2.5 rounded-xl bg-[#0F172A] text-white font-bold text-sm disabled:opacity-60"
+                            className={cn(
+                                'px-5 py-2.5 rounded-xl font-bold text-sm disabled:opacity-60',
+                                saved
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-[#0F172A] text-white'
+                            )}
                         >
-                            {savingProfile ? 'Saving…' : 'Save reminder settings'}
+                            {savingProfile ? 'Saving…' : saved ? 'Saved' : 'Save reminder settings'}
                         </button>
                     </div>
                 )}
@@ -1630,9 +1636,14 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                 type="button"
                                 disabled={savingProfile}
                                 onClick={saveProfile}
-                                className="px-5 py-2.5 rounded-xl bg-[#0F172A] text-white font-bold text-sm disabled:opacity-60"
+                                className={cn(
+                                    'px-5 py-2.5 rounded-xl font-bold text-sm disabled:opacity-60',
+                                    saved
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-[#0F172A] text-white'
+                                )}
                             >
-                                {savingProfile ? 'Saving…' : 'Save profile'}
+                                {savingProfile ? 'Saving…' : saved ? 'Saved' : 'Save changes'}
                             </button>
                             {onBack && (
                                 <button type="button" onClick={onBack} className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B]">

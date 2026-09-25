@@ -1,3 +1,5 @@
+import { clearBookingOrgSlug, setBookingOrgSlug } from '../bookings/shared/bookingUtils';
+
 const TOKEN_KEY = 'localpulse_token';
 const MUST_CHANGE_KEY = 'localpulse_must_change_password';
 const PLATFORM_ROLE_KEY = 'localpulse_platform_role';
@@ -14,6 +16,7 @@ export function clearToken() {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(MUST_CHANGE_KEY);
     localStorage.removeItem(PLATFORM_ROLE_KEY);
+    clearBookingOrgSlug();
 }
 
 export function setMustChangePassword(value: boolean) {

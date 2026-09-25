@@ -91,9 +91,9 @@ export default function Dashboard() {
         apiGet('/api/auth/me')
             .then((res) => {
                 const name = res.user?.name || res.name || '';
-                setUserName(name.split(' ')[0] || 'Karun');
+                setUserName(name.split(' ')[0] || 'there');
             })
-            .catch(() => setUserName('Karun'));
+            .catch(() => setUserName('there'));
 
         if (!isLocalSeoPlan) {
             apiGet('/api/host/overview')
@@ -161,7 +161,7 @@ function BookingSoloDashboard({
     data: BookingOverview | null;
 }) {
     const currency = data?.organization?.currency || 'GBP';
-    const depositsPaid = data?.money?.depositsPaid ?? 16000;
+    const depositsPaid = data?.money?.depositsPaid ?? 0;
     const openBalance = data?.money?.openBalance ?? 0;
     const expenses = data?.money?.expenses ?? 0;
     const quotesOpen = data?.quotesOpen ?? 0;
@@ -169,10 +169,10 @@ function BookingSoloDashboard({
     const stats = [
         {
             label: 'Clients',
-            value: data?.clients ?? 3,
+            value: data?.clients ?? 0,
             icon: Users,
             tone: 'bg-amber-50 text-amber-600',
-            trend: '↑ 1 new this week',
+            trend: 'From your CRM',
             trendPositive: true
         },
         {
@@ -180,7 +180,7 @@ function BookingSoloDashboard({
             value: data?.bookingsToday ?? 0,
             icon: CalendarDays,
             tone: 'bg-sky-50 text-sky-600',
-            trend: '↑ 0% vs yesterday',
+            trend: 'Bookings today',
             trendPositive: true
         },
         {
@@ -188,7 +188,7 @@ function BookingSoloDashboard({
             value: data?.upcoming ?? 0,
             icon: CalendarClock,
             tone: 'bg-purple-50 text-purple-600',
-            trend: '↑ 0% vs yesterday',
+            trend: 'Scheduled ahead',
             trendPositive: true
         },
         {
@@ -196,15 +196,15 @@ function BookingSoloDashboard({
             value: data?.openRequests ?? 0,
             icon: Mail,
             tone: 'bg-emerald-50 text-emerald-600',
-            trend: '↓ 0% vs yesterday',
+            trend: 'Awaiting response',
             trendPositive: false
         },
         {
             label: 'Invoices paid',
-            value: data?.invoicesPaid ?? 1,
+            value: data?.invoicesPaid ?? 0,
             icon: FileText,
             tone: 'bg-rose-50 text-rose-600',
-            trend: '↑ 1 this week',
+            trend: 'Paid invoices',
             trendPositive: true
         }
     ];
@@ -222,7 +222,7 @@ function BookingSoloDashboard({
             {/* ── Top Header ── */}
             <div>
                 <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[#0F172A]">
-                    Welcome back, {userName || 'Karun'} <span className="inline-block hover:rotate-12 transition-transform cursor-default">👋</span>
+                    Welcome back, {userName || 'there'} <span className="inline-block hover:rotate-12 transition-transform cursor-default">👋</span>
                 </h1>
                 <p className="text-xs text-[#64748B] mt-0.5">
                     Here&apos;s what&apos;s happening with your bookings and business today.
@@ -528,64 +528,59 @@ function LocalSeoOnlyDashboard({
     businessData: LocalBusinessData | null;
 }) {
     const businessName = businessData?.name || 'Local Business';
-    const rating = businessData?.rating || 4.9;
-    const reviewCount = businessData?.review_count || 48;
+    const rating = businessData?.rating ?? null;
+    const reviewCount = businessData?.review_count ?? 0;
     const reviews = businessData?.reviews || [];
 
     const seoStats = [
         {
             label: 'Avg Map Rank',
-            value: '#2.4',
+            value: '—',
             sub: 'in Local 3-Pack',
             icon: MapPin,
             tone: 'bg-amber-50 text-[#FF8800]',
-            trend: '↑ 0.8 this week',
+            trend: 'Connect GBP to track',
             trendPositive: true
         },
         {
             label: 'Search Grid Visibility',
-            value: '84%',
+            value: '—',
             sub: 'Top 3 pin coverage',
             icon: Search,
             tone: 'bg-sky-50 text-sky-600',
-            trend: '↑ 12% vs last month',
+            trend: 'No grid data yet',
             trendPositive: true
         },
         {
             label: 'GBP Profile Health',
-            value: '96%',
-            sub: 'Fully optimized',
+            value: '—',
+            sub: businessData ? 'Profile linked' : 'Not connected',
             icon: Building2,
             tone: 'bg-emerald-50 text-emerald-600',
-            trend: 'Good standing',
+            trend: businessData ? 'From Google' : 'Connect to measure',
             trendPositive: true
         },
         {
             label: 'Google Reviews',
-            value: `${rating} ★`,
-            sub: `${reviewCount} verified reviews`,
+            value: rating != null ? `${rating} ★` : '—',
+            sub: `${reviewCount} reviews`,
             icon: Star,
             tone: 'bg-purple-50 text-purple-600',
-            trend: '↑ 3 new this month',
+            trend: reviewCount ? 'From Google' : 'No reviews yet',
             trendPositive: true
         },
         {
             label: 'Active Citations',
-            value: '42',
+            value: '—',
             sub: 'Directories synced',
             icon: BookMarked,
             tone: 'bg-rose-50 text-rose-600',
-            trend: '100% NAP consistency',
+            trend: 'No citations yet',
             trendPositive: true
         }
     ];
 
-    const trackedKeywords = [
-        { keyword: 'dentist near me', rank: 1, prevRank: 2, volume: '2,400/mo' },
-        { keyword: 'teeth whitening basingstoke', rank: 2, prevRank: 3, volume: '880/mo' },
-        { keyword: 'emergency dentist open now', rank: 1, prevRank: 1, volume: '1,200/mo' },
-        { keyword: 'dental hygiene clinic', rank: 3, prevRank: 4, volume: '590/mo' }
-    ];
+    const trackedKeywords: { keyword: string; rank: number; prevRank: number; volume: string }[] = [];
 
     const quickSeoTools = [
         { to: '/rank-tracker', label: 'Local Search Grid', icon: MapPin, desc: 'Track GeoGrid pin rankings', tone: 'bg-amber-50 text-[#FF8800]' },
@@ -792,8 +787,16 @@ function LocalSeoOnlyDashboard({
                             </div>
                         ) : (
                             <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-500 text-center">
-                                <p className="font-semibold text-slate-800">48 Google Reviews Syncing</p>
-                                <p className="mt-1">Average 4.9 ★ star rating across all directories.</p>
+                                <p className="font-semibold text-slate-800">
+                                    {reviewCount
+                                        ? `${reviewCount} Google Reviews Syncing`
+                                        : 'No Google reviews yet'}
+                                </p>
+                                <p className="mt-1">
+                                    {rating != null
+                                        ? `Average ${rating} ★ star rating across all directories.`
+                                        : 'Connect your business profile to sync reviews.'}
+                                </p>
                             </div>
                         )}
                     </div>
@@ -844,13 +847,13 @@ function HybridDashboard({
     businessData: LocalBusinessData | null;
 }) {
     const currency = bookingData?.organization?.currency || 'GBP';
-    const depositsPaid = bookingData?.money?.depositsPaid ?? 16000;
+    const depositsPaid = bookingData?.money?.depositsPaid ?? 0;
     const openBalance = bookingData?.money?.openBalance ?? 0;
     const quotesOpen = bookingData?.quotesOpen ?? 0;
-    const upcoming = bookingData?.upcoming ?? 2;
-    const rating = businessData?.rating || 4.9;
-    const reviewCount = businessData?.review_count || 48;
-    const orgSlug = bookingData?.organization?.slug || 'karun';
+    const upcoming = bookingData?.upcoming ?? 0;
+    const rating = businessData?.rating ?? null;
+    const reviewCount = businessData?.review_count ?? 0;
+    const orgSlug = bookingData?.organization?.slug || '';
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -862,19 +865,19 @@ function HybridDashboard({
     const hybridStats = [
         {
             label: 'Avg Map Rank',
-            value: '#2.4',
+            value: businessData ? '#—' : '—',
             sub: 'in Local 3-Pack',
             icon: MapPin,
             tone: 'bg-sky-50 text-sky-600',
-            trend: '84% Grid coverage'
+            trend: businessData ? 'From rank tracker' : 'Connect GBP to track'
         },
         {
             label: 'Google Reviews',
-            value: `${rating} ★`,
+            value: rating != null ? `${rating} ★` : '—',
             sub: `${reviewCount} reviews`,
             icon: Star,
             tone: 'bg-purple-50 text-purple-600',
-            trend: 'Top reputation'
+            trend: reviewCount ? 'From Google' : 'No reviews yet'
         },
         {
             label: 'Upcoming Bookings',
@@ -882,7 +885,7 @@ function HybridDashboard({
             sub: 'Appointments scheduled',
             icon: CalendarClock,
             tone: 'bg-amber-50 text-[#FF8800]',
-            trend: '↑ Active schedule'
+            trend: upcoming ? 'Active schedule' : 'No upcoming jobs'
         },
         {
             label: 'Revenue (Deposits)',
@@ -890,23 +893,19 @@ function HybridDashboard({
             sub: 'Deposits collected',
             icon: Wallet,
             tone: 'bg-emerald-50 text-emerald-600',
-            trend: '↑ 100% paid'
+            trend: depositsPaid ? 'From bookings' : 'No deposits yet'
         },
         {
             label: 'Total Clients',
-            value: bookingData?.clients ?? 24,
+            value: bookingData?.clients ?? 0,
             sub: 'Client contacts',
             icon: Users,
             tone: 'bg-rose-50 text-rose-600',
-            trend: '↑ 3 new this week'
+            trend: 'From your CRM'
         }
     ];
 
-    const hybridKeywords = [
-        { keyword: 'dentist near me', rank: 1, volume: '2,400/mo' },
-        { keyword: 'teeth whitening clinic', rank: 2, volume: '880/mo' },
-        { keyword: 'emergency dental appointment', rank: 1, volume: '1,200/mo' }
-    ];
+    const hybridKeywords: { keyword: string; rank: number; volume: string }[] = [];
 
     return (
         <div className="max-w-7xl mx-auto space-y-4 animate-in fade-in duration-300 pb-10">
@@ -1145,7 +1144,7 @@ function HybridDashboard({
                             </div>
                             <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
                                 <p className="text-slate-400 text-[11px]">Active Clients</p>
-                                <p className="font-bold text-slate-900 mt-0.5">{bookingData?.clients ?? 24} Clients</p>
+                                <p className="font-bold text-slate-900 mt-0.5">{bookingData?.clients ?? 0} Clients</p>
                             </div>
                         </div>
                     </div>

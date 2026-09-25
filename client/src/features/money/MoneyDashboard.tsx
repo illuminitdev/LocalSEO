@@ -88,94 +88,39 @@ export default function MoneyDashboard() {
 
             setSummary(moneyRes.summary);
 
-            // Extract transactions from dashboard bookings or fallback demo
             const bookings = dashRes.bookings || [];
-            if (bookings.length > 0) {
-                const txList: TransactionRow[] = [];
-                bookings.slice(0, 8).forEach((b: any, idx: number) => {
-                    const date = b.start_at ? b.start_at.slice(0, 10) : '2026-09-17';
-                    const name = b.customer_name || 'Dr Carmen Aesthetics';
+            const txList: TransactionRow[] = [];
+            bookings.forEach((b: any, idx: number) => {
+                const date = b.start_at ? b.start_at.slice(0, 10) : '';
+                const name = b.customer_name || 'Booking';
 
-                    if (b.deposit_cents) {
-                        txList.push({
-                            id: `tx-dep-${b.id || idx}`,
-                            date,
-                            type: 'deposit',
-                            clientJob: name,
-                            amountCents: Number(b.deposit_cents),
-                            status: b.deposit_paid ? 'paid' : 'open'
-                        });
-                    }
-
-                    if (b.invoice_amount_cents || b.total_cents) {
-                        txList.push({
-                            id: `tx-inv-${b.id || idx}`,
-                            date,
-                            type: 'invoice',
-                            clientJob: name,
-                            amountCents: Number(b.invoice_amount_cents || b.total_cents),
-                            status: b.invoice_status === 'paid' ? 'paid' : 'open'
-                        });
-                    }
-                });
-
-                if (txList.length > 0) {
-                    setTransactions(txList);
-                } else {
-                    setDemoTransactions();
+                if (b.deposit_cents) {
+                    txList.push({
+                        id: `tx-dep-${b.id || idx}`,
+                        date,
+                        type: 'deposit',
+                        clientJob: name,
+                        amountCents: Number(b.deposit_cents),
+                        status: b.deposit_paid ? 'paid' : 'open'
+                    });
                 }
-            } else {
-                setDemoTransactions();
-            }
+
+                if (b.invoice_amount_cents || b.total_cents) {
+                    txList.push({
+                        id: `tx-inv-${b.id || idx}`,
+                        date,
+                        type: 'invoice',
+                        clientJob: name,
+                        amountCents: Number(b.invoice_amount_cents || b.total_cents),
+                        status: b.invoice_status === 'paid' ? 'paid' : 'open'
+                    });
+                }
+            });
+            setTransactions(txList);
         } catch (e: any) {
             setError(e.message || 'Could not load money metrics');
-            setDemoTransactions();
+            setTransactions([]);
         }
-    };
-
-    const setDemoTransactions = () => {
-        setTransactions([
-            {
-                id: 'tx-1',
-                date: '2026-09-17',
-                type: 'deposit',
-                clientJob: 'Dr Carmen Aesthetics',
-                amountCents: 16000,
-                status: 'paid'
-            },
-            {
-                id: 'tx-2',
-                date: '2026-09-17',
-                type: 'invoice',
-                clientJob: 'Dr Carmen Aesthetics',
-                amountCents: 4500,
-                status: 'paid'
-            },
-            {
-                id: 'tx-3',
-                date: '2026-09-12',
-                type: 'expense',
-                clientJob: 'Marketing',
-                amountCents: 0,
-                status: 'none'
-            },
-            {
-                id: 'tx-4',
-                date: '2026-09-05',
-                type: 'invoice',
-                clientJob: 'Sample Client',
-                amountCents: 0,
-                status: 'none'
-            },
-            {
-                id: 'tx-5',
-                date: '2026-09-01',
-                type: 'deposit',
-                clientJob: 'Sample Client',
-                amountCents: 0,
-                status: 'none'
-            }
-        ]);
     };
 
     useEffect(() => {
@@ -203,9 +148,9 @@ export default function MoneyDashboard() {
 
     // Card totals (dynamic from summary or computed from transactions)
     const cardMetrics = useMemo(() => {
-        const depositsPaid = summary?.depositsPaid ?? 16000;
-        const bookedTotal = summary?.bookedTotal ?? 16000;
-        const invoicesPaid = summary?.invoicesPaid ?? 4500;
+        const depositsPaid = summary?.depositsPaid ?? 0;
+        const bookedTotal = summary?.bookedTotal ?? 0;
+        const invoicesPaid = summary?.invoicesPaid ?? 0;
         const openBalance = summary?.openBalance ?? 0;
         const expenses = summary?.expenses ?? 0;
 
@@ -218,16 +163,28 @@ export default function MoneyDashboard() {
         };
     }, [summary]);
 
-    // Chart Intervals Data
+    // Chart intervals from real transactions only
     const chartBars = useMemo(() => {
-        return [
-            { label: 'Aug 20', deposits: 0, invoices: 0, expenses: 0 },
-            { label: 'Aug 27', deposits: 160, invoices: 0, expenses: 0 },
-            { label: 'Sep 03', deposits: 0, invoices: 45, expenses: 0 },
-            { label: 'Sep 10', deposits: 0, invoices: 0, expenses: 0 },
-            { label: 'Sep 17', deposits: 0, invoices: 0, expenses: 0 }
-        ];
-    }, []);
+        if (!transactions.length) {
+            return [
+                { label: '—', deposits: 0, invoices: 0, expenses: 0 }
+            ];
+        }
+        const byWeek = new Map<string, { deposits: number; invoices: number; expenses: number }>();
+        for (const tx of transactions) {
+            if (!tx.date) continue;
+            const d = new Date(`${tx.date}T12:00:00`);
+            if (Number.isNaN(d.getTime())) continue;
+            const label = d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
+            const row = byWeek.get(label) || { deposits: 0, invoices: 0, expenses: 0 };
+            const pounds = (Number(tx.amountCents) || 0) / 100;
+            if (tx.type === 'deposit') row.deposits += pounds;
+            else if (tx.type === 'invoice') row.invoices += pounds;
+            else if (tx.type === 'expense') row.expenses += pounds;
+            byWeek.set(label, row);
+        }
+        return Array.from(byWeek.entries()).map(([label, v]) => ({ label, ...v }));
+    }, [transactions]);
 
     return (
         <div className="w-full space-y-5">

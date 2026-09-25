@@ -60,24 +60,7 @@ export default function Team() {
             const fetchedMembers = res.members || [];
             const fetchedInvites = res.invites || [];
 
-            if (!fetchedMembers.length) {
-                // Default seeded member matching the screenshot
-                setMembers([
-                    {
-                        user_id: 'team-1',
-                        name: 'Karun',
-                        display_name: 'Karun',
-                        email: 'weumaunowoiyeu-8236@yopmail.com',
-                        role: 'owner',
-                        active: true,
-                        bookable: true,
-                        created_at: new Date().toISOString()
-                    }
-                ]);
-            } else {
-                setMembers(fetchedMembers);
-            }
-
+            setMembers(fetchedMembers);
             setInvites(fetchedInvites);
             setError('');
         } catch (e: any) {
@@ -149,20 +132,7 @@ export default function Team() {
             setInviteForm({ name: '', email: '', role: 'owner', bookable: true });
             await load();
         } catch (err: any) {
-            // If backend demo fallback
-            const newMember = {
-                user_id: `team-demo-${Date.now()}`,
-                name: inviteForm.name.trim() || inviteForm.email.split('@')[0],
-                display_name: inviteForm.name.trim() || inviteForm.email.split('@')[0],
-                email: inviteForm.email.trim(),
-                role: inviteForm.role,
-                active: true,
-                bookable: inviteForm.bookable,
-                created_at: new Date().toISOString()
-            };
-            setMembers((prev) => [...prev, newMember]);
-            setShowInviteModal(false);
-            setInviteForm({ name: '', email: '', role: 'owner', bookable: true });
+            setError(err.message || 'Could not send invite');
         } finally {
             setBusy(false);
         }
@@ -178,7 +148,7 @@ export default function Team() {
             )
         );
 
-        if (!String(id).startsWith('team-')) {
+        if (!String(id).startsWith('team-demo-')) {
             try {
                 await apiPatch(`/api/host/team/members/${id}`, {
                     role: m.role,
@@ -201,7 +171,7 @@ export default function Team() {
             )
         );
 
-        if (!String(id).startsWith('team-')) {
+        if (!String(id).startsWith('team-demo-')) {
             try {
                 await apiPatch(`/api/host/team/members/${id}`, {
                     role: newRole,
@@ -227,7 +197,7 @@ export default function Team() {
             )
         );
 
-        if (!String(id).startsWith('team-')) {
+        if (!String(id).startsWith('team-demo-')) {
             try {
                 await apiPatch(`/api/host/team/members/${id}`, {
                     role: m.role,
@@ -251,7 +221,7 @@ export default function Team() {
             prev.filter((item) => (item.user_id || item.membership_id) !== id)
         );
 
-        if (!String(id).startsWith('team-')) {
+        if (!String(id).startsWith('team-demo-')) {
             try {
                 await apiDelete(`/api/host/team/members/${id}`);
             } catch (err) {

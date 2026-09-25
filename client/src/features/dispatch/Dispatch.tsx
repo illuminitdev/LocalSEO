@@ -14,14 +14,6 @@ import {
 import { apiGet, apiPatch, cn } from '../../shared/utils';
 import PlacesMap, { geocodeAddress, mapsJsConfigured, type MapMarker } from '../../shared/PlacesMap';
 
-// Basingstoke demo coordinates
-const BASINGSTOKE_FALLBACK_COORDS = [
-    { lat: 51.2745, lng: -1.0942, address: 'uk 9378, Basingstoke' },
-    { lat: 51.2502, lng: -1.0664, address: '5654, Basingstoke' },
-    { lat: 51.2584, lng: -1.0918, address: '57 Brackley way, Basingstoke, RG22 6LL' },
-    { lat: 51.2468, lng: -1.1095, address: 'South Ham, Basingstoke' }
-];
-
 function startOfWeek(d: Date) {
     const x = new Date(d);
     const day = (x.getDay() + 6) % 7; // Monday = 0
@@ -77,66 +69,8 @@ export default function Dispatch() {
             const fetchedBookings = dash.bookings || [];
             const fetchedMembers = team.members || [];
 
-            setMembers(
-                fetchedMembers.length > 0
-                    ? fetchedMembers
-                    : [
-                          { user_id: 'mem-1', name: 'Karun' },
-                          { user_id: 'mem-2', name: 'Carmen' },
-                          { user_id: 'mem-3', name: 'Alex' }
-                      ]
-            );
-
-            // If no bookings or empty schedule, seed demo jobs matching the week
-            if (!fetchedBookings.length) {
-                const mon = startOfWeek(weekStart);
-                const thu = new Date(mon);
-                thu.setDate(thu.getDate() + 3);
-                const fri = new Date(mon);
-                fri.setDate(fri.getDate() + 4);
-
-                setBookings([
-                    {
-                        id: 'disp-demo-1',
-                        customer_name: 'robert kim',
-                        customer_address: 'uk 9378',
-                        start_at: new Date(thu.setHours(17, 0, 0, 0)).toISOString(),
-                        end_at: new Date(thu.setHours(18, 0, 0, 0)).toISOString(),
-                        status: 'scheduled',
-                        assigned_user_id: null,
-                        route_sort: 1,
-                        lat: 51.2745,
-                        lng: -1.0942
-                    },
-                    {
-                        id: 'disp-demo-2',
-                        customer_name: 'sai manikanta',
-                        customer_address: '5654',
-                        start_at: new Date(thu.setHours(22, 30, 0, 0)).toISOString(),
-                        end_at: new Date(thu.setHours(23, 30, 0, 0)).toISOString(),
-                        status: 'scheduled',
-                        assigned_user_id: null,
-                        route_sort: 2,
-                        lat: 51.2502,
-                        lng: -1.0664
-                    },
-                    {
-                        id: 'disp-demo-3',
-                        customer_name: 'mani',
-                        customer_address: '57 Brackley way, Basingstoke, RG22 6LL',
-                        start_at: new Date(fri.setHours(22, 30, 0, 0)).toISOString(),
-                        end_at: new Date(fri.setHours(23, 30, 0, 0)).toISOString(),
-                        status: 'scheduled',
-                        assigned_user_id: 'mem-1',
-                        assigned_name: 'Karun',
-                        route_sort: 1,
-                        lat: 51.2584,
-                        lng: -1.0918
-                    }
-                ]);
-            } else {
-                setBookings(fetchedBookings);
-            }
+            setMembers(fetchedMembers);
+            setBookings(fetchedBookings);
         } catch (e: any) {
             setError(e.message || 'Could not load dispatch schedule');
         }
@@ -188,17 +122,7 @@ export default function Dispatch() {
 
         const updateMarkers = async () => {
             if (!selectedDayBookings.length) {
-                // Show default Basingstoke area route pins for presentation
-                setMapMarkers(
-                    BASINGSTOKE_FALLBACK_COORDS.map((coord, idx) => ({
-                        lat: coord.lat,
-                        lng: coord.lng,
-                        label: String(idx + 1),
-                        title: `Stop ${idx + 1} — ${coord.address}`,
-                        highlight: idx === 0,
-                        color: '#FF8800'
-                    }))
-                );
+                setMapMarkers([]);
                 return;
             }
 
@@ -216,19 +140,14 @@ export default function Dispatch() {
                     }
                 }
 
-                // Fallback to coordinates map if address is demo-based
-                if (lat == null || lng == null) {
-                    const fallback = BASINGSTOKE_FALLBACK_COORDS[i % BASINGSTOKE_FALLBACK_COORDS.length];
-                    lat = fallback.lat;
-                    lng = fallback.lng;
-                }
+                if (lat == null || lng == null) continue;
 
                 markers.push({
                     lat,
                     lng,
-                    label: String(i + 1),
-                    title: `${b.customer_name || 'Job'} — ${b.customer_address || 'Basingstoke'}`,
-                    highlight: i === 0,
+                    label: String(markers.length + 1),
+                    title: `${b.customer_name || 'Job'} — ${b.customer_address || ''}`,
+                    highlight: markers.length === 0,
                     color: '#FF8800'
                 });
             }
@@ -248,11 +167,11 @@ export default function Dispatch() {
     // Google Maps Navigation URL
     const googleMapsRouteUrl = useMemo(() => {
         const addresses = selectedDayBookings
-            .map((b) => b.customer_address || 'Basingstoke, UK')
-            .filter(Boolean);
+            .map((b) => b.customer_address)
+            .filter(Boolean) as string[];
 
         if (!addresses.length) {
-            return 'https://www.google.com/maps/search/Basingstoke';
+            return '';
         }
 
         if (addresses.length === 1) {
@@ -267,11 +186,9 @@ export default function Dispatch() {
     const handleAssignTeamMember = async (bookingId: string, userId: string) => {
         setActiveActionBookingId(null);
         try {
-            if (!bookingId.startsWith('disp-demo-')) {
-                await apiPatch(`/api/host/bookings/${bookingId}`, {
-                    assignedUserId: userId || null
-                });
-            }
+            await apiPatch(`/api/host/bookings/${bookingId}`, {
+                assignedUserId: userId || null
+            });
             const memberObj = members.find((m) => m.user_id === userId);
             setBookings((prev) =>
                 prev.map((b) =>
@@ -291,36 +208,8 @@ export default function Dispatch() {
 
     const handleCreateJob = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newJobForm.customerName.trim()) return;
-
-        const dateStr = newJobForm.date || selectedDate.toISOString().slice(0, 10);
-        const startAt = new Date(`${dateStr}T${newJobForm.time || '14:00'}:00`).toISOString();
-        const endAt = new Date(new Date(startAt).getTime() + 60 * 60 * 1000).toISOString();
-        const memberObj = members.find((m) => m.user_id === newJobForm.assignedUserId);
-
-        const newBooking = {
-            id: `disp-demo-${Date.now()}`,
-            customer_name: newJobForm.customerName.trim(),
-            customer_address: newJobForm.address.trim() || 'Basingstoke, UK',
-            start_at: startAt,
-            end_at: endAt,
-            status: 'scheduled',
-            assigned_user_id: newJobForm.assignedUserId || null,
-            assigned_name: memberObj ? memberObj.name : null,
-            route_sort: selectedDayBookings.length + 1,
-            lat: BASINGSTOKE_FALLBACK_COORDS[selectedDayBookings.length % BASINGSTOKE_FALLBACK_COORDS.length].lat,
-            lng: BASINGSTOKE_FALLBACK_COORDS[selectedDayBookings.length % BASINGSTOKE_FALLBACK_COORDS.length].lng
-        };
-
-        setBookings((prev) => [...prev, newBooking]);
+        setError('Dispatch jobs come from real bookings. Add a job on the booking board first.');
         setShowAssignModal(false);
-        setNewJobForm({
-            customerName: '',
-            address: '',
-            time: '14:00',
-            assignedUserId: '',
-            date: ''
-        });
     };
 
     const selectedDayTitle = selectedDate.toLocaleDateString('en-US', {
