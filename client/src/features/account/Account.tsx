@@ -233,6 +233,8 @@ export default function Account() {
                 if (me.user?.mustChangePassword) {
                     setMustChange(true);
                     setMustChangePassword(true);
+                    setShowPasswordForm(true);
+                    selectSection('password');
                 }
                 const o = me.organization || {};
                 setOrg({
@@ -523,7 +525,8 @@ export default function Account() {
 
             {mustChangePassword && (
                 <p className="mb-3 text-xs text-amber-950 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl px-4 py-2.5 shadow-sm">
-                    Please change your temporary password when you can — open Account security.
+                    <span className="font-bold">Change your temporary password.</span>
+                    {' '}You signed in with a ZappSites invite password — open Account security below and set a new one.
                 </p>
             )}
 
@@ -859,10 +862,12 @@ export default function Account() {
                     <div className="rounded-xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 flex items-start gap-3 mb-4">
                         <Shield className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
                         <p className="text-sm text-amber-950">
-                            We recommend changing your password every 90 days to keep your account secure.
+                            {mustChangePassword
+                                ? 'You signed in with a temporary invite password. Set a new password below to secure your account.'
+                                : 'We recommend changing your password every 90 days to keep your account secure.'}
                         </p>
                     </div>
-                    {!showPasswordForm ? (
+                    {!showPasswordForm && !mustChangePassword ? (
                         <div className="rounded-xl border border-dashed border-[#E2E8F0] px-4 py-8 text-center">
                             <button
                                 type="button"
