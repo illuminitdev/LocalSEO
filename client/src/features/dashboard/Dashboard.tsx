@@ -527,10 +527,11 @@ function LocalSeoOnlyDashboard({
     userName: string;
     businessData: LocalBusinessData | null;
 }) {
-    const businessName = businessData?.name || 'Local Business';
+    const businessName = businessData?.name || 'your business';
     const rating = businessData?.rating ?? null;
     const reviewCount = businessData?.review_count ?? 0;
     const reviews = businessData?.reviews || [];
+    const hasBusiness = Boolean(businessData?.name);
 
     const seoStats = [
         {
@@ -627,7 +628,9 @@ function LocalSeoOnlyDashboard({
                             Dominate your local market on Google Maps & Search
                         </h2>
                         <p className="text-xs sm:text-sm text-[#A9C7F5] mt-1.5 leading-relaxed font-medium">
-                            Your Google Business Profile is currently ranking in the <strong>Top 3 Local Pack</strong> for 84% of nearby searches.
+                            {hasBusiness
+                                ? 'Track map pack rankings, citations, and profile health for your Google Business Profile.'
+                                : 'Connect your Google Business Profile to start tracking map rankings, citations, and local visibility.'}
                         </p>
                         <div className="flex flex-wrap gap-2.5 mt-4">
                             <Link
@@ -649,13 +652,15 @@ function LocalSeoOnlyDashboard({
                     <div className="hidden lg:flex flex-col gap-2.5 bg-white/5 backdrop-blur-md p-4 rounded-2xl border border-white/10 shrink-0 w-64">
                         <div className="flex items-center justify-between text-xs">
                             <span className="text-slate-300">Map Dominance</span>
-                            <span className="font-bold text-amber-400">High (#2.4 Avg)</span>
+                            <span className="font-bold text-amber-400">No data yet</span>
                         </div>
                         <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden">
-                            <div className="bg-amber-400 h-full rounded-full" style={{ width: '84%' }} />
+                            <div className="bg-amber-400/40 h-full rounded-full" style={{ width: '0%' }} />
                         </div>
                         <p className="text-[11px] text-slate-300 mt-1">
-                            ✓ 42 citations active &nbsp;•&nbsp; ✓ GBP verified
+                            {hasBusiness
+                                ? '0 citations synced · Run a grid scan to measure rank'
+                                : 'Connect GBP to measure map pack coverage'}
                         </p>
                     </div>
                 </div>
@@ -1021,11 +1026,15 @@ function HybridDashboard({
                         {/* Map Dominance Score Box */}
                         <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between text-xs">
                             <div>
-                                <p className="font-bold text-slate-900">Map Dominance: #2.4 Avg Rank</p>
-                                <p className="text-slate-500 mt-0.5">84% Top 3 Local Pack coverage in Basingstoke</p>
+                                <p className="font-bold text-slate-900">Map Dominance: No data yet</p>
+                                <p className="text-slate-500 mt-0.5">
+                                    {businessData?.name
+                                        ? 'Run a Local Search Grid scan to measure Top 3 pack coverage.'
+                                        : 'Connect your Google Business Profile, then run a grid scan.'}
+                                </p>
                             </div>
-                            <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] uppercase shrink-0">
-                                Strong Visibility
+                            <span className="px-2.5 py-1 rounded-full bg-slate-200 text-slate-600 font-bold text-[10px] uppercase shrink-0">
+                                Not measured
                             </span>
                         </div>
 

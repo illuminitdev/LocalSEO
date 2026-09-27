@@ -20,33 +20,15 @@ import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
 
 const REQUIRED_FIELDS = ['name', 'category', 'address', 'phone'] as const;
 
-const DEFAULT_SCHEDULE = [
-    { day: 'Monday', time: '5:00 – 10:30 PM' },
-    { day: 'Tuesday', time: '5:00 – 10:30 PM' },
-    { day: 'Wednesday', time: '5:00 – 10:30 PM' },
-    { day: 'Thursday', time: '5:00 – 10:30 PM' },
-    { day: 'Friday', time: '5:00 – 10:30 PM' },
-    { day: 'Saturday', time: '12:00 – 2:00 PM, 5:00 – 10:30 PM' },
-    { day: 'Sunday', time: '12:00 – 2:00 PM, 5:00 – 10:30 PM' }
-];
-const DEFAULT_ATTRIBUTES = [
-    'south_indian_restaurant',
-    'indian_restaurant',
-    'restaurant',
-    'food',
-    'point_of_interest',
-    'establishment'
-];
-
-const INITIAL_PROFILE = {
-    name: 'Sravs Kitchen',
-    category: 'South Indian Restaurant',
-    address: '162 Portswood Rd, Portswood, Southampton SO17 2NJ, UK',
-    phone: '023 8039 9221',
-    website: 'https://sravskitchen.co.uk/',
-    hours: 'Mon-Fri: 5:00 – 10:30 PM; Sat-Sun: 12:00 – 2:00 PM, 5:00 – 10:30 PM',
-    attributes: 'south_indian_restaurant, indian_restaurant, restaurant, food, point_of_interest, establishment',
-    description: 'Authentic South Indian culinary experience serving traditional dosas, curries, and regional delicacies in Southampton.'
+const EMPTY_PROFILE = {
+    name: '',
+    category: '',
+    address: '',
+    phone: '',
+    website: '',
+    hours: '',
+    attributes: '',
+    description: ''
 };
 
 export default function ProfileAudit() {
@@ -55,21 +37,21 @@ export default function ProfileAudit() {
     const [auditResult, setAuditResult] = useState<any>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [savedOk, setSavedOk] = useState('');
-    const [formData, setFormData] = useState({ ...INITIAL_PROFILE });
+    const [formData, setFormData] = useState({ ...EMPTY_PROFILE });
     const [error, setError] = useState('');
     const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
 
     const applyBusiness = (b: any) => {
         if (!b) return;
         setFormData({
-            name: b?.name || INITIAL_PROFILE.name,
-            category: b?.category || INITIAL_PROFILE.category,
-            address: b?.address || INITIAL_PROFILE.address,
-            phone: b?.phone || INITIAL_PROFILE.phone,
-            website: b?.website || INITIAL_PROFILE.website,
-            hours: b?.hours || INITIAL_PROFILE.hours,
-            attributes: b?.attributes || INITIAL_PROFILE.attributes,
-            description: b?.description || INITIAL_PROFILE.description
+            name: b?.name || '',
+            category: b?.category || '',
+            address: b?.address || '',
+            phone: b?.phone || '',
+            website: b?.website || '',
+            hours: b?.hours || '',
+            attributes: b?.attributes || '',
+            description: b?.description || ''
         });
     };
 
@@ -80,7 +62,7 @@ export default function ProfileAudit() {
                 applyBusiness(b);
             }
         } catch {
-            // Keep default realistic profile data
+            // Leave empty until the user connects or enters their business
         }
     };
 
@@ -114,6 +96,18 @@ export default function ProfileAudit() {
     };
 
     const handleAudit = async () => {
+        const missing = REQUIRED_FIELDS.filter((k) => !String(formData[k] || '').trim());
+        if (missing.length) {
+            const nextErrors: Record<string, boolean> = {};
+            missing.forEach((k) => {
+                nextErrors[k] = true;
+            });
+            setFieldErrors(nextErrors);
+            setError('Add your business name, category, address, and phone before running an audit.');
+            setMode('edit');
+            return;
+        }
+
         setIsAuditing(true);
         setError('');
         try {
@@ -176,13 +170,13 @@ export default function ProfileAudit() {
         }
     };
 
-    // Attribute badges list
     const attributeList = formData.attributes
         ? formData.attributes
               .split(',')
               .map((s) => s.trim())
               .filter(Boolean)
-        : DEFAULT_ATTRIBUTES;
+        : [];
+    const hasBusiness = Boolean(String(formData.name || '').trim());
 
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
@@ -286,10 +280,15 @@ export default function ProfileAudit() {
                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
                         <div>
                             <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-[#FFF7ED] text-[#FF8800] mb-1.5">
-                                SAVED LISTING
+                                {hasBusiness ? 'SAVED LISTING' : 'NOT CONNECTED'}
                             </span>
-                            <h2 className="text-2xl font-bold text-[#0F172A] leading-tight">{formData.name}</h2>
-                            <p className="text-xs text-gray-500 font-medium mt-0.5">{formData.category}</p>
+                            <h2 className="text-2xl font-bold text-[#0F172A] leading-tight">
+                                {hasBusiness ? formData.name : 'Add your business'}
+                            </h2>
+                            <p className="text-xs text-gray-500 font-medium mt-0.5">
+                                {formData.category ||
+                                    (hasBusiness ? '' : 'Enter your business details to power listing tools.')}
+                            </p>
                         </div>
 
                         <button
@@ -298,7 +297,7 @@ export default function ProfileAudit() {
                             className="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl border border-[#E2E8F0] bg-white hover:bg-gray-50 text-xs font-bold text-[#0F172A] cursor-pointer shadow-xs transition-colors self-start"
                         >
                             <Pencil className="w-3.5 h-3.5 text-gray-500" />
-                            Edit your business info
+                            {hasBusiness ? 'Edit your business info' : 'Add business info'}
                         </button>
                     </div>
 
@@ -312,7 +311,7 @@ export default function ProfileAudit() {
                             <div className="flex-1 min-w-0">
                                 <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">ADDRESS</p>
                                 <p className="text-xs font-semibold text-[#0F172A] leading-relaxed break-words">
-                                    {formData.address}
+                                    {formData.address || 'Not set'}
                                 </p>
                             </div>
                         </div>
@@ -324,7 +323,7 @@ export default function ProfileAudit() {
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">PHONE</p>
-                                <p className="text-xs font-semibold text-[#0F172A]">{formData.phone}</p>
+                                <p className="text-xs font-semibold text-[#0F172A]">{formData.phone || 'Not set'}</p>
                             </div>
                         </div>
 
@@ -335,14 +334,9 @@ export default function ProfileAudit() {
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2">HOURS</p>
-                                <div className="space-y-1 text-xs text-[#0F172A]">
-                                    {DEFAULT_SCHEDULE.map((item) => (
-                                        <div key={item.day} className="grid grid-cols-[85px_1fr] gap-2">
-                                            <span className="text-gray-500 font-medium">{item.day}</span>
-                                            <span className="font-semibold">{item.time}</span>
-                                        </div>
-                                    ))}
-                                </div>
+                                <p className="text-xs font-semibold text-[#0F172A] whitespace-pre-wrap">
+                                    {formData.hours || 'Not set'}
+                                </p>
                             </div>
                         </div>
 
@@ -377,16 +371,20 @@ export default function ProfileAudit() {
                         </div>
                         <div className="flex-1 min-w-0">
                             <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2">ATTRIBUTES</p>
-                            <div className="flex flex-wrap gap-2">
-                                {attributeList.map((attr, idx) => (
-                                    <span
-                                        key={idx}
-                                        className="inline-block px-3 py-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-full text-xs font-medium text-gray-700"
-                                    >
-                                        {attr}
-                                    </span>
-                                ))}
-                            </div>
+                            {attributeList.length > 0 ? (
+                                <div className="flex flex-wrap gap-2">
+                                    {attributeList.map((attr, idx) => (
+                                        <span
+                                            key={idx}
+                                            className="inline-block px-3 py-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-full text-xs font-medium text-gray-700"
+                                        >
+                                            {attr}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-xs text-gray-400 font-medium">Not set</p>
+                            )}
                         </div>
                     </div>
 
@@ -428,7 +426,7 @@ export default function ProfileAudit() {
                                 className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800] ${
                                     fieldErrors.name ? 'border-red-400' : 'border-[#E2E8F0]'
                                 }`}
-                                placeholder="Sravs Kitchen"
+                                placeholder="Business name"
                             />
                         </div>
 
@@ -444,7 +442,7 @@ export default function ProfileAudit() {
                                 className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800] ${
                                     fieldErrors.category ? 'border-red-400' : 'border-[#E2E8F0]'
                                 }`}
-                                placeholder="South Indian Restaurant"
+                                placeholder="e.g. Plumber, Hairdresser, Cafe"
                             />
                         </div>
 
@@ -460,7 +458,7 @@ export default function ProfileAudit() {
                                 className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800] ${
                                     fieldErrors.address ? 'border-red-400' : 'border-[#E2E8F0]'
                                 }`}
-                                placeholder="162 Portswood Rd, Portswood, Southampton SO17 2NJ, UK"
+                                placeholder="Street, city, postcode"
                             />
                         </div>
 
@@ -476,7 +474,7 @@ export default function ProfileAudit() {
                                 className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800] ${
                                     fieldErrors.phone ? 'border-red-400' : 'border-[#E2E8F0]'
                                 }`}
-                                placeholder="023 8039 9221"
+                                placeholder="Phone number"
                             />
                         </div>
 
@@ -488,7 +486,7 @@ export default function ProfileAudit() {
                                 value={formData.website}
                                 onChange={handleChange}
                                 className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800]"
-                                placeholder="https://sravskitchen.co.uk/"
+                                placeholder="https://"
                             />
                         </div>
 
@@ -500,7 +498,7 @@ export default function ProfileAudit() {
                                 value={formData.hours}
                                 onChange={handleChange}
                                 className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800]"
-                                placeholder="Mon-Fri: 5:00 – 10:30 PM; Sat-Sun: 12:00 – 2:00 PM, 5:00 – 10:30 PM"
+                                placeholder="e.g. Mon–Fri 9:00 AM – 5:00 PM"
                             />
                         </div>
 
@@ -514,7 +512,7 @@ export default function ProfileAudit() {
                                 value={formData.attributes}
                                 onChange={handleChange}
                                 className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800]"
-                                placeholder="south_indian_restaurant, indian_restaurant, restaurant, food, point_of_interest, establishment"
+                                placeholder="e.g. wheelchair_accessible, women_owned"
                             />
                         </div>
 

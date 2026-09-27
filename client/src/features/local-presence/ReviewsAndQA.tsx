@@ -83,8 +83,8 @@ function GoogleLogo({ className = 'w-4 h-4' }: { className?: string }) {
 
 export function ReviewManagement() {
     const [reviews, setReviews] = useState<Review[]>([]);
-    const [businessName, setBusinessName] = useState('Sravs Kitchen');
-    const [businessLocation, setBusinessLocation] = useState('Southampton, UK');
+    const [businessName, setBusinessName] = useState('');
+    const [businessLocation, setBusinessLocation] = useState('');
     const [globalTone, setGlobalTone] = useState('warm');
     const [isDraftingBatch, setIsDraftingBatch] = useState(false);
     const [activeTab, setActiveTab] = useState<'all' | 'needs_reply' | 'drafts' | 'replied'>('all');
@@ -226,7 +226,8 @@ export function ReviewManagement() {
     const repliedCount = reviews.filter((r) => r.status === 'published').length;
     const avgRating = totalCount
         ? (reviews.reduce((acc, r) => acc + r.rating, 0) / totalCount).toFixed(1)
-        : '4.7';
+        : null;
+    const avgRatingNum = avgRating != null ? Number(avgRating) : 0;
 
     return (
         <div className="max-w-7xl mx-auto animate-in fade-in duration-500 pb-12">
@@ -248,8 +249,12 @@ export function ReviewManagement() {
                             <GoogleLogo className="w-3.5 h-3.5" />
                         </div>
                         <div className="text-left leading-tight">
-                            <p className="text-xs font-bold text-[#0F172A]">{businessName}</p>
-                            <p className="text-[10px] text-gray-400 font-medium">{businessLocation}</p>
+                            <p className="text-xs font-bold text-[#0F172A]">
+                                {businessName || 'Connect your business'}
+                            </p>
+                            <p className="text-[10px] text-gray-400 font-medium">
+                                {businessLocation || 'Add a profile to sync reviews'}
+                            </p>
                         </div>
                     </div>
 
@@ -339,12 +344,7 @@ export function ReviewManagement() {
                         </div>
                         <div>
                             <p className="text-xs text-gray-500 font-medium">Replied this month</p>
-                            <div className="flex items-center gap-2">
-                                <p className="text-2xl font-bold text-[#0F172A]">{repliedCount}</p>
-                                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full">
-                                    +12%
-                                </span>
-                            </div>
+                            <p className="text-2xl font-bold text-[#0F172A]">{repliedCount}</p>
                         </div>
                     </div>
                 </div>
@@ -357,12 +357,19 @@ export function ReviewManagement() {
                     <div>
                         <p className="text-xs text-gray-500 font-medium">Average rating</p>
                         <div className="flex items-center gap-1.5">
-                            <span className="text-2xl font-bold text-[#0F172A]">{avgRating}</span>
-                            <div className="flex text-amber-400">
-                                {[...Array(5)].map((_, i) => (
-                                    <Star key={i} className="w-3.5 h-3.5 fill-current" />
-                                ))}
-                            </div>
+                            <span className="text-2xl font-bold text-[#0F172A]">{avgRating ?? '—'}</span>
+                            {avgRating != null && (
+                                <div className="flex text-amber-400">
+                                    {[...Array(5)].map((_, i) => (
+                                        <Star
+                                            key={i}
+                                            className={`w-3.5 h-3.5 ${
+                                                i < Math.round(avgRatingNum) ? 'fill-current' : 'text-gray-200'
+                                            }`}
+                                        />
+                                    ))}
+                                </div>
+                            )}
                         </div>
                         <p className="text-[10px] text-gray-400">
                             {totalCount > 0 ? `Based on ${totalCount} reviews` : 'No reviews recorded'}
