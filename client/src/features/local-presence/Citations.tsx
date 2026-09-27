@@ -216,12 +216,12 @@ export default function Citations() {
                                             )}
                                         </td>
                                         <td className="px-5 py-3.5 text-gray-700 font-medium">
-                                            {row.businessName || 'Sravs Kitchen'}
+                                            {row.businessName || '—'}
                                         </td>
                                         <td className="px-5 py-3.5 text-gray-600">
-                                            {row.address || '162 Portswood Rd, Southampton'}
+                                            {row.address || '—'}
                                         </td>
-                                        <td className="px-5 py-3.5 text-gray-600">{row.phone || '023 8039 9221'}</td>
+                                        <td className="px-5 py-3.5 text-gray-600">{row.phone || '—'}</td>
                                         <td className="px-5 py-3.5">{statusBadge(row.status)}</td>
                                     </tr>
                                 ))

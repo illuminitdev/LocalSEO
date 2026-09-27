@@ -109,32 +109,27 @@ export default function RankTracker() {
     const [isGeneratingGap, setIsGeneratingGap] = useState(false);
     const [gapAnalysis, setGapAnalysis] = useState<string | null>(null);
     const [gridData, setGridData] = useState<number[][]>([]);
-    const [keyword, setKeyword] = useState('South Indian Restaurant near me');
-    const [activeKeyword, setActiveKeyword] = useState('South Indian Restaurant near me');
+    const [keyword, setKeyword] = useState('');
+    const [activeKeyword, setActiveKeyword] = useState('');
     const [businessCategory, setBusinessCategory] = useState('');
     const [competitors, setCompetitors] = useState<any[]>([]);
     const [trackedKeywords, setTrackedKeywords] = useState<TrackedKeyword[]>([]);
-    const [lastAudit, setLastAudit] = useState<LastAuditSummary | null>({
-        total: 93,
-        bandLabel: 'Strong local presence',
-        createdAt: new Date().toISOString(),
-        query: 'South Indian Restaurant near Southampton SO17 2NJ'
-    });
+    const [lastAudit, setLastAudit] = useState<LastAuditSummary | null>(null);
     const [hasAuditReport, setHasAuditReport] = useState(false);
     const [showRankGrid, setShowRankGrid] = useState(false);
     const [error, setError] = useState('');
 
     const [showAuditForm, setShowAuditForm] = useState(false);
-    const [businessName, setBusinessName] = useState('South Indian Restaurant');
-    const [address, setAddress] = useState('Southampton SO17 2NJ');
-    const [city, setCity] = useState('Southampton');
-    const [service, setService] = useState('Restaurants');
+    const [businessName, setBusinessName] = useState('');
+    const [address, setAddress] = useState('');
+    const [city, setCity] = useState('');
+    const [service, setService] = useState('');
     const [serviceOther, setServiceOther] = useState('');
     const [website, setWebsite] = useState('');
     const [phone, setPhone] = useState('');
     const [placeId, setPlaceId] = useState('');
-    const [lat, setLat] = useState<number | null>(50.9097);
-    const [lng, setLng] = useState<number | null>(-1.4044);
+    const [lat, setLat] = useState<number | null>(null);
+    const [lng, setLng] = useState<number | null>(null);
     const [auditError, setAuditError] = useState('');
     const [auditRunning, setAuditRunning] = useState(false);
     const [auditStep, setAuditStep] = useState(0);
@@ -232,7 +227,7 @@ export default function RankTracker() {
                             total: report.score.total,
                             bandLabel: report.score.bandLabel || 'Strong local presence',
                             createdAt: report.createdAt || new Date().toISOString(),
-                            query: report.gbpLookup?.localRank?.query || report.input?.service || 'South Indian Restaurant near Southampton SO17 2NJ'
+                            query: report.gbpLookup?.localRank?.query || report.input?.service || ''
                         });
                     }
                 }
@@ -277,20 +272,21 @@ export default function RankTracker() {
         };
     }, [gridData, businessName, address, city, lat, lng]);
 
-    const displayKeyword = activeKeyword || keyword || (businessCategory ? `${businessCategory} near me` : 'South Indian Restaurant near me');
+    const displayKeyword =
+        activeKeyword || keyword || (businessCategory ? `${businessCategory} near me` : '');
 
     const mapMarkers = useMemo(() => {
-        const centerLat = typeof lat === 'number' && Number.isFinite(lat) ? lat : 50.9097;
-        const centerLng = typeof lng === 'number' && Number.isFinite(lng) ? lng : -1.4044;
+        const centerLat = typeof lat === 'number' && Number.isFinite(lat) ? lat : null;
+        const centerLng = typeof lng === 'number' && Number.isFinite(lng) ? lng : null;
 
         const markers: MapMarker[] = [];
-        const effectiveGrid = gridData.length === 3 ? gridData : [
-            [3, 4, 2],
-            [1, 2, 5],
-            [4, 6, 8]
-        ];
+        if (centerLat == null || centerLng == null) {
+            return markers;
+        }
 
-        if (showRankGrid) {
+        const effectiveGrid = gridData.length === 3 ? gridData : [];
+
+        if (showRankGrid && effectiveGrid.length === 3) {
             markers.push(...geoGridMarkers(centerLat, centerLng, effectiveGrid, 1));
         }
 
@@ -322,16 +318,6 @@ export default function RankTracker() {
                     color: '#3B82F6'
                 });
             }
-        } else {
-            // Default realistic map markers matching screenshot
-            markers.push(
-                { lat: centerLat + 0.0052, lng: centerLng - 0.0084, label: 'C1', title: 'Competitor 1', color: '#3B82F6' },
-                { lat: centerLat + 0.0071, lng: centerLng + 0.0062, label: 'C2', title: 'Competitor 2', color: '#3B82F6' },
-                { lat: centerLat - 0.0048, lng: centerLng + 0.0078, label: 'C3', title: 'Competitor 3', color: '#3B82F6' },
-                { lat: centerLat - 0.0062, lng: centerLng - 0.0091, label: 'O1', title: 'Other business', color: '#94A3B8' },
-                { lat: centerLat + 0.0041, lng: centerLng - 0.0152, label: 'O2', title: 'Other business', color: '#94A3B8' },
-                { lat: centerLat - 0.0092, lng: centerLng + 0.0035, label: 'O3', title: 'Other business', color: '#94A3B8' }
-            );
         }
 
         return markers;
@@ -366,9 +352,9 @@ export default function RankTracker() {
 
     const handleGenerateGap = async () => {
         const effective =
-            keyword.trim() || (businessCategory ? `${businessCategory} near me` : 'South Indian Restaurant near me');
+            keyword.trim() || (businessCategory ? `${businessCategory} near me` : '');
         if (!effective) {
-            setError('Enter a ranking keyword (e.g. South Indian restaurant near me) or set your business category.');
+            setError('Enter a ranking keyword (e.g. plumber near me) or set your business category.');
             return;
         }
         if (!keyword.trim()) setKeyword(effective);
@@ -410,10 +396,10 @@ export default function RankTracker() {
             const ranks = nextGrid.flat().filter((n: any) => typeof n === 'number');
             const avgRank = ranks.length
                 ? Number((ranks.reduce((a: number, b: number) => a + b, 0) / ranks.length).toFixed(1))
-                : Number(data.trackedKeywords?.[0]?.avgRank) || 3.3;
+                : Number(data.trackedKeywords?.[0]?.avgRank) || 0;
             const top3Percentage = ranks.length
                 ? Math.round((ranks.filter((r: number) => r <= 3).length / ranks.length) * 100)
-                : Number(data.trackedKeywords?.[0]?.top3Percentage) || 56;
+                : Number(data.trackedKeywords?.[0]?.top3Percentage) || 0;
 
             const entry: TrackedKeyword = {
                 keyword: usedKeyword,
@@ -488,16 +474,16 @@ export default function RankTracker() {
             saveVisibilityAuditReport(data);
             setHasAuditReport(true);
             const summary: LastAuditSummary = {
-                total: Number(data?.score?.total) || 93,
-                bandLabel: String(data?.score?.bandLabel || data?.score?.band || 'Strong local presence'),
+                total: Number(data?.score?.total) || 0,
+                bandLabel: String(data?.score?.bandLabel || data?.score?.band || 'Visibility score'),
                 createdAt: String(data?.createdAt || new Date().toISOString()),
-                query: String(data?.gbpLookup?.localRank?.query || resolvedService || 'South Indian Restaurant near Southampton SO17 2NJ')
+                query: String(data?.gbpLookup?.localRank?.query || resolvedService || '')
             };
             setLastAudit(summary);
             await updateDashboardStats({ lastVisibilityAudit: summary });
             await logDashboardActivity({
                 type: 'audit',
-                message: `Local Visibility Audit scored ${data?.score?.total ?? '93'}/100.`,
+                message: `Local Visibility Audit scored ${data?.score?.total ?? '—'}/100.`,
                 icon: 'Radar',
                 color: 'text-[#FF8800]'
             }).catch(() => undefined);
@@ -511,14 +497,7 @@ export default function RankTracker() {
         }
     };
 
-    const effectiveKeywords: TrackedKeyword[] = trackedKeywords.length > 0 ? trackedKeywords : [
-        {
-            keyword: 'South Indian Restaurant near me',
-            avgRank: 3.3,
-            top3Percentage: 56,
-            updatedAt: new Date().toISOString()
-        }
-    ];
+    const effectiveKeywords: TrackedKeyword[] = trackedKeywords;
 
     return (
         <div className="max-w-7xl mx-auto animate-in fade-in duration-500 pb-12">
@@ -546,7 +525,7 @@ export default function RankTracker() {
                                 }
                             }}
                             className="w-full pl-9 pr-8 py-2 bg-white border border-[#E2E8F0] rounded-xl text-sm font-medium text-[#0F172A] shadow-xs focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800]"
-                            placeholder="South Indian Restaurant near me"
+                            placeholder="your service near me"
                         />
                         {keyword && (
                             <button
@@ -593,17 +572,21 @@ export default function RankTracker() {
 
                             <div className="text-right shrink-0">
                                 <div className="text-3xl font-black text-[#0F172A] leading-none">
-                                    {lastAudit?.total ?? 93}
+                                    {lastAudit?.total != null ? lastAudit.total : '—'}
                                     <span className="text-base font-bold text-gray-400">/100</span>
                                 </div>
                                 <p className="text-xs font-bold text-emerald-600 mt-1">
-                                    {lastAudit?.bandLabel || 'Strong local presence'}
+                                    {lastAudit?.bandLabel || 'No audit yet'}
                                 </p>
                             </div>
                         </div>
 
                         <p className="text-xs text-sky-600 font-medium mb-4">
-                            Last run {lastAudit?.createdAt ? new Date(lastAudit.createdAt).toLocaleDateString() : '9/11/2026'} · {lastAudit?.query || 'South Indian Restaurant near Southampton SO17 2NJ'}
+                            {lastAudit?.createdAt
+                                ? `Last run ${new Date(lastAudit.createdAt).toLocaleDateString()}${
+                                      lastAudit.query ? ` · ${lastAudit.query}` : ''
+                                  }`
+                                : 'Run a visibility audit to see your score here.'}
                         </p>
 
                         <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -671,16 +654,23 @@ export default function RankTracker() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
-                                    {effectiveKeywords.map((row) => (
+                                    {effectiveKeywords.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={4} className="py-6 text-center text-xs text-gray-400">
+                                                No keywords tracked yet. Enter a keyword and run Gap Analysis.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        effectiveKeywords.map((row) => (
                                         <tr key={row.keyword}>
                                             <td className="py-3 font-semibold text-[#0F172A] max-w-[200px] truncate">
                                                 {row.keyword}
                                             </td>
                                             <td className="py-3 font-bold text-[#FF8800] text-center">
-                                                {row.avgRank || '3.3'}
+                                                {row.avgRank != null ? row.avgRank : '—'}
                                             </td>
                                             <td className="py-3 text-gray-700 font-semibold text-center">
-                                                {row.top3Percentage ?? '56'}%
+                                                {row.top3Percentage != null ? `${row.top3Percentage}%` : '—'}
                                             </td>
                                             <td className="py-3 text-right">
                                                 <button
@@ -692,7 +682,8 @@ export default function RankTracker() {
                                                 </button>
                                             </td>
                                         </tr>
-                                    ))}
+                                        ))
+                                    )}
                                 </tbody>
                             </table>
                         </div>
@@ -858,7 +849,8 @@ export default function RankTracker() {
                                             setGapAnalysis(null);
                                             setGridData([]);
                                             setCompetitors([]);
-                                            setActiveKeyword('South Indian Restaurant near me');
+                                            setActiveKeyword('');
+                                            setKeyword('');
                                             clearGapAnalysis();
                                         }}
                                         className="px-3.5 py-1.5 bg-white hover:bg-gray-100 border border-[#E2E8F0] text-[#0F172A] text-xs font-bold rounded-lg cursor-pointer"
