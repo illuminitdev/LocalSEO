@@ -24,13 +24,13 @@ import {
     Bell,
     MessageSquarePlus,
     CheckCheck,
-    Truck
+    Truck,
+    KeyRound
 } from 'lucide-react';
 import { apiGet, cn } from './utils';
-import { clearToken } from '../features/auth/auth';
+import { clearToken, getMustChangePassword } from '../features/auth/auth';
 import { hasRouteAccess, routeRequiresFeatures } from './planCatalog';
 import { useEntitlements } from './EntitlementsContext';
-import MustChangePasswordBanner from '../features/account/MustChangePasswordBanner';
 import { useOrgBrand } from './OrgBrandContext';
 
 const SIDEBAR_MIN = 200;
@@ -143,18 +143,74 @@ export default function Layout() {
         time: string;
         unread: boolean;
         link: string;
-        type: 'review' | 'quote' | 'rank' | 'booking';
+        type: 'review' | 'quote' | 'rank' | 'booking' | 'security';
     };
 
     const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
     const unreadCount = notifications.filter((n) => n.unread).length;
+    const PW_NOTIF_ID = 'must-change-password';
+    const PW_NOTIF_READ_KEY = 'lp.must-change-pw-notif-read';
+
+    const syncPasswordNotification = () => {
+        const mustChange = getMustChangePassword();
+        setNotifications((prev) => {
+            const without = prev.filter((n) => n.id !== PW_NOTIF_ID);
+            if (!mustChange) {
+                try {
+                    sessionStorage.removeItem(PW_NOTIF_READ_KEY);
+                } catch {
+                    /* ignore */
+                }
+                return without;
+            }
+            let read = false;
+            try {
+                read = sessionStorage.getItem(PW_NOTIF_READ_KEY) === '1';
+            } catch {
+                read = false;
+            }
+            return [
+                {
+                    id: PW_NOTIF_ID,
+                    title: 'Change your temporary password',
+                    desc: 'You signed in with a ZappSites invite password — set a new one in Settings.',
+                    time: 'Now',
+                    unread: !read,
+                    link: '/account#password',
+                    type: 'security' as const
+                },
+                ...without
+            ];
+        });
+    };
+
+    useEffect(() => {
+        syncPasswordNotification();
+        const onAuth = () => syncPasswordNotification();
+        window.addEventListener('localpulse-auth', onAuth);
+        return () => window.removeEventListener('localpulse-auth', onAuth);
+    }, []);
 
     const markAllRead = () => {
+        try {
+            if (notifications.some((n) => n.id === PW_NOTIF_ID)) {
+                sessionStorage.setItem(PW_NOTIF_READ_KEY, '1');
+            }
+        } catch {
+            /* ignore */
+        }
         setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
     };
 
     const handleNotificationClick = (item: NotificationItem) => {
+        if (item.id === PW_NOTIF_ID) {
+            try {
+                sessionStorage.setItem(PW_NOTIF_READ_KEY, '1');
+            } catch {
+                /* ignore */
+            }
+        }
         setNotifications((prev) => prev.map((n) => (n.id === item.id ? { ...n, unread: false } : n)));
         setNotifOpen(false);
         navigate(item.link);
@@ -477,7 +533,9 @@ export default function Layout() {
                             >
                                 <Bell className="w-5 h-5" strokeWidth={1.75} />
                                 {unreadCount > 0 && (
-                                    <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-[#EF4444] ring-2 ring-white" />
+                                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#EF4444] text-white text-[10px] font-black leading-[18px] text-center ring-2 ring-white">
+                                        {unreadCount > 9 ? '9+' : unreadCount}
+                                    </span>
                                 )}
                             </button>
 
@@ -525,6 +583,8 @@ export default function Layout() {
                                                         ? FileText
                                                         : n.type === 'rank'
                                                         ? Wand2
+                                                        : n.type === 'security'
+                                                        ? KeyRound
                                                         : CalendarClock;
                                                 return (
                                                     <div
@@ -544,6 +604,8 @@ export default function Layout() {
                                                                     ? 'bg-blue-50 text-blue-600'
                                                                     : n.type === 'rank'
                                                                     ? 'bg-purple-50 text-purple-600'
+                                                                    : n.type === 'security'
+                                                                    ? 'bg-amber-50 text-amber-700'
                                                                     : 'bg-emerald-50 text-emerald-600'
                                                             )}
                                                         >
@@ -579,7 +641,6 @@ export default function Layout() {
                     </div>
                 </header>
                 <main className="flex-1 overflow-auto overscroll-contain p-4 sm:p-5 lg:p-6">
-                    <MustChangePasswordBanner />
                     <Outlet />
                 </main>
             </div>
