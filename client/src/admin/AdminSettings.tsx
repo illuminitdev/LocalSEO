@@ -75,7 +75,6 @@ export default function AdminSettings() {
     const [profileErr, setProfileErr] = useState('');
     const [busy, setBusy] = useState(false);
     const [loadError, setLoadError] = useState('');
-    const [passwordSource, setPasswordSource] = useState('');
 
     const notifyAvatar = (url: string) => {
         window.dispatchEvent(new CustomEvent('admin-avatar-updated', { detail: { avatarUrl: url } }));
@@ -86,7 +85,6 @@ export default function AdminSettings() {
             .then((data) => {
                 setEmail(data.email || data.admin?.email || '');
                 setAvatarUrl(data.avatarUrl || '');
-                setPasswordSource(data.passwordSource || '');
             })
             .catch((err: Error) => setLoadError(err.message));
     }, []);
@@ -153,7 +151,6 @@ export default function AdminSettings() {
             setCurrentPassword('');
             setNewPassword('');
             setConfirmPassword('');
-            setPasswordSource('custom');
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -173,70 +170,70 @@ export default function AdminSettings() {
 
             {/* Profile card */}
             <section className="relative rounded-2xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
-                <div className="h-28 bg-gradient-to-br from-[#0F172A] via-[#1E293B] to-[#334155] relative">
+                <div className="h-28 bg-gradient-to-br from-[#0F172A] via-[#1E293B] to-[#334155] relative px-5 sm:px-6">
                     <div className="absolute top-0 right-0 w-40 h-40 rounded-full bg-[#F59E0B]/25 blur-3xl pointer-events-none" />
                     <div className="absolute bottom-0 left-8 w-28 h-28 rounded-full bg-white/5 blur-2xl pointer-events-none" />
-                </div>
-
-                <div className="relative px-5 sm:px-6 pb-5 -mt-12">
-                    <div className="flex flex-col sm:flex-row sm:items-end gap-4 sm:gap-5">
-                        <div className="relative shrink-0 self-start">
-                            {avatarUrl ? (
-                                <img
-                                    src={avatarUrl}
-                                    alt="Admin profile"
-                                    className="h-24 w-24 rounded-2xl object-cover border-[3px] border-white shadow-lg bg-white"
-                                />
-                            ) : (
-                                <div className="h-24 w-24 rounded-2xl bg-[#F59E0B] text-[#0F172A] flex items-center justify-center text-3xl font-black border-[3px] border-white shadow-lg">
-                                    {initial}
-                                </div>
-                            )}
-                            <label
-                                className={cn(
-                                    'absolute -bottom-1.5 -right-1.5 h-9 w-9 rounded-xl bg-[#0F172A] text-white',
-                                    'flex items-center justify-center cursor-pointer shadow-md border-2 border-white',
-                                    'hover:bg-[#1E293B] transition-colors',
-                                    avatarBusy && 'opacity-60 pointer-events-none'
-                                )}
-                                title="Upload photo"
-                            >
-                                <Camera className="w-4 h-4" strokeWidth={2.25} />
-                                <input
-                                    ref={fileRef}
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/webp,image/gif"
-                                    className="hidden"
-                                    disabled={avatarBusy}
-                                    onChange={async (e) => {
-                                        const file = e.target.files?.[0];
-                                        if (!file) return;
-                                        await uploadAvatar(file);
-                                        e.target.value = '';
-                                    }}
-                                />
-                            </label>
-                        </div>
-
-                        <div className="flex-1 min-w-0 pb-1 pt-1 sm:pt-0">
+                    <div className="relative z-10 h-full flex items-start pt-5 sm:pl-[7.5rem]">
+                        <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                                <h2 className="text-xl font-bold text-[#0F172A]">Admin account</h2>
+                                <h2 className="text-xl font-bold text-white">Admin account</h2>
                                 <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-[#FFF7ED] text-[#D97706] border border-[#FDE68A]">
                                     <Shield className="w-3 h-3" />
                                     Desk access
                                 </span>
                             </div>
-                            <p className="mt-1 text-sm text-[#64748B] flex items-center gap-1.5 min-w-0">
-                                <Mail className="w-3.5 h-3.5 shrink-0 opacity-70" />
+                            <p className="mt-1 text-sm text-white/75 flex items-center gap-1.5 min-w-0">
+                                <Mail className="w-3.5 h-3.5 shrink-0 opacity-80" />
                                 <span className="truncate">{email || '—'}</span>
-                            </p>
-                            <p className="mt-1.5 text-xs text-[#94A3B8]">
-                                JPG, PNG, WebP or GIF · max 5MB · stored in S3
                             </p>
                         </div>
                     </div>
+                </div>
 
-                    <div className="mt-5 flex flex-wrap gap-2">
+                <div className="relative px-5 sm:px-6 pb-5 -mt-12">
+                    <div className="relative shrink-0 self-start w-fit">
+                        {avatarUrl ? (
+                            <img
+                                src={avatarUrl}
+                                alt="Admin profile"
+                                className="h-24 w-24 rounded-2xl object-cover border-[3px] border-white shadow-lg bg-white"
+                            />
+                        ) : (
+                            <div className="h-24 w-24 rounded-2xl bg-[#F59E0B] text-[#0F172A] flex items-center justify-center text-3xl font-black border-[3px] border-white shadow-lg">
+                                {initial}
+                            </div>
+                        )}
+                        <label
+                            className={cn(
+                                'absolute -bottom-1.5 -right-1.5 h-9 w-9 rounded-xl bg-[#0F172A] text-white',
+                                'flex items-center justify-center cursor-pointer shadow-md border-2 border-white',
+                                'hover:bg-[#1E293B] transition-colors',
+                                avatarBusy && 'opacity-60 pointer-events-none'
+                            )}
+                            title="Upload photo"
+                        >
+                            <Camera className="w-4 h-4" strokeWidth={2.25} />
+                            <input
+                                ref={fileRef}
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp,image/gif"
+                                className="hidden"
+                                disabled={avatarBusy}
+                                onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    await uploadAvatar(file);
+                                    e.target.value = '';
+                                }}
+                            />
+                        </label>
+                    </div>
+
+                    <p className="mt-3 text-xs text-[#94A3B8]">
+                        JPG, PNG, WebP or GIF · max 5MB · stored in S3
+                    </p>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
                         <button
                             type="button"
                             disabled={avatarBusy}
@@ -271,18 +268,10 @@ export default function AdminSettings() {
                     )}
                 </div>
 
-                <div className="px-5 sm:px-6 py-4 border-t border-[#E2E8F0] bg-[#F8FAFC] grid sm:grid-cols-2 gap-3 text-sm">
+                <div className="px-5 sm:px-6 py-4 border-t border-[#E2E8F0] bg-[#F8FAFC] text-sm">
                     <div className="rounded-xl border border-[#E2E8F0] bg-white px-4 py-3">
                         <p className="text-[11px] font-bold uppercase tracking-wide text-[#94A3B8]">Sign-in email</p>
                         <p className="mt-1 font-semibold text-[#0F172A] break-all">{email || '—'}</p>
-                        <p className="mt-1 text-xs text-[#94A3B8]">Locked for this environment</p>
-                    </div>
-                    <div className="rounded-xl border border-[#E2E8F0] bg-white px-4 py-3">
-                        <p className="text-[11px] font-bold uppercase tracking-wide text-[#94A3B8]">Password source</p>
-                        <p className="mt-1 font-semibold text-[#0F172A] capitalize">
-                            {passwordSource === 'custom' ? 'Custom (saved)' : passwordSource === 'env' ? 'Environment' : '—'}
-                        </p>
-                        <p className="mt-1 text-xs text-[#94A3B8]">Change it in the section below</p>
                     </div>
                 </div>
             </section>
