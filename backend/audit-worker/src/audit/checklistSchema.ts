@@ -1,8 +1,4 @@
 
-
-
-
-
 export const PILLARS = [
   { id: 'gbp', label: 'Google Business Profile', sectionIds: ['gbp'], max: 10 },
   { id: 'reviews', label: 'Reviews', sectionIds: ['reviews'], max: 10 },

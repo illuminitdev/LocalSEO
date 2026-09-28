@@ -8,8 +8,6 @@ function statusWeight(status) {
 }
 
 
-
-
 export function scoreChecks(checks) {
   let sum = 0;
   let count = 0;

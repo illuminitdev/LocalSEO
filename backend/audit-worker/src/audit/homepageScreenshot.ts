@@ -1,9 +1,5 @@
 import { config } from '../config.js';
 
-
-
-
-
 export async function captureHomepageScreenshot(url) {
   if (!url) return null;
   let target = String(url).trim();

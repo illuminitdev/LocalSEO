@@ -1,0 +1,129 @@
+import {
+  auditContext,
+  failedChecks,
+  inPackFromAudit,
+  mapsResultsFromAudit,
+  measuredQueryFromAudit,
+  toActions
+} from './deckShared.js';
+
+export function buildGeoFixes(audit) {
+  const { name, city, service } = auditContext(audit);
+  const failed = failedChecks(audit);
+  const geoFails = failed
+    .filter(
+      (c) =>
+        String(c.id).startsWith('geo_') ||
+        ['tech_12', 'tech_13', 'tech_14', 'tech_15'].includes(c.id)
+    )
+    .slice(0, 4);
+  const mapsResults = mapsResultsFromAudit(audit);
+  const inPack = inPackFromAudit(audit);
+  const measuredQuery = measuredQueryFromAudit(audit, service, city);
+  const aiEngineChecks = Array.isArray(audit?.gbpLookup?.aiEngineChecks)
+    ? audit.gbpLookup.aiEngineChecks
+    : [];
+  const geoChecklist = audit?.gbpLookup?.geoChecklist || null;
+  const geoPromptTexts = Array.from(
+    new Set(
+      aiEngineChecks
+        .map((e: { prompt?: string }) => String(e?.prompt || '').trim())
+        .filter(Boolean)
+    )
+  );
+  const geoPromptSummary =
+    geoPromptTexts.length > 0
+      ? geoPromptTexts.map((p) => `“${p}”`).join(', ')
+      : `“${measuredQuery}”, “best ${service} in ${city}”, “${service} near me”`;
+
+  const geoActions = toActions(geoFails, 'Medium');
+
+  return {
+    title: 'GEO: Google + AI visibility',
+    visualIntro:
+      'ChatGPT and Gemini are measured via DataForSEO LLM Scraper (consumer UI). Claude is measured via the LLM Responses API. Re-check with the same prompts on each product if you want to compare.',
+    goalLine: `Win Local Pack for “${measuredQuery}” and get cited in ChatGPT / Claude / Gemini for ${geoPromptSummary}.`,
+    verifyHint: `ChatGPT / Gemini = scraped UI Top 5; Claude = API + web search. Re-check yourself: search Google for “${measuredQuery}”, then ask ChatGPT / Claude / Gemini: ${geoPromptSummary}.`,
+    queryCards: [
+      {
+        query: measuredQuery,
+        competitorsShown: mapsResults.map((r) => r.name),
+        competitorsDetailed: mapsResults,
+        mapsResults,
+        measured: true,
+        inPack,
+        prospectFound: inPack
+      }
+    ],
+    aiEngines: aiEngineChecks,
+    geoChecklist,
+    opportunity: (() => {
+      const mentioned = [
+        ...new Set(
+          aiEngineChecks
+            .filter((e) => e && e.mentioned === true)
+            .map((e) => e.label)
+            .filter(Boolean)
+        )
+      ];
+      const missed = [
+        ...new Set(
+          aiEngineChecks
+            .filter((e) => e && e.mentioned === false)
+            .map((e) => e.label)
+            .filter(Boolean)
+        )
+      ];
+      const googleBit = inPack
+        ? `${name} is in the Google Local Pack / Maps results for “${measuredQuery}”.`
+        : mapsResults.length
+          ? `${name} is not in the Google Maps results for “${measuredQuery}” (showing ${mapsResults.length} other listings).`
+          : `${name} is not in the Google Maps results for “${measuredQuery}”.`;
+      const aiBit = mentioned.length
+        ? ` Mentioned in ${mentioned.join(' / ')} across measured GEO prompts.`
+        : missed.length
+          ? ` Not mentioned in ${missed.join(' / ')} across measured GEO prompts.`
+          : ' AI engine checks were unavailable for this run.';
+      return `${googleBit}${aiBit}`;
+    })(),
+    actions:
+      geoActions.length > 0
+        ? geoActions.map(
+            ({ title, detail, howTo, priority, issue, evidence, impact, recommendation }) => ({
+              title,
+              detail,
+              howTo,
+              priority,
+              issue,
+              evidence,
+              impact,
+              recommendation
+            })
+          )
+        : [
+            {
+              title: 'Standardise brand name',
+              detail: `Use “${name}” consistently everywhere — no variations.`,
+              howTo: 'Align GBP, website title, schema and directories to the same legal/trading name.',
+              priority: 'High',
+              issue: 'Inconsistent entity naming',
+              evidence: `Brand must appear consistently as “${name}” for Google and AI citation.`,
+              impact:
+                'Google Local Pack and ChatGPT / Claude may prefer clearer competitor entities.',
+              recommendation: 'Standardise the trading name across GBP, site, schema and directories.'
+            },
+            {
+              title: 'Entity & schema signals',
+              detail: 'Add Organisation / LocalBusiness schema with NAP and sameAs links.',
+              howTo:
+                'Publish JSON-LD LocalBusiness on the homepage with address, phone, and social sameAs.',
+              priority: 'High',
+              issue: 'Weak entity / schema signals',
+              evidence: 'LocalBusiness / sameAs signals need strengthening for GEO.',
+              impact:
+                'Lower chance of appearing in Local Pack and being recommended by AI assistants.',
+              recommendation: 'Publish LocalBusiness JSON-LD with NAP and sameAs links.'
+            }
+          ]
+  };
+}

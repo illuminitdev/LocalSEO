@@ -1,7 +1,4 @@
 
-
-
-
 export async function runLighthouse(url) {
   try {
     const chromeLauncher = await import('chrome-launcher');
