@@ -49,8 +49,144 @@ function stripEmojiDeep(value) {
   return value;
 }
 
+/** Positive completeness phrasing that must never appear as a critical issue title. */
+const POSITIVE_AS_ISSUE =
+  /^(photos present|business description present|description present|opening hours present|categories present|services listed|gbp posts being used|appears for\b)/i;
 
-function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards, localRank }) {
+function isPositiveAsIssueTitle(title) {
+  return POSITIVE_AS_ISSUE.test(String(title || '').trim());
+}
+
+function collectAuditChecks(audit) {
+  const presence = audit?.presence?.checks;
+  if (Array.isArray(presence) && presence.length) return presence;
+  return audit?.checklist?.checks || [];
+}
+
+function areaFromCheck(c) {
+  return c?.pillar || c?.sectionTitle || c?.section || 'Local SEO';
+}
+
+/** Build fail-oriented critical issues from measured failed checks (never pass-worded labels). */
+export function buildDeterministicCriticalIssues(audit, limit = 4) {
+  const failed = collectAuditChecks(audit).filter((c) => c.status === 'fail');
+  return failed.slice(0, limit).map((c) => ({
+    title: String(c.label || 'Visibility gap'),
+    detail: String(c.evidence || ''),
+    impact: 'High',
+    area: areaFromCheck(c),
+    evidence: String(c.evidence || ''),
+    recommendation: '',
+    priority: 'High'
+  }));
+}
+
+export function buildDeterministicStrengths(audit, limit = 4) {
+  return collectAuditChecks(audit)
+    .filter((c) => c.status === 'pass')
+    .slice(0, limit)
+    .map((c) => String(c.label || ''))
+    .filter(Boolean);
+}
+
+export function buildDeterministicPriorityFixes(audit, limit = 3) {
+  const failed = collectAuditChecks(audit).filter((c) => c.status === 'fail');
+  return failed.slice(0, limit).map((c) => ({
+    title: String(c.label || 'Fix visibility gap'),
+    why: String(c.evidence || 'This check failed in the measured audit.'),
+    action: 'Update the matching GBP / website signal, then re-run the audit to confirm.',
+    suggestedPackage: 'Local Presence',
+    issue: String(c.label || ''),
+    evidence: String(c.evidence || ''),
+    impact: 'High',
+    recommendation: 'Update the matching GBP / website signal, then re-run the audit to confirm.',
+    priority: 'High'
+  }));
+}
+
+const DEFAULT_CLOSING =
+  'Share this report with the owner, agree the first three priority fixes, then re-run the audit to track progress.';
+
+function filterPositiveAsIssues(list) {
+  return (Array.isArray(list) ? list : []).filter((item) => {
+    if (!item || typeof item !== 'object') return false;
+    if (isPositiveAsIssueTitle(item.title)) return false;
+    return true;
+  });
+}
+
+function scrubPositiveContradictions(list, { photosPresent, descriptionPresent, hasHours, passedLabels }) {
+  const passed = new Set((passedLabels || []).map((l) => String(l || '').toLowerCase().trim()).filter(Boolean));
+  return (Array.isArray(list) ? list : [])
+    .map((item) => {
+      if (!item || typeof item !== 'object') return item;
+      const title = String(item.title || '').trim();
+      const blob = `${title} ${item.detail || ''} ${item.why || ''} ${item.action || ''}`.toLowerCase();
+      if (isPositiveAsIssueTitle(title)) return null;
+      if (passed.has(title.toLowerCase())) return null;
+      if (photosPresent === true && /no photos|missing photos|photos (missing|absent)|lack of photos/i.test(blob)) {
+        return null;
+      }
+      if (
+        descriptionPresent === true &&
+        /no (business )?description|missing (business )?description|description (missing|absent)/i.test(blob)
+      ) {
+        return null;
+      }
+      if (hasHours === true && /no (opening )?hours|missing (opening )?hours|hours (missing|absent)/i.test(blob)) {
+        return null;
+      }
+      return item;
+    })
+    .filter(Boolean);
+}
+
+/** Fill missing narrative fields from measured checks so the report never shows empty/wrong sections. */
+export function ensureNarrativeSections(aiReport, audit) {
+  const out = { ...(aiReport || {}) };
+  const gbp = audit?.gbpLookup || {};
+  const passedLabels = buildDeterministicStrengths(audit, 20);
+  const detCritical = buildDeterministicCriticalIssues(audit, 4);
+  const detStrengths = buildDeterministicStrengths(audit, 4);
+  const detFixes = buildDeterministicPriorityFixes(audit, 3);
+
+  let critical = filterPositiveAsIssues(out.criticalIssues);
+  critical = scrubPositiveContradictions(critical, {
+    photosPresent: gbp.photosPresent,
+    descriptionPresent: gbp.descriptionPresent ?? gbp.hasDescription,
+    hasHours: gbp.hasHours,
+    passedLabels
+  });
+  if (!critical.length) critical = detCritical;
+  out.criticalIssues = critical.slice(0, 4);
+
+  if (!Array.isArray(out.strengths) || !out.strengths.length) {
+    out.strengths = detStrengths;
+  } else {
+    out.strengths = out.strengths.map(String).slice(0, 4);
+  }
+
+  let fixes = filterPositiveAsIssues(out.priorityFixes);
+  fixes = scrubPositiveContradictions(fixes, {
+    photosPresent: gbp.photosPresent,
+    descriptionPresent: gbp.descriptionPresent ?? gbp.hasDescription,
+    hasHours: gbp.hasHours,
+    passedLabels
+  });
+  if (!fixes.length) fixes = detFixes;
+  out.priorityFixes = fixes.slice(0, 3);
+
+  if (!String(out.closingLine || '').trim()) {
+    out.closingLine = DEFAULT_CLOSING;
+  }
+  if (!String(out.offerLine || '').trim()) {
+    out.offerLine =
+      'We can help close these gaps with managed Local Presence or Local Growth at clear monthly pricing.';
+  }
+  return out;
+}
+
+function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards, localRank, gbpFacts, passedLabels }) {
   const out = { ...parsed };
   if (phoneVisibleOnCrawl) {
     out.executiveSummary = scrubFalsePhoneClaims(out.executiveSummary);
@@ -86,6 +222,16 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
       };
     }
   }
+
+  const scrubOpts = {
+    photosPresent: gbpFacts?.photosPresent,
+    descriptionPresent: gbpFacts?.descriptionPresent ?? gbpFacts?.hasDescription,
+    hasHours: gbpFacts?.hasHours,
+    passedLabels: passedLabels || []
+  };
+  out.criticalIssues = scrubPositiveContradictions(filterPositiveAsIssues(out.criticalIssues), scrubOpts);
+  out.findings = scrubPositiveContradictions(filterPositiveAsIssues(out.findings), scrubOpts);
+  out.priorityFixes = scrubPositiveContradictions(filterPositiveAsIssues(out.priorityFixes), scrubOpts);
   
   if (Array.isArray(napCards) && napCards.length) {
     out.localSeoFixes = {
@@ -239,20 +385,23 @@ Include 4-6 findings and exactly 3 priorityFixes.`;
       const result = await model.generateContent(prompt);
       const parsed = extractJson(result.response.text());
 
-      return {
-        generatedAt: new Date().toISOString(),
-        model: modelName,
-        headline: parsed.headline || 'Local visibility snapshot',
-        executiveSummary: parsed.executiveSummary || '',
-        overallVerdict: parsed.overallVerdict || '',
-        scoreComment: parsed.scoreComment || '',
-        strengths: Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 4) : [],
-        findings: Array.isArray(parsed.findings) ? parsed.findings.slice(0, 6) : [],
-        priorityFixes: Array.isArray(parsed.priorityFixes) ? parsed.priorityFixes.slice(0, 3) : [],
-        gbpNote: parsed.gbpNote || '',
-        offerLine: parsed.offerLine || '',
-        closingLine: parsed.closingLine || ''
-      };
+      return ensureNarrativeSections(
+        {
+          generatedAt: new Date().toISOString(),
+          model: modelName,
+          headline: parsed.headline || 'Local visibility snapshot',
+          executiveSummary: parsed.executiveSummary || '',
+          overallVerdict: parsed.overallVerdict || '',
+          scoreComment: parsed.scoreComment || '',
+          strengths: Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 4) : [],
+          findings: Array.isArray(parsed.findings) ? parsed.findings.slice(0, 6) : [],
+          priorityFixes: Array.isArray(parsed.priorityFixes) ? parsed.priorityFixes.slice(0, 3) : [],
+          gbpNote: parsed.gbpNote || '',
+          offerLine: parsed.offerLine || '',
+          closingLine: parsed.closingLine || ''
+        },
+        audit
+      );
     } catch (err) {
       lastError = err;
     }
@@ -295,6 +444,13 @@ Tone: clear, commercial, British English. Do NOT invent ratings, rankings, crede
 Use only the measured JSON. Structure the narrative like a client deck: overall visibility, Local SEO / AEO / GEO, four critical issues, strengths, 90-day roadmap, plus three fix decks.
 For every issue use Issue → Evidence → Impact → Recommendation → Priority (fill evidence/recommendation/priority fields; keep title/detail/impact too).
 GEO visuals must describe Google Local Pack / Maps results only — never invent or request an AI Overview block.
+
+CRITICAL ISSUES RULES (must follow):
+- criticalIssues must be REAL gaps from Failed checks only — never invent issues.
+- NEVER list a Passed check (or positive GBP fact) as a critical issue. Forbidden titles include: "Photos present", "Business description present", "Opening hours present", "Categories present", "Services listed".
+- If photos/description/hours are present on GBP, do not claim they are missing.
+- strengths must come from Passed checks / positive measured facts only.
+- priorityFixes must address Failed checks only.
 
 EMOJI RULE (must follow):
 - Never use emojis, emoticons, or pictographs in any JSON string field (headlines, summaries, titles, details, decks, roadmap, next steps).
@@ -428,10 +584,18 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
       });
       const result = await model.generateContent(prompt);
       const parsedRaw = extractJson(result.response.text());
+      const gbp = audit.gbpLookup || {};
+      const passedLabels = passed.map((c) => c.label).filter(Boolean);
       const parsed = sanitizeDeepReportAgainstFacts(parsedRaw, {
         phoneVisibleOnCrawl,
         napCards,
-        localRank: audit.gbpLookup?.localRank || null
+        localRank: gbp.localRank || null,
+        gbpFacts: {
+          photosPresent: gbp.photosPresent,
+          descriptionPresent: gbp.descriptionPresent ?? gbp.hasDescription,
+          hasHours: gbp.hasHours
+        },
+        passedLabels
       });
 
       const localSeoFixes = {
@@ -484,28 +648,33 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
           : fallbacks.geoFixes.actions
       };
 
-      return stripEmojiDeep({
-        generatedAt: new Date().toISOString(),
-        model: modelName,
-        kind: 'deep-local-aeo-geo',
-        headline: parsed.headline || 'Digital presence audit',
-        executiveSummary: parsed.executiveSummary || '',
-        overallVerdict: parsed.overallVerdict || '',
-        scoreComment: parsed.scoreComment || '',
-        pillarComments: parsed.pillarComments || {},
-        strengths: Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 4) : [],
-        criticalIssues: Array.isArray(parsed.criticalIssues) ? parsed.criticalIssues.slice(0, 4) : [],
-        findings: Array.isArray(parsed.findings) ? parsed.findings.slice(0, 6) : [],
-        priorityFixes: Array.isArray(parsed.priorityFixes) ? parsed.priorityFixes.slice(0, 3) : [],
-        roadmap: Array.isArray(parsed.roadmap) ? parsed.roadmap.slice(0, 3) : [],
-        localSeoFixes,
-        aeoFixes,
-        geoFixes,
-        nextSteps: Array.isArray(parsed.nextSteps) ? parsed.nextSteps.slice(0, 4) : [],
-        gbpNote: parsed.gbpNote || '',
-        offerLine: parsed.offerLine || '',
-        closingLine: parsed.closingLine || ''
-      });
+      return stripEmojiDeep(
+        ensureNarrativeSections(
+          {
+            generatedAt: new Date().toISOString(),
+            model: modelName,
+            kind: 'deep-local-aeo-geo',
+            headline: parsed.headline || 'Digital presence audit',
+            executiveSummary: parsed.executiveSummary || '',
+            overallVerdict: parsed.overallVerdict || '',
+            scoreComment: parsed.scoreComment || '',
+            pillarComments: parsed.pillarComments || {},
+            strengths: Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 4) : [],
+            criticalIssues: Array.isArray(parsed.criticalIssues) ? parsed.criticalIssues.slice(0, 4) : [],
+            findings: Array.isArray(parsed.findings) ? parsed.findings.slice(0, 6) : [],
+            priorityFixes: Array.isArray(parsed.priorityFixes) ? parsed.priorityFixes.slice(0, 3) : [],
+            roadmap: Array.isArray(parsed.roadmap) ? parsed.roadmap.slice(0, 3) : [],
+            localSeoFixes,
+            aeoFixes,
+            geoFixes,
+            nextSteps: Array.isArray(parsed.nextSteps) ? parsed.nextSteps.slice(0, 4) : [],
+            gbpNote: parsed.gbpNote || '',
+            offerLine: parsed.offerLine || '',
+            closingLine: parsed.closingLine || ''
+          },
+          audit
+        )
+      );
     } catch (err) {
       lastError = err;
     }

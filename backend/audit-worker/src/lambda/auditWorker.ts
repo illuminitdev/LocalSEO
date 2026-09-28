@@ -8,7 +8,7 @@ import { fallbackPillarDecks } from '../audit/pillarFixDecks.js';
 import { buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
 import { buildGeoChecklist, applyGeoChecklistToChecks } from '../audit/geoChecklist.js';
 import { computeScore } from '../audit/score.js';
-import { generateAiReport, generateDeepAiReport } from '../audit/geminiReport.js';
+import { generateAiReport, generateDeepAiReport, ensureNarrativeSections } from '../audit/geminiReport.js';
 import { deriveTopFixes } from '../audit/store.js';
 import { updateAuditJob } from '../lib/auditJobs.js';
 import {
@@ -959,14 +959,17 @@ export const main: SQSHandler = async (event: SQSEvent) => {
           audit.aiReport = await generateDeepAiReport(audit);
         } catch (aiErr) {
           try {
-            audit.aiReport = await generateAiReport(audit);
+            audit.aiReport = ensureNarrativeSections(await generateAiReport(audit), audit);
           } catch (fallbackErr) {
             const err = fallbackErr as Error;
-            audit.aiReport = {
-              ...(audit.aiReport || {}),
-              fallbackError: err.message,
-              generatedAt: new Date().toISOString()
-            };
+            audit.aiReport = ensureNarrativeSections(
+              {
+                ...(audit.aiReport || {}),
+                fallbackError: err.message,
+                generatedAt: new Date().toISOString()
+              },
+              audit
+            );
           }
         }
         try {
