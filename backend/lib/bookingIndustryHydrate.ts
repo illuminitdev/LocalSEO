@@ -5,8 +5,11 @@ import {
     getBookingPreset,
     isBookingPlanId,
     normalizeBookingIndustryId,
-    type BookingIndustryId
+    sharedBoardPreset,
+    type BookingIndustryId,
+    type BookingIndustryPreset
 } from './bookingIndustryPresets';
+import { getBookingIndustryById } from './bookingIndustriesDb';
 
 function getStripeClient(): Stripe | null {
     if (!process.env.STRIPE_SECRET_KEY) return null;
@@ -143,6 +146,35 @@ function industryIdFromTradeTypeLabel(tradeType: string | null | undefined): Boo
     return normalizeBookingIndustryId(inferred);
 }
 
+/** Preset for host/public UI: keeps purchased industry id; overlays Admin catalog name. */
+export async function resolveBookingIndustryPreset(
+    industryIdRaw: string | null | undefined
+): Promise<BookingIndustryPreset | null> {
+    const industryId = normalizeBookingIndustryId(industryIdRaw);
+    if (!industryId) return null;
+
+    const row = await getBookingIndustryById(industryId).catch(() => null);
+    const exact = bookingIndustryPresets.find((p) => p.id === industryId);
+    if (exact) {
+        return {
+            ...exact,
+            name: row?.name || exact.name,
+            shortName: row?.shortName || exact.shortName
+        };
+    }
+
+    if (row) {
+        return sharedBoardPreset(industryId, { name: row.name, shortName: row.shortName });
+    }
+
+    return getBookingPreset(industryId);
+}
+
+async function industryDisplayName(industryId: string): Promise<string> {
+    const preset = await resolveBookingIndustryPreset(industryId);
+    return preset?.name || getBookingPreset(industryId).name;
+}
+
 
 
 
@@ -246,7 +278,7 @@ export async function hydrateOrgBookingIndustry(orgId: string): Promise<BookingI
 
     await backfillInviteIndustry(sourceInviteId, industryId);
 
-    const preset = getBookingPreset(industryId);
+    const displayName = await industryDisplayName(industryId);
     try {
         await query(
             `UPDATE organizations
@@ -256,7 +288,7 @@ export async function hydrateOrgBookingIndustry(orgId: string): Promise<BookingI
                    ELSE trade_type
                  END
              WHERE id = $1`,
-            [orgId, industryId, preset.name]
+            [orgId, industryId, displayName]
         );
     } catch (err: any) {
         if (!/booking_industry_id/i.test(String(err?.message || ''))) throw err;
@@ -273,11 +305,11 @@ export async function setOrgBookingIndustry(
 ): Promise<BookingIndustryId | null> {
     const industryId = normalizeBookingIndustryId(industryIdRaw);
     if (!industryId || !orgId) return null;
-    const preset = getBookingPreset(industryId);
+    const displayName = await industryDisplayName(industryId);
     if (syncTradeType) {
         await query(
             `UPDATE organizations SET booking_industry_id = $2, trade_type = $3 WHERE id = $1`,
-            [orgId, industryId, preset.name]
+            [orgId, industryId, displayName]
         );
     } else {
         await query(`UPDATE organizations SET booking_industry_id = $2 WHERE id = $1`, [

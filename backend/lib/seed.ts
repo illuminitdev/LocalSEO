@@ -64,10 +64,6 @@ async function createBookingOrg({
     createNew = false
 }: any) {
     const catalog = getTradeBookingCatalog(tradeType, bookingIndustryId);
-    const resolvedStandard =
-        standardDeposit != null && standardDeposit !== '' ? Number(standardDeposit) : catalog.standardDeposit;
-    const resolvedEmergency =
-        emergencyDeposit != null && emergencyDeposit !== '' ? Number(emergencyDeposit) : catalog.emergencyDeposit;
     const resolvedAccepting =
         acceptingEmergencies !== undefined && acceptingEmergencies !== null
             ? acceptingEmergencies !== false
@@ -77,8 +73,6 @@ async function createBookingOrg({
             ? String(emergencyNote).trim()
             : catalog.emergencyNote;
 
-    const standardDepositCents = Math.round(resolvedStandard * 100) || 4500;
-    const emergencyDepositCents = Math.round(resolvedEmergency * 100) || 6000;
     const currencyCode = currency === '£' || currency === 'GBP' ? 'GBP' : currency === '€' || currency === 'EUR' ? 'EUR' : 'USD';
     const resolvedIndustryId = String(bookingIndustryId || catalog.bookingIndustryId || '').trim() || null;
     const resolvedTradeType = String(tradeType || catalog.tradeType || '').trim();
@@ -110,16 +104,7 @@ async function createBookingOrg({
         );
         const org = orgRes.rows[0];
         if (!org) throw new Error('Organization not found');
-        const { rows: existingTypes } = await query('SELECT id FROM event_types WHERE org_id = $1 LIMIT 1', [org.id]);
-        if (!existingTypes.length) {
-            await seedDefaultEventTypes(org.id, {
-                standardDepositCents,
-                emergencyDepositCents,
-                acceptingEmergencies: resolvedAccepting,
-                tradeType: resolvedTradeType,
-                bookingIndustryId: resolvedIndustryId
-            });
-        }
+        // New boards start with zero event types; hosts add services themselves.
         return org;
     }
 
@@ -143,13 +128,7 @@ async function createBookingOrg({
         ]
     );
     const org = orgRes.rows[0];
-    await seedDefaultEventTypes(org.id, {
-        standardDepositCents,
-        emergencyDepositCents,
-        acceptingEmergencies: resolvedAccepting,
-        tradeType: resolvedTradeType,
-        bookingIndustryId: resolvedIndustryId
-    });
+    // Do not seed preset event types — hosts add services after setup.
 
     if (userId) {
         await query(
@@ -166,10 +145,7 @@ async function createBookingOrg({
 async function listUserBookingOrgs(userId: string) {
     const { rows } = await query(
         `SELECT o.id, o.slug, o.name, o.host_name, o.trade_type, o.service_area, o.setup_complete,
-                o.booking_industry_id,
-                EXISTS (
-                    SELECT 1 FROM event_types et WHERE et.org_id = o.id LIMIT 1
-                ) AS has_events
+                o.booking_industry_id
          FROM memberships m
          JOIN organizations o ON o.id = m.org_id
          WHERE m.user_id = $1
@@ -178,11 +154,7 @@ async function listUserBookingOrgs(userId: string) {
     );
 
     return rows.map((o: any) => {
-        const industryId = String(o.booking_industry_id || '').trim().toLowerCase();
-        const isSalons = industryId === 'salons';
-        const hasBookingData = Boolean(
-            String(o.trade_type || '').trim() && (isSalons || o.has_events)
-        );
+        const hasBookingData = Boolean(String(o.trade_type || '').trim());
         return {
             id: o.id,
             slug: o.slug,
