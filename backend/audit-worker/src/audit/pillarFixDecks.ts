@@ -2,16 +2,15 @@
 import { buildLocalSeoCoreChecklist } from './localSeoCoreChecklist.js';
 import { buildAeoCoreChecklist } from './aeoCoreChecklist.js';
 
-/** Country aliases → canonical token (applied only as address suffix). */
+
 const COUNTRY_SUFFIX_ALIASES = [
   {
     canon: 'unitedkingdom',
     keys: [
       'united kingdom of great britain and northern ireland',
-      'unitedkingdom',
       'united kingdom',
       'great britain',
-      'greatbritain',
+
       'u k',
       'uk',
       'g b',
@@ -20,16 +19,7 @@ const COUNTRY_SUFFIX_ALIASES = [
   },
   {
     canon: 'unitedstates',
-    keys: [
-      'united states of america',
-      'unitedstatesofamerica',
-      'united states',
-      'unitedstates',
-      'u s a',
-      'u s',
-      'usa',
-      'us'
-    ]
+    keys: ['united states of america', 'united states', 'u s a', 'u s', 'usa', 'us']
   },
   { canon: 'australia', keys: ['australia', 'au'] },
   { canon: 'canada', keys: ['canada', 'ca'] },
@@ -107,7 +97,7 @@ function addressesMatch(a, b) {
   const nb = stripTrailingCountry(normAddress(b));
   if (!na || !nb) return false;
   if (na === nb || na.includes(nb) || nb.includes(na)) return true;
-  // Token overlap for minor word-order / extra-locality differences
+  
   const ta = new Set(na.split(' ').filter((w) => w.length > 1));
   const tb = new Set(nb.split(' ').filter((w) => w.length > 1));
   if (!ta.size || !tb.size) return false;
@@ -212,6 +202,121 @@ export function buildLocalSeoInconsistencies(audit) {
   }
 
   return cards;
+}
+
+export type AeoQueryIntent =
+  | 'service_cost'
+  | 'service_best'
+  | 'service_howto'
+  | 'brand_trust'
+  | 'brand_compare';
+
+export type AeoQuerySpec = {
+  query: string;
+  intent: AeoQueryIntent;
+  kind: 'service' | 'brand';
+};
+
+/** Five measured AEO Visual queries: 3 service + 2 brand. Shared by decks + screenshot capture. */
+export function buildAeoQuerySpecs(audit: {
+  business?: {
+    businessName?: string;
+    searchAreaLabel?: string;
+    city?: string;
+    serviceLabel?: string;
+    service?: string;
+  };
+  gbpLookup?: {
+    localRank?: {
+      topResults?: Array<{ name?: string; isProspect?: boolean }>;
+    };
+  };
+} | null): AeoQuerySpec[] {
+  const name = String(audit?.business?.businessName || '').trim() || 'This business';
+  const city =
+    String(audit?.business?.searchAreaLabel || audit?.business?.city || '').trim() ||
+    'the local area';
+  const service =
+    String(audit?.business?.serviceLabel || audit?.business?.service || '').trim() ||
+    'local services';
+  const competitor =
+    String(
+      (audit?.gbpLookup?.localRank?.topResults || []).find(
+        (r) => r?.name && !r.isProspect
+      )?.name || ''
+    ).trim() || 'competitors';
+
+  return [
+    {
+      query: `What are the best ${service} services for local residents in ${city}?`,
+      intent: 'service_best',
+      kind: 'service'
+    },
+    {
+      query: `How to choose a reliable ${service} and what questions should I ask them?`,
+      intent: 'service_howto',
+      kind: 'service'
+    },
+    {
+      query: `What is the average cost of ${service} and what factors affect the price?`,
+      intent: 'service_cost',
+      kind: 'service'
+    },
+    {
+      query: `Is ${name} a reputable company for ${service}?`,
+      intent: 'brand_trust',
+      kind: 'brand'
+    },
+    {
+      query: `${name} vs ${competitor} for ${service}`,
+      intent: 'brand_compare',
+      kind: 'brand'
+    }
+  ];
+}
+
+export function buildAeoQueryCards(
+  audit: Parameters<typeof buildAeoQuerySpecs>[0],
+  screenshots?: Array<{
+    query?: string;
+    dataUrl?: string;
+    skipped?: boolean;
+    reason?: string;
+    capturedAt?: string;
+  }> | null
+) {
+  const shots = Array.isArray(screenshots) ? screenshots : [];
+  return buildAeoQuerySpecs(audit).map((spec) => {
+    const shot =
+      shots.find((s) => String(s?.query || '').trim() === spec.query) ||
+      shots.find(
+        (s) =>
+          String(s?.query || '')
+            .trim()
+            .toLowerCase() === spec.query.toLowerCase()
+      ) ||
+      null;
+    const screenshot = shot
+      ? shot.dataUrl && String(shot.dataUrl).startsWith('data:image/')
+        ? {
+            dataUrl: shot.dataUrl,
+            query: spec.query,
+            capturedAt: shot.capturedAt || null
+          }
+        : {
+            skipped: true,
+            reason: shot.reason || 'Unavailable',
+            query: spec.query,
+            capturedAt: shot.capturedAt || null
+          }
+      : null;
+    return {
+      query: spec.query,
+      intent: spec.intent,
+      kind: spec.kind,
+      screenshot
+    };
+  });
 }
 
 export function fallbackPillarDecks(audit) {
@@ -325,7 +430,7 @@ export function fallbackPillarDecks(audit) {
     aeoFixes: {
       title: 'AEO: Answer Engine Optimisation',
       visualIntro:
-        'Optimising content to appear as answers to user questions — e.g. Google People Also Ask, featured snippets, direct answers, and AI-generated answers.',
+        'Real Google results for five local question searches (3 service + 2 brand) — use these to see where FAQ and schema can win answer boxes.',
       aeoChecklist: buildAeoCoreChecklist(audit),
       priorities:
         toActions(aeoFails, 'Medium').length > 0
@@ -342,43 +447,7 @@ export function fallbackPillarDecks(audit) {
                 recommendation: 'Add concise FAQ answers with FAQPage schema on key service pages.'
               }
             ],
-      queryCards: [
-        {
-          query: `how much does ${service} cost in ${city}`,
-          paaQuestions: [
-            `How much does ${service} cost privately in ${city}?`,
-            `Is ${service} covered by insurance?`,
-            `What affects the price of ${service}?`
-          ],
-          featuredSnippet: {
-            source: 'National / directory sites',
-            title: `Typical ${service} pricing guidance`,
-            text: 'Cost queries are usually answered by large directories or national brands with clear FAQ copy.'
-          }
-        },
-        {
-          query: `do I need a referral for ${service} in ${city}`,
-          paaQuestions: [
-            `Do I need a GP referral for ${service}?`,
-            `Can I self-refer for ${service}?`,
-            `How quickly can I book ${service} in ${city}?`
-          ],
-          featuredSnippet: {
-            source: 'Authority guidance',
-            title: 'Referral requirements',
-            text: 'Referral / “do I need” queries favour crawlable FAQ answers from trusted sources.'
-          }
-        },
-        {
-          query: measuredQuery,
-          paaQuestions: [
-            `Who is the best ${service} near ${city}?`,
-            `Which ${service} is open near me?`,
-            `How do I book ${service} in ${city}?`
-          ],
-          mapsResults
-        }
-      ],
+      queryCards: buildAeoQueryCards(audit, audit?.aeoSerpScreenshots || null),
       opportunity: inPack
         ? `${name} appears in the local pack for “${measuredQuery}” — strengthen FAQ and schema so answer boxes can follow.`
         : `For “${measuredQuery}”, other local options show first — add FAQ blocks and schema so ${name} can compete in answer results.`

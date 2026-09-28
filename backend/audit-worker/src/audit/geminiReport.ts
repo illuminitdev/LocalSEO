@@ -106,7 +106,6 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
     }));
   const measuredNames = measuredMaps.map((r) => r.name);
   const measuredQuery = String(localRank?.query || '').trim();
-  const aeoMapsOnly = measuredMaps.filter((r) => !r.isProspect).slice(0, 3);
   const inPackMeasured = typeof localRank?.position === 'number';
 
   // Always attach factual Maps ranking (yes/no + list) — never leave "not measured"
@@ -132,30 +131,10 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
     };
   }
 
-  if (out.aeoFixes?.queryCards) {
-    out.aeoFixes = {
-      ...out.aeoFixes,
-      queryCards: (out.aeoFixes.queryCards || []).map((card) => {
-        const { note: _drop, ...rest } = card || {};
-        if (!aeoMapsOnly.length) return rest;
-        return {
-          ...rest,
-          mapsResults: aeoMapsOnly,
-          featuredSnippet: card?.featuredSnippet
-            ? {
-                ...card.featuredSnippet,
-                source:
-                  measuredNames.includes(card.featuredSnippet.source) ||
-                  /nhs|gov\.uk|wikipedia|yell|treatwell|booksy|national/i.test(
-                    String(card.featuredSnippet.source || '')
-                  )
-                    ? card.featuredSnippet.source
-                    : measuredNames[0] || 'Local directory / national source'
-              }
-            : card?.featuredSnippet
-        };
-      })
-    };
+  // AEO Visual queryCards are measured SERP screenshots — drop any Gemini-invented SERP mocks
+  if (out.aeoFixes) {
+    const { queryCards: _dropCards, ...aeoRest } = out.aeoFixes;
+    out.aeoFixes = aeoRest;
   }
   if (out.geoFixes) {
     const q = measuredQuery || restQuery(out.geoFixes);
@@ -396,21 +375,9 @@ Return ONLY JSON:
   },
   "aeoFixes": {
     "title": "AEO: Answer Engine Optimisation",
-    "visualIntro": "one sentence about question / FAQ search readiness for this service and city",
+    "visualIntro": "one sentence about question / FAQ search readiness for this service and city — AEO Visual uses measured Google SERP screenshots (do not invent SERP cards)",
     "priorities": [
       { "priority": "Critical|High|Medium", "title": "", "detail": "", "howTo": "concrete how-to steps", "issue": "", "evidence": "", "impact": "", "recommendation": "" }
-    ],
-    "queryCards": [
-      {
-        "query": "realistic UK question query for this service+city (cost, referral, or how-to)",
-        "featuredSnippet": {
-          "source": "real national/directory source or competitor from localRank only",
-          "title": "short snippet title",
-          "text": "1-2 sentences — do not invent local clinic names; use national/directory or names from localRank topResults"
-        },
-        "paaQuestions": ["3 related People Also Ask questions"],
-        "mapsResults": [{ "position": 1, "name": "from localRank only", "rating": 4.8, "reviewCount": 100 }]
-      }
     ],
     "opportunity": "one sentence opportunity — do NOT invent 'Brand is not mentioned' red-tag style notes"
   },
@@ -445,7 +412,7 @@ Return ONLY JSON:
 
 For every criticalIssue, finding, priorityFix, and deck action/priority use Issue → Evidence → Impact → Recommendation → Priority (map title/detail/why/action into those fields; keep existing keys too).
 Include exactly 4 criticalIssues, 4-6 findings, exactly 3 priorityFixes, roadmap months 1–3,
-exactly 3 aeoFixes.queryCards, 2 geoFixes.queryCards, 3-4 actions per Local SEO and GEO decks, 3-4 AEO priorities.
+do NOT generate aeoFixes.queryCards / featuredSnippet / paaQuestions (AEO Visual uses measured Google SERP screenshots), 2 geoFixes.queryCards, 3-4 actions per Local SEO and GEO decks, 3-4 AEO priorities.
 Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (you may refine titles only — never change phone/address facts or invent missing phones).`;
 
   let lastError;
@@ -490,24 +457,10 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
         priorities: Array.isArray(parsed.aeoFixes?.priorities)
           ? parsed.aeoFixes.priorities.slice(0, 4)
           : fallbacks.aeoFixes.priorities,
-        queryCards: (() => {
-          const fromAi = Array.isArray(parsed.aeoFixes?.queryCards)
-            ? parsed.aeoFixes.queryCards.slice(0, 3)
-            : null;
-          const base = fromAi || fallbacks.aeoFixes.queryCards;
-          return base.map((card: Record<string, unknown>, i: number) => {
-            const fb = (fallbacks.aeoFixes.queryCards[i] || {}) as Record<string, unknown>;
-            const paa = Array.isArray(card?.paaQuestions) ? card.paaQuestions : [];
-            const maps = Array.isArray(card?.mapsResults) ? card.mapsResults : [];
-            return {
-              ...fb,
-              ...card,
-              paaQuestions: paa.length ? paa.slice(0, 4) : (fb.paaQuestions as unknown[]) || [],
-              featuredSnippet: card?.featuredSnippet || fb.featuredSnippet || null,
-              mapsResults: maps.length ? maps.slice(0, 3) : (fb.mapsResults as unknown[]) || []
-            };
-          });
-        })()
+        // Measured Google SERP screenshots only — never Gemini-invented snippet/PAA cards
+        queryCards: Array.isArray(fallbacks.aeoFixes.queryCards)
+          ? fallbacks.aeoFixes.queryCards
+          : []
       };
 
       const geoFixes = {

@@ -56,10 +56,7 @@ function prefer(...ses: StatusEv[]): StatusEv {
   return ses[0] || { status: 'no', evidence: 'Not found / not confirmed' };
 }
 
-/**
- * Local AEO — Core Checklist for the report AEO section.
- * Statuses come from measured audit signals only (never invent passes).
- */
+
 export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
   const checks: CheckRow[] = audit?.checklist?.checks || audit?.presence?.checks || [];
   const gbp = audit?.gbpLookup || {};
