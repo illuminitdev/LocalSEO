@@ -817,7 +817,7 @@ async function enrichFromDataForSeo(audit: any) {
             lat: typeof lat === 'number' ? lat : null,
             lng: typeof lng === 'number' ? lng : null,
             locationName: locationLabel || undefined,
-            timeoutMs: 32000
+            timeoutMs: 60000
           })
         )
       );

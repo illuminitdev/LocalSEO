@@ -508,7 +508,7 @@ export async function captureAeoSerpScreenshot(opts: {
   applyLocalLocation(task, opts);
 
   const controller = new AbortController();
-  const timeoutMs = opts.timeoutMs ?? 32000;
+  const timeoutMs = opts.timeoutMs ?? 60000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
@@ -548,7 +548,7 @@ export async function captureAeoSerpScreenshot(opts: {
       };
     }
 
-    let dataUrl = await captureSerpScreenshotDataUrl(taskId, { timeoutMs: 40000 });
+    let dataUrl = await captureSerpScreenshotDataUrl(taskId, { timeoutMs: 55000 });
     if (!dataUrl) {
       return {
         query,
