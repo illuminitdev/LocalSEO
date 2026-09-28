@@ -14,7 +14,9 @@ import {
     Pencil,
     Trash2,
     Loader2,
-    History
+    History,
+    ChevronLeft,
+    ChevronRight
 } from 'lucide-react';
 import {
     type LeadTask,
@@ -55,6 +57,8 @@ function fmtDate(value?: string | null) {
     return time ? `${date} ${time}` : date;
 }
 
+const PAGE_SIZE = 10;
+
 export default function AdminCrmTasks() {
     const [tasks, setTasks] = useState<LeadTask[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
@@ -63,7 +67,7 @@ export default function AdminCrmTasks() {
     const [error, setError] = useState('');
     const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
 
-    
+    const [page, setPage] = useState(1);
     const [selectedAgent, setSelectedAgent] = useState<string>('all');
     const [selectedType, setSelectedType] = useState<string>('all');
     const [selectedStatus, setSelectedStatus] = useState<string>('all');
@@ -192,6 +196,20 @@ export default function AdminCrmTasks() {
         return true;
     });
 
+    const totalPages = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
+    const safePage = Math.min(page, totalPages);
+    const pageTasks = useMemo(() => {
+        const start = (safePage - 1) * PAGE_SIZE;
+        return filteredTasks.slice(start, start + PAGE_SIZE);
+    }, [filteredTasks, safePage]);
+
+    useEffect(() => {
+        if (page !== safePage) setPage(safePage);
+    }, [page, safePage]);
+
+    const rangeStart = filteredTasks.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+    const rangeEnd = Math.min(safePage * PAGE_SIZE, filteredTasks.length);
+
     const handleDeleteTask = async (taskId: string, taskTitle: string) => {
         if (!window.confirm(`Are you sure you want to delete task "${taskTitle}"?`)) return;
         setDeletingTaskId(taskId);
@@ -245,13 +263,16 @@ export default function AdminCrmTasks() {
             {}
             <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                    {}
+                    {/* Search bar */}
                     <div className="relative flex-1 max-w-md">
                         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input
                             type="text"
                             value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onChange={(e) => {
+                                setSearchQuery(e.target.value);
+                                setPage(1);
+                            }}
                             placeholder="Search tasks, notes, or telecaller..."
                             className="w-full pl-9 pr-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                         />
@@ -267,7 +288,7 @@ export default function AdminCrmTasks() {
                     </button>
                 </div>
 
-                {}
+                {/* Filters */}
                 <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 pt-2 border-t border-slate-100">
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
@@ -275,7 +296,10 @@ export default function AdminCrmTasks() {
                         </label>
                         <select
                             value={selectedBusiness}
-                            onChange={(e) => setSelectedBusiness(e.target.value)}
+                            onChange={(e) => {
+                                setSelectedBusiness(e.target.value);
+                                setPage(1);
+                            }}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             title="Filter by business category"
                         >
@@ -294,7 +318,10 @@ export default function AdminCrmTasks() {
                         </label>
                         <select
                             value={selectedAgent}
-                            onChange={(e) => setSelectedAgent(e.target.value)}
+                            onChange={(e) => {
+                                setSelectedAgent(e.target.value);
+                                setPage(1);
+                            }}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                         >
                             <option value="all">All Agents</option>
@@ -312,7 +339,10 @@ export default function AdminCrmTasks() {
                         </label>
                         <select
                             value={selectedType}
-                            onChange={(e) => setSelectedType(e.target.value)}
+                            onChange={(e) => {
+                                setSelectedType(e.target.value);
+                                setPage(1);
+                            }}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                         >
                             <option value="all">All Task Types</option>
@@ -330,7 +360,10 @@ export default function AdminCrmTasks() {
                         </label>
                         <select
                             value={selectedStatus}
-                            onChange={(e) => setSelectedStatus(e.target.value)}
+                            onChange={(e) => {
+                                setSelectedStatus(e.target.value);
+                                setPage(1);
+                            }}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                         >
                             <option value="all">All Statuses</option>
@@ -347,7 +380,10 @@ export default function AdminCrmTasks() {
                         </label>
                         <select
                             value={statusDateFilter}
-                            onChange={(e) => setStatusDateFilter(e.target.value as StatusDateFilter)}
+                            onChange={(e) => {
+                                setStatusDateFilter(e.target.value as StatusDateFilter);
+                                setPage(1);
+                            }}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             title="Filter by status updated date"
                         >
@@ -362,7 +398,10 @@ export default function AdminCrmTasks() {
                             <input
                                 type="date"
                                 value={statusCustomDate}
-                                onChange={(e) => setStatusCustomDate(e.target.value)}
+                                onChange={(e) => {
+                                    setStatusCustomDate(e.target.value);
+                                    setPage(1);
+                                }}
                                 className="w-full mt-1 px-2 py-1 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             />
                         )}
@@ -374,7 +413,10 @@ export default function AdminCrmTasks() {
                         </label>
                         <select
                             value={selectedPriority}
-                            onChange={(e) => setSelectedPriority(e.target.value)}
+                            onChange={(e) => {
+                                setSelectedPriority(e.target.value);
+                                setPage(1);
+                            }}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                         >
                             <option value="all">All Priorities</option>
@@ -421,7 +463,7 @@ export default function AdminCrmTasks() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {filteredTasks.map((task) => {
+                                {pageTasks.map((task) => {
                                     const isDone = task.status === 'completed';
                                     const isOverdue = task.dueDate && !isDone && new Date(task.dueDate) < now && !task.dueDate.startsWith(todayStr);
                                     const isDueToday = task.dueDate && !isDone && task.dueDate.startsWith(todayStr);
@@ -589,6 +631,48 @@ export default function AdminCrmTasks() {
                                 })}
                             </tbody>
                         </table>
+                    </div>
+                )}
+
+                {/* Pagination Controls */}
+                {!loading && filteredTasks.length > 0 && (
+                    <div className="p-3.5 sm:p-4 bg-slate-50/70 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+                        <p>
+                            Showing{' '}
+                            <span className="font-semibold text-slate-800">
+                                {rangeStart}
+                            </span>{' '}
+                            to{' '}
+                            <span className="font-semibold text-slate-800">
+                                {rangeEnd}
+                            </span>{' '}
+                            of{' '}
+                            <span className="font-semibold text-slate-800">
+                                {filteredTasks.length}
+                            </span>{' '}
+                            tasks
+                        </p>
+                        <div className="flex items-center justify-between sm:justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                disabled={page <= 1}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:pointer-events-none transition-colors bg-white shadow-2xs"
+                            >
+                                <ChevronLeft className="w-3.5 h-3.5" /> Previous
+                            </button>
+                            <span className="text-xs font-medium text-slate-600 px-1">
+                                Page {page} of {totalPages}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                                disabled={page >= totalPages}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:pointer-events-none transition-colors bg-white shadow-2xs"
+                            >
+                                Next <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>
