@@ -5,7 +5,7 @@ import {
     ClipboardList, CheckSquare, ClipboardCheck, Bell,
     UserPlus, AlertCircle, CheckCheck, FileText, Zap, Building2
 } from 'lucide-react';
-import { clearAdminToken } from './adminApi';
+import { adminGet, clearAdminToken } from './adminApi';
 import { cn } from '../shared/utils';
 
 // ─── Notification Types ───────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ function pageTitle(pathname: string) {
         };
     }
     if (pathname.startsWith('/admin/settings')) {
-        return { title: 'Settings', subtitle: 'Your admin login email and password.' };
+        return { title: 'Settings', subtitle: 'Profile photo, email, and password for this admin desk.' };
     }
     return { title: 'Overview', subtitle: 'Quick health check for the Local SEO portal.' };
 }
@@ -290,6 +290,8 @@ export default function AdminLayout() {
 
     const [notifOpen, setNotifOpen] = useState(false);
     const notifRef = useRef<HTMLDivElement | null>(null);
+    const [adminEmail, setAdminEmail] = useState('');
+    const [adminAvatarUrl, setAdminAvatarUrl] = useState('');
 
     useEffect(() => {
         if (!notifOpen) return;
@@ -301,6 +303,26 @@ export default function AdminLayout() {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [notifOpen]);
+
+    useEffect(() => {
+        let cancelled = false;
+        adminGet('/api/admin/me')
+            .then((data) => {
+                if (cancelled) return;
+                setAdminEmail(data.email || data.admin?.email || '');
+                setAdminAvatarUrl(data.avatarUrl || '');
+            })
+            .catch(() => {});
+        const onAvatar = (e: Event) => {
+            const detail = (e as CustomEvent<{ avatarUrl?: string }>).detail;
+            setAdminAvatarUrl(detail?.avatarUrl || '');
+        };
+        window.addEventListener('admin-avatar-updated', onAvatar);
+        return () => {
+            cancelled = true;
+            window.removeEventListener('admin-avatar-updated', onAvatar);
+        };
+    }, []);
 
     const logout = () => {
         clearAdminToken();
@@ -356,12 +378,20 @@ export default function AdminLayout() {
 
             <div className="px-4 pb-4 pt-3 border-t-2 border-[#E2E8F0] shrink-0 space-y-3 safe-pb">
                 <div className="flex items-center gap-3 px-1">
-                    <div className="w-9 h-9 rounded-full bg-[#0F172A] text-white flex items-center justify-center text-xs font-bold shrink-0">
-                        AD
-                    </div>
+                    {adminAvatarUrl ? (
+                        <img
+                            src={adminAvatarUrl}
+                            alt=""
+                            className="w-9 h-9 rounded-full object-cover shrink-0 border border-[#E2E8F0]"
+                        />
+                    ) : (
+                        <div className="w-9 h-9 rounded-full bg-[#0F172A] text-white flex items-center justify-center text-xs font-bold shrink-0">
+                            {(adminEmail || 'A').charAt(0).toUpperCase()}
+                        </div>
+                    )}
                     <div className="min-w-0 leading-tight">
                         <p className="text-sm font-semibold text-[#0F172A] truncate">Admin</p>
-                        <p className="text-xs text-[#94A3B8] mt-0.5 truncate">Admin</p>
+                        <p className="text-xs text-[#94A3B8] mt-0.5 truncate">{adminEmail || 'Admin'}</p>
                     </div>
                 </div>
                 <button

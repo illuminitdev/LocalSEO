@@ -54,11 +54,14 @@ router.post('/login', async (req: Request, res: Response) => {
 
 router.get('/me', requireAdmin, async (req: Request, res: Response) => {
     let passwordUpdatedAt: string | null = null;
+    let avatarUrl = '';
     try {
         const { rows } = await query(
-            `SELECT updated_at FROM admin_settings WHERE id = 'default' LIMIT 1`
+            `SELECT updated_at, COALESCE(avatar_url, '') AS avatar_url
+             FROM admin_settings WHERE id = 'default' LIMIT 1`
         );
         passwordUpdatedAt = rows[0]?.updated_at || null;
+        avatarUrl = rows[0]?.avatar_url || '';
     } catch {
         
     }
@@ -67,9 +70,47 @@ router.get('/me', requireAdmin, async (req: Request, res: Response) => {
         products: PRODUCTS,
         stage: resolveAdminCredentials().stage,
         email: resolveAdminCredentials().email,
+        avatarUrl,
         passwordUpdatedAt,
         passwordSource: passwordUpdatedAt ? 'custom' : 'env'
     });
+});
+
+router.post('/settings/avatar/presign', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { createUploadPresign } = await import('../lib/media');
+        const data = await createUploadPresign({
+            kind: 'avatar',
+            contentType: String(req.body?.contentType || 'image/jpeg'),
+            userId: 'admin'
+        });
+        res.json(data);
+    } catch (err: any) {
+        res.status(err.status || 500).json({ error: err.message || 'Presign failed' });
+    }
+});
+
+router.patch('/settings/avatar', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const { isAllowedMediaUrl } = await import('../lib/media');
+        const raw = req.body?.avatarUrl != null ? String(req.body.avatarUrl).trim() : '';
+        if (raw && !isAllowedMediaUrl(raw)) {
+            return res.status(400).json({ error: 'Invalid avatar URL.' });
+        }
+
+        await query(
+            `INSERT INTO admin_settings (id, password_hash, avatar_url, updated_at)
+             VALUES ('default', '', $1, NOW())
+             ON CONFLICT (id) DO UPDATE
+             SET avatar_url = EXCLUDED.avatar_url`,
+            [raw]
+        );
+
+        res.json({ success: true, avatarUrl: raw });
+    } catch (err: any) {
+        console.error('Admin avatar update error:', err);
+        res.status(500).json({ error: err.message || 'Could not update avatar' });
+    }
 });
 
 router.patch('/settings/password', requireAdmin, async (req: Request, res: Response) => {
