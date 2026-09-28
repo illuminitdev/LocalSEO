@@ -82,7 +82,11 @@ import {
     sendCampaign,
     updateSiteContent
 } from '../lib/marketing';
-import { hydrateOrgBookingIndustry, setOrgBookingIndustry } from '../lib/bookingIndustryHydrate';
+import {
+    hydrateOrgBookingIndustry,
+    resolveBookingIndustryPreset,
+    setOrgBookingIndustry
+} from '../lib/bookingIndustryHydrate';
 import {
     getBookingPreset,
     normalizeBookingIndustryId
@@ -200,12 +204,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const industryId =
                 normalizeBookingIndustryId(org?.booking_industry_id) ||
                 normalizeBookingIndustryId(hydratedId);
-            const industryPreset = industryId ? getBookingPreset(industryId) : null;
-            const isSalonsIndustry = industryId === 'salons';
-            const hasBookingData = Boolean(
-                String(org?.trade_type || '').trim() &&
-                    (isSalonsIndustry || (data?.eventTypes || []).length > 0)
-            );
+            const industryPreset = industryId ? await resolveBookingIndustryPreset(industryId) : null;
+            const hasBookingData = Boolean(String(org?.trade_type || '').trim());
             const bookingReady = Boolean(org?.setup_complete && hasBookingData);
             if (!bookingReady) {
                 return res.json({
@@ -224,10 +224,12 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                         : null,
                     bookingIndustry: industryPreset
                         ? {
-                              id: industryPreset.id,
+                              id: industryId,
                               name: industryPreset.name,
-                              services: isSalonsIndustry ? [] : industryPreset.services,
-                              defaultService: isSalonsIndustry ? '' : industryPreset.defaultService
+                              shortName: industryPreset.shortName,
+                              tagline: industryPreset.tagline,
+                              services: [],
+                              defaultService: ''
                           }
                         : null,
                     stripeConfigured: Boolean(stripeClient)
@@ -249,10 +251,12 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 planId: ents.planId || null,
                 bookingIndustry: industryPreset
                     ? {
-                          id: industryPreset.id,
+                          id: industryId,
                           name: industryPreset.name,
-                          services: isSalonsIndustry ? [] : industryPreset.services,
-                          defaultService: isSalonsIndustry ? '' : industryPreset.defaultService,
+                          shortName: industryPreset.shortName,
+                          tagline: industryPreset.tagline,
+                          services: [],
+                          defaultService: '',
                           customFields: industryPreset.customFields,
                           uploadPrompt: industryPreset.uploadPrompt,
                           notesPlaceholder: industryPreset.notesPlaceholder,
@@ -362,9 +366,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const industryId =
                 normalizeBookingIndustryId(bookingIndustryId) ||
                 (tradeType ? getBookingPreset(String(tradeType)).id : null);
-            const resolvedTradeType = industryId
-                ? getBookingPreset(industryId).name
-                : String(tradeType || '').trim();
+            const industryPreset = industryId ? await resolveBookingIndustryPreset(industryId) : null;
+            const resolvedTradeType = industryPreset?.name || String(tradeType || '').trim();
 
             if (!String(name || '').trim() || !String(businessName || '').trim() || !resolvedTradeType) {
                 return res.status(400).json({ error: 'Your name, business name, and service type are required.' });
@@ -423,12 +426,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                 const data = await loadDashboard((req as any).orgId);
                 const org = data?.organization;
                 if (!org) return res.json({ organizations: [] });
-                const industryId = normalizeBookingIndustryId(org.booking_industry_id);
-                const isSalonsIndustry = industryId === 'salons';
-                const hasBookingData = Boolean(
-                    String(org.trade_type || '').trim() &&
-                        (isSalonsIndustry || (data?.eventTypes || []).length > 0)
-                );
+                const hasBookingData = Boolean(String(org.trade_type || '').trim());
                 return res.json({
                     organizations: [
                         {
@@ -478,9 +476,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const industryId =
                 normalizeBookingIndustryId(bookingIndustryId) ||
                 (tradeType ? getBookingPreset(String(tradeType)).id : null);
-            const resolvedTradeType = industryId
-                ? getBookingPreset(industryId).name
-                : String(tradeType || '').trim();
+            const industryPreset = industryId ? await resolveBookingIndustryPreset(industryId) : null;
+            const resolvedTradeType = industryPreset?.name || String(tradeType || '').trim();
 
             if (!String(name || '').trim() || !String(businessName || '').trim() || !resolvedTradeType) {
                 return res.status(400).json({ error: 'Your name, business name, and service type are required.' });

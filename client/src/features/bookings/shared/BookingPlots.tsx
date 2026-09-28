@@ -633,6 +633,8 @@ export default function BookingPlots() {
                             data?.bookingIndustry?.id ||
                             null
                         }
+                        initialIndustryName={data?.bookingIndustry?.name || null}
+                        initialIndustryTagline={data?.bookingIndustry?.tagline || null}
                         onRefreshIndustry={() => {
                             setLoading(true);
                             load().catch((e: any) => {

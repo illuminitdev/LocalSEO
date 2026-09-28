@@ -622,7 +622,7 @@ export function normalizeBookingIndustryId(raw: unknown): string | null {
 export function bookingIndustryLabel(id: string | null | undefined): string | null {
     if (!id) return null;
     const preset = bookingIndustryPresets.find((p) => p.id === id);
-    return preset?.name || id;
+    return preset?.name || humanizeIndustrySlug(id) || id;
 }
 
 function smallBusinessPreset(): BookingIndustryPreset {
@@ -632,9 +632,42 @@ function smallBusinessPreset(): BookingIndustryPreset {
     );
 }
 
+/** Turn a slug like "garages" into "Garages" when Admin catalog name is unavailable. */
+export function humanizeIndustrySlug(id: string): string {
+    return String(id || '')
+        .split('-')
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+}
+
 /**
- * Demo board behavior for known industries. Unknown / newly Admin-added ids use
- * small-business until a dedicated demo is built.
+ * Shared customer/host board for Admin-added industries that do not have a dedicated
+ * demo yet. Keeps the real industry id + display name; reuses small-business forms/services.
+ */
+export function sharedBoardPreset(
+    industryId: string,
+    labels?: { name?: string | null; shortName?: string | null }
+): BookingIndustryPreset {
+    const base = smallBusinessPreset();
+    const id = String(industryId || '').trim().toLowerCase() || base.id;
+    const name =
+        String(labels?.name || '').trim() ||
+        String(labels?.shortName || '').trim() ||
+        humanizeIndustrySlug(id) ||
+        base.name;
+    const shortName = String(labels?.shortName || '').trim() || name;
+    return {
+        ...base,
+        id,
+        name,
+        shortName
+    };
+}
+
+/**
+ * Demo board behavior for known industries. Unknown / newly Admin-added ids use the
+ * shared small-business board template but keep the purchased industry id + name.
  */
 export function getBookingPreset(industryId: string | null | undefined): BookingIndustryPreset {
     if (!industryId || typeof industryId !== 'string') return smallBusinessPreset();
@@ -698,9 +731,11 @@ export function getBookingPreset(industryId: string | null | undefined): Booking
     if (idLower.includes('profess') || idLower.includes('accountant') || idLower.includes('consult')) {
         return bookingIndustryPresets.find((p) => p.id === 'professional-services') || smallBusinessPreset();
     }
-    if (idLower.includes('small') || idLower.includes('biz')) return smallBusinessPreset();
+    if (idLower === 'small-business' || idLower === 'small-businesses') {
+        return smallBusinessPreset();
+    }
 
-    return smallBusinessPreset();
+    return sharedBoardPreset(idLower);
 }
 
 export function slugifyServiceName(name: string): string {

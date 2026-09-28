@@ -42,6 +42,9 @@ type Props = {
     error: string;
     
     initialIndustryId?: string | null;
+    /** Display name from Admin catalog / host API (preferred over preset fallback). */
+    initialIndustryName?: string | null;
+    initialIndustryTagline?: string | null;
     onRefreshIndustry?: () => void;
     onComplete: (form: SetupForm) => Promise<void>;
 };
@@ -81,6 +84,8 @@ export default function BookingSetupWizard({
     busy,
     error,
     initialIndustryId,
+    initialIndustryName,
+    initialIndustryTagline,
     onRefreshIndustry,
     onComplete
 }: Props) {
@@ -99,22 +104,31 @@ export default function BookingSetupWizard({
     );
     
     const [step, setStep] = useState(0);
-    const [form, setForm] = useState<SetupForm>(() => baseForm(checkoutIndustryId || null));
+    const [form, setForm] = useState<SetupForm>(() => {
+        const name = String(initialIndustryName || '').trim();
+        return baseForm(checkoutIndustryId || null, name ? { tradeType: name } : {});
+    });
 
     const selectedPreset = getBookingPreset(checkoutIndustryId || form.bookingIndustryId);
+    const lockedName =
+        String(initialIndustryName || '').trim() ||
+        String(form.tradeType || '').trim() ||
+        selectedPreset.name;
+    const lockedTagline = String(initialIndustryTagline || '').trim() || selectedPreset.tagline;
     const placeholders = selectedPreset.setupPlaceholders;
-    const isSalons = selectedPreset.id === 'salons';
+    const isSalons = selectedPreset.id === 'salons' || checkoutIndustryId === 'salons';
 
     useEffect(() => {
         if (!checkoutIndustryId) return;
         const preset = getBookingPreset(checkoutIndustryId);
+        const displayName = String(initialIndustryName || '').trim() || preset.name;
         setForm((f) => ({
             ...f,
-            bookingIndustryId: preset.id,
-            tradeType: preset.name
+            bookingIndustryId: checkoutIndustryId,
+            tradeType: displayName
         }));
         setStep((s) => (s === 0 ? 0 : s));
-    }, [checkoutIndustryId]);
+    }, [checkoutIndustryId, initialIndustryName]);
 
     const useSavedBusiness = () => {
         if (!linkedBusiness?.name) return;
@@ -124,7 +138,8 @@ export default function BookingSetupWizard({
     };
 
     const enterManually = () => {
-        setForm(baseForm(checkoutIndustryId || null));
+        const name = String(initialIndustryName || '').trim();
+        setForm(baseForm(checkoutIndustryId || null, name ? { tradeType: name } : {}));
         setPath('manual');
         setStep(hasCheckoutIndustry ? 0 : 1);
     };
@@ -132,12 +147,12 @@ export default function BookingSetupWizard({
     const finish = async (e: FormEvent) => {
         e.preventDefault();
         if (!hasCheckoutIndustry) return;
-        const preset = getBookingPreset(checkoutIndustryId);
+        const displayName = String(initialIndustryName || '').trim() || lockedName;
         await onComplete({
             ...form,
-            bookingIndustryId: preset.id,
-            tradeType: preset.name,
-            ...(preset.id === 'salons'
+            bookingIndustryId: checkoutIndustryId,
+            tradeType: displayName,
+            ...(isSalons
                 ? { acceptingEmergencies: false, emergencyDeposit: form.standardDeposit }
                 : {})
         });
@@ -159,7 +174,7 @@ export default function BookingSetupWizard({
                 <p className="text-xs font-bold uppercase tracking-widest text-[#F59E0B]">Booking Plots</p>
                 <h1 className="text-2xl lg:text-3xl font-black text-[#0F172A] mt-1">Set up your booking board</h1>
                 <p className="text-sm text-[#64748B] mt-1">
-                    Your industry was chosen at payment. Customer forms and services match that selection.
+                    Your industry was chosen at payment. After setup you&apos;ll add your own services.
                 </p>
             </div>
 
@@ -245,14 +260,8 @@ export default function BookingSetupWizard({
                                 <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-[#D97706]">
                                     <Lock className="w-3.5 h-3.5" /> Locked from payment
                                 </div>
-                                <p className="font-bold text-[#0F172A] text-lg mt-1">{selectedPreset.name}</p>
-                                <p className="text-sm text-[#64748B] mt-1">{selectedPreset.tagline}</p>
-                                <p className="text-xs text-[#64748B] mt-2">
-                                    Services: {selectedPreset.services.slice(0, 2).join(' · ')}
-                                    {selectedPreset.services.length > 2
-                                        ? ` · +${selectedPreset.services.length - 2} more`
-                                        : ''}
-                                </p>
+                                <p className="font-bold text-[#0F172A] text-lg mt-1">{lockedName}</p>
+                                <p className="text-sm text-[#64748B] mt-1">{lockedTagline}</p>
                             </div>
 
                             {onIndustryStep && (

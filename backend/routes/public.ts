@@ -88,15 +88,16 @@ function normalizeIntakeAnswers(raw: any): Record<string, string> {
 function industryPayload(org: any, menuItems: any[] = []) {
     const industryId =
         normalizeBookingIndustryId(org?.booking_industry_id) ||
-        (org?.trade_type ? getBookingPreset(String(org.trade_type)).id : null);
+        (org?.trade_type ? normalizeBookingIndustryId(org.trade_type) : null);
     if (!industryId) return null;
     const preset = getBookingPreset(industryId);
+    const displayName = String(org?.trade_type || '').trim() || preset.name;
     
     const customFields = (preset.customFields || []).filter((field) => field.id !== 'enquiryType');
     return {
-        id: preset.id,
-        name: preset.name,
-        shortName: preset.shortName,
+        id: industryId,
+        name: displayName,
+        shortName: preset.shortName === preset.name ? displayName : preset.shortName,
         defaultService: preset.defaultService,
         services: preset.services,
         categorizedServices: preset.categorizedServices || [],
