@@ -73,14 +73,14 @@ export default function Dashboard() {
     const hasBookings = features.includes('bookings');
     const hasLocalSeo = features.includes('local_presence') || features.includes('local_growth');
 
-    // 1. Booking-only plans: booking-solo, booking-solo-plus, booking-pro
+    // 1. Booking-only
     const isBookingPlan =
         planId === 'booking-solo' ||
         planId === 'booking-solo-plus' ||
         planId === 'booking-pro' ||
         (hasBookings && !hasLocalSeo);
 
-    // 2. Local SEO-only plans: local-presence, local-growth, website-essential
+    // 2. Local SEO-only 
     const isLocalSeoPlan =
         planId === 'local-presence' ||
         planId === 'local-growth' ||
@@ -118,7 +118,6 @@ export default function Dashboard() {
         );
     }
 
-    // ── 2. LOCAL SEO-ONLY PLANS (Local Presence, Local Growth) ──
     if (isLocalSeoPlan) {
         return (
             <>
@@ -150,9 +149,6 @@ export default function Dashboard() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// 1. BOOKING-ONLY DASHBOARD (Matches Image 1)
-// ═══════════════════════════════════════════════════════════════════
 function BookingSoloDashboard({
     userName,
     data
@@ -219,7 +215,7 @@ function BookingSoloDashboard({
 
     return (
         <div className="max-w-6xl mx-auto space-y-4 animate-in fade-in duration-500 pb-8">
-            {/* ── Top Header ── */}
+            {}
             <div>
                 <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[#0F172A]">
                     Welcome back, {userName || 'there'} <span className="inline-block hover:rotate-12 transition-transform cursor-default">👋</span>
@@ -229,7 +225,7 @@ function BookingSoloDashboard({
                 </p>
             </div>
 
-            {/* ── Hero Banner ── */}
+            {}
             <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-[#061838] via-[#0B2A63] to-[#081F4B] text-white p-4 sm:p-5 lg:p-6 shadow-xl border border-[#163675]">
                 <div className="absolute -left-12 -top-12 w-64 h-64 rounded-full bg-sky-500/10 blur-3xl pointer-events-none" />
                 <div className="absolute right-1/4 -bottom-8 w-64 h-64 rounded-full bg-amber-500/15 blur-3xl pointer-events-none" />
@@ -256,7 +252,7 @@ function BookingSoloDashboard({
                         </Link>
                     </div>
 
-                    {/* Right hero artwork */}
+                    {}
                     <div className="hidden md:flex items-center justify-end gap-5 lg:gap-8 xl:gap-10 shrink-0 relative select-none">
                         <svg width="390" height="155" viewBox="0 0 400 155" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0 overflow-visible">
                             <defs>
@@ -387,7 +383,7 @@ function BookingSoloDashboard({
                 </div>
             </div>
 
-            {/* ── 5 Stat KPI Cards ── */}
+                {}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
                 {stats.map((s) => {
                     const Icon = s.icon;
@@ -413,9 +409,8 @@ function BookingSoloDashboard({
                 })}
             </div>
 
-            {/* ── Bottom 2 Columns: Money Snapshot & Quick Links ── */}
+            {}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* ── Left: Money snapshot ── */}
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col justify-between">
                     <div>
                         <div className="flex items-start justify-between gap-2 mb-4">
@@ -477,7 +472,7 @@ function BookingSoloDashboard({
                     </div>
                 </div>
 
-                {/* ── Right: Quick links ── */}
+                {}
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col justify-between">
                     <div>
                         <div className="flex items-center gap-2.5 mb-4">
@@ -516,10 +511,7 @@ function BookingSoloDashboard({
         </div>
     );
 }
-
-// ═══════════════════════════════════════════════════════════════════
-// 2. LOCAL SEO-ONLY DASHBOARD (Matches Image 2 Style - No Bookings)
-// ═══════════════════════════════════════════════════════════════════
+//Local SEO Only Dashboard
 function LocalSeoOnlyDashboard({
     userName,
     businessData
@@ -594,7 +586,7 @@ function LocalSeoOnlyDashboard({
 
     return (
         <div className="max-w-7xl mx-auto space-y-5 animate-in fade-in duration-300 pb-12">
-            {/* Header */}
+            {}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                     <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
@@ -613,7 +605,7 @@ function LocalSeoOnlyDashboard({
                 </Link>
             </div>
 
-            {/* Hero Banner */}
+            {}
             <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-[#061838] via-[#0B2A63] to-[#081F4B] text-white p-5 sm:p-6 lg:p-7 shadow-xl border border-[#163675]">
                 <div className="absolute -left-12 -top-12 w-64 h-64 rounded-full bg-sky-500/10 blur-3xl pointer-events-none" />
                 <div className="absolute right-0 top-0 w-80 h-80 rounded-full bg-blue-600/15 blur-3xl pointer-events-none" />
@@ -648,7 +640,7 @@ function LocalSeoOnlyDashboard({
                         </div>
                     </div>
 
-                    {/* Quick Health Summary */}
+                    {}
                     <div className="hidden lg:flex flex-col gap-2.5 bg-white/5 backdrop-blur-md p-4 rounded-2xl border border-white/10 shrink-0 w-64">
                         <div className="flex items-center justify-between text-xs">
                             <span className="text-slate-300">Map Dominance</span>
