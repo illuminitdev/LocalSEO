@@ -170,24 +170,15 @@ const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 380;
 const SIDEBAR_DEFAULT = 240;
 
-type NavItem = {
-    name: string;
-    to: string;
-    icon: React.ElementType;
-    end?: boolean;
-    /** CSS class that drives the hover/active icon micro-animation */
-    iconAnim: string;
-};
-
-const NAV: NavItem[] = [
-    { name: 'Overview', to: '/admin', icon: LayoutDashboard, end: true, iconAnim: 'nav-icon-grid' },
-    { name: 'Users', to: '/admin/users', icon: Users, iconAnim: 'nav-icon-users' },
-    { name: 'Full Audit', to: '/admin/full-audits', icon: ClipboardCheck, iconAnim: 'nav-icon-audit' },
-    { name: 'Leads', to: '/admin/growth-audit-leads', icon: ClipboardList, iconAnim: 'nav-icon-list' },
-    { name: 'CRM', to: '/admin/tasks', icon: CheckSquare, iconAnim: 'nav-icon-crm' },
-    { name: 'Plan guide', to: '/admin/services', icon: Layers, iconAnim: 'nav-icon-layers' },
-    { name: 'Industries', to: '/admin/industries', icon: Building2, iconAnim: 'nav-icon-building' },
-    { name: 'Settings', to: '/admin/settings', icon: Settings, iconAnim: 'nav-icon-gear' },
+const NAV = [
+    { name: 'Overview', to: '/admin', icon: LayoutDashboard, end: true },
+    { name: 'Users', to: '/admin/users', icon: Users },
+    { name: 'Full Audit', to: '/admin/full-audits', icon: ClipboardCheck },
+    { name: 'Leads', to: '/admin/growth-audit-leads', icon: ClipboardList },
+    { name: 'CRM', to: '/admin/tasks', icon: CheckSquare },
+    { name: 'Plan guide', to: '/admin/services', icon: Layers },
+    { name: 'Industries', to: '/admin/industries', icon: Building2 },
+    { name: 'Settings', to: '/admin/settings', icon: Settings }
 ];
 
 function pageTitle(pathname: string) {
@@ -350,149 +341,18 @@ export default function AdminLayout() {
                                       ? location.pathname.startsWith('/admin/full-audits')
                                       : isActive;
                             return cn(
-                                'group flex items-center gap-2.5 px-3 py-2 min-h-[38px] rounded-xl text-sm transition-colors',
+                                'flex items-center gap-2.5 px-3 py-2 min-h-[38px] rounded-xl text-sm transition-colors',
                                 active
                                     ? 'bg-[#F59E0B] text-[#0F172A] font-semibold'
                                     : 'text-[#64748B] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
                             );
                         }}
                     >
-                        {({ isActive }) => {
-                            const active =
-                                item.to === '/admin/users'
-                                    ? location.pathname.startsWith('/admin/users')
-                                    : item.to === '/admin/full-audits'
-                                      ? location.pathname.startsWith('/admin/full-audits')
-                                      : isActive;
-                            return (
-                                <>
-                                    <item.icon
-                                        className={cn(
-                                            'nav-icon w-[18px] h-[18px] shrink-0',
-                                            item.iconAnim,
-                                            active && 'is-active'
-                                        )}
-                                        strokeWidth={1.75}
-                                        aria-hidden
-                                    />
-                                    <span>{item.name}</span>
-                                </>
-                            );
-                        }}
+                        <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
+                        <span>{item.name}</span>
                     </NavLink>
                 ))}
             </nav>
-
-            <style>{`
-                @media (prefers-reduced-motion: no-preference) {
-                    .nav-icon {
-                        transform-origin: center;
-                        transition: transform 0.22s ease;
-                    }
-                    /* Overview — tiles settle into place */
-                    .group:hover .nav-icon-grid {
-                        animation: navIconTiles 0.5s cubic-bezier(0.34, 1.4, 0.64, 1);
-                    }
-                    .nav-icon-grid.is-active {
-                        transform: rotate(-6deg) scale(1.06);
-                    }
-                    /* Users — friendly nod / wave */
-                    .group:hover .nav-icon-users {
-                        animation: navIconWave 0.55s ease;
-                    }
-                    .nav-icon-users.is-active {
-                        transform: rotate(-8deg);
-                    }
-                    /* Full Audit — clipboard stamp */
-                    .group:hover .nav-icon-audit {
-                        animation: navIconStamp 0.45s ease;
-                    }
-                    .nav-icon-audit.is-active {
-                        transform: rotate(6deg) scale(1.06);
-                    }
-                    /* Leads — list rattle */
-                    .group:hover .nav-icon-list {
-                        animation: navIconRattle 0.45s ease;
-                    }
-                    .nav-icon-list.is-active {
-                        transform: skewX(-6deg);
-                    }
-                    /* CRM — check press */
-                    .group:hover .nav-icon-crm {
-                        animation: navIconPress 0.4s ease;
-                    }
-                    .nav-icon-crm.is-active {
-                        transform: scale(0.92);
-                    }
-                    /* Plan guide — layers peel */
-                    .group:hover .nav-icon-layers {
-                        animation: navIconPeel 0.5s ease;
-                    }
-                    .nav-icon-layers.is-active {
-                        transform: skewY(-4deg) translateY(-1px);
-                    }
-                    /* Industries — buildings rise */
-                    .group:hover .nav-icon-building {
-                        animation: navIconRise 0.5s cubic-bezier(0.34, 1.3, 0.64, 1);
-                        transform-origin: bottom center;
-                    }
-                    .nav-icon-building.is-active {
-                        transform: scaleY(1.12);
-                        transform-origin: bottom center;
-                    }
-                    /* Settings — gear turn */
-                    .group:hover .nav-icon-gear {
-                        animation: navIconSpin 0.6s ease;
-                    }
-                    .nav-icon-gear.is-active {
-                        transform: rotate(45deg);
-                    }
-                }
-                @keyframes navIconTiles {
-                    0% { transform: rotate(0deg) scale(1); }
-                    35% { transform: rotate(-10deg) scale(1.12); }
-                    70% { transform: rotate(4deg) scale(1.04); }
-                    100% { transform: rotate(0deg) scale(1); }
-                }
-                @keyframes navIconWave {
-                    0%, 100% { transform: rotate(0deg); }
-                    25% { transform: rotate(-14deg); }
-                    50% { transform: rotate(10deg); }
-                    75% { transform: rotate(-6deg); }
-                }
-                @keyframes navIconStamp {
-                    0% { transform: translateY(0) scale(1) rotate(0deg); }
-                    30% { transform: translateY(-3px) scale(1.08) rotate(-4deg); }
-                    55% { transform: translateY(1px) scale(0.9) rotate(3deg); }
-                    100% { transform: translateY(0) scale(1) rotate(0deg); }
-                }
-                @keyframes navIconRattle {
-                    0%, 100% { transform: translateX(0) rotate(0deg); }
-                    20% { transform: translateX(-2px) rotate(-5deg); }
-                    40% { transform: translateX(2px) rotate(5deg); }
-                    60% { transform: translateX(-1px) rotate(-3deg); }
-                    80% { transform: translateX(1px) rotate(2deg); }
-                }
-                @keyframes navIconPress {
-                    0%, 100% { transform: scale(1); }
-                    40% { transform: scale(0.82); }
-                    70% { transform: scale(1.12); }
-                }
-                @keyframes navIconPeel {
-                    0%, 100% { transform: translateY(0) skewY(0deg) rotate(0deg); }
-                    40% { transform: translateY(-2px) skewY(-6deg) rotate(-4deg); }
-                    70% { transform: translateY(1px) skewY(3deg) rotate(2deg); }
-                }
-                @keyframes navIconRise {
-                    0% { transform: scaleY(0.75); }
-                    55% { transform: scaleY(1.18); }
-                    100% { transform: scaleY(1); }
-                }
-                @keyframes navIconSpin {
-                    from { transform: rotate(0deg); }
-                    to { transform: rotate(120deg); }
-                }
-            `}</style>
 
             <div className="px-4 pb-4 pt-3 border-t-2 border-[#E2E8F0] shrink-0 space-y-3 safe-pb">
                 <div className="flex items-center gap-3 px-1">
