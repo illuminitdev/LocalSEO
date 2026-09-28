@@ -18,6 +18,13 @@ import {
     normalizeBookingIndustryId,
     bookingIndustryLabel
 } from '../lib/bookingIndustryPresets';
+import {
+    createBookingIndustry,
+    getBookingIndustryById,
+    isActiveBookingIndustryId,
+    listBookingIndustries,
+    updateBookingIndustry
+} from '../lib/bookingIndustriesDb';
 import { setOrgBookingIndustry } from '../lib/bookingIndustryHydrate';
 import Stripe from 'stripe';
 import adminFullAuditsRouter from './fullAudits';
@@ -121,6 +128,8 @@ function mapRegisteredUser(row: any) {
               }
             : null,
         serviceLabel:
+            row.industry_short_name ||
+            row.industry_name ||
             bookingIndustryLabel(bookingIndustryId) ||
             String(row.trade_type || '').trim() ||
             null,
@@ -233,7 +242,11 @@ function mapInviteUser(row: any) {
         mustChangePassword: true,
         platformRole: 'customer' as const,
         organization: null,
-        serviceLabel: bookingIndustryLabel(bookingIndustryId) || null,
+        serviceLabel:
+            row.industry_short_name ||
+            row.industry_name ||
+            bookingIndustryLabel(bookingIndustryId) ||
+            null,
         subscription: row.plan_id
             ? {
                   id: row.subscription_id,
@@ -432,6 +445,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                     u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
                     u.must_change_password, COALESCE(u.platform_role, 'customer') AS platform_role,
                     o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.booking_industry_id, o.setup_complete,
+                    bi.name AS industry_name, bi.short_name AS industry_short_name,
                     COALESCE(NULLIF(TRIM(o.phone), ''), NULLIF(TRIM(pi.phone), '')) AS phone,
                     s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
@@ -451,6 +465,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
              FROM users u
              LEFT JOIN memberships m ON m.user_id = u.id AND m.role = 'owner'
              LEFT JOIN organizations o ON o.id = m.org_id
+             LEFT JOIN booking_industries bi ON bi.id = o.booking_industry_id
              LEFT JOIN subscriptions s ON s.status = 'active' AND (
                  (o.id IS NOT NULL AND s.org_id = o.id)
                  OR LOWER(s.customer_email) = LOWER(u.email)
@@ -486,11 +501,13 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                     pi.claimed_at, pi.credentials_emailed_at, pi.created_at AS invite_created_at,
                     pi.stripe_subscription_id, pi.stripe_customer_id, pi.stripe_session_id,
                     pi.features AS invite_features, pi.booking_industry_id,
+                    bi.name AS industry_name, bi.short_name AS industry_short_name,
                     p.name AS plan_name, p.price_cents, p.currency,
                     s.id AS subscription_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
                     s.cancel_at_period_end
              FROM portal_invites pi
+             LEFT JOIN booking_industries bi ON bi.id = pi.booking_industry_id
              LEFT JOIN plans p ON p.id = pi.plan_id
              LEFT JOIN subscriptions s ON s.status = 'active'
                AND (LOWER(s.customer_email) = LOWER(pi.email)
@@ -537,6 +554,7 @@ router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Respon
             `SELECT u.id AS user_id, u.email, u.name AS user_name, u.created_at AS user_created_at,
                     u.must_change_password, COALESCE(u.platform_role, 'customer') AS platform_role,
                     o.id AS org_id, o.name AS org_name, o.slug AS org_slug, o.trade_type, o.booking_industry_id, o.setup_complete,
+                    bi.name AS industry_name, bi.short_name AS industry_short_name,
                     COALESCE(NULLIF(TRIM(o.phone), ''), NULLIF(TRIM(pi.phone), '')) AS phone,
                     s.id AS subscription_id, s.plan_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
@@ -553,6 +571,7 @@ router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Respon
              FROM users u
              LEFT JOIN memberships m ON m.user_id = u.id AND m.role = 'owner'
              LEFT JOIN organizations o ON o.id = m.org_id
+             LEFT JOIN booking_industries bi ON bi.id = o.booking_industry_id
              LEFT JOIN subscriptions s ON s.status = 'active' AND (
                  (o.id IS NOT NULL AND s.org_id = o.id)
                  OR LOWER(s.customer_email) = LOWER(u.email)
@@ -586,11 +605,13 @@ router.get('/users/invite/:inviteId', requireAdmin, async (req: Request, res: Re
                     pi.claimed_at, pi.credentials_emailed_at, pi.created_at AS invite_created_at,
                     pi.stripe_subscription_id, pi.stripe_customer_id, pi.stripe_session_id,
                     pi.booking_industry_id,
+                    bi.name AS industry_name, bi.short_name AS industry_short_name,
                     p.name AS plan_name, p.price_cents, p.currency,
                     s.id AS subscription_id, s.status AS subscription_status,
                     s.current_period_start, s.current_period_end, s.created_at AS subscription_created_at,
                     s.cancel_at_period_end
              FROM portal_invites pi
+             LEFT JOIN booking_industries bi ON bi.id = pi.booking_industry_id
              LEFT JOIN plans p ON p.id = pi.plan_id
              LEFT JOIN subscriptions s ON s.status = 'active'
                AND (LOWER(s.customer_email) = LOWER(pi.email)
@@ -1084,6 +1105,14 @@ router.post('/users', requireAdmin, async (req: Request, res: Response) => {
         ) {
             return res.status(400).json({ error: 'Invalid booking industry / services selection.' });
         }
+        if (role === 'customer' && bookingIndustryId) {
+            const ok = await isActiveBookingIndustryId(bookingIndustryId);
+            if (!ok) {
+                return res.status(400).json({
+                    error: 'Unknown or inactive booking industry. Add it under Admin → Industries first.'
+                });
+            }
+        }
 
         const existing = await query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email]);
         if (existing.rows.length) {
@@ -1355,6 +1384,58 @@ router.get('/services', requireAdmin, (_req: Request, res: Response) => {
         })),
         featureLabels: FEATURE_LABELS
     });
+});
+
+router.get('/industries', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+        const industries = await listBookingIndustries({ activeOnly: false });
+        res.json({
+            stage: resolveAdminCredentials().stage,
+            industries
+        });
+    } catch (err: any) {
+        console.error('Admin list industries error:', err);
+        res.status(500).json({ error: err.message || 'Failed to list industries' });
+    }
+});
+
+router.post('/industries', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const industry = await createBookingIndustry({
+            id: req.body?.id,
+            name: req.body?.name,
+            shortName: req.body?.shortName ?? req.body?.short_name,
+            icon: req.body?.icon,
+            sortOrder: req.body?.sortOrder ?? req.body?.sort_order,
+            active: req.body?.active,
+            navSlug: req.body?.navSlug ?? req.body?.nav_slug,
+            demoReady: req.body?.demoReady ?? req.body?.demo_ready
+        });
+        res.status(201).json({ industry });
+    } catch (err: any) {
+        const status = err.status || 500;
+        if (status >= 500) console.error('Admin create industry error:', err);
+        res.status(status).json({ error: err.message || 'Failed to create industry' });
+    }
+});
+
+router.patch('/industries/:id', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const industry = await updateBookingIndustry(String(req.params.id), {
+            name: req.body?.name,
+            shortName: req.body?.shortName ?? req.body?.short_name,
+            icon: req.body?.icon,
+            sortOrder: req.body?.sortOrder ?? req.body?.sort_order,
+            active: req.body?.active,
+            navSlug: req.body?.navSlug ?? req.body?.nav_slug,
+            demoReady: req.body?.demoReady ?? req.body?.demo_ready
+        });
+        res.json({ industry });
+    } catch (err: any) {
+        const status = err.status || 500;
+        if (status >= 500) console.error('Admin update industry error:', err);
+        res.status(status).json({ error: err.message || 'Failed to update industry' });
+    }
 });
 
 

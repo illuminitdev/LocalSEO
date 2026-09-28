@@ -15,11 +15,7 @@ import {
 import { adminDelete, adminGet, adminPost, fetchSalesAgents, type SalesAgent } from './adminApi';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { PLANS } from '../shared/planCatalog';
-import {
-    bookingIndustrySelectOptions,
-    bookingIndustryLabel,
-    isBookingPlanId
-} from '../features/bookings/shared/bookingIndustryPresets';
+import { isBookingPlanId } from '../features/bookings/shared/bookingIndustryPresets';
 import { cn } from '../shared/utils';
 
 type AdminUser = {
@@ -93,7 +89,7 @@ function roleLabel(user: AdminUser) {
 function serviceOf(user: AdminUser) {
     if (user.serviceLabel) return user.serviceLabel;
     const id = user.organization?.bookingIndustryId;
-    if (id) return bookingIndustryLabel(id) || id;
+    if (id) return id;
     const trade = String(user.organization?.tradeType || '').trim();
     return trade || null;
 }
@@ -121,6 +117,7 @@ export default function AdminUsers() {
         planId: '',
         bookingIndustryId: ''
     });
+    const [industryOptions, setIndustryOptions] = useState<{ id: string; label: string }[]>([]);
 
     const load = () => {
         adminGet('/api/admin/users')
@@ -133,6 +130,17 @@ export default function AdminUsers() {
     useEffect(() => {
         load();
         fetchSalesAgents().then(setSalesAgents).catch(() => { });
+        adminGet('/api/admin/industries')
+            .then((data) => {
+                const list = (data.industries || [])
+                    .filter((i: any) => i.active !== false)
+                    .map((i: any) => ({
+                        id: String(i.id),
+                        label: String(i.shortName || i.name || i.id)
+                    }));
+                setIndustryOptions(list);
+            })
+            .catch(() => setIndustryOptions([]));
     }, []);
 
     const totalUsers = users.length;
@@ -140,14 +148,14 @@ export default function AdminUsers() {
     const salesAgentsCount = users.filter((u) => roleOf(u) === 'sales_agent').length;
     const convertedLeads = users.filter((u) => roleOf(u) === 'converted_lead').length;
 
-    const industryOptions = useMemo(() => bookingIndustrySelectOptions(), []);
-
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         const selectedServiceShort =
             (serviceFilter && industryOptions.find((p) => p.id === serviceFilter)?.label) || '';
         const selectedServiceFull =
-            (serviceFilter && bookingIndustryLabel(serviceFilter)) || '';
+            (serviceFilter && industryOptions.find((p) => p.id === serviceFilter)?.label) ||
+            serviceFilter ||
+            '';
         const selectedPlanName = planFilter
             ? PLANS.find((p) => p.id === planFilter)?.name || ''
             : '';

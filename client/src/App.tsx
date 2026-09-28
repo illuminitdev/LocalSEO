@@ -35,6 +35,7 @@ import AdminDashboard from './admin/AdminDashboard';
 import AdminUsers from './admin/AdminUsers';
 import AdminUserDetail from './admin/AdminUserDetail';
 import AdminServices from './admin/AdminServices';
+import AdminIndustries from './admin/AdminIndustries';
 import AdminSettings from './admin/AdminSettings';
 import AdminGrowthAuditLeads from './admin/AdminGrowthAuditLeads';
 import AdminCrmTasks from './admin/AdminCrmTasks';
@@ -79,6 +80,7 @@ export default function App() {
           <Route path="/admin/full-audits/new" element={<Navigate to="/admin/full-audits?new=1" replace />} />
           <Route path="/admin/tasks" element={<AdminCrmTasks />} />
           <Route path="/admin/services" element={<AdminServices />} />
+          <Route path="/admin/industries" element={<AdminIndustries />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
         </Route>
         <Route path="/" element={<Login />} />

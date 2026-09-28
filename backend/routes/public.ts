@@ -32,6 +32,7 @@ import {
 import { getPublicSite } from '../lib/marketing';
 import { applyReferralCode } from '../lib/marketing';
 import { getBookingPreset, normalizeBookingIndustryId, resolveSalonServiceCategory } from '../lib/bookingIndustryPresets';
+import { listBookingIndustries } from '../lib/bookingIndustriesDb';
 import { createUploadPresign, mediaConfigured } from '../lib/media';
 import { orgBrandingFields } from '../lib/branding';
 import {
@@ -110,6 +111,27 @@ function industryPayload(org: any, menuItems: any[] = []) {
 
 function createPublicRouter({ stripeClient }: { stripeClient: any }) {
     const router = Router();
+
+    router.get('/booking-industries', async (_req: Request, res: Response) => {
+        try {
+            const industries = await listBookingIndustries({ activeOnly: true });
+            res.json({
+                industries: industries.map((i) => ({
+                    id: i.id,
+                    name: i.name,
+                    shortName: i.shortName,
+                    icon: i.icon,
+                    sortOrder: i.sortOrder,
+                    navSlug: i.navSlug,
+                    demoReady: i.demoReady,
+                    href: i.navSlug || `/booking-demo?industry=${encodeURIComponent(i.id)}`
+                }))
+            });
+        } catch (err: any) {
+            console.error('Public booking-industries error:', err);
+            res.status(500).json({ error: err.message || 'Failed to list industries' });
+        }
+    });
 
     async function loadOrg(hostSlug: any) {
         const { rows } = await query('SELECT * FROM organizations WHERE slug = $1', [hostSlug]);

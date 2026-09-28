@@ -1,4 +1,5 @@
 
+/** Known demo-board industry ids (implementation keys). Display names live in booking_industries DB. */
 export const BOOKING_INDUSTRY_IDS = [
     'plumbing',
     'electricians',
@@ -15,7 +16,8 @@ export const BOOKING_INDUSTRY_IDS = [
     'dentists'
 ] as const;
 
-export type BookingIndustryId = (typeof BOOKING_INDUSTRY_IDS)[number];
+/** Industry id string; display catalog lives in booking_industries DB. */
+export type BookingIndustryId = string;
 
 export type BookingCustomField = {
     id: string;
@@ -718,14 +720,14 @@ export function isBookingPlanId(planId: string): boolean {
     return String(planId || '').startsWith('booking-');
 }
 
-export function normalizeBookingIndustryId(raw: unknown): BookingIndustryId | null {
+export function normalizeBookingIndustryId(raw: unknown): string | null {
     const id = String(raw || '')
         .trim()
-        .toLowerCase();
-    if (!id) return null;
-    return (BOOKING_INDUSTRY_IDS as readonly string[]).includes(id)
-        ? (id as BookingIndustryId)
-        : null;
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    if (!id || id.length > 64) return null;
+    return id;
 }
 
 export function bookingIndustryLabel(id: string | null | undefined): string | null {
@@ -734,43 +736,54 @@ export function bookingIndustryLabel(id: string | null | undefined): string | nu
     return preset?.name || id;
 }
 
+/** @deprecated Prefer loading industries from Admin/public API (DB). Kept for offline fallback. */
+/** @deprecated Display catalogs come from booking_industries DB / Admin API. */
+export function bookingIndustrySelectOptions(): { id: string; label: string }[] {
+    return [];
+}
 
-export function bookingIndustrySelectOptions(): { id: BookingIndustryId; label: string }[] {
-    return bookingIndustryPresets.map((p) => ({ id: p.id, label: p.shortName }));
+function smallBusinessPreset(): BookingIndustryPreset {
+    return (
+        bookingIndustryPresets.find((p) => p.id === 'small-business') ||
+        bookingIndustryPresets[bookingIndustryPresets.length - 1]
+    );
 }
 
 export function getBookingPreset(industryId: string | null | undefined): BookingIndustryPreset {
-    if (!industryId || typeof industryId !== 'string') return bookingIndustryPresets[0];
+    if (!industryId || typeof industryId !== 'string') return smallBusinessPreset();
     const idLower = industryId.toLowerCase();
 
+    const exact = bookingIndustryPresets.find((p) => p.id === idLower);
+    if (exact) return exact;
+
     if (idLower.includes('plumb') || idLower.includes('boiler') || idLower.includes('heating')) {
-        return bookingIndustryPresets[0];
+        return bookingIndustryPresets.find((p) => p.id === 'plumbing') || smallBusinessPreset();
     }
     if (idLower.includes('electr') || idLower.includes('ev') || idLower.includes('eicr')) {
-        return bookingIndustryPresets[1];
+        return bookingIndustryPresets.find((p) => p.id === 'electricians') || smallBusinessPreset();
     }
-    if (idLower.includes('clean')) return bookingIndustryPresets[2];
-    if (idLower.includes('valet') || idLower.includes('detail') || idLower.includes('car')) {
-        return bookingIndustryPresets[3];
+    if (idLower.includes('clean')) {
+        return bookingIndustryPresets.find((p) => p.id === 'cleaners') || smallBusinessPreset();
+    }
+    if (idLower.includes('valet') || idLower.includes('detail')) {
+        return bookingIndustryPresets.find((p) => p.id === 'valeting') || smallBusinessPreset();
     }
     if (idLower.includes('pressure') || idLower.includes('patio') || idLower.includes('driveway')) {
-        return bookingIndustryPresets[4];
+        return bookingIndustryPresets.find((p) => p.id === 'pressure-washing') || smallBusinessPreset();
     }
     if (idLower.includes('pest') || idLower.includes('wasp') || idLower.includes('rat')) {
-        return bookingIndustryPresets[5];
+        return bookingIndustryPresets.find((p) => p.id === 'pest-control') || smallBusinessPreset();
     }
     if (idLower.includes('garden') || idLower.includes('landscap') || idLower.includes('lawn')) {
-        return bookingIndustryPresets[6];
+        return bookingIndustryPresets.find((p) => p.id === 'gardeners') || smallBusinessPreset();
     }
-    
     if (
         idLower.includes('dentist') ||
         idLower.includes('dental') ||
         idLower.includes('teeth') ||
-        idLower.includes('orthodont') ||
-        (idLower.includes('carmen') && idLower.includes('aesthetic'))
+        idLower.includes('orthodont')
     ) {
-        return bookingIndustryPresets[12];
+        return bookingIndustryPresets.find((p) => p.id === 'dentists') || smallBusinessPreset();
     }
     if (
         idLower.includes('salon') ||
@@ -778,15 +791,10 @@ export function getBookingPreset(industryId: string | null | undefined): Booking
         idLower.includes('hair') ||
         (idLower.includes('aesthetic') && !idLower.includes('dental'))
     ) {
-        return bookingIndustryPresets[7];
+        return bookingIndustryPresets.find((p) => p.id === 'salons') || smallBusinessPreset();
     }
-    if (
-        idLower.includes('personal') ||
-        idLower.includes('pt') ||
-        idLower.includes('fitness') ||
-        idLower.includes('trainer')
-    ) {
-        return bookingIndustryPresets[8];
+    if (idLower.includes('personal') || idLower.includes('fitness') || idLower.includes('trainer')) {
+        return bookingIndustryPresets.find((p) => p.id === 'personal-trainers') || smallBusinessPreset();
     }
     if (
         idLower.includes('restaurant') ||
@@ -794,15 +802,14 @@ export function getBookingPreset(industryId: string | null | undefined): Booking
         idLower.includes('dining') ||
         idLower.includes('cafe')
     ) {
-        return bookingIndustryPresets[9];
+        return bookingIndustryPresets.find((p) => p.id === 'restaurants') || smallBusinessPreset();
     }
     if (idLower.includes('profess') || idLower.includes('accountant') || idLower.includes('consult')) {
-        return bookingIndustryPresets[10];
+        return bookingIndustryPresets.find((p) => p.id === 'professional-services') || smallBusinessPreset();
     }
-    if (idLower.includes('small') || idLower.includes('biz')) return bookingIndustryPresets[11];
+    if (idLower.includes('small') || idLower.includes('biz')) return smallBusinessPreset();
 
-    const found = bookingIndustryPresets.find((p) => p.id === idLower);
-    return found || bookingIndustryPresets[0];
+    return smallBusinessPreset();
 }
 
 export function slugifyServiceName(name: string): string {

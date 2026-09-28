@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
     LayoutDashboard, Users, LogOut, Layers, Settings, Menu, X,
     ClipboardList, CheckSquare, ClipboardCheck, Bell,
-    UserPlus, AlertCircle, CheckCheck, FileText, Zap
+    UserPlus, AlertCircle, CheckCheck, FileText, Zap, Building2
 } from 'lucide-react';
 import { clearAdminToken } from './adminApi';
 import { cn } from '../shared/utils';
@@ -177,6 +177,7 @@ const NAV = [
     { name: 'Leads', to: '/admin/growth-audit-leads', icon: ClipboardList },
     { name: 'CRM', to: '/admin/tasks', icon: CheckSquare },
     { name: 'Plan guide', to: '/admin/services', icon: Layers },
+    { name: 'Industries', to: '/admin/industries', icon: Building2 },
     { name: 'Settings', to: '/admin/settings', icon: Settings }
 ];
 
@@ -210,6 +211,12 @@ function pageTitle(pathname: string) {
     }
     if (pathname.startsWith('/admin/services')) {
         return { title: 'Plan guide', subtitle: 'Which portal tools each paid plan includes.' };
+    }
+    if (pathname.startsWith('/admin/industries')) {
+        return {
+            title: 'Industries',
+            subtitle: 'Who We Help trades — names for ZappSites nav and booking checkout.'
+        };
     }
     if (pathname.startsWith('/admin/settings')) {
         return { title: 'Settings', subtitle: 'Your admin login email and password.' };
