@@ -52,10 +52,7 @@ function itemFixed(id: string, label: string, status: CoreCheckStatus, evidence:
   return { id, label, status, evidence };
 }
 
-/**
- * Local SEO — Core Checklist for the report SEO section.
- * Statuses come from measured audit signals only (never invent passes).
- */
+//Local SEO Core Checklist 
 export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   const checks: CheckRow[] = audit?.checklist?.checks || audit?.presence?.checks || [];
   const gbp = audit?.gbpLookup || {};

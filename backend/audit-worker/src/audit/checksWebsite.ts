@@ -1,8 +1,4 @@
 
-
-
-
-
 function setCheck(checksById, id, status, evidence = '', notes = '') {
   const c = checksById.get(id);
   if (!c) return;

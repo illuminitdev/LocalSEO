@@ -31,9 +31,7 @@ function extractJson(text: string): any {
   return null;
 }
 
-/**
- * Gemini + Google Search citation / directory / brand-mention audit for Local SEO authority rows.
- */
+
 export async function runCitationAudit(opts: {
   businessName: string;
   address?: string;

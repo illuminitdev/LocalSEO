@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { buildLocalSeoInconsistencies, fallbackPillarDecks } from './pillarFixDecks.js';
+import { fallbackPillarDecks } from './pillarFixDecks.js';
+import { buildLocalSeoInconsistencies } from './localSeoDeck.js';
 
 function extractJson(text) {
   const raw = String(text || '').trim();
