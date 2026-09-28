@@ -4,7 +4,7 @@ import { crawlWebsite } from '../audit/crawler.js';
 import { applyWebsiteChecks } from '../audit/checksWebsite.js';
 import { runLighthouse } from '../audit/lighthouseRunner.js';
 import { captureHomepageScreenshot } from '../audit/homepageScreenshot.js';
-import { fallbackPillarDecks } from '../audit/pillarFixDecks.js';
+import { fallbackPillarDecks, buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/pillarFixDecks.js';
 import { buildGeoChecklist, applyGeoChecklistToChecks } from '../audit/geoChecklist.js';
 import { computeScore } from '../audit/score.js';
 import { generateAiReport, generateDeepAiReport } from '../audit/geminiReport.js';
@@ -13,6 +13,7 @@ import { updateAuditJob } from '../lib/auditJobs.js';
 import {
   buildDeepLocalRank,
   buildGeoAiPrompts,
+  captureAeoSerpScreenshot,
   captureMapsScreenshotFromTask,
   captureOrganicLocalPackScreenshot,
   checkAiEngineMentionsMulti,
@@ -28,7 +29,8 @@ import {
   findMatchingMapsItem,
   measureGeoGridVisibility,
   requireDataForSeoConfigured,
-  type DataForSeoMapsItem
+  type DataForSeoMapsItem,
+  type SerpScreenshotResult
 } from '../lib/dataForSeo.js';
 import { runCitationAudit } from '../audit/citationAudit.js';
 import {
@@ -799,6 +801,38 @@ async function enrichFromDataForSeo(audit: any) {
       };
     }
   }
+
+  // AEO Visual: 5 real Google organic SERP screenshots (3 service + 2 brand)
+  try {
+    const aeoSpecs = buildAeoQuerySpecs(audit);
+    const aeoShots: SerpScreenshotResult[] = [];
+    const batchSize = 2;
+    for (let i = 0; i < aeoSpecs.length; i += batchSize) {
+      const batch = aeoSpecs.slice(i, i + batchSize);
+      const batchResults = await Promise.all(
+        batch.map((spec) =>
+          captureAeoSerpScreenshot({
+            keyword: spec.query,
+            lat: typeof lat === 'number' ? lat : null,
+            lng: typeof lng === 'number' ? lng : null,
+            locationName: locationLabel || undefined,
+            timeoutMs: 32000
+          })
+        )
+      );
+      aeoShots.push(...batchResults);
+    }
+    audit.aeoSerpScreenshots = aeoShots;
+  } catch (aeoShotErr) {
+    const err = aeoShotErr as Error;
+    console.warn('[auditWorker] AEO SERP screenshots failed:', err.message);
+    audit.aeoSerpScreenshots = buildAeoQuerySpecs(audit).map((spec) => ({
+      query: spec.query,
+      skipped: true,
+      reason: err.message || 'AEO screenshot failed',
+      capturedAt: new Date().toISOString()
+    }));
+  }
 }
 
 export const main: SQSHandler = async (event: SQSEvent) => {
@@ -937,9 +971,17 @@ export const main: SQSHandler = async (event: SQSEvent) => {
         try {
           const decks = fallbackPillarDecks(audit);
           const aiLocal: any = audit.aiReport?.localSeoFixes || {};
+          const aiAeo: any = audit.aiReport?.aeoFixes || {};
           const aiGeo: any = audit.aiReport?.geoFixes || {};
           const deckLocal: any = decks.localSeoFixes || {};
+          const deckAeo: any = decks.aeoFixes || {};
           const deckGeo: any = decks.geoFixes || {};
+          const measuredAeoCards = buildAeoQueryCards(
+            audit,
+            (Array.isArray(audit.aeoSerpScreenshots)
+              ? audit.aeoSerpScreenshots
+              : null) as SerpScreenshotResult[] | null
+          );
           audit.aiReport = {
             ...(audit.aiReport || {}),
             localSeoFixes: {
@@ -952,7 +994,13 @@ export const main: SQSHandler = async (event: SQSEvent) => {
                 ? aiLocal.inconsistencies
                 : deckLocal.inconsistencies
             },
-            aeoFixes: audit.aiReport?.aeoFixes || decks.aeoFixes,
+            aeoFixes: {
+              ...deckAeo,
+              ...aiAeo,
+              aeoChecklist: deckAeo.aeoChecklist || aiAeo.aeoChecklist || null,
+              // Always use measured SERP screenshot cards (never Gemini mock SERPs)
+              queryCards: measuredAeoCards
+            },
             geoFixes: {
               ...deckGeo,
               ...aiGeo,

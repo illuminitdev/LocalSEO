@@ -163,10 +163,16 @@ export async function captureSerpScreenshotDataUrl(
 
 async function cropSerpScreenshotToLocalPack(
   dataUrl: string,
-  cropBottomPx?: number | null
+  cropBottomPx?: number | null,
+  opts?: { maxHeight?: number; minHeight?: number; quality?: number; maxBase64Len?: number }
 ): Promise<string> {
   const src = String(dataUrl || '');
   if (!src.startsWith('data:image/')) return src;
+
+  const maxHeight = opts?.maxHeight ?? 1100;
+  const minHeight = opts?.minHeight ?? 420;
+  const quality = opts?.quality ?? 62;
+  const maxBase64Len = opts?.maxBase64Len ?? 900_000;
 
   let browser: any;
   try {
@@ -214,22 +220,27 @@ async function cropSerpScreenshotToLocalPack(
     }))) as { w: number; h: number };
     if (!dims?.w || !dims?.h) return src;
 
-    
-    const fallbackH = Math.round(Math.min(dims.h * 0.48, 1100));
+    const fallbackH = Math.round(Math.min(dims.h * 0.48, maxHeight));
     const targetH = Math.max(
-      420,
-      Math.min(dims.h, Math.round(cropBottomPx && cropBottomPx > 200 ? cropBottomPx + 56 : fallbackH))
+      minHeight,
+      Math.min(
+        dims.h,
+        Math.min(
+          maxHeight,
+          Math.round(cropBottomPx && cropBottomPx > 200 ? cropBottomPx + 56 : fallbackH)
+        )
+      )
     );
     const clipH = Math.min(dims.h, targetH);
     await page.setViewport({ width: dims.w, height: clipH, deviceScaleFactor: 1 });
     const buffer = await page.screenshot({
       type: 'jpeg',
-      quality: 62,
+      quality,
       encoding: 'binary',
       clip: { x: 0, y: 0, width: dims.w, height: clipH }
     });
     const b64 = Buffer.from(buffer).toString('base64');
-    if (!b64 || b64.length > 900_000) return src;
+    if (!b64 || b64.length > maxBase64Len) return src;
     return `data:image/jpeg;base64,${b64}`;
   } catch (err: any) {
     console.warn('[dataForSeo] SERP crop failed:', err?.message || err);
@@ -455,6 +466,111 @@ export async function captureOrganicLocalPackScreenshot(opts: {
       query,
       skipped: true,
       reason: msg || 'organic screenshot failed',
+      capturedAt: new Date().toISOString()
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Short top-of-SERP screenshot for AEO Visual thumbs (5 queries per audit). */
+export async function captureAeoSerpScreenshot(opts: {
+  keyword: string;
+  lat?: number | null;
+  lng?: number | null;
+  locationName?: string;
+  languageCode?: string;
+  timeoutMs?: number;
+}): Promise<SerpScreenshotResult> {
+  const keyword = String(opts.keyword || '').trim();
+  const query = keyword;
+  if (!keyword) {
+    return { query: '', skipped: true, reason: 'No keyword', capturedAt: new Date().toISOString() };
+  }
+  if (!requireDataForSeoConfigured()) {
+    return {
+      query,
+      skipped: true,
+      reason: 'DataForSEO not configured',
+      capturedAt: new Date().toISOString()
+    };
+  }
+
+  const task: Record<string, unknown> = {
+    language_code: opts.languageCode || 'en',
+    keyword,
+    depth: 10,
+    device: 'desktop',
+    os: 'windows',
+    browser_screen_width: 1280,
+    browser_screen_height: 900
+  };
+  applyLocalLocation(task, opts);
+
+  const controller = new AbortController();
+  const timeoutMs = opts.timeoutMs ?? 32000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
+      method: 'POST',
+      headers: {
+        Authorization: basicAuthHeader(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify([task]),
+      signal: controller.signal
+    });
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        query,
+        skipped: true,
+        reason: `organic HTTP ${res.status}`,
+        capturedAt: new Date().toISOString()
+      };
+    }
+    const taskResult = Array.isArray(data?.tasks) ? data.tasks[0] : null;
+    if (!taskResult || taskResult.status_code !== 20000) {
+      return {
+        query,
+        skipped: true,
+        reason: String(taskResult?.status_message || 'organic task failed'),
+        capturedAt: new Date().toISOString()
+      };
+    }
+    const taskId = String(taskResult.id || '').trim();
+    if (!taskId) {
+      return {
+        query,
+        skipped: true,
+        reason: 'No organic task id',
+        capturedAt: new Date().toISOString()
+      };
+    }
+
+    let dataUrl = await captureSerpScreenshotDataUrl(taskId, { timeoutMs: 40000 });
+    if (!dataUrl) {
+      return {
+        query,
+        skipped: true,
+        reason: 'Screenshot unavailable',
+        capturedAt: new Date().toISOString()
+      };
+    }
+    // Compact top strip for AEO Visual grid (no local-pack-specific crop)
+    dataUrl = await cropSerpScreenshotToLocalPack(dataUrl, null, {
+      maxHeight: 520,
+      minHeight: 420,
+      quality: 52,
+      maxBase64Len: 380_000
+    });
+    return { dataUrl, query, capturedAt: new Date().toISOString() };
+  } catch (err: any) {
+    const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
+    return {
+      query,
+      skipped: true,
+      reason: msg || 'AEO SERP screenshot failed',
       capturedAt: new Date().toISOString()
     };
   } finally {
