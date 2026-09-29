@@ -22,7 +22,8 @@ import {
     CheckCircle2,
     X,
     History,
-    Clock
+    Clock,
+    Calendar
 } from 'lucide-react';
 import {
     adminGet,
@@ -849,7 +850,8 @@ export default function AdminGrowthAuditLeads() {
                         </div>
 
                         <div>
-                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                            <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-1">
+                                <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
                                 Status Date
                             </label>
                             <select
@@ -861,7 +863,7 @@ export default function AdminGrowthAuditLeads() {
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                                 title="Filter leads by updated status date"
                             >
-                                <option value="all">📅 All Dates</option>
+                                <option value="all">All Dates</option>
                                 <option value="today">Today</option>
                                 <option value="yesterday">Yesterday</option>
                                 <option value="7days">Last 7 Days</option>
