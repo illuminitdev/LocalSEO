@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     ClipboardList,
     MessageSquare,
@@ -58,6 +59,7 @@ type AdminLead = GrowthAuditLeadRef & {
     auditId?: string | null;
     salesNotes?: string | null;
     assignedAgentName?: string | null;
+    assignedTo?: string | null;
     importBatchId?: string | null;
     importFileName?: string | null;
     importUploadedAt?: string | null;
@@ -317,6 +319,7 @@ export function getLeadBusinessCategory(lead: {
 }
 
 export default function AdminGrowthAuditLeads() {
+    const navigate = useNavigate();
     const [leads, setLeads] = useState<AdminLead[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
     const [activeLead, setActiveLead] = useState<GrowthAuditLeadRef | null>(null);
@@ -952,7 +955,7 @@ export default function AdminGrowthAuditLeads() {
                                             <th className="px-3 py-2.5 font-bold">Contact Info</th>
                                             <th className="px-3 py-2.5 font-bold text-center">Score / Report</th>
                                             <th className="px-3 py-2.5 font-bold">Assigned To</th>
-                                            <th className="px-3 py-2.5 font-bold text-right">CRM & Actions</th>
+                                            <th className="px-3 py-2.5 font-bold text-right">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-[#F1F5F9]">
@@ -1167,20 +1170,20 @@ export default function AdminGrowthAuditLeads() {
                                                              <button
                                                                  type="button"
                                                                  onClick={() => setViewingLeadDetails(lead)}
-                                                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg transition-colors shadow-2xs shrink-0"
-                                                                 title="View lead details & observations"
+                                                                 className="inline-flex items-center justify-center p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg transition-colors shadow-2xs shrink-0"
+                                                                 title="View Details"
+                                                                 aria-label="View Details"
                                                              >
                                                                  <Eye className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                                                                 <span>View Details</span>
                                                              </button>
                                                              <button
                                                                  type="button"
                                                                  onClick={() => setActiveLead(lead)}
-                                                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-xs font-bold rounded-lg transition-colors shadow-2xs shrink-0"
-                                                                 title="Assign tasks & manage CRM notes"
+                                                                 className="inline-flex items-center justify-center p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg transition-colors shadow-2xs shrink-0"
+                                                                 title="Assign Tasks"
+                                                                 aria-label="Assign Tasks"
                                                              >
-                                                                 <CheckSquare className="w-3.5 h-3.5 text-[#D97706] shrink-0" />
-                                                                 <span>Assign Tasks</span>
+                                                                 <CheckSquare className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                                                              </button>
                                                              <button
                                                                  type="button"
@@ -1200,17 +1203,16 @@ export default function AdminGrowthAuditLeads() {
                                  </table>
                             ) : (
                                 /* 2. SPREADSHEET / ADDED LEADS DETAILED COLUMNS VIEW */
-                                <table className="w-full text-left text-sm min-w-[1360px] table-fixed">
+                                <table className="w-full text-left text-sm min-w-[1100px] table-fixed">
                                     <colgroup>
                                         <col className="w-[38px]" />
-                                        <col className="w-[105px]" />
-                                        <col className="w-[125px]" />
-                                        <col className="w-[160px]" />
-                                        <col className="w-[230px]" />
-                                        <col className="w-[185px]" />
+                                        <col className="w-[240px]" />
+                                        <col className="w-[200px]" />
+                                        <col className="w-[140px]" />
+                                        <col className="w-[150px]" />
                                         <col className="w-[110px]" />
-                                        <col className="w-[135px]" />
-                                        <col className="w-[272px]" />
+                                        <col className="w-[110px]" />
+                                        <col className="w-[120px]" />
                                     </colgroup>
                                     <thead>
                                         <tr className="border-b border-[#E2E8F0] text-[10px] uppercase tracking-wide text-[#64748B] bg-slate-50/50">
@@ -1223,19 +1225,17 @@ export default function AdminGrowthAuditLeads() {
                                                     title="Select / Deselect all on this page"
                                                 />
                                             </th>
-                                            <th className="px-3 py-2.5 font-bold">Date</th>
-                                            <th className="px-3 py-2.5 font-bold">Type & Source</th>
-                                            <th className="px-3 py-2.5 font-bold">Status & Notes</th>
                                             <th className="px-3 py-2.5 font-bold">Name / Business</th>
                                             <th className="px-3 py-2.5 font-bold">Contact Info</th>
-                                            <th className="px-3 py-2.5 font-bold text-center">Opportunity</th>
+                                            <th className="px-3 py-2.5 font-bold">Type & Source</th>
                                             <th className="px-3 py-2.5 font-bold">Assigned To</th>
-                                            <th className="px-3 py-2.5 font-bold text-right">CRM & Actions</th>
+                                            <th className="px-3 py-2.5 font-bold">Date</th>
+                                            <th className="px-3 py-2.5 font-bold text-center">Priority</th>
+                                            <th className="px-3 py-2.5 font-bold text-right">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-[#F1F5F9]">
                                         {pageLeads.map((lead) => {
-                                            const badge = statusBadge(displayLeadStatus(lead));
                                             const title = displayName(lead);
                                             const oppLevel = String(lead.opportunityLevel || '').toLowerCase();
                                             const isSelected = selectedLeadIds.has(lead.id);
@@ -1243,16 +1243,12 @@ export default function AdminGrowthAuditLeads() {
                                             return (
                                                 <tr
                                                     key={lead.id}
-                                                    onClick={(e) => {
-                                                        if ((e.target as HTMLElement).closest('a, button, input')) return;
-                                                        setViewingLeadDetails(lead);
-                                                    }}
                                                     className={cn(
-                                                        "group cursor-pointer transition-colors",
+                                                        "group transition-colors",
                                                         isSelected ? "bg-amber-50/60 hover:bg-amber-50/90" : "hover:bg-slate-50/80"
                                                     )}
                                                 >
-                                                    <td className="px-3 py-2.5 align-middle" onClick={(e) => e.stopPropagation()}>
+                                                    <td className="px-3 py-2.5 align-middle">
                                                         <input
                                                             type="checkbox"
                                                             checked={isSelected}
@@ -1260,81 +1256,14 @@ export default function AdminGrowthAuditLeads() {
                                                             className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
                                                         />
                                                     </td>
-                                                    <td className="px-3 py-2.5 text-xs whitespace-nowrap">
-                                                        {(() => {
-                                                            const { date, time } = formatDateParts(lead.createdAt);
-                                                            return (
-                                                                <div>
-                                                                    <div className="font-medium text-slate-700">{date}</div>
-                                                                    {time ? <div className="text-[10px] text-[#94A3B8] mt-0.5">{time}</div> : null}
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                    </td>
-                                                    <td className="px-3 py-2.5 text-xs font-semibold text-[#334155]">
-                                                        <div>
-                                                            <span className="truncate max-w-[140px] block" title={typeLabel(lead.type)}>
-                                                                {typeLabel(lead.type)}
-                                                            </span>
-                                                        </div>
-                                                        {getDistinctSourceSubtext(lead.type, lead.source) ? (
-                                                            <div
-                                                                className="text-[10px] font-medium text-[#94A3B8] truncate max-w-[120px] mt-0.5"
-                                                                title={lead.source || undefined}
-                                                            >
-                                                                {lead.source}
-                                                            </div>
-                                                        ) : null}
-                                                    </td>
-                                                    <td className="px-3 py-2.5 align-top">
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setSelectedStatusLead(lead);
-                                                            }}
-                                                            className={cn(
-                                                                'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer hover:shadow-xs hover:scale-105 transition-all text-left group/badge',
-                                                                badge ? badge.className : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                                                            )}
-                                                            title="Click to view full status history timeline"
-                                                        >
-                                                            <span>{badge ? badge.label : 'New'}</span>
-                                                            <History className="w-2.5 h-2.5 opacity-60 group-hover/badge:opacity-100 shrink-0" />
-                                                        </button>
-                                                        <div
-                                                            className="flex items-center gap-1 text-[10px] text-slate-400 font-medium mt-1 whitespace-nowrap"
-                                                            title="Date when status was last updated"
-                                                        >
-                                                            <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-                                                            <span>{fmtDate(lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt)}</span>
-                                                        </div>
-                                                        {(() => {
-                                                            const note = getCleanSalesNote(lead);
-                                                            if (!note) return null;
-                                                            return (
-                                                                <div
-                                                                    className="flex items-start gap-1 mt-1 max-w-[200px]"
-                                                                    title={note}
-                                                                >
-                                                                    <MessageSquare className="w-2.5 h-2.5 text-indigo-400 shrink-0 mt-0.5" />
-                                                                    <span className="text-[10px] text-slate-600 leading-tight line-clamp-3 break-words">
-                                                                        {note}
-                                                                    </span>
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                    </td>
                                                     <td className="px-3 py-2.5 text-sm font-semibold text-[#0F172A] overflow-hidden">
                                                         <div className="w-full min-w-0 pr-1.5">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setViewingLeadDetails(lead)}
+                                                            <span
+                                                                className="block truncate w-full"
                                                                 title={title !== '—' ? title : undefined}
-                                                                className="block text-left truncate w-full group-hover:font-bold hover:text-[#D97706]"
                                                             >
                                                                 {title}
-                                                            </button>
+                                                            </span>
                                                             {lead.address ? (
                                                                 <div className="text-[11px] font-normal text-[#64748B] truncate w-full mt-0.5" title={lead.address}>
                                                                     {lead.address}
@@ -1379,6 +1308,44 @@ export default function AdminGrowthAuditLeads() {
                                                             {!lead.phone && !lead.email && !lead.website && <span className="text-[#94A3B8]">—</span>}
                                                         </div>
                                                     </td>
+                                                    <td className="px-3 py-2.5 text-xs font-semibold text-[#334155]">
+                                                        <div>
+                                                            <span className="truncate max-w-[140px] block" title={typeLabel(lead.type)}>
+                                                                {typeLabel(lead.type)}
+                                                            </span>
+                                                        </div>
+                                                        {getDistinctSourceSubtext(lead.type, lead.source) ? (
+                                                            <div
+                                                                className="text-[10px] font-medium text-[#94A3B8] truncate max-w-[120px] mt-0.5"
+                                                                title={lead.source || undefined}
+                                                            >
+                                                                {lead.source}
+                                                            </div>
+                                                        ) : null}
+                                                    </td>
+                                                    <td className="px-3 py-2.5 whitespace-nowrap">
+                                                        {lead.assignedAgentName ? (
+                                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200/80 text-indigo-700 font-semibold text-xs" title={`Assigned to ${lead.assignedAgentName}`}>
+                                                                <User className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                                                <span className="truncate max-w-[100px]">{lead.assignedAgentName}</span>
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-500 text-[11px] font-medium shrink-0">
+                                                                Unassigned
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-2.5 text-xs whitespace-nowrap">
+                                                        {(() => {
+                                                            const { date, time } = formatDateParts(lead.createdAt);
+                                                            return (
+                                                                <div>
+                                                                    <div className="font-medium text-slate-700">{date}</div>
+                                                                    {time ? <div className="text-[10px] text-[#94A3B8] mt-0.5">{time}</div> : null}
+                                                                </div>
+                                                            );
+                                                        })()}
+                                                    </td>
                                                     <td className="px-3 py-2.5 text-center whitespace-nowrap">
                                                         {lead.opportunityLevel ? (
                                                             <span className={cn(
@@ -1393,37 +1360,25 @@ export default function AdminGrowthAuditLeads() {
                                                             <span className="text-[#94A3B8] text-xs">—</span>
                                                         )}
                                                     </td>
-                                                    <td className="px-3 py-2.5 whitespace-nowrap">
-                                                        {lead.assignedAgentName ? (
-                                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200/80 text-indigo-700 font-semibold text-xs" title={`Assigned to ${lead.assignedAgentName}`}>
-                                                                <User className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                                                                <span className="truncate max-w-[100px]">{lead.assignedAgentName}</span>
-                                                            </span>
-                                                        ) : (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-500 text-[11px] font-medium shrink-0">
-                                                                Unassigned
-                                                            </span>
-                                                        )}
-                                                    </td>
                                                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
                                                         <div className="flex items-center justify-end gap-1.5">
                                                             <button
                                                                 type="button"
-                                                                onClick={() => setViewingLeadDetails(lead)}
-                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold rounded-lg transition-colors shadow-2xs shrink-0"
-                                                                title="View lead details & observations"
+                                                                onClick={() => navigate(`/admin/leads/${encodeURIComponent(lead.id)}`)}
+                                                                className="inline-flex items-center justify-center p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg transition-colors shadow-2xs shrink-0"
+                                                                title="View Details"
+                                                                aria-label="View Details"
                                                             >
                                                                 <Eye className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                                                                <span>View Details</span>
                                                             </button>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setActiveLead(lead)}
-                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-xs font-bold rounded-lg transition-colors shadow-2xs shrink-0"
-                                                                title="Assign tasks & manage CRM notes"
+                                                                className="inline-flex items-center justify-center p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg transition-colors shadow-2xs shrink-0"
+                                                                title="Assign Tasks"
+                                                                aria-label="Assign Tasks"
                                                             >
-                                                                <CheckSquare className="w-3.5 h-3.5 text-[#D97706] shrink-0" />
-                                                                <span>Assign Tasks</span>
+                                                                <CheckSquare className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                                                             </button>
                                                             <button
                                                                 type="button"
@@ -1508,7 +1463,7 @@ export default function AdminGrowthAuditLeads() {
                     onTaskUpdated={load}
                     onViewDetails={(lead) => {
                         setActiveLead(null);
-                        setViewingLeadDetails(lead);
+                        navigate(`/admin/leads/${encodeURIComponent(lead.id)}`);
                     }}
                 />
             )}

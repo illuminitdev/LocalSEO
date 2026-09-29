@@ -39,6 +39,8 @@ import AdminIndustries from './admin/AdminIndustries';
 import AdminSettings from './admin/AdminSettings';
 import AdminGrowthAuditLeads from './admin/AdminGrowthAuditLeads';
 import AdminCrmTasks from './admin/AdminCrmTasks';
+import AdminLeadDetail from './admin/AdminLeadDetail';
+import AdminLeadProfile from './admin/AdminLeadProfile';
 import AdminFullAudits from './admin/AdminFullAudits';
 import AdminLayout from './admin/AdminLayout';
 import SalesLayout from './sales-agent/SalesLayout';
@@ -49,6 +51,7 @@ import SalesReminders from './sales-agent/SalesReminders';
 import SalesActivityLogs from './sales-agent/SalesActivityLogs';
 import SalesLeadDetail from './sales-agent/SalesLeadDetail';
 import SalesAccount from './sales-agent/SalesAccount';
+import PublicRequestFullAudit from './features/leads/PublicRequestFullAudit';
 
 
 function BookingSettingsRedirect() {
@@ -79,6 +82,8 @@ export default function App() {
           <Route path="/admin/full-audits" element={<AdminFullAudits />} />
           <Route path="/admin/full-audits/new" element={<Navigate to="/admin/full-audits?new=1" replace />} />
           <Route path="/admin/tasks" element={<AdminCrmTasks />} />
+          <Route path="/admin/leads/:id" element={<AdminLeadProfile />} />
+          <Route path="/admin/crm/leads/:id" element={<AdminLeadDetail />} />
           <Route path="/admin/services" element={<AdminServices />} />
           <Route path="/admin/industries" element={<AdminIndustries />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
@@ -96,6 +101,7 @@ export default function App() {
         <Route path="/book/manage/:token" element={<BookManage />} />
         <Route path="/book/portal/:token" element={<ClientPortal />} />
         <Route path="/quote/:token" element={<PublicQuote />} />
+        <Route path="/request-full-audit/:token" element={<PublicRequestFullAudit />} />
         <Route path="/s/:orgSlug" element={<PublicSite />} />
         <Route path="/team/accept" element={<RequireAuth><TeamAccept /></RequireAuth>} />
         <Route path="/book/:hostSlug/:eventSlug" element={<PublicBookEvent />} />

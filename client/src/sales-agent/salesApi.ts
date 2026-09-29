@@ -88,6 +88,9 @@ export interface SalesUnifiedLead {
     emailShareStatus?: 'none' | 'sent' | 'opened';
     emailShareSentAt?: string | null;
     emailShareOpenedAt?: string | null;
+    observationEmailShareStatus?: 'none' | 'sent' | 'opened';
+    observationEmailSentAt?: string | null;
+    observationEmailOpenedAt?: string | null;
     assignedTo?: string | null;
     nextFollowUpAt?: string | null;
 }
@@ -246,6 +249,48 @@ export async function shareFullAuditEmail(
     return apiPost(`/api/sales/full-audits/${encodeURIComponent(auditId)}/share-email`, body);
 }
 
+export async function shareLeadObservationsEmail(
+    leadId: string,
+    opts?: { email?: string }
+): Promise<{
+    success: boolean;
+    to: string;
+    emailShareStatus?: string;
+    observationEmailShareStatus?: string;
+}> {
+    const body: { email?: string } = {};
+    if (opts?.email) body.email = opts.email;
+    return apiPost(`/api/sales/leads/${encodeURIComponent(leadId)}/share-observations-email`, body);
+}
+
+/** Prompt + confirm, then email GBP / AI visibility observations. Returns null if cancelled. */
+export async function confirmAndShareLeadObservationsEmail(opts: {
+    leadId: string;
+    businessName?: string | null;
+    email?: string | null;
+}): Promise<{ to: string } | null> {
+    let email = String(opts.email || '').trim();
+    if (!email || !email.includes('@')) {
+        const entered = window.prompt(
+            'This lead has no company email. Enter the email address to send observations to:'
+        );
+        email = String(entered || '').trim();
+        if (!email || !email.includes('@')) {
+            throw new Error('A valid company email is required to send observations.');
+        }
+    }
+    const biz = opts.businessName || 'this business';
+    if (
+        !window.confirm(
+            `Email GBP & AI visibility observations to ${email} for “${biz}”?`
+        )
+    ) {
+        return null;
+    }
+    const res = await shareLeadObservationsEmail(opts.leadId, { email });
+    return { to: res.to };
+}
+
 /** Prompt + confirm, then email the full-audit PDF. Returns null if the user cancels. */
 export async function confirmAndShareFullAuditEmail(opts: {
     auditId: string;
@@ -270,23 +315,9 @@ export async function confirmAndShareFullAuditEmail(opts: {
     return { to: res.to, attached: res.attached };
 }
 
-export function emailShareStatusLabel(
-    status?: 'none' | 'sent' | 'opened' | null
-): 'Sent' | 'Opened' | null {
-    if (status === 'opened') return 'Opened';
-    if (status === 'sent') return 'Sent';
-    return null;
-}
-
-export function emailShareStatusHint(
-    status?: 'none' | 'sent' | 'opened' | null
-): string {
-    if (status === 'opened') {
-        return 'They opened the email (images loaded) or clicked the report link';
-    }
-    if (status === 'sent') {
-        return 'Waiting — turns Opened when they display images or click “View full audit report”. Opening the PDF attachment alone is not tracked.';
-    }
-    return '';
-}
+export {
+    emailShareStatusLabel,
+    emailShareStatusHint
+} from '../shared/emailShareStatus';
+export type { EmailShareStatus } from '../shared/emailShareStatus';
 

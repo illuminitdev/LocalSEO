@@ -122,6 +122,12 @@ export type LeadTask = {
     leadSource?: string | null;
     leadIndustry?: string | null;
     leadAuditId?: string | null;
+    emailShareStatus?: 'none' | 'sent' | 'opened';
+    emailShareSentAt?: string | null;
+    emailShareOpenedAt?: string | null;
+    observationEmailShareStatus?: 'none' | 'sent' | 'opened';
+    observationEmailSentAt?: string | null;
+    observationEmailOpenedAt?: string | null;
 };
 
 export type LeadActivity = {
@@ -196,6 +202,50 @@ export async function fetchLeadActivities(leadId: string): Promise<LeadActivity[
     return res.activities || [];
 }
 
+export type AdminLeadCrmDetail = {
+    lead: {
+        id: string;
+        businessName: string;
+        phone?: string;
+        email?: string;
+        website?: string;
+        address?: string;
+        city?: string;
+        industry?: string;
+        scoreTotal?: number | null;
+        auditId?: string | null;
+        reportUrl?: string | null;
+        source?: string;
+        status?: string;
+        notes?: string | null;
+        gbpObservation?: string | null;
+        aiVisibilityObservation?: string | null;
+        leadOpportunity?: string | null;
+        opportunityLevel?: string | null;
+        isCustomer?: boolean;
+        convertedAt?: string | null;
+        assignedTo?: string | null;
+        assignedAgentName?: string | null;
+        spreadsheetStatus?: string;
+        spreadsheetStatus1?: string;
+        spreadsheetStatus2?: string;
+        spreadsheetStatus3?: string;
+        updatedAt?: string | null;
+        emailShareStatus?: 'none' | 'sent' | 'opened';
+        emailShareSentAt?: string | null;
+        emailShareOpenedAt?: string | null;
+        observationEmailShareStatus?: 'none' | 'sent' | 'opened';
+        observationEmailSentAt?: string | null;
+        observationEmailOpenedAt?: string | null;
+    };
+    tasks: LeadTask[];
+    activities: LeadActivity[];
+};
+
+export async function fetchAdminLeadCrm(leadId: string): Promise<AdminLeadCrmDetail> {
+    return adminGet(`/api/admin/crm/leads/${encodeURIComponent(leadId)}/crm`);
+}
+
 export async function createLeadActivity(leadId: string, data: {
     activity_type?: string;
     disposition?: string;
@@ -263,6 +313,42 @@ export async function shareFullAuditEmail(
     return adminPost(`/api/admin/full-audits/${encodeURIComponent(id)}/share-email`, body);
 }
 
+export type FullAuditRequest = {
+    id: string;
+    leadId: string;
+    businessName: string;
+    toEmail: string;
+    status: 'pending' | 'in_progress' | 'completed' | 'dismissed' | string;
+    source?: string;
+    requestedAt?: string | null;
+    fulfilledAuditId?: string | null;
+    assignedToUserId?: string | null;
+    assignedAgentName?: string | null;
+    assignedAgentEmail?: string | null;
+    completedAt?: string | null;
+    notes?: string;
+    reportUrl?: string | null;
+};
+
+export async function fetchFullAuditRequests(status?: string): Promise<FullAuditRequest[]> {
+    const qs = status && status !== 'all' ? `?status=${encodeURIComponent(status)}` : '';
+    const res = await adminGet(`/api/admin/full-audit-requests${qs}`);
+    return res.requests || [];
+}
+
+export async function updateFullAuditRequest(
+    id: string,
+    updates: {
+        status?: string;
+        notes?: string;
+        assignedToUserId?: string | null;
+        fulfilledAuditId?: string | null;
+    }
+): Promise<FullAuditRequest> {
+    const res = await adminPatch(`/api/admin/full-audit-requests/${encodeURIComponent(id)}`, updates);
+    return res.request;
+}
+
 
 
 
@@ -297,6 +383,7 @@ export type AdminCrmLead = {
     spreadsheetStatus1?: string;
     spreadsheetStatus2?: string;
     spreadsheetStatus3?: string;
+    auditId?: string | null;
     createdAt: string;
     updatedAt: string;
 };
@@ -403,7 +490,13 @@ export async function bulkDeleteAdminCrmLeads(
 }
 
 export async function deleteAdminCrmLead(leadId: string): Promise<{ success: boolean; id: string }> {
-    return adminDelete(`/api/admin/crm/leads/${encodeURIComponent(leadId)}`);
+    // Use bulk-delete so Checkout / growth-audit `submissions` rows delete the same way as Excel/CRM leads.
+    // Single DELETE /crm/leads/:id historically only hit sales_leads and can 404 for form leads.
+    const res = await bulkDeleteAdminCrmLeads([leadId]);
+    if (!res?.success || !(res.count > 0)) {
+        throw new Error(res?.message || 'Lead not found.');
+    }
+    return { success: true, id: leadId };
 }
 
 

@@ -225,18 +225,21 @@ export default function SalesLayout() {
             .slice(0, 2)
             .toUpperCase() || 'S';
 
+    const logoMaxW = Math.max(120, sidebarWidth - 32);
+    const logoH = Math.round(Math.min(44, Math.max(32, logoMaxW * 0.22)));
+
     const sidebar = (
         <>
-            <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2 border-b-2 border-[#E2E8F0]">
+            <div className="min-h-14 px-4 py-2.5 shrink-0 flex items-center justify-between gap-2 min-w-0">
                 <img
                     src="/localseo.png"
                     alt="Local SEO"
-                    className="h-9 w-auto max-w-[180px] object-contain object-left min-w-0 flex-1"
-                    style={{ maxHeight: '36px', maxWidth: '160px', objectFit: 'contain' }}
+                    className="w-auto max-w-full object-contain object-left min-w-0"
+                    style={{ height: logoH, maxWidth: logoMaxW }}
                 />
                 <button
                     type="button"
-                    className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9]"
+                    className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9] shrink-0"
                     aria-label="Close menu"
                     onClick={() => setNavOpen(false)}
                 >
@@ -304,7 +307,7 @@ export default function SalesLayout() {
     return (
         <div className="flex h-[100dvh] bg-[#EEF2F6] text-[#0F172A] overflow-hidden">
             <aside
-                className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden"
+                className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden min-w-0"
                 style={{ width: sidebarWidth }}
             >
                 {sidebar}
@@ -315,12 +318,17 @@ export default function SalesLayout() {
                     onPointerDown={(e) => {
                         if (e.button !== 0) return;
                         e.preventDefault();
+                        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
                         resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
                         setResizing(true);
                     }}
-                    className="absolute inset-y-0 right-0 z-20 w-1.5 translate-x-1/2 cursor-sidebar-resize touch-none"
+                    className="absolute inset-y-0 right-0 z-20 w-2 cursor-sidebar-resize touch-none"
                 >
-                    <span className={`pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 ${resizing ? 'bg-[#F59E0B]' : 'bg-transparent hover:bg-[#CBD5E1]'}`} />
+                    <span
+                        className={`pointer-events-none absolute inset-y-0 right-0 w-px ${
+                            resizing ? 'bg-[#F59E0B]' : 'bg-transparent'
+                        }`}
+                    />
                 </div>
             </aside>
 
@@ -339,8 +347,8 @@ export default function SalesLayout() {
             )}
 
             <div className="flex-1 flex flex-col min-w-0 min-h-0">
-                <header className="shrink-0 sticky top-0 z-30 border-b border-[#E2E8F0] bg-white/95 backdrop-blur px-3 sm:px-5 lg:px-6 py-2.5 sm:py-3 safe-pt">
-                    <div className="flex items-center justify-between lg:justify-end gap-4 min-h-[40px]">
+                <header className="h-14 shrink-0 sticky top-0 z-30 border-b border-[#E2E8F0] bg-white/95 backdrop-blur px-3 sm:px-5 lg:px-6 safe-pt flex items-center">
+                    <div className="flex items-center justify-between lg:justify-end gap-4 w-full min-w-0">
                         <button
                             type="button"
                             className="lg:hidden inline-flex items-center justify-center w-10 h-10 rounded-xl border border-[#E2E8F0] bg-white text-[#0F172A] shrink-0 shadow-2xs hover:bg-[#F8FAFC]"

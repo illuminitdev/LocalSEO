@@ -20,7 +20,7 @@ export type AeoQuerySpec = {
   kind: 'service' | 'brand';
 };
 
-/** Five measured AEO Visual queries: 3 service + 2 brand. Shared by decks + screenshot capture. */
+
 export function buildAeoQuerySpecs(audit: {
   business?: {
     businessName?: string;

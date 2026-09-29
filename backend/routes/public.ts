@@ -56,9 +56,14 @@ import { listBookableMembers } from '../lib/team';
 import {
     markAuditEmailOpened,
     isSafeHttpUrl,
+    apiPublicOrigin,
     TRANSPARENT_GIF,
     ZAPP_EMAIL_LOGO_PNG
 } from '../lib/auditEmailSends';
+import {
+    markLeadObservationEmailOpened,
+    getLeadObservationEmailSendByToken
+} from '../lib/leadObservationEmailSends';
 import { ensureCrmTables } from '../sales-agent/sales';
 
 function frontendOrigin() {
@@ -851,6 +856,240 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
+
+    async function handleEmailOpen(req: Request, res: Response, kind: 'gif' | 'png') {
+        try {
+            await ensureCrmTables();
+            const token = String(req.params.token || '').trim();
+            if (token) {
+                const ok = await markAuditEmailOpened(token).catch(() => false);
+                console.log('[audit-email-open]', kind, token.slice(0, 8), ok ? 'ok' : 'miss');
+            }
+        } catch (err) {
+            console.warn('[audit-email-open] mark failed:', err);
+        }
+        if (kind === 'png') {
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+            res.setHeader('Pragma', 'no-cache');
+            return res.status(200).send(ZAPP_EMAIL_LOGO_PNG);
+        }
+        res.setHeader('Content-Type', 'image/gif');
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        res.setHeader('Pragma', 'no-cache');
+        return res.status(200).send(TRANSPARENT_GIF);
+    }
+
+    router.get('/audit-email-open/:token/logo.png', (req, res) => handleEmailOpen(req, res, 'png'));
+    router.get('/audit-email-open/:token/pixel.gif', (req, res) => handleEmailOpen(req, res, 'gif'));
+    router.get('/audit-email-open/:token.gif', (req, res) => handleEmailOpen(req, res, 'gif'));
+    router.get('/audit-email-open/:token', (req, res) => handleEmailOpen(req, res, 'gif'));
+
+    router.get('/audit-email-click/:token', async (req: Request, res: Response) => {
+        const token = String(req.params.token || '').trim();
+        const dest = String(req.query.u || '').trim();
+        try {
+            await ensureCrmTables();
+            if (token) {
+                const ok = await markAuditEmailOpened(token).catch(() => false);
+                console.log('[audit-email-click]', token.slice(0, 8), ok ? 'ok' : 'miss');
+            }
+        } catch (err) {
+            console.warn('[audit-email-click] mark failed:', err);
+        }
+        if (isSafeHttpUrl(dest)) {
+            return res.redirect(302, dest);
+        }
+        return res.status(400).send('Invalid link');
+    });
+
+    async function handleLeadEmailOpen(req: Request, res: Response, kind: 'gif' | 'png') {
+        try {
+            await ensureCrmTables();
+            const token = String(req.params.token || '').trim();
+            if (token) {
+                const ok = await markLeadObservationEmailOpened(token).catch(() => false);
+                console.log('[lead-email-open]', kind, token.slice(0, 8), ok ? 'ok' : 'miss');
+            }
+        } catch (err) {
+            console.warn('[lead-email-open] mark failed:', err);
+        }
+        if (kind === 'png') {
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+            res.setHeader('Pragma', 'no-cache');
+            return res.status(200).send(ZAPP_EMAIL_LOGO_PNG);
+        }
+        res.setHeader('Content-Type', 'image/gif');
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        res.setHeader('Pragma', 'no-cache');
+        return res.status(200).send(TRANSPARENT_GIF);
+    }
+
+    router.get('/lead-email-open/:token/logo.png', (req, res) => handleLeadEmailOpen(req, res, 'png'));
+    router.get('/lead-email-open/:token/pixel.gif', (req, res) => handleLeadEmailOpen(req, res, 'gif'));
+
+    router.get('/brand/zappsites-logo.png', (_req: Request, res: Response) => {
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.status(200).send(ZAPP_EMAIL_LOGO_PNG);
+    });
+
+    router.get('/lead-full-audit-request/:token', async (req: Request, res: Response) => {
+        const token = String(req.params.token || '').trim();
+        let okPage = false;
+        let alreadyRequested = false;
+        let businessLabel = 'your business';
+        try {
+            await ensureCrmTables();
+            if (token) {
+                await markLeadObservationEmailOpened(token).catch(() => false);
+                const send = await getLeadObservationEmailSendByToken(token);
+                if (send) {
+                    const leadId = String(send.lead_id || '').trim();
+                    const toEmail = String(send.to_email || '').trim().toLowerCase();
+                    let businessName = '';
+                    try {
+                        const { rows } = await query(
+                            `SELECT name FROM sales_leads WHERE id::text = $1 LIMIT 1`,
+                            [leadId]
+                        );
+                        businessName = String(rows[0]?.name || '').trim();
+                    } catch {
+                        /* ignore */
+                    }
+                    if (!businessName) {
+                        try {
+                            const { rows } = await query(
+                                `SELECT COALESCE(payload->>'businessName', payload->>'name', '') AS name
+                                 FROM submissions WHERE id::text = $1 LIMIT 1`,
+                                [leadId]
+                            );
+                            businessName = String(rows[0]?.name || '').trim();
+                        } catch {
+                            /* ignore */
+                        }
+                    }
+                    if (businessName) businessLabel = businessName;
+
+                    const existing = await query(
+                        `SELECT id FROM full_audit_requests
+                         WHERE lead_id = $1 AND status IN ('pending', 'in_progress')
+                         ORDER BY requested_at DESC LIMIT 1`,
+                        [leadId]
+                    ).catch(() => ({ rows: [] as any[] }));
+
+                    if (existing.rows[0]) {
+                        alreadyRequested = true;
+                    } else {
+                        await query(
+                            `INSERT INTO full_audit_requests
+                             (lead_id, observation_email_token, business_name, to_email, status, source)
+                             VALUES ($1, $2, $3, $4, 'pending', 'email_cta')`,
+                            [leadId, token, businessName || 'Lead', toEmail]
+                        );
+                    }
+                    okPage = true;
+                }
+            }
+        } catch (err) {
+            console.warn('[lead-full-audit-request] failed:', err);
+        }
+
+        const wantsJson =
+            String(req.query.format || '').toLowerCase() === 'json' ||
+            String(req.headers.accept || '').includes('application/json');
+
+        if (wantsJson) {
+            res.setHeader('Cache-Control', 'no-store');
+            if (!okPage) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'This request link is invalid or has expired.'
+                });
+            }
+            return res.json({
+                success: true,
+                alreadyRequested,
+                businessName: businessLabel,
+                title: 'Request received',
+                message: alreadyRequested
+                    ? `We already have an open full main audit request for ${businessLabel}. Our team will complete it and get back to you.`
+                    : `Thanks — we received your request for a full main audit for ${businessLabel}. Our team will complete it and get back to you.`
+            });
+        }
+
+        const safeBiz = String(businessLabel || 'your business')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        const title = okPage ? 'Request received' : 'Link not found';
+        const body = okPage
+            ? alreadyRequested
+                ? `We already have an open full main audit request for <strong>${safeBiz}</strong>. Our team will complete it and get back to you.`
+                : `Thanks — we received your request for a full main audit for <strong>${safeBiz}</strong>. Our team will complete it and get back to you.`
+            : 'This request link is invalid or has expired. If you still need a full audit, reply to the email you received from us.';
+        const badge = okPage ? 'Request received' : 'Unable to process';
+        const logoSrc = `${apiPublicOrigin()}/api/public/brand/zappsites-logo.png`;
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(okPage ? 200 : 404).send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>${title} — ZappSites</title>
+</head>
+<body style="margin:0;min-height:100vh;font-family:Arial,Helvetica,sans-serif;background:#F7F7F8;color:#111827;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="min-height:100vh;">
+    <tr>
+      <td align="center" style="padding:48px 16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;background:#ffffff;border:1px solid #E5E7EB;">
+          <tr>
+            <td style="padding:20px 28px;border-bottom:1px solid #E5E7EB;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="padding-right:12px;vertical-align:middle;">
+                    <img src="${logoSrc}" width="36" height="36" alt="ZappSites" style="display:block;width:36px;height:36px;border:0;border-radius:50%;"/>
+                  </td>
+                  <td style="vertical-align:middle;">
+                    <div style="font-size:16px;font-weight:700;color:#111827;">ZappSites</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 28px 8px;">
+              <div style="display:inline-block;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:${okPage ? '#065F46' : '#991B1B'};background:${okPage ? '#ECFDF5' : '#FEF2F2'};border:1px solid ${okPage ? '#A7F3D0' : '#FECACA'};border-radius:999px;padding:5px 10px;margin-bottom:14px;">${badge}</div>
+              <h1 style="font-size:22px;line-height:1.3;margin:0 0 12px;font-weight:700;color:#111827;">${title}</h1>
+              <p style="font-size:15px;line-height:1.65;color:#4B5563;margin:0;">${body}</p>
+            </td>
+          </tr>
+          ${
+              okPage
+                  ? `<tr>
+            <td style="padding:18px 28px 8px;">
+              <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:#111827;">What happens next</p>
+              <p style="margin:0;font-size:14px;color:#6B7280;line-height:1.55;">Our team will run the full audit and follow up when the report is ready.</p>
+            </td>
+          </tr>`
+                  : ''
+          }
+          <tr>
+            <td style="padding:20px 28px 28px;">
+              <p style="font-size:13px;line-height:1.5;color:#9CA3AF;margin:0;">You can close this tab.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`);
+    });
+
     router.post('/:hostSlug/upload-url', async (req: Request, res: Response) => {
         try {
             const org = await loadOrg(req.params.hostSlug);
@@ -1453,54 +1692,6 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             console.error('Book error:', err);
             res.status(500).json({ error: err.message });
         }
-    });
-
-    async function handleEmailOpen(req: Request, res: Response, kind: 'gif' | 'png') {
-        try {
-            await ensureCrmTables();
-            const token = String(req.params.token || '').trim();
-            if (token) {
-                const ok = await markAuditEmailOpened(token).catch(() => false);
-                console.log('[audit-email-open]', kind, token.slice(0, 8), ok ? 'ok' : 'miss');
-            }
-        } catch (err) {
-            console.warn('[audit-email-open] mark failed:', err);
-        }
-        if (kind === 'png') {
-            res.setHeader('Content-Type', 'image/png');
-            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-            res.setHeader('Pragma', 'no-cache');
-            return res.status(200).send(ZAPP_EMAIL_LOGO_PNG);
-        }
-        res.setHeader('Content-Type', 'image/gif');
-        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-        res.setHeader('Pragma', 'no-cache');
-        return res.status(200).send(TRANSPARENT_GIF);
-    }
-
-    // Preferred paths (no ambiguous :token.gif param)
-    router.get('/audit-email-open/:token/logo.png', (req, res) => handleEmailOpen(req, res, 'png'));
-    router.get('/audit-email-open/:token/pixel.gif', (req, res) => handleEmailOpen(req, res, 'gif'));
-    // Legacy fallbacks
-    router.get('/audit-email-open/:token.gif', (req, res) => handleEmailOpen(req, res, 'gif'));
-    router.get('/audit-email-open/:token', (req, res) => handleEmailOpen(req, res, 'gif'));
-
-    router.get('/audit-email-click/:token', async (req: Request, res: Response) => {
-        const token = String(req.params.token || '').trim();
-        const dest = String(req.query.u || '').trim();
-        try {
-            await ensureCrmTables();
-            if (token) {
-                const ok = await markAuditEmailOpened(token).catch(() => false);
-                console.log('[audit-email-click]', token.slice(0, 8), ok ? 'ok' : 'miss');
-            }
-        } catch (err) {
-            console.warn('[audit-email-click] mark failed:', err);
-        }
-        if (isSafeHttpUrl(dest)) {
-            return res.redirect(302, dest);
-        }
-        return res.status(400).send('Invalid link');
     });
 
     return router;

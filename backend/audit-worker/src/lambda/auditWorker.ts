@@ -160,7 +160,7 @@ async function mergeGbpFromMapsHit(
     await Promise.all(photoUrls.map(async (u) => (await imageUrlToDataUrl(u)) || u))
   ).filter((u) => String(u || '').startsWith('data:image/'));
 
-  // Keep distinct photos only (avoid same image in main + "See outside")
+  
   const seen = new Set<string>();
   photoUrls = photoUrls.filter((u) => {
     const key = String(u).slice(0, 120);
@@ -237,7 +237,6 @@ async function mergeGbpFromMapsHit(
     serviceQuery: prev.serviceQuery || null
   };
 }
-
 
 
 
@@ -478,7 +477,7 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  //  Local SEO signals (DataForSEO + Gemini) 
+
   try {
     const gbp = audit.gbpLookup || {};
     const placeId = String(gbp.placeId || '').trim();
@@ -743,7 +742,7 @@ async function enrichFromDataForSeo(audit: any) {
       }
     }
 
-    // ChatGPT + Claude + Gemini × three GEO prompts (near / best / near me)
+
     try {
       const aiEngineChecks = await checkAiEngineMentionsMulti({
         service,
@@ -803,7 +802,7 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  // AEO Visual: 5 real Google organic SERP screenshots (3 service + 2 brand)
+  // AEO Visual: 5
   try {
     const aeoSpecs = buildAeoQuerySpecs(audit);
     const aeoShots: SerpScreenshotResult[] = [];
@@ -991,7 +990,7 @@ export const main: SQSHandler = async (event: SQSEvent) => {
             localSeoFixes: {
               ...deckLocal,
               ...aiLocal,
-              // Always keep factual Maps ranking yes/no + list from measured localRank
+              // Always keep factual Maps ranking 
               mapsRanking: deckLocal.mapsRanking || aiLocal.mapsRanking,
               coreChecklist: aiLocal.coreChecklist || deckLocal.coreChecklist,
               inconsistencies: Array.isArray(aiLocal.inconsistencies) && aiLocal.inconsistencies.length
@@ -1002,7 +1001,7 @@ export const main: SQSHandler = async (event: SQSEvent) => {
               ...deckAeo,
               ...aiAeo,
               aeoChecklist: deckAeo.aeoChecklist || aiAeo.aeoChecklist || null,
-              // Always use measured SERP screenshot cards (never Gemini mock SERPs)
+              
               queryCards: measuredAeoCards
             },
             geoFixes: {

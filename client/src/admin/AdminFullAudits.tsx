@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     Check,
@@ -10,6 +10,7 @@ import {
     Copy,
     ExternalLink,
     Globe2,
+    Inbox,
     Loader2,
     MapPinned,
     Plus,
@@ -23,12 +24,15 @@ import {
 import {
     deleteFullAudit,
     fetchFullAudit,
+    fetchFullAuditRequests,
     fetchFullAudits,
     fetchSalesAgents,
     pollFullAuditJob,
     shareFullAuditEmail,
     startFullCrawl,
+    updateFullAuditRequest,
     type FullAuditListItem,
+    type FullAuditRequest,
     type SalesAgent
 } from './adminApi';
 import { AUDIT_SERVICE_OPTIONS, resolveAuditService } from './auditServices';
@@ -37,6 +41,53 @@ import { resolveAuditReportUrl } from '../shared/apiConfig';
 import { cn } from '../shared/utils';
 
 const PAGE_SIZE = 10;
+const REQUESTS_SEEN_KEY = 'admin_full_audit_requests_seen_v1';
+
+type RequestFilter = 'open' | 'assigned' | 'done' | 'all';
+
+function loadSeenRequestIds(): Set<string> {
+    try {
+        const raw = localStorage.getItem(REQUESTS_SEEN_KEY);
+        const arr = raw ? (JSON.parse(raw) as unknown) : [];
+        return new Set(Array.isArray(arr) ? arr.map(String) : []);
+    } catch {
+        return new Set();
+    }
+}
+
+function saveSeenRequestIds(ids: Set<string>) {
+    try {
+        localStorage.setItem(REQUESTS_SEEN_KEY, JSON.stringify(Array.from(ids)));
+    } catch {
+        /* ignore */
+    }
+}
+
+function normalizeMatch(value?: string | null) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ');
+}
+
+function isReadyAudit(a: FullAuditListItem) {
+    return Boolean(a.published || a.status === 'complete' || a.status === 'completed');
+}
+
+function auditsReadyForRequest(req: FullAuditRequest, audits: FullAuditListItem[]) {
+    const email = normalizeMatch(req.toEmail);
+    const name = normalizeMatch(req.businessName);
+    const linked = String(req.fulfilledAuditId || '').trim();
+    return audits.filter((a) => {
+        if (!isReadyAudit(a)) return false;
+        if (linked && a.id === linked) return true;
+        const aEmail = normalizeMatch(a.email);
+        const aName = normalizeMatch(a.businessName);
+        if (email && aEmail && email === aEmail) return true;
+        if (name && aName && (aName === name || aName.includes(name) || name.includes(aName))) return true;
+        return false;
+    });
+}
 
 const CRAWL_STEPS = [
     {
@@ -120,7 +171,9 @@ function auditToLeadRef(a: FullAuditListItem): GrowthAuditLeadRef {
 
 export default function AdminFullAudits() {
     const [searchParams, setSearchParams] = useSearchParams();
+    const activeTab = searchParams.get('tab') === 'requests' ? 'requests' : 'audits';
     const [audits, setAudits] = useState<FullAuditListItem[]>([]);
+    const [requests, setRequests] = useState<FullAuditRequest[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
     const [activeLead, setActiveLead] = useState<GrowthAuditLeadRef | null>(null);
     const [loading, setLoading] = useState(true);
@@ -129,6 +182,14 @@ export default function AdminFullAudits() {
     const [busyId, setBusyId] = useState('');
     const [busyAction, setBusyAction] = useState<'share' | 'delete' | ''>('');
     const [page, setPage] = useState(1);
+    const [fulfillAuditId, setFulfillAuditId] = useState('');
+    const [fulfillAgentId, setFulfillAgentId] = useState('');
+    const [assignModalReq, setAssignModalReq] = useState<FullAuditRequest | null>(null);
+    const [assignSaving, setAssignSaving] = useState(false);
+    const [requestFilter, setRequestFilter] = useState<RequestFilter>('open');
+    const [seenRequestIds, setSeenRequestIds] = useState<Set<string>>(() => loadSeenRequestIds());
+    const [prefillRequestId, setPrefillRequestId] = useState<string | null>(null);
+    const pendingAssignRef = useRef<{ reqId: string; auditId: string } | null>(null);
 
     const [showForm, setShowForm] = useState(false);
     const [form, setForm] = useState(EMPTY_FORM);
@@ -139,11 +200,27 @@ export default function AdminFullAudits() {
     const load = useCallback(() => {
         setLoading(true);
         setError('');
-        Promise.all([fetchFullAudits(), fetchSalesAgents().catch(() => [] as SalesAgent[])])
-            .then(([list, agents]) => {
+        Promise.all([
+            fetchFullAudits(),
+            fetchSalesAgents().catch(() => [] as SalesAgent[]),
+            fetchFullAuditRequests().catch(() => [] as FullAuditRequest[])
+        ])
+            .then(([list, agents, reqs]) => {
                 setAudits(list);
                 setSalesAgents(agents);
+                setRequests(reqs);
                 setPage(1);
+                const pending = pendingAssignRef.current;
+                if (pending) {
+                    pendingAssignRef.current = null;
+                    const req = reqs.find((r) => r.id === pending.reqId);
+                    if (req) {
+                        setAssignModalReq({ ...req, fulfilledAuditId: pending.auditId });
+                        setFulfillAuditId(pending.auditId);
+                        setFulfillAgentId(req.assignedToUserId || '');
+                        setAssignSaving(false);
+                    }
+                }
             })
             .catch((err: Error) => {
                 setAudits([]);
@@ -165,6 +242,127 @@ export default function AdminFullAudits() {
             setSearchParams(next, { replace: true });
         }
     }, [searchParams, setSearchParams]);
+
+    const setTab = (tab: 'audits' | 'requests') => {
+        const next = new URLSearchParams(searchParams);
+        if (tab === 'requests') next.set('tab', 'requests');
+        else next.delete('tab');
+        setSearchParams(next, { replace: true });
+    };
+
+    const openRequests = useMemo(
+        () => requests.filter((r) => r.status === 'pending' || r.status === 'in_progress'),
+        [requests]
+    );
+
+    const unseenRequestCount = useMemo(
+        () => openRequests.filter((r) => !seenRequestIds.has(r.id)).length,
+        [openRequests, seenRequestIds]
+    );
+
+    // Opening the Requests tab clears the badge for currently open requests
+    useEffect(() => {
+        if (activeTab !== 'requests' || !openRequests.length) return;
+        setSeenRequestIds((prev) => {
+            const next = new Set(prev);
+            let changed = false;
+            for (const r of openRequests) {
+                if (!next.has(r.id)) {
+                    next.add(r.id);
+                    changed = true;
+                }
+            }
+            if (!changed) return prev;
+            saveSeenRequestIds(next);
+            return next;
+        });
+    }, [activeTab, openRequests]);
+
+    const filteredRequests = useMemo(() => {
+        return requests.filter((r) => {
+            if (requestFilter === 'all') return true;
+            if (requestFilter === 'open') return r.status === 'pending' || r.status === 'in_progress';
+            if (requestFilter === 'assigned') {
+                return r.status === 'completed' && Boolean(r.assignedToUserId || r.assignedAgentName);
+            }
+            if (requestFilter === 'done') {
+                return r.status === 'completed' || r.status === 'dismissed';
+            }
+            return true;
+        });
+    }, [requests, requestFilter]);
+
+    const openNewFormFromRequest = (req: FullAuditRequest) => {
+        setPrefillRequestId(req.id);
+        setForm({
+            ...EMPTY_FORM,
+            businessName: req.businessName || '',
+            emailOrPhone: req.toEmail || ''
+        });
+        setShowForm(true);
+        setTab('audits');
+        setError('');
+        setMessage('');
+        updateFullAuditRequest(req.id, { status: 'in_progress' }).catch(() => {});
+    };
+
+    const openAssignModal = (req: FullAuditRequest) => {
+        const ready = auditsReadyForRequest(req, audits);
+        if (!ready.length) {
+            setError('Run and publish a full audit for this business first, then assign.');
+            return;
+        }
+        setAssignModalReq(req);
+        setFulfillAuditId(req.fulfilledAuditId || ready[0]?.id || '');
+        setFulfillAgentId(req.assignedToUserId || '');
+        setAssignSaving(false);
+        setError('');
+        setMessage('');
+    };
+
+    const closeAssignModal = () => {
+        if (assignSaving) return;
+        setAssignModalReq(null);
+        setFulfillAuditId('');
+        setFulfillAgentId('');
+        setAssignSaving(false);
+    };
+
+    const handleFulfillRequest = async (req: FullAuditRequest) => {
+        const auditId = String(fulfillAuditId || '').trim();
+        const ready = auditsReadyForRequest(req, audits);
+        const selected = audits.find((a) => a.id === auditId);
+        const allowed =
+            Boolean(auditId) &&
+            (ready.some((a) => a.id === auditId) || Boolean(selected && isReadyAudit(selected)));
+        if (!allowed) {
+            setError('Select a published full audit for this business before assigning.');
+            return;
+        }
+        if (!fulfillAgentId) {
+            setError('Select a sales agent to assign.');
+            return;
+        }
+        setAssignSaving(true);
+        setError('');
+        try {
+            await updateFullAuditRequest(req.id, {
+                status: 'completed',
+                fulfilledAuditId: auditId,
+                assignedToUserId: fulfillAgentId
+            });
+            setMessage('Assigned — sales agent will see this in CRM to email the PDF.');
+            setAssignModalReq(null);
+            setFulfillAuditId('');
+            setFulfillAgentId('');
+            setRequestFilter('assigned');
+            load();
+        } catch (err: any) {
+            setError(err.message || 'Failed to fulfill request');
+        } finally {
+            setAssignSaving(false);
+        }
+    };
 
     useEffect(() => {
         if (!creating) return undefined;
@@ -226,7 +424,17 @@ export default function AdminFullAudits() {
         setShowForm(false);
         setCreateMessage('');
         setStepIndex(0);
-        setMessage('Full audit ready — report opened in a new tab.');
+        setMessage(
+            prefillRequestId
+                ? 'Full audit ready — pick a sales agent to assign.'
+                : 'Full audit ready — report opened in a new tab.'
+        );
+        if (prefillRequestId) {
+            pendingAssignRef.current = { reqId: prefillRequestId, auditId };
+            setPrefillRequestId(null);
+            setFulfillAuditId(auditId);
+            setTab('requests');
+        }
         load();
     };
 
@@ -423,7 +631,40 @@ export default function AdminFullAudits() {
 
     return (
         <div className="space-y-5 max-w-7xl">
-            <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="inline-flex items-center rounded-xl border border-[#E2E8F0] bg-white p-1">
+                    <button
+                        type="button"
+                        onClick={() => setTab('audits')}
+                        className={cn(
+                            'px-3.5 py-2 text-xs font-bold rounded-lg transition-colors',
+                            activeTab === 'audits'
+                                ? 'bg-[#F59E0B] text-[#0F172A]'
+                                : 'text-[#64748B] hover:text-[#0F172A]'
+                        )}
+                    >
+                        Audits
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setTab('requests')}
+                        className={cn(
+                            'inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-colors',
+                            activeTab === 'requests'
+                                ? 'bg-[#F59E0B] text-[#0F172A]'
+                                : 'text-[#64748B] hover:text-[#0F172A]'
+                        )}
+                    >
+                        <Inbox className="w-3.5 h-3.5" />
+                        Requests
+                        {unseenRequestCount > 0 ? (
+                            <span className="ml-0.5 inline-flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-[#0F172A] text-white text-[10px] px-1">
+                                {unseenRequestCount}
+                            </span>
+                        ) : null}
+                    </button>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                     type="button"
                     onClick={load}
@@ -433,7 +674,7 @@ export default function AdminFullAudits() {
                     <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
                     Refresh
                 </button>
-                {!showForm ? (
+                {!showForm && activeTab === 'audits' ? (
                     <button
                         type="button"
                         onClick={openNewForm}
@@ -443,6 +684,7 @@ export default function AdminFullAudits() {
                         New full audit
                     </button>
                 ) : null}
+                </div>
             </div>
 
             {error ? (
@@ -456,7 +698,182 @@ export default function AdminFullAudits() {
                 </p>
             ) : null}
 
-            {showForm ? (
+            {activeTab === 'requests' ? (
+                <div className="bg-white border border-[#E2E8F0] rounded-2xl overflow-hidden">
+                    <div className="px-4 py-3 border-b border-[#E2E8F0] bg-[#F8FAFC] space-y-3">
+                        <div>
+                            <h2 className="text-sm font-black text-[#0F172A]">Full audit requests</h2>
+                            <p className="text-xs text-[#64748B] mt-0.5">
+                                Run a full audit and publish the PDF first, then assign to sales to email it.
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            {(
+                                [
+                                    { id: 'open', label: 'Open' },
+                                    { id: 'assigned', label: 'Assigned' },
+                                    { id: 'done', label: 'Done' },
+                                    { id: 'all', label: 'All' }
+                                ] as const
+                            ).map((f) => (
+                                <button
+                                    key={f.id}
+                                    type="button"
+                                    onClick={() => setRequestFilter(f.id)}
+                                    className={cn(
+                                        'px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors',
+                                        requestFilter === f.id
+                                            ? 'bg-[#0F172A] text-white border-[#0F172A]'
+                                            : 'bg-white text-[#64748B] border-[#E2E8F0] hover:text-[#0F172A]'
+                                    )}
+                                >
+                                    {f.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    {loading ? (
+                        <div className="p-8 text-center text-sm text-[#64748B]">Loading requests…</div>
+                    ) : !filteredRequests.length ? (
+                        <div className="p-8 text-center text-sm text-[#64748B]">
+                            No requests in this filter.
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-[#F8FAFC] text-[11px] uppercase tracking-wider text-[#64748B]">
+                                    <tr>
+                                        <th className="px-4 py-2.5 font-bold">Business</th>
+                                        <th className="px-4 py-2.5 font-bold">Email</th>
+                                        <th className="px-4 py-2.5 font-bold">Requested</th>
+                                        <th className="px-4 py-2.5 font-bold">Status</th>
+                                        <th className="px-4 py-2.5 font-bold text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#E2E8F0]">
+                                    {filteredRequests.map((req) => {
+                                        const readyAudits = auditsReadyForRequest(req, audits);
+                                        const hasReadyAudit = readyAudits.length > 0;
+                                        const isAssigned =
+                                            req.status === 'completed' &&
+                                            Boolean(req.assignedToUserId || req.assignedAgentName);
+                                        const isOpen =
+                                            req.status === 'pending' || req.status === 'in_progress';
+
+                                        return (
+                                        <tr key={req.id} className="align-top">
+                                            <td className="px-4 py-3">
+                                                <div className="font-bold text-[#0F172A]">{req.businessName || '—'}</div>
+                                                {req.fulfilledAuditId ? (
+                                                    <div className="text-[11px] text-emerald-700 mt-0.5 font-mono">
+                                                        Audit: {req.fulfilledAuditId.slice(0, 8)}…
+                                                    </div>
+                                                ) : null}
+                                            </td>
+                                            <td className="px-4 py-3 text-xs text-[#334155]">{req.toEmail || '—'}</td>
+                                            <td className="px-4 py-3 text-xs text-[#64748B]">
+                                                {req.requestedAt
+                                                    ? new Date(req.requestedAt).toLocaleString()
+                                                    : '—'}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                {isAssigned ? (
+                                                    <div>
+                                                        <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-emerald-50 text-emerald-800 border-emerald-200">
+                                                            Assigned
+                                                        </span>
+                                                        <div className="text-[11px] font-semibold text-[#334155] mt-1">
+                                                            {req.assignedAgentName ||
+                                                                req.assignedAgentEmail ||
+                                                                'Sales agent'}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <span
+                                                        className={cn(
+                                                            'inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border',
+                                                            req.status === 'pending'
+                                                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                                                : req.status === 'in_progress'
+                                                                  ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                                                                  : req.status === 'completed'
+                                                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                                    : 'bg-slate-100 text-slate-600 border-slate-200'
+                                                        )}
+                                                    >
+                                                        {req.status.replace(/_/g, ' ')}
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex flex-col items-end gap-2">
+                                                    {isOpen ? (
+                                                        <>
+                                                            {hasReadyAudit ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openAssignModal(req)}
+                                                                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-[#0F172A] text-white hover:bg-[#1E293B] transition-colors"
+                                                                >
+                                                                    <Check className="w-3.5 h-3.5" />
+                                                                    Assign
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openNewFormFromRequest(req)}
+                                                                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-[#F59E0B] text-[#0F172A] hover:bg-[#FBBF24] transition-colors"
+                                                                    title="Publish a full audit PDF before assigning"
+                                                                >
+                                                                    <Plus className="w-3.5 h-3.5" />
+                                                                    Run full audit
+                                                                </button>
+                                                            )}
+                                                            <div className="flex items-center gap-3">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        updateFullAuditRequest(req.id, {
+                                                                            status: 'dismissed'
+                                                                        }).then(load)
+                                                                    }
+                                                                    className="text-[11px] font-semibold text-[#94A3B8] hover:text-rose-600 transition-colors"
+                                                                >
+                                                                    Dismiss
+                                                                </button>
+                                                                {req.leadId ? (
+                                                                    <a
+                                                                        href={`/admin/leads/${encodeURIComponent(req.leadId)}`}
+                                                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#475569] hover:text-[#0F172A] transition-colors"
+                                                                    >
+                                                                        Open lead
+                                                                        <ExternalLink className="w-3 h-3" />
+                                                                    </a>
+                                                                ) : null}
+                                                            </div>
+                                                        </>
+                                                    ) : req.leadId ? (
+                                                        <a
+                                                            href={`/admin/leads/${encodeURIComponent(req.leadId)}`}
+                                                            className="inline-flex items-center gap-1 text-xs font-bold text-[#475569] hover:text-[#0F172A] transition-colors"
+                                                        >
+                                                            Open lead
+                                                            <ExternalLink className="w-3.5 h-3.5" />
+                                                        </a>
+                                                    ) : null}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            ) : null}
+
+            {activeTab === 'audits' && showForm ? (
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5 sm:p-6 space-y-4">
                     <div className="flex items-start justify-between gap-3">
                         <div>
@@ -664,7 +1081,7 @@ export default function AdminFullAudits() {
                 </div>
             ) : null}
 
-            {!showForm ? (
+            {activeTab === 'audits' && !showForm ? (
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
                     <div className="px-5 py-4 border-b border-[#E2E8F0] bg-gradient-to-r from-[#FFFBEB] to-white flex items-center gap-2.5">
                         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FEF3C7] border border-[#FDE68A]">
@@ -854,6 +1271,123 @@ export default function AdminFullAudits() {
                     salesAgents={salesAgents}
                     onClose={() => setActiveLead(null)}
                 />
+            ) : null}
+
+            {assignModalReq ? (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <button
+                        type="button"
+                        aria-label="Close assign dialog"
+                        className="absolute inset-0 bg-slate-900/40"
+                        onClick={closeAssignModal}
+                    />
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="assign-full-audit-title"
+                        className="relative w-full max-w-sm rounded-2xl border border-[#E2E8F0] bg-white shadow-xl p-5 space-y-4"
+                    >
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">
+                                    Full audit request
+                                </p>
+                                <h3
+                                    id="assign-full-audit-title"
+                                    className="text-base font-black text-[#0F172A] mt-0.5"
+                                >
+                                    Assign &amp; complete
+                                </h3>
+                                <p className="text-xs text-[#64748B] mt-1 truncate max-w-[240px]">
+                                    {assignModalReq.businessName || 'Lead'}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeAssignModal}
+                                className="p-1.5 rounded-lg text-[#94A3B8] hover:bg-[#F1F5F9] hover:text-[#0F172A]"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-2.5">
+                            {error ? (
+                                <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                                    {error}
+                                </p>
+                            ) : null}
+                            <label className="block space-y-1">
+                                <span className="text-[11px] font-bold text-[#475569]">Ready audit (PDF)</span>
+                                <select
+                                    value={fulfillAuditId}
+                                    onChange={(e) => setFulfillAuditId(e.target.value)}
+                                    autoFocus
+                                    className="w-full px-3 py-2.5 text-sm border border-[#E2E8F0] rounded-xl bg-white text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/40"
+                                >
+                                    <option value="">Select published audit…</option>
+                                    {(() => {
+                                        const ready = auditsReadyForRequest(assignModalReq, audits);
+                                        const extra =
+                                            fulfillAuditId && !ready.some((a) => a.id === fulfillAuditId)
+                                                ? audits.find((a) => a.id === fulfillAuditId)
+                                                : null;
+                                        const options = extra ? [extra, ...ready] : ready;
+                                        return options.map((a) => (
+                                            <option key={a.id} value={a.id}>
+                                                {(a.businessName || 'Audit') +
+                                                    (a.totalScore != null ? ` · ${a.totalScore}/100` : '') +
+                                                    ` · ${a.id.slice(0, 8)}…`}
+                                            </option>
+                                        ));
+                                    })()}
+                                </select>
+                            </label>
+                            <label className="block space-y-1">
+                                <span className="text-[11px] font-bold text-[#475569]">Sales agent</span>
+                                <select
+                                    value={fulfillAgentId}
+                                    onChange={(e) => setFulfillAgentId(e.target.value)}
+                                    className="w-full px-3 py-2.5 text-sm border border-[#E2E8F0] rounded-xl bg-white text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/40"
+                                >
+                                    <option value="">Select sales agent…</option>
+                                    {salesAgents.map((a) => (
+                                        <option key={a.id} value={a.id}>
+                                            {a.name || a.email}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                        </div>
+
+                        <p className="text-[11px] text-[#64748B] leading-relaxed">
+                            This creates a CRM task for the agent to email the full audit PDF.
+                        </p>
+
+                        <div className="flex items-center gap-2 pt-1">
+                            <button
+                                type="button"
+                                onClick={closeAssignModal}
+                                className="flex-1 px-3 py-2.5 text-xs font-bold rounded-xl border border-[#E2E8F0] text-[#475569] hover:bg-[#F8FAFC]"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleFulfillRequest(assignModalReq)}
+                                disabled={!fulfillAuditId.trim() || !fulfillAgentId || assignSaving}
+                                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-bold rounded-xl bg-[#0F172A] text-white hover:bg-[#1E293B] disabled:opacity-40"
+                            >
+                                {assignSaving ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                    <Check className="w-3.5 h-3.5" />
+                                )}
+                                Assign &amp; complete
+                            </button>
+                        </div>
+                    </div>
+                </div>
             ) : null}
         </div>
     );

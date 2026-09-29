@@ -49,7 +49,7 @@ function normalizeUkLocationName(raw: string): string {
   if (/united\s*kingdom|\buk\b|england|scotland|wales|northern\s*ireland/i.test(name)) {
     return name;
   }
-  // DataForSEO prefers City,Region,Country — city-only labels often return empty.
+
   return `${name},England,United Kingdom`;
 }
 
@@ -473,7 +473,7 @@ export async function captureOrganicLocalPackScreenshot(opts: {
   }
 }
 
-/** Short top-of-SERP screenshot for AEO Visual thumbs (5 queries per audit). */
+
 export async function captureAeoSerpScreenshot(opts: {
   keyword: string;
   lat?: number | null;
@@ -851,7 +851,7 @@ export type AiEngineCheckResult = {
 const UK_POSTCODE_RE =
   /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i;
 
-/** Light cleanup of a few common short forms; otherwise keep the address text as-is. */
+
 const COUNTRY_SHORT_FORMS: Record<string, string> = {
   uk: 'UK',
   'u.k.': 'UK',
@@ -876,10 +876,6 @@ function looksLikePostcodeOnly(segment: string): boolean {
   return false;
 }
 
-/**
- * Take whatever country is on the business/GBP address (last comma segment).
- * No country whitelist — address text is the source of truth.
- */
 export function countryFromAddress(address?: string | null): string {
   const parts = String(address || '')
     .split(',')
@@ -895,13 +891,13 @@ export function countryFromAddress(address?: string | null): string {
       .replace(/[./]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    // Skip street-like bits (numbers) — keep walking left
+   
     if (!cleaned || /\d/.test(cleaned)) continue;
     if (cleaned.length < 2 || cleaned.length > 56) continue;
     if (!/^[A-Za-z][A-Za-z\s'-]*$/.test(cleaned)) continue;
     const key = cleaned.toLowerCase();
     if (COUNTRY_SHORT_FORMS[key]) return COUNTRY_SHORT_FORMS[key];
-    // Use the address segment as written (title-case words)
+    
     return cleaned
       .split(/\s+/)
       .map((w) => {
@@ -977,7 +973,7 @@ function extractLlmAnswerText(result: any): string {
   return chunks.join('\n\n').trim();
 }
 
-/** Strip markdown noise for report/PDF excerpts while keeping readable prose + URLs. */
+
 export function sanitizeLlmExcerpt(text: string, maxLen = 420): string {
   let s = String(text || '');
   s = s.replace(/^#{1,6}\s+/gm, '');
@@ -999,7 +995,6 @@ function brandMentionedInText(answer: string, businessName: string): boolean {
   if (!text || !name || name.length < 3) return false;
   if (text.includes(name)) return true;
 
-  // Drop weak filler tokens; keep distinctive brand words (incl. short ones like "plus").
   const stop = new Set([
     'ltd',
     'limited',
@@ -1018,8 +1013,7 @@ function brandMentionedInText(answer: string, businessName: string): boolean {
     .filter((t) => t.length >= 3 && !stop.has(t));
   if (!tokens.length) return false;
 
-  // Strong hit: distinctive multi-word core without the city suffix (e.g. "eleven plus tutors").
-  const core = tokens.filter((t) => !/^(manchester|london|birmingham|leeds|liverpool|glasgow|edinburgh|bristol)$/i.test(t));
+   const core = tokens.filter((t) => !/^(manchester|london|birmingham|leeds|liverpool|glasgow|edinburgh|bristol)$/i.test(t));
   if (core.length >= 2 && core.every((t) => text.includes(t))) return true;
 
   return tokens.every((t) => text.includes(t));
@@ -1039,10 +1033,7 @@ function shortCityForWebSearch(city?: string): string | undefined {
   return first || undefined;
 }
 
-/**
- * Prefer a real town/city from the address (e.g. Manchester) over a building label
- * like "Swan Buildings" — DataForSEO web_search_city needs a place people search.
- */
+
 export function placeForGeoWebSearch(opts: { city?: string; address?: string | null }): string {
   const parts = String(opts.address || '')
     .split(',')
@@ -1077,7 +1068,6 @@ function geoLlmSystemMessage(place?: string): string {
   ).slice(0, 500);
 }
 
-/** Strengthen the user prompt so API answers stay grounded (closer to consumer ChatGPT). */
 function geoLlmUserPrompt(prompt: string, place?: string): string {
   const q = String(prompt || '').replace(/\s+/g, ' ').trim();
   const loc = String(place || '').replace(/\s+/g, ' ').trim();

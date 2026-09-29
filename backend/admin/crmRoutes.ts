@@ -4,6 +4,12 @@ import { query } from '../lib/db';
 import { requireAdmin } from './adminAuth';
 import { createSalesLead, bulkImportSalesLeads, convertLeadToCustomer, ensureCrmTables, resolveAllLeadIds } from '../sales-agent/sales';
 import { fetchAdminLeadMetadataMap } from './leadHelpers';
+import { fetchLatestAuditEmailShareMap, shareInfoForAudit } from '../lib/auditEmailSends';
+import {
+    fetchLatestLeadObservationEmailShareMap,
+    shareInfoForLeadObservation
+} from '../lib/leadObservationEmailSends';
+import { reportShareUrl } from '../lib/zappSitesAuditProxy';
 
 const router = Router();
 
@@ -96,9 +102,22 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
 
         const leadIds = Array.from(new Set(rows.map((t: any) => t.leadId).filter(Boolean))) as string[];
         const leadMetaMap = await fetchAdminLeadMetadataMap(leadIds);
+        const auditIds = Array.from(
+            new Set(
+                Array.from(leadMetaMap.values())
+                    .map((m: any) => String(m.auditId || '').trim())
+                    .filter(Boolean)
+            )
+        );
+        const [shareMap, obsMap] = await Promise.all([
+            fetchLatestAuditEmailShareMap(auditIds),
+            fetchLatestLeadObservationEmailShareMap(leadIds)
+        ]);
 
         const enrichedTasks = rows.map((t: any) => {
             const meta = leadMetaMap.get(t.leadId) || {};
+            const share = shareInfoForAudit(shareMap, meta.auditId);
+            const obs = shareInfoForLeadObservation(obsMap, t.leadId);
             return {
                 ...t,
                 leadBusinessName: meta.businessName || 'Lead',
@@ -109,7 +128,15 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
                 leadCity: meta.city || '',
                 leadScoreTotal: meta.scoreTotal ?? null,
                 leadReportUrl: meta.reportUrl || null,
-                leadSource: meta.source || ''
+                leadSource: meta.source || '',
+                leadIndustry: meta.industry || '',
+                leadAuditId: meta.auditId || null,
+                emailShareStatus: share.emailShareStatus,
+                emailShareSentAt: share.emailShareSentAt,
+                emailShareOpenedAt: share.emailShareOpenedAt,
+                observationEmailShareStatus: obs.observationEmailShareStatus,
+                observationEmailSentAt: obs.observationEmailSentAt,
+                observationEmailOpenedAt: obs.observationEmailOpenedAt
             };
         });
 
@@ -378,6 +405,201 @@ router.delete('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response
     }
 });
 
+
+router.get('/crm/leads/:leadId/crm', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = String(req.params.leadId);
+        const metaMap = await fetchAdminLeadMetadataMap([leadId]);
+        const meta = metaMap.get(leadId) || {};
+        const lead: Record<string, any> = {
+            id: leadId,
+            businessName: meta.businessName || 'Lead',
+            phone: meta.phone || '',
+            email: meta.email || '',
+            website: meta.website || '',
+            address: meta.address || '',
+            city: meta.city || '',
+            industry: meta.industry || '',
+            scoreTotal: meta.scoreTotal ?? null,
+            auditId: meta.auditId || null,
+            reportUrl: meta.reportUrl || null,
+            source: meta.source || '',
+            status: meta.status || 'new',
+            notes: meta.notes || null,
+            gbpObservation: meta.gbpObservation || null,
+            aiVisibilityObservation: meta.aiVisibilityObservation || null,
+            leadOpportunity: meta.leadOpportunity || null,
+            opportunityLevel: meta.opportunityLevel || null,
+            isCustomer: Boolean(meta.isCustomer),
+            convertedAt: meta.convertedAt || null,
+            assignedTo: meta.assignedTo || null,
+            assignedAgentName: meta.assignedAgentName || null,
+            spreadsheetStatus: meta.spreadsheetStatus || '',
+            spreadsheetStatus1: meta.spreadsheetStatus1 || '',
+            spreadsheetStatus2: meta.spreadsheetStatus2 || '',
+            spreadsheetStatus3: meta.spreadsheetStatus3 || '',
+            updatedAt: meta.updatedAt || null
+        };
+
+        const shareMap = await fetchLatestAuditEmailShareMap(
+            lead.auditId ? [String(lead.auditId)] : []
+        );
+        Object.assign(lead, shareInfoForAudit(shareMap, lead.auditId));
+
+        const allLeadIds = await resolveAllLeadIds(leadId);
+        const obsMap = await fetchLatestLeadObservationEmailShareMap(allLeadIds);
+        let obsShare = shareInfoForLeadObservation(obsMap, leadId);
+        if (obsShare.observationEmailShareStatus === 'none') {
+            for (const altId of allLeadIds) {
+                const alt = shareInfoForLeadObservation(obsMap, altId);
+                if (alt.observationEmailShareStatus !== 'none') {
+                    obsShare = alt;
+                    break;
+                }
+            }
+        }
+        Object.assign(lead, obsShare);
+
+        const [salesRes, subRes] = await Promise.all([
+            query(
+                `SELECT id, name, email, phone, industry, status, notes,
+                        gbp_observation, ai_visibility_observation, lead_opportunity, opportunity_level,
+                        is_customer, converted_at, assigned_to, spreadsheet_status,
+                        spreadsheet_status_1, spreadsheet_status_2, spreadsheet_status_3,
+                        website, address, updated_at, created_at, audit_id
+                 FROM sales_leads WHERE id::text = ANY($1::text[])`,
+                [allLeadIds]
+            ).catch(() => ({ rows: [] as any[] })),
+            query(
+                `SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name,
+                        payload->>'email' AS email, payload
+                 FROM submissions WHERE id::text = ANY($1::text[])`,
+                [allLeadIds]
+            ).catch(() => ({ rows: [] as any[] }))
+        ]);
+
+        if (salesRes.rows[0]) {
+            const s = salesRes.rows[0];
+            lead.businessName = s.name || lead.businessName;
+            lead.phone = s.phone || lead.phone;
+            lead.email = s.email || lead.email;
+            lead.website = s.website || lead.website;
+            lead.address = s.address || lead.address;
+            lead.industry = s.industry || lead.industry;
+            lead.status = s.status || lead.status;
+            lead.notes = s.notes || lead.notes;
+            lead.gbpObservation = s.gbp_observation || lead.gbpObservation;
+            lead.aiVisibilityObservation = s.ai_visibility_observation || lead.aiVisibilityObservation;
+            lead.leadOpportunity = s.lead_opportunity || lead.leadOpportunity;
+            lead.opportunityLevel = s.opportunity_level || lead.opportunityLevel;
+            lead.isCustomer = Boolean(s.is_customer);
+            lead.convertedAt = s.converted_at || lead.convertedAt;
+            lead.assignedTo = s.assigned_to || lead.assignedTo;
+            lead.spreadsheetStatus = s.spreadsheet_status || lead.spreadsheetStatus;
+            lead.spreadsheetStatus1 = s.spreadsheet_status_1 || lead.spreadsheetStatus1;
+            lead.spreadsheetStatus2 = s.spreadsheet_status_2 || lead.spreadsheetStatus2;
+            lead.spreadsheetStatus3 = s.spreadsheet_status_3 || lead.spreadsheetStatus3;
+            lead.updatedAt = s.updated_at || s.created_at || lead.updatedAt;
+            if (s.audit_id) {
+                lead.auditId = String(s.audit_id);
+                lead.reportUrl = reportShareUrl(String(s.audit_id));
+                const auditShareMap = await fetchLatestAuditEmailShareMap([String(s.audit_id)]);
+                Object.assign(lead, shareInfoForAudit(auditShareMap, String(s.audit_id)));
+            }
+        } else if (subRes.rows[0]) {
+            const payload =
+                subRes.rows[0].payload && typeof subRes.rows[0].payload === 'object'
+                    ? subRes.rows[0].payload
+                    : {};
+            lead.businessName =
+                subRes.rows[0].bname || subRes.rows[0].name || lead.businessName;
+            lead.email = subRes.rows[0].email || payload.email || lead.email;
+            lead.phone = payload.phone || lead.phone;
+            lead.website = payload.website || lead.website;
+            lead.address = payload.address || lead.address;
+            lead.city = payload.city || lead.city;
+        }
+
+        const leadName = String(lead.businessName || '').trim().toLowerCase();
+        const leadEmail = String(lead.email || '').trim().toLowerCase();
+
+        const [tasksRes, activitiesRes, agentRes] = await Promise.all([
+            query(
+                `
+                SELECT
+                    t.id,
+                    t.lead_id AS "leadId",
+                    t.task_type AS "taskType",
+                    t.title,
+                    t.notes,
+                    t.priority,
+                    t.status,
+                    t.due_date AS "dueDate",
+                    t.completed_at AS "completedAt",
+                    t.created_at AS "createdAt",
+                    t.updated_at AS "updatedAt",
+                    t.assigned_to_user_id AS "assignedToUserId",
+                    COALESCE(t.created_by_role, 'admin') AS "createdByRole",
+                    COALESCE(t.created_by_name, 'Admin') AS "createdByName",
+                    u.name AS "assignedToName",
+                    u.email AS "assignedToEmail"
+                FROM lead_tasks t
+                LEFT JOIN users u ON u.id = t.assigned_to_user_id
+                WHERE t.lead_id = ANY($1::text[])
+                ORDER BY
+                    CASE WHEN t.status = 'pending' THEN 1 WHEN t.status = 'in_progress' THEN 2 ELSE 3 END,
+                    t.due_date ASC NULLS LAST,
+                    t.created_at DESC
+            `,
+                [allLeadIds]
+            ),
+            query(
+                `
+                SELECT DISTINCT
+                    a.id,
+                    a.lead_id AS "leadId",
+                    a.activity_type AS "activityType",
+                    a.disposition,
+                    a.note,
+                    a.author_name AS "authorName",
+                    a.created_at AS "createdAt",
+                    u.name AS "userName",
+                    u.email AS "userEmail"
+                FROM lead_activities a
+                LEFT JOIN users u ON u.id = a.user_id
+                WHERE (
+                    a.lead_id = ANY($1::text[])
+                    OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(email)) = $3)))
+                    OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)))
+                )
+                  AND a.activity_type IN ('call_log', 'status_change', 'note', 'task_event')
+                ORDER BY a.created_at DESC
+                LIMIT 200
+            `,
+                [allLeadIds, leadName || null, leadEmail || null]
+            ),
+            lead.assignedTo
+                ? query(`SELECT name, email FROM users WHERE id = $1`, [lead.assignedTo]).catch(
+                      () => ({ rows: [] as any[] })
+                  )
+                : Promise.resolve({ rows: [] as any[] })
+        ]);
+
+        if (agentRes.rows[0] && !lead.assignedAgentName) {
+            lead.assignedAgentName = agentRes.rows[0].name || agentRes.rows[0].email || null;
+        }
+
+        res.json({
+            lead,
+            tasks: tasksRes.rows,
+            activities: activitiesRes.rows
+        });
+    } catch (err: any) {
+        console.error('Admin fetch lead CRM error:', err);
+        res.status(500).json({ error: err.message || 'Failed to fetch lead CRM' });
+    }
+});
 
 router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, res: Response) => {
     try {
@@ -864,7 +1086,26 @@ router.patch('/crm/leads/:id', requireAdmin, async (req: Request, res: Response)
     try {
         await ensureCrmTables();
         const leadId = String(req.params.id);
-        const { assignedTo, status, notes, opportunityLevel, industry, website, phone, email, name } = req.body || {};
+        const {
+            assignedTo,
+            status,
+            notes,
+            opportunityLevel,
+            industry,
+            website,
+            phone,
+            email,
+            name,
+            gbpObservation,
+            aiVisibilityObservation,
+            leadOpportunity,
+            address,
+            spreadsheetStatus,
+            spreadsheetStatus1,
+            spreadsheetStatus2,
+            spreadsheetStatus3,
+            auditId
+        } = req.body || {};
 
         const updates: string[] = ['updated_at = NOW()'];
         const params: any[] = [leadId];
@@ -904,6 +1145,42 @@ router.patch('/crm/leads/:id', requireAdmin, async (req: Request, res: Response)
         if (name !== undefined) {
             params.push(String(name || '').trim());
             updates.push(`name = $${params.length}`);
+        }
+        if (gbpObservation !== undefined) {
+            params.push(String(gbpObservation || '').trim());
+            updates.push(`gbp_observation = $${params.length}`);
+        }
+        if (aiVisibilityObservation !== undefined) {
+            params.push(String(aiVisibilityObservation || '').trim());
+            updates.push(`ai_visibility_observation = $${params.length}`);
+        }
+        if (leadOpportunity !== undefined) {
+            params.push(String(leadOpportunity || '').trim());
+            updates.push(`lead_opportunity = $${params.length}`);
+        }
+        if (address !== undefined) {
+            params.push(String(address || '').trim());
+            updates.push(`address = $${params.length}`);
+        }
+        if (spreadsheetStatus !== undefined) {
+            params.push(String(spreadsheetStatus || '').trim());
+            updates.push(`spreadsheet_status = $${params.length}`);
+        }
+        if (spreadsheetStatus1 !== undefined) {
+            params.push(String(spreadsheetStatus1 || '').trim());
+            updates.push(`spreadsheet_status_1 = $${params.length}`);
+        }
+        if (spreadsheetStatus2 !== undefined) {
+            params.push(String(spreadsheetStatus2 || '').trim());
+            updates.push(`spreadsheet_status_2 = $${params.length}`);
+        }
+        if (spreadsheetStatus3 !== undefined) {
+            params.push(String(spreadsheetStatus3 || '').trim());
+            updates.push(`spreadsheet_status_3 = $${params.length}`);
+        }
+        if (auditId !== undefined) {
+            params.push(String(auditId || '').trim() || null);
+            updates.push(`audit_id = $${params.length}`);
         }
 
         const { rows } = await query(`
@@ -1225,21 +1502,56 @@ router.post('/crm/leads/bulk-delete', requireAdmin, async (req: Request, res: Re
     }
 });
 
-/** Admin: Delete a single sales lead */
+/** Admin: Delete a single lead (sales_leads and/or submissions) */
 router.delete('/crm/leads/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
-        const leadId = String(req.params.id);
-
-        await query(`DELETE FROM lead_tasks WHERE lead_id = $1`, [leadId]).catch(() => {});
-        await query(`DELETE FROM lead_activities WHERE lead_id = $1`, [leadId]).catch(() => {});
-        const { rows } = await query(`DELETE FROM sales_leads WHERE id = $1 RETURNING id`, [leadId]);
-
-        if (!rows.length) {
-            return res.status(404).json({ error: 'Lead not found.' });
+        const leadId = String(req.params.id || '').trim();
+        if (!leadId) {
+            return res.status(400).json({ error: 'Lead ID is required.' });
         }
 
-        res.json({ success: true, id: leadId });
+        const leadIds = [leadId];
+
+        await query(`DELETE FROM lead_tasks WHERE lead_id = ANY($1::text[])`, [leadIds]).catch(() => {});
+        await query(`DELETE FROM lead_activities WHERE lead_id = ANY($1::text[])`, [leadIds]).catch(
+            () => {}
+        );
+
+        const { rows: salesRows } = await query(
+            `DELETE FROM sales_leads WHERE id::text = ANY($1::text[]) RETURNING id::text AS id`,
+            [leadIds]
+        );
+
+        let submissionCount = 0;
+        let submissionError: string | null = null;
+        try {
+            const { rows: subRows } = await query(
+                `DELETE FROM submissions WHERE id::text = ANY($1::text[]) RETURNING id::text AS id`,
+                [leadIds]
+            );
+            submissionCount = subRows.length;
+        } catch (err: any) {
+            submissionError = err?.message || String(err);
+            console.warn('[admin-delete-lead] submissions delete failed:', submissionError);
+        }
+
+        const deletedCount = salesRows.length + submissionCount;
+        if (!deletedCount) {
+            return res.status(404).json({
+                error: submissionError
+                    ? `Lead not found in CRM, and form-submission delete failed: ${submissionError}`
+                    : 'Lead not found.'
+            });
+        }
+
+        res.json({
+            success: true,
+            id: leadId,
+            count: deletedCount,
+            salesLeadsDeleted: salesRows.length,
+            submissionsDeleted: submissionCount
+        });
     } catch (err: any) {
         console.error('Admin delete lead error:', err);
         res.status(500).json({ error: err.message || 'Failed to delete lead' });

@@ -31,6 +31,7 @@ import {
     updateSalesTask,
     convertLeadToCustomer,
     confirmAndShareFullAuditEmail,
+    confirmAndShareLeadObservationsEmail,
     emailShareStatusLabel,
     emailShareStatusHint
 } from './salesApi';
@@ -54,6 +55,7 @@ export default function SalesLeadDetail() {
     const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
     const [showLeadHistoryModal, setShowLeadHistoryModal] = useState(false);
     const [sharingAudit, setSharingAudit] = useState(false);
+    const [sharingObservations, setSharingObservations] = useState(false);
 
     const loadLead = useCallback(async () => {
         if (!id) return;
@@ -77,12 +79,14 @@ export default function SalesLeadDetail() {
 
     // While waiting for open, poll so badge turns green without manual refresh
     useEffect(() => {
-        if (lead?.emailShareStatus !== 'sent') return;
+        const waitingAudit = lead?.emailShareStatus === 'sent';
+        const waitingObs = lead?.observationEmailShareStatus === 'sent';
+        if (!waitingAudit && !waitingObs) return;
         const timer = window.setInterval(() => {
             loadLead();
         }, 8000);
         return () => window.clearInterval(timer);
-    }, [lead?.emailShareStatus, loadLead]);
+    }, [lead?.emailShareStatus, lead?.observationEmailShareStatus, loadLead]);
 
     
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: SalesLeadTask } | null>(null);
@@ -162,6 +166,27 @@ export default function SalesLeadDetail() {
         }
     };
 
+    const handleEmailObservations = async () => {
+        if (!id) return;
+        setSharingObservations(true);
+        setError('');
+        setMsg('');
+        try {
+            const res = await confirmAndShareLeadObservationsEmail({
+                leadId: id,
+                businessName: lead?.businessName,
+                email: lead?.email
+            });
+            if (!res) return;
+            setMsg(`Observations emailed to ${res.to}.`);
+            await loadLead();
+        } catch (err: any) {
+            setError(err.message || 'Could not email observations');
+        } finally {
+            setSharingObservations(false);
+        }
+    };
+
     if (loading && !lead) {
         return (
             <div className="p-12 text-center text-[#64748B]">
@@ -227,6 +252,44 @@ export default function SalesLeadDetail() {
                             <ArrowUpRight className="w-3.5 h-3.5" />
                         </a>
                     )}
+                    {emailShareStatusLabel(lead.observationEmailShareStatus) ? (
+                        <span
+                            className={cn(
+                                'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
+                                lead.observationEmailShareStatus === 'opened'
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                    : 'bg-slate-50 text-slate-600 border-slate-200'
+                            )}
+                            title={emailShareStatusHint(lead.observationEmailShareStatus)}
+                        >
+                            Email: {emailShareStatusLabel(lead.observationEmailShareStatus)}
+                        </span>
+                    ) : null}
+                    <button
+                        type="button"
+                        onClick={handleEmailObservations}
+                        disabled={
+                            sharingObservations ||
+                            !(
+                                String(lead.gbpObservation || '').trim() ||
+                                String(lead.aiVisibilityObservation || '').trim()
+                            )
+                        }
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-800 hover:bg-indigo-100 text-xs font-bold rounded-xl transition-colors shadow-2xs disabled:opacity-50"
+                        title={
+                            !(
+                                String(lead.gbpObservation || '').trim() ||
+                                String(lead.aiVisibilityObservation || '').trim()
+                            )
+                                ? 'Add GBP or AI visibility observations before emailing'
+                                : lead.email
+                                  ? `Email observations to ${lead.email}`
+                                  : 'Email GBP & AI visibility observations'
+                        }
+                    >
+                        <Mail className={cn('w-3.5 h-3.5', sharingObservations && 'animate-pulse')} />
+                        <span>{sharingObservations ? 'Sending…' : 'Email'}</span>
+                    </button>
                     {lead.auditId ? (
                         <>
                             {emailShareStatusLabel(lead.emailShareStatus) ? (
@@ -239,7 +302,7 @@ export default function SalesLeadDetail() {
                                     )}
                                     title={emailShareStatusHint(lead.emailShareStatus)}
                                 >
-                                    {emailShareStatusLabel(lead.emailShareStatus)}
+                                    PDF: {emailShareStatusLabel(lead.emailShareStatus)}
                                 </span>
                             ) : null}
                             <button
