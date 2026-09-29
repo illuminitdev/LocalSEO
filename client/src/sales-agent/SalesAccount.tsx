@@ -1,13 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-    Building2,
     Camera,
-    CreditCard,
+    Eye,
+    EyeOff,
     Key,
     LogOut,
     Mail,
-    MapPin,
     Pencil,
     Phone,
     Shield,
@@ -18,6 +17,61 @@ import { clearToken, setMustChangePassword } from '../features/auth/auth';
 
 const fieldClass =
     'mt-1.5 w-full rounded-xl border border-[#E2E8F0]/80 bg-white/90 px-3.5 py-2.5 text-sm text-[#0F172A] placeholder:text-[#94A3B8] shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25 transition-shadow';
+
+const passwordInputClass =
+    'mt-1.5 w-full rounded-xl border border-[#E2E8F0]/80 bg-white/90 pl-3.5 pr-11 py-2.5 text-sm text-[#0F172A] placeholder:text-[#94A3B8] shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25 transition-shadow';
+
+function PasswordField({
+    id,
+    label,
+    value,
+    onChange,
+    placeholder,
+    required,
+    minLength,
+    autoComplete
+}: {
+    id: string;
+    label: string;
+    value: string;
+    onChange: (v: string) => void;
+    placeholder?: string;
+    required?: boolean;
+    minLength?: number;
+    autoComplete?: string;
+}) {
+    const [show, setShow] = useState(false);
+    return (
+        <label className="block text-sm font-semibold text-[#334155]" htmlFor={id}>
+            {label}
+            <div className="relative">
+                <input
+                    id={id}
+                    type={show ? 'text' : 'password'}
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    required={required}
+                    minLength={minLength}
+                    autoComplete={autoComplete}
+                    className={passwordInputClass}
+                    placeholder={placeholder}
+                />
+                <button
+                    type="button"
+                    onClick={() => setShow((s) => !s)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-[#94A3B8] hover:text-[#0F172A] hover:bg-[#E2E8F0]/60 transition-colors"
+                    aria-label={show ? 'Hide password' : 'Show password'}
+                >
+                    {show ? (
+                        <EyeOff className="w-[18px] h-[18px]" strokeWidth={1.75} />
+                    ) : (
+                        <Eye className="w-[18px] h-[18px]" strokeWidth={1.75} />
+                    )}
+                </button>
+            </div>
+        </label>
+    );
+}
 
 function SectionCard({
     icon: Icon,
@@ -371,18 +425,6 @@ export default function SalesAccount() {
                     </div>
                 </section>
 
-                {}
-                <SectionCard
-                    icon={CreditCard}
-                    title="Your plan"
-                    subtitle="Features included with your ZappSites subscription."
-                >
-                    <p className="text-sm text-[#64748B]">
-                        No active plan on this account. Contact ZappSites or upgrade to unlock local SEO and booking tools.
-                    </p>
-                </SectionCard>
-
-                {}
                 <SectionCard
                     icon={Shield}
                     title="Account Security"
@@ -409,44 +451,35 @@ export default function SalesAccount() {
                         </div>
                     ) : (
                         <form onSubmit={changePassword} className="space-y-4 max-w-md">
-                            <label className="block text-sm font-semibold text-[#334155]">
-                                Current password
-                                <input
-                                    type="password"
-                                    required
-                                    autoComplete="current-password"
-                                    value={currentPassword}
-                                    onChange={(e) => setCurrentPassword(e.target.value)}
-                                    className={fieldClass}
-                                    placeholder="Enter current password"
-                                />
-                            </label>
-                            <label className="block text-sm font-semibold text-[#334155]">
-                                New password
-                                <input
-                                    type="password"
-                                    required
-                                    minLength={8}
-                                    autoComplete="new-password"
-                                    value={newPassword}
-                                    onChange={(e) => setNewPassword(e.target.value)}
-                                    className={fieldClass}
-                                    placeholder="At least 8 characters"
-                                />
-                            </label>
-                            <label className="block text-sm font-semibold text-[#334155]">
-                                Confirm new password
-                                <input
-                                    type="password"
-                                    required
-                                    minLength={8}
-                                    autoComplete="new-password"
-                                    value={confirmPassword}
-                                    onChange={(e) => setConfirmPassword(e.target.value)}
-                                    className={fieldClass}
-                                    placeholder="Re-enter new password"
-                                />
-                            </label>
+                            <PasswordField
+                                id="sales-current-password"
+                                label="Current password"
+                                value={currentPassword}
+                                onChange={setCurrentPassword}
+                                placeholder="Enter current password"
+                                required
+                                autoComplete="current-password"
+                            />
+                            <PasswordField
+                                id="sales-new-password"
+                                label="New password"
+                                value={newPassword}
+                                onChange={setNewPassword}
+                                placeholder="At least 8 characters"
+                                required
+                                minLength={8}
+                                autoComplete="new-password"
+                            />
+                            <PasswordField
+                                id="sales-confirm-password"
+                                label="Confirm new password"
+                                value={confirmPassword}
+                                onChange={setConfirmPassword}
+                                placeholder="Re-enter new password"
+                                required
+                                minLength={8}
+                                autoComplete="new-password"
+                            />
                             <div className="flex flex-wrap gap-2">
                                 <button
                                     type="submit"
@@ -472,41 +505,6 @@ export default function SalesAccount() {
                     )}
                 </SectionCard>
 
-                {}
-                <SectionCard
-                    icon={Building2}
-                    title="Workspace business"
-                    subtitle="Trading name and contact used for bookings and your workspace."
-                >
-                    <div className="rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-5 py-8 text-center">
-                        <Building2 className="w-8 h-8 text-[#CBD5E1] mx-auto mb-3" />
-                        <p className="text-sm font-semibold text-[#0F172A]">No workspace business yet</p>
-                        <p className="text-xs text-[#64748B] mt-1 mb-4">Add trading details used across bookings.</p>
-                        <button
-                            type="button"
-                            onClick={() => {}}
-                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#F59E0B] text-white text-sm font-bold hover:bg-[#D97706] transition-colors"
-                        >
-                            Add business details
-                        </button>
-                    </div>
-                </SectionCard>
-
-                {}
-                <SectionCard
-                    icon={MapPin}
-                    title="Listing location"
-                    subtitle="Connect your Google Business Profile for rankings, reviews, and listing tools."
-                >
-                    <div className="rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-5 py-6 text-center">
-                        <MapPin className="w-7 h-7 text-[#CBD5E1] mx-auto mb-2" />
-                        <p className="text-sm text-[#64748B]">
-                            Connecting a Google listing needs the Local Presence plan (or higher). See your current plan above.
-                        </p>
-                    </div>
-                </SectionCard>
-
-                {}
                 <section className="relative overflow-hidden rounded-2xl border border-red-100 bg-gradient-to-br from-white to-red-50/40 p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shadow-[0_10px_30px_-18px_rgba(127,29,29,0.35)]">
                     <div>
                         <h2 className="text-base font-black text-[#0F172A]">Sign out</h2>
