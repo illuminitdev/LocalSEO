@@ -317,7 +317,9 @@ export async function confirmAndShareFullAuditEmail(opts: {
 
 export {
     emailShareStatusLabel,
-    emailShareStatusHint
+    emailShareStatusHint,
+    emailShareStatusTimeLines,
+    formatEmailShareDateTime
 } from '../shared/emailShareStatus';
-export type { EmailShareStatus } from '../shared/emailShareStatus';
+export type { EmailShareStatus, EmailShareTimes } from '../shared/emailShareStatus';
 

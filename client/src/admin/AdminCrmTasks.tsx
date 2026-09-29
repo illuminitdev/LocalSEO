@@ -532,7 +532,11 @@ export default function AdminCrmTasks() {
                                                                     : 'bg-slate-50 text-slate-600 border-slate-200'
                                                             )}
                                                             title={emailShareStatusHint(
-                                                                task.observationEmailShareStatus
+                                                                task.observationEmailShareStatus,
+                                                                {
+                                                                    sentAt: task.observationEmailSentAt,
+                                                                    openedAt: task.observationEmailOpenedAt
+                                                                }
                                                             )}
                                                         >
                                                             <Mail className="w-2.5 h-2.5" />
@@ -547,7 +551,10 @@ export default function AdminCrmTasks() {
                                                                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                                                     : 'bg-amber-50 text-amber-900 border-amber-200'
                                                             )}
-                                                            title={emailShareStatusHint(task.emailShareStatus)}
+                                                            title={emailShareStatusHint(task.emailShareStatus, {
+                                                                sentAt: task.emailShareSentAt,
+                                                                openedAt: task.emailShareOpenedAt
+                                                            })}
                                                         >
                                                             <Mail className="w-2.5 h-2.5" />
                                                             Audit email: {shareLabel}

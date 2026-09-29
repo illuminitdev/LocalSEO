@@ -581,24 +581,25 @@ async function sendFullAuditShareEmail({
     });
 }
 
-function formatObservationHtml(raw: string) {
+function formatCriticalIssueHtml(raw: string) {
     const lines = String(raw || '')
         .split(/\r?\n/)
         .map((l) => l.trim())
         .filter(Boolean);
     if (!lines.length) return '';
-    const looksListed = lines.every((l) => /^\d+[\).\]]\s+/.test(l) || /^[-•*]\s+/.test(l));
-    if (looksListed || lines.length > 1) {
-        const items = lines
-            .map((l) => l.replace(/^\d+[\).\]]\s+/, '').replace(/^[-•*]\s+/, ''))
-            .map(
-                (l) =>
-                    `<li style="margin:0 0 8px;padding:0;color:#334155;font-size:14px;line-height:1.55;">${escapeHtml(l)}</li>`
-            )
-            .join('');
-        return `<ul style="margin:0;padding:0 0 0 18px;">${items}</ul>`;
-    }
-    return `<p style="margin:0;font-size:14px;color:#334155;line-height:1.6;">${escapeHtml(raw).replace(/\n/g, '<br/>')}</p>`;
+    const items = lines
+        .map((l) => l.replace(/^\d+[\).\]]\s+/, '').replace(/^[-•*]\s+/, ''))
+        .map(
+            (l) =>
+                `<tr>
+                  <td style="padding:0 10px 10px 0;vertical-align:top;width:22px;">
+                    <div style="width:18px;height:18px;border-radius:50%;background:#DC2626;color:#ffffff;font-size:11px;font-weight:800;line-height:18px;text-align:center;">✕</div>
+                  </td>
+                  <td style="padding:0 0 10px;font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;color:#1E293B;font-size:14px;line-height:1.55;">${escapeHtml(l)}</td>
+                </tr>`
+        )
+        .join('');
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">${items}</table>`;
 }
 
 async function sendLeadObservationsEmail({
@@ -624,32 +625,33 @@ async function sendLeadObservationsEmail({
     const track = String(openTrackingUrl || '').trim();
     const logoTrack = String(logoTrackingUrl || openTrackingUrl || '').trim();
     const requestUrl = String(requestFullAuditUrl || '').trim();
-    const subject = `A few visibility notes for ${biz}`;
+    const subject = `Visibility notes for ${biz}`;
 
     const textParts = [
         `Hi ${biz},`,
         '',
-        'We took a quick look at how your business shows up online and found a few things worth sharing.'
+        'CRITICAL ALERT — Your business visibility is at risk!',
+        'Our quick review found issues that can impact how your business appears online — and it needs your attention.',
+        ''
     ];
     if (gbp) {
-        textParts.push('', 'On your Google Business Profile, we noticed:', gbp);
+        textParts.push('Google Business Profile — Note: critical issues', gbp, '');
     }
     if (ai) {
-        textParts.push('', 'On AI / search visibility, we noticed:', ai);
+        textParts.push('AI visibility — Note: critical issues', ai, '');
     }
     textParts.push(
-        '',
-        'If you would like us to dig deeper, you can request a full main audit and we will get back to you.',
+        'Want the full picture? Request a full main audit and we will run it, then get back to you.',
         requestUrl ? `Request a full main audit: ${requestUrl}` : '',
         '',
-        'Thanks,',
-        'ZappSites'
+        'ZappSites',
+        'Local SEO for growing businesses'
     );
-    const text = textParts.filter((line) => line !== '').join('\n');
+    const text = textParts.filter((line) => line !== null).join('\n');
 
     const safeBiz = escapeHtml(biz);
-    const gbpHtml = gbp ? formatObservationHtml(gbp) : '';
-    const aiHtml = ai ? formatObservationHtml(ai) : '';
+    const gbpHtml = gbp ? formatCriticalIssueHtml(gbp) : '';
+    const aiHtml = ai ? formatCriticalIssueHtml(ai) : '';
     const safeLogo =
         logoTrack && /^https?:\/\//i.test(logoTrack) ? escapeHtml(logoTrack) : '';
     const safePixel = track && /^https?:\/\//i.test(track) ? escapeHtml(track) : '';
@@ -663,13 +665,50 @@ async function sendLeadObservationsEmail({
         ? `<img src="${safePixel}" width="1" height="1" alt="" border="0" style="width:1px;height:1px;border:0;display:block;" />`
         : '';
 
+    const criticalBlock =
+        gbp || ai
+            ? `
+            <tr>
+              <td style="padding:0 28px 16px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FEF2F2;border-left:5px solid #DC2626;border-radius:0 12px 12px 0;">
+                  <tr>
+                    <td style="padding:16px 18px;vertical-align:top;width:44px;">
+                      <div style="width:36px;height:36px;border-radius:8px;background:#DC2626;color:#ffffff;font-size:20px;font-weight:800;line-height:36px;text-align:center;">!</div>
+                    </td>
+                    <td style="padding:14px 18px 14px 0;vertical-align:top;">
+                      <div style="font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:11px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#DC2626;margin-bottom:6px;">
+                        Critical alert
+                      </div>
+                      <div style="font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:17px;font-weight:800;color:#0F172A;margin-bottom:6px;line-height:1.3;">
+                        Your business visibility is <span style="color:#DC2626;">at risk!</span>
+                      </div>
+                      <p style="margin:0;font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:14px;color:#475569;line-height:1.55;">
+                        Our quick review found issues that can impact how your business appears online — and it needs your attention.
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>`
+            : '';
+
     const gbpBlock = gbp
         ? `
             <tr>
-              <td style="padding:0 0 20px;">
-                <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#0F172A;">Google Business Profile</p>
-                <p style="margin:0 0 10px;font-size:14px;color:#64748B;line-height:1.5;">Here is what we found on your listing:</p>
-                ${gbpHtml}
+              <td style="padding:0 28px 14px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FFF7ED;border-left:4px solid #F59E0B;border-radius:0 12px 12px 0;">
+                  <tr>
+                    <td style="padding:16px 18px;">
+                      <div style="font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#EA580C;margin-bottom:4px;">
+                        Google Business Profile
+                      </div>
+                      <div style="font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:12px;font-weight:800;color:#DC2626;margin-bottom:12px;">
+                        Note: critical issues
+                      </div>
+                      ${gbpHtml}
+                    </td>
+                  </tr>
+                </table>
               </td>
             </tr>`
         : '';
@@ -677,10 +716,20 @@ async function sendLeadObservationsEmail({
     const aiBlock = ai
         ? `
             <tr>
-              <td style="padding:0 0 20px;">
-                <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#0F172A;">AI visibility</p>
-                <p style="margin:0 0 10px;font-size:14px;color:#64748B;line-height:1.5;">Here is what we found for AI / search visibility:</p>
-                ${aiHtml}
+              <td style="padding:0 28px 14px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F8FAFC;border-left:4px solid #0F172A;border-radius:0 12px 12px 0;">
+                  <tr>
+                    <td style="padding:16px 18px;">
+                      <div style="font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:11px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#0F172A;margin-bottom:4px;">
+                        AI visibility
+                      </div>
+                      <div style="font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:12px;font-weight:800;color:#DC2626;margin-bottom:12px;">
+                        Note: critical issues
+                      </div>
+                      ${aiHtml}
+                    </td>
+                  </tr>
+                </table>
               </td>
             </tr>`
         : '';
@@ -688,13 +737,20 @@ async function sendLeadObservationsEmail({
     const ctaBlock = safeRequest
         ? `
             <tr>
-              <td style="padding:8px 0 0;">
-                <p style="margin:0 0 14px;font-size:14px;color:#475569;line-height:1.55;">
-                  Want us to take a deeper look? Request a full main audit and we will complete it, then get back to you.
-                </p>
-                <a href="${safeRequest}" style="display:inline-block;background:#111827;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:11px 18px;border-radius:6px;">
-                  Request a full main audit
-                </a>
+              <td style="padding:8px 28px 18px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0F172A;border-radius:14px;">
+                  <tr>
+                    <td style="padding:26px 24px;" align="center">
+                      <div style="font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:17px;font-weight:800;color:#ffffff;margin-bottom:8px;text-align:center;">Want the full picture?</div>
+                      <p style="margin:0 auto 18px;max-width:400px;font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:14px;color:#CBD5E1;line-height:1.55;text-align:center;">
+                        Request a full main audit and we will run it, then get back to you with the complete report.
+                      </p>
+                      <a href="${safeRequest}" style="display:inline-block;background:#F59E0B;color:#0F172A;font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:14px;font-weight:800;text-decoration:none;padding:12px 22px;border-radius:10px;">
+                        Request a full main audit
+                      </a>
+                    </td>
+                  </tr>
+                </table>
               </td>
             </tr>`
         : '';
@@ -706,44 +762,44 @@ async function sendLeadObservationsEmail({
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(subject)}</title>
+  <!--[if !mso]><!-->
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <!--<![endif]-->
 </head>
-<body style="margin:0;padding:0;background:#F7F7F8;font-family:Arial,Helvetica,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F7F7F8;padding:32px 12px;">
+<body style="margin:0;padding:0;background:#EEF2F6;font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;color:#0F172A;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#EEF2F6;padding:28px 12px;font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:540px;background:#ffffff;border:1px solid #E5E7EB;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #E2E8F0;font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;">
           <tr>
-            <td style="padding:20px 28px;border-bottom:1px solid #E5E7EB;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+            <td style="background:#0F172A;padding:20px 28px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
                 <tr>
-                  <td style="padding-right:12px;vertical-align:middle;">${logoImg}</td>
+                  <td style="padding-right:12px;vertical-align:middle;width:36px;">${logoImg}</td>
                   <td style="vertical-align:middle;">
-                    <div style="font-size:16px;font-weight:700;color:#111827;">ZappSites</div>
+                    <div style="font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:18px;font-weight:800;color:#ffffff;letter-spacing:-0.02em;">ZappSites</div>
+                    <div style="font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:12px;color:#FBBF24;margin-top:3px;font-weight:700;">Visibility notes</div>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
           <tr>
-            <td style="padding:28px 28px 8px;">
-              <p style="margin:0 0 12px;font-size:16px;color:#111827;line-height:1.4;">Hi ${safeBiz},</p>
-              <p style="margin:0 0 20px;font-size:14px;color:#4B5563;line-height:1.6;">
-                We took a quick look at how your business shows up online and found a few things worth sharing.
+            <td style="padding:28px 28px 16px;">
+              <p style="margin:0 0 10px;font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:17px;color:#0F172A;line-height:1.4;font-weight:700;">Hi ${safeBiz},</p>
+              <p style="margin:0;font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:15px;color:#475569;line-height:1.6;">
+                Quick notes from our visibility review of your business — focused on what matters for local discovery.
               </p>
             </td>
           </tr>
+          ${criticalBlock}
+          ${ctaBlock}
+          ${gbpBlock}
+          ${aiBlock}
           <tr>
-            <td style="padding:0 28px 24px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                ${gbpBlock}
-                ${aiBlock}
-                ${ctaBlock}
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:18px 28px;border-top:1px solid #E5E7EB;">
-              <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.5;">Thanks,<br/>ZappSites</p>
+            <td style="background:#F8FAFC;border-top:1px solid #E2E8F0;padding:16px 28px;">
+              <div style="font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:13px;font-weight:800;color:#0F172A;">ZappSites</div>
+              <div style="font-family:'Plus Jakarta Sans',Inter,Arial,Helvetica,sans-serif;font-size:12px;color:#94A3B8;margin-top:2px;">Local SEO for growing businesses</div>
             </td>
           </tr>
         </table>
