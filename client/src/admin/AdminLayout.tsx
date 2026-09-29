@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
     LayoutDashboard, Users, LogOut, Layers, Settings, Menu, X,
@@ -18,9 +18,29 @@ interface AdminNotification {
     body: string;
     time: string;
     read: boolean;
+    link?: string;
 }
 
+const READ_NOTIFS_KEY = 'lp.admin.readNotifs';
 
+function loadReadNotifIds(): Set<string> {
+    try {
+        const stored = localStorage.getItem(READ_NOTIFS_KEY);
+        if (!stored) return new Set();
+        const arr = JSON.parse(stored);
+        return new Set(Array.isArray(arr) ? arr.map(String) : []);
+    } catch {
+        return new Set();
+    }
+}
+
+function saveReadNotifIds(ids: Set<string>) {
+    try {
+        localStorage.setItem(READ_NOTIFS_KEY, JSON.stringify(Array.from(ids).slice(-200)));
+    } catch {
+        /* ignore */
+    }
+}
 
 function timeAgo(iso: string): string {
     const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -46,16 +66,65 @@ function NotificationBell({ notifRef, notifOpen, setNotifOpen }: {
     notifOpen: boolean;
     setNotifOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
+    const navigate = useNavigate();
+    const location = useLocation();
     const [notifications, setNotifications] = useState<AdminNotification[]>([]);
+    const [loading, setLoading] = useState(false);
 
     const unreadCount = notifications.filter((n) => !n.read).length;
 
+    const loadNotifications = useCallback(async () => {
+        setLoading(true);
+        try {
+            const data = await adminGet('/api/admin/notifications');
+            const list = Array.isArray(data?.notifications) ? data.notifications : [];
+            const readSet = loadReadNotifIds();
+            setNotifications(
+                list.map((n: any) => ({
+                    id: String(n.id),
+                    type: (['lead', 'task', 'audit', 'system', 'alert'].includes(n.type) ? n.type : 'system') as NotifType,
+                    title: String(n.title || 'Update'),
+                    body: String(n.body || ''),
+                    time: String(n.time || new Date().toISOString()),
+                    link: String(n.link || '/admin'),
+                    read: readSet.has(String(n.id))
+                }))
+            );
+        } catch {
+            /* keep prior list */
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadNotifications();
+        const timer = window.setInterval(loadNotifications, 60000);
+        return () => window.clearInterval(timer);
+    }, [loadNotifications, location.pathname]);
+
+    useEffect(() => {
+        if (notifOpen) loadNotifications();
+    }, [notifOpen, loadNotifications]);
+
     const markAllRead = () => {
+        const readSet = loadReadNotifIds();
+        notifications.forEach((n) => readSet.add(n.id));
+        saveReadNotifIds(readSet);
         setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     };
 
     const markOneRead = (id: string) => {
-        setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
+        const readSet = loadReadNotifIds();
+        readSet.add(id);
+        saveReadNotifIds(readSet);
+        setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    };
+
+    const openNotif = (notif: AdminNotification) => {
+        markOneRead(notif.id);
+        setNotifOpen(false);
+        if (notif.link) navigate(notif.link);
     };
 
     return (
@@ -88,7 +157,6 @@ function NotificationBell({ notifRef, notifOpen, setNotifOpen }: {
                     className="absolute right-0 top-full mt-2 w-[340px] sm:w-[380px] rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_20px_60px_-12px_rgba(15,23,42,0.2)] z-50 overflow-hidden"
                     style={{ animation: 'notifSlideIn 0.18s cubic-bezier(0.16,1,0.3,1)' }}
                 >
-                    {/* Header */}
                     <div className="px-4 py-3 border-b border-[#F1F5F9] flex items-center justify-between bg-gradient-to-r from-[#F8FAFC] to-white">
                         <div className="flex items-center gap-2">
                             <Bell className="w-4 h-4 text-[#64748B]" strokeWidth={1.75} />
@@ -112,44 +180,60 @@ function NotificationBell({ notifRef, notifOpen, setNotifOpen }: {
                         )}
                     </div>
 
-                    {/* List */}
                     <div className="max-h-[380px] overflow-y-auto overscroll-contain divide-y divide-[#F1F5F9]">
-                        {notifications.map((notif) => {
-                            const cfg = NOTIF_ICON[notif.type];
-                            const IconComp = cfg.icon;
-                            return (
-                                <button
-                                    type="button"
-                                    key={notif.id}
-                                    id={'admin-notif-item-' + notif.id}
-                                    onClick={() => markOneRead(notif.id)}
-                                    className={cn(
-                                        'w-full text-left flex items-start gap-3 px-4 py-3.5 transition-colors duration-100',
-                                        notif.read ? 'bg-white hover:bg-[#F8FAFC]' : 'bg-blue-50/40 hover:bg-blue-50/70'
-                                    )}
-                                >
-                                    <div className={cn('flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center mt-0.5', cfg.bg)}>
-                                        <IconComp className={cn('w-4 h-4', cfg.color)} strokeWidth={1.75} />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-start justify-between gap-2">
-                                            <p className={cn('text-sm leading-tight', notif.read ? 'font-medium text-[#475569]' : 'font-semibold text-[#0F172A]')}>
-                                                {notif.title}
-                                            </p>
-                                            <span className="text-[10px] text-[#94A3B8] shrink-0 mt-0.5 font-medium">{timeAgo(notif.time)}</span>
+                        {loading && notifications.length === 0 ? (
+                            <div className="px-4 py-10 text-center text-xs text-slate-400 font-medium">
+                                Loading updates…
+                            </div>
+                        ) : notifications.length === 0 ? (
+                            <div className="px-4 py-10 text-center">
+                                <Bell className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                <p className="text-xs font-bold text-slate-800">No notifications yet</p>
+                                <p className="text-[11px] text-slate-500 mt-1">
+                                    Telecaller CRM updates and new ZappSites audits will show here.
+                                </p>
+                            </div>
+                        ) : (
+                            notifications.map((notif) => {
+                                const cfg = NOTIF_ICON[notif.type];
+                                const IconComp = cfg.icon;
+                                return (
+                                    <button
+                                        type="button"
+                                        key={notif.id}
+                                        id={'admin-notif-item-' + notif.id}
+                                        onClick={() => openNotif(notif)}
+                                        className={cn(
+                                            'w-full text-left flex items-start gap-3 px-4 py-3.5 transition-colors duration-100',
+                                            notif.read ? 'bg-white hover:bg-[#F8FAFC]' : 'bg-blue-50/40 hover:bg-blue-50/70'
+                                        )}
+                                    >
+                                        <div className={cn('flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center mt-0.5', cfg.bg)}>
+                                            <IconComp className={cn('w-4 h-4', cfg.color)} strokeWidth={1.75} />
                                         </div>
-                                        <p className="text-xs text-[#64748B] mt-0.5 leading-relaxed line-clamp-2">{notif.body}</p>
-                                    </div>
-                                    {!notif.read && <span className="flex-shrink-0 w-2 h-2 rounded-full bg-blue-500 mt-2" />}
-                                </button>
-                            );
-                        })}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <p className={cn('text-sm leading-tight', notif.read ? 'font-medium text-[#475569]' : 'font-semibold text-[#0F172A]')}>
+                                                    {notif.title}
+                                                </p>
+                                                <span className="text-[10px] text-[#94A3B8] shrink-0 mt-0.5 font-medium">{timeAgo(notif.time)}</span>
+                                            </div>
+                                            <p className="text-xs text-[#64748B] mt-0.5 leading-relaxed line-clamp-2">{notif.body}</p>
+                                        </div>
+                                        {!notif.read && <span className="flex-shrink-0 w-2 h-2 rounded-full bg-blue-500 mt-2" />}
+                                    </button>
+                                );
+                            })
+                        )}
                     </div>
 
-                    {/* Footer */}
                     <div className="px-4 py-2.5 border-t border-[#F1F5F9] bg-[#F8FAFC]">
                         <p className="text-[11px] text-[#94A3B8] text-center font-medium">
-                            {unreadCount === 0 ? 'All caught up! ✓' : unreadCount + ' unread notification' + (unreadCount !== 1 ? 's' : '')}
+                            {notifications.length === 0
+                                ? 'All caught up'
+                                : unreadCount === 0
+                                  ? 'All caught up'
+                                  : unreadCount + ' unread notification' + (unreadCount !== 1 ? 's' : '')}
                         </p>
                     </div>
                 </div>
@@ -201,6 +285,18 @@ function pageTitle(pathname: string) {
         return {
             title: 'Leads',
             subtitle: 'ZappSites form submissions — contact, start, visibility, growth audit, and checkout.'
+        };
+    }
+    if (pathname.startsWith('/admin/crm/leads/')) {
+        return {
+            title: 'CRM lead',
+            subtitle: 'Tasks, telecaller notes, status history, and email tracking.'
+        };
+    }
+    if (pathname.startsWith('/admin/leads/')) {
+        return {
+            title: 'Lead details',
+            subtitle: 'Excel / form profile — AI visibility, GBP, opportunity, status & notes.'
         };
     }
     if (pathname.startsWith('/admin/tasks')) {
@@ -329,18 +425,21 @@ export default function AdminLayout() {
         navigate('/', { replace: true });
     };
 
+    const logoMaxW = Math.max(120, sidebarWidth - 32);
+    const logoH = Math.round(Math.min(44, Math.max(32, logoMaxW * 0.22)));
+
     const sidebar = (
         <>
-            <div className="px-5 pt-5 pb-4 shrink-0 flex items-start justify-between gap-2 border-b-2 border-[#E2E8F0]">
+            <div className="min-h-14 px-4 py-2.5 shrink-0 flex items-center justify-between gap-2 min-w-0">
                 <img
                     src="/localseo.png"
                     alt="Local SEO"
-                    className="h-9 w-auto max-w-[180px] object-contain object-left min-w-0 flex-1"
-                    style={{ maxHeight: '36px', maxWidth: '160px', objectFit: 'contain' }}
+                    className="w-auto max-w-full object-contain object-left min-w-0"
+                    style={{ height: logoH, maxWidth: logoMaxW }}
                 />
                 <button
                     type="button"
-                    className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9]"
+                    className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9] shrink-0"
                     aria-label="Close menu"
                     onClick={() => setNavOpen(false)}
                 >
@@ -348,7 +447,7 @@ export default function AdminLayout() {
                 </button>
             </div>
 
-            <nav className="px-3 pt-3 flex-1 overflow-y-auto space-y-0.5 overscroll-contain">
+            <nav className="px-3 pt-3 flex-1 overflow-y-auto space-y-0.5 overscroll-contain min-w-0">
                 {NAV.map((item) => (
                     <NavLink
                         key={item.to}
@@ -361,9 +460,15 @@ export default function AdminLayout() {
                                     ? location.pathname.startsWith('/admin/users')
                                     : item.to === '/admin/full-audits'
                                       ? location.pathname.startsWith('/admin/full-audits')
-                                      : isActive;
+                                      : item.to === '/admin/growth-audit-leads'
+                                        ? location.pathname.startsWith('/admin/growth-audit-leads') ||
+                                          location.pathname.startsWith('/admin/leads/')
+                                        : item.to === '/admin/tasks'
+                                          ? location.pathname.startsWith('/admin/tasks') ||
+                                            location.pathname.startsWith('/admin/crm/leads/')
+                                          : isActive;
                             return cn(
-                                'flex items-center gap-2.5 px-3 py-2 min-h-[38px] rounded-xl text-sm transition-colors',
+                                'flex items-center gap-2.5 px-3 py-2 min-h-[38px] rounded-xl text-sm transition-colors min-w-0',
                                 active
                                     ? 'bg-[#F59E0B] text-[#0F172A] font-semibold'
                                     : 'text-[#64748B] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
@@ -371,7 +476,7 @@ export default function AdminLayout() {
                         }}
                     >
                         <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
-                        <span>{item.name}</span>
+                        <span className="truncate">{item.name}</span>
                     </NavLink>
                 ))}
             </nav>
@@ -409,7 +514,7 @@ export default function AdminLayout() {
     return (
         <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden">
             <aside
-                className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden"
+                className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden min-w-0"
                 style={{ width: sidebarWidth }}
             >
                 {sidebar}
@@ -420,12 +525,18 @@ export default function AdminLayout() {
                     onPointerDown={(e) => {
                         if (e.button !== 0) return;
                         e.preventDefault();
+                        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
                         resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
                         setResizing(true);
                     }}
-                    className="absolute inset-y-0 right-0 z-20 w-1.5 translate-x-1/2 cursor-sidebar-resize touch-none"
+                    className="absolute inset-y-0 right-0 z-20 w-2 cursor-sidebar-resize touch-none"
                 >
-                    <span className={`pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 ${resizing ? 'bg-[#F59E0B]' : 'bg-transparent hover:bg-[#CBD5E1]'}`} />
+                    <span
+                        className={cn(
+                            'pointer-events-none absolute inset-y-0 right-0 w-px',
+                            resizing ? 'bg-[#F59E0B]' : 'bg-transparent group-hover:bg-[#CBD5E1]'
+                        )}
+                    />
                 </div>
             </aside>
 
@@ -444,8 +555,8 @@ export default function AdminLayout() {
             )}
 
             <div className="flex-1 flex flex-col min-w-0 min-h-0">
-                <header className="shrink-0 sticky top-0 z-30 border-b border-[#E2E8F0] bg-white/95 backdrop-blur px-4 sm:px-6 lg:px-8 py-2.5 sm:py-3 safe-pt">
-                    <div className="flex items-center justify-between gap-4">
+                <header className="h-14 shrink-0 sticky top-0 z-30 border-b border-[#E2E8F0] bg-white/95 backdrop-blur px-4 sm:px-6 lg:px-8 safe-pt flex items-center">
+                    <div className="flex items-center justify-between gap-4 w-full min-w-0">
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                             <button
                                 type="button"
@@ -457,14 +568,15 @@ export default function AdminLayout() {
                                 <Menu className="w-4 h-4" />
                             </button>
                             <div className="min-w-0 flex-1">
-                                <h1 className="text-lg sm:text-xl font-bold tracking-tight text-[#0F172A] leading-tight">{heading.title}</h1>
-                                <p className="text-xs text-[#64748B] mt-0.5 max-w-2xl leading-normal">
+                                <h1 className="text-base sm:text-lg font-bold tracking-tight text-[#0F172A] leading-none truncate">
+                                    {heading.title}
+                                </h1>
+                                <p className="text-[11px] text-[#64748B] mt-0.5 max-w-2xl leading-none truncate">
                                     {heading.subtitle}
                                 </p>
                             </div>
                         </div>
 
-                        {/* Notifications Bell */}
                         <NotificationBell notifRef={notifRef} notifOpen={notifOpen} setNotifOpen={setNotifOpen} />
                     </div>
                 </header>

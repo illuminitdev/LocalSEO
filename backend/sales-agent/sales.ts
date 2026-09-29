@@ -119,6 +119,7 @@ export async function ensureCrmTables() {
                 note TEXT NOT NULL DEFAULT '',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
+            ALTER TABLE lead_activities ADD COLUMN IF NOT EXISTS activity_type TEXT NOT NULL DEFAULT 'note';
             ALTER TABLE lead_tasks DROP CONSTRAINT IF EXISTS lead_tasks_task_type_check;
             ALTER TABLE lead_tasks ADD CONSTRAINT lead_tasks_task_type_check CHECK (task_type IN (
                 'prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom',
@@ -140,6 +141,42 @@ export async function ensureCrmTables() {
             );
             CREATE INDEX IF NOT EXISTS idx_audit_email_sends_audit ON audit_email_sends(audit_id, sent_at DESC);
             CREATE INDEX IF NOT EXISTS idx_audit_email_sends_token ON audit_email_sends(token);
+
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS audit_id TEXT NULL;
+            CREATE INDEX IF NOT EXISTS idx_sales_leads_audit_id ON sales_leads(audit_id);
+
+            CREATE TABLE IF NOT EXISTS lead_observation_email_sends (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                token TEXT NOT NULL UNIQUE,
+                lead_id TEXT NOT NULL,
+                to_email TEXT NOT NULL,
+                sent_by_user_id UUID,
+                sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                opened_at TIMESTAMPTZ,
+                open_count INT NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_lead_obs_email_lead ON lead_observation_email_sends(lead_id, sent_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_lead_obs_email_token ON lead_observation_email_sends(token);
+
+            CREATE TABLE IF NOT EXISTS full_audit_requests (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                lead_id TEXT NOT NULL,
+                observation_email_token TEXT,
+                business_name TEXT NOT NULL DEFAULT '',
+                to_email TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'in_progress', 'completed', 'dismissed')),
+                source TEXT NOT NULL DEFAULT 'email_cta',
+                requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                fulfilled_audit_id TEXT,
+                assigned_to_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                completed_at TIMESTAMPTZ,
+                notes TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_full_audit_requests_status
+                ON full_audit_requests(status, requested_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_full_audit_requests_lead
+                ON full_audit_requests(lead_id, requested_at DESC);
 
             UPDATE sales_leads SET industry = '' WHERE LOWER(TRIM(industry)) LIKE 'sheet%' OR LOWER(TRIM(industry)) ~ '^sheet\s*\d+$';
             UPDATE sales_leads SET industry = 'Garage' WHERE LOWER(TRIM(industry)) IN ('garage', 'garages');

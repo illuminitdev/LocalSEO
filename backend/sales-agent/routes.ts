@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { requireSalesAgent } from '../middleware/auth';
 import { comparePassword, hashPassword } from '../lib/authTokens';
 import { query } from '../lib/db';
-import { sendFullAuditShareEmail } from '../lib/bookingEmail';
+import { sendFullAuditShareEmail, sendLeadObservationsEmail } from '../lib/bookingEmail';
 import {
     proxyZappSitesOps,
     proxyZappSitesPdf,
@@ -19,6 +19,15 @@ import {
     recordAuditEmailSend,
     shareInfoForAudit
 } from '../lib/auditEmailSends';
+import {
+    fetchLatestLeadObservationEmailShareMap,
+    leadEmailLogoTrackingUrl,
+    leadEmailOpenTrackingUrl,
+    leadFullAuditRequestUrl,
+    newLeadObservationEmailToken,
+    recordLeadObservationEmailSend,
+    shareInfoForLeadObservation
+} from '../lib/leadObservationEmailSends';
 import {
     CALL_OUTCOMES,
     getAssignedLead,
@@ -156,6 +165,7 @@ async function fetchLeadMetadataMap(leadIds: string[]) {
                 [missing]
             );
             for (const row of salesRows) {
+                const auditId = String(row.audit_id || '').trim() || null;
                 map.set(String(row.id), {
                     id: String(row.id),
                     businessName: row.name || 'Lead',
@@ -175,8 +185,8 @@ async function fetchLeadMetadataMap(leadIds: string[]) {
                     notes: row.notes || '',
                     status: row.status || 'new',
                     scoreTotal: null,
-                    auditId: null,
-                    reportUrl: null,
+                    auditId,
+                    reportUrl: auditId ? reportShareUrl(auditId) : null,
                     source: row.source || 'sales_lead',
                     spreadsheetStatus: row.spreadsheet_status || '',
                     spreadsheetStatus1: row.spreadsheet_status_1 || '',
@@ -287,11 +297,49 @@ async function agentCanShareAudit(agentId: string, auditId: string): Promise<boo
                WHERE s.id::text = t.lead_id
                  AND s.payload->>'auditId' = $2
              )
+             OR EXISTS (
+               SELECT 1 FROM sales_leads sl
+               WHERE sl.id::text = t.lead_id
+                 AND sl.audit_id = $2
+             )
            )
          LIMIT 1`,
         [agentId, auditId]
     );
-    return rows.length > 0;
+    if (rows.length > 0) return true;
+
+    const { rows: leadRows } = await query(
+        `SELECT 1 FROM sales_leads
+         WHERE audit_id = $2
+           AND (assigned_to = $1 OR id::text IN (
+             SELECT lead_id FROM lead_tasks WHERE assigned_to_user_id = $1
+           ))
+         LIMIT 1`,
+        [agentId, auditId]
+    );
+    return leadRows.length > 0;
+}
+
+async function agentOwnsLead(agentId: string, leadId: string): Promise<boolean> {
+    const allIds = await resolveAllLeadIds(leadId);
+    const { rows } = await query(
+        `SELECT 1 FROM sales_leads
+         WHERE id::text = ANY($1::text[])
+           AND (assigned_to = $2 OR id::text IN (
+             SELECT lead_id FROM lead_tasks WHERE assigned_to_user_id = $2
+           ))
+         LIMIT 1`,
+        [allIds, agentId]
+    );
+    if (rows.length > 0) return true;
+
+    const { rows: taskRows } = await query(
+        `SELECT 1 FROM lead_tasks
+         WHERE assigned_to_user_id = $1 AND lead_id = ANY($2::text[])
+         LIMIT 1`,
+        [agentId, allIds]
+    );
+    return taskRows.length > 0;
 }
 
 router.get('/me', async (req: Request, res: Response) => {
@@ -672,17 +720,66 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
         Object.assign(lead, share);
 
         const allLeadIds = await resolveAllLeadIds(leadId);
+        const obsMap = await fetchLatestLeadObservationEmailShareMap(allLeadIds);
+        let obsShare = shareInfoForLeadObservation(obsMap, leadId);
+        if (obsShare.observationEmailShareStatus === 'none') {
+            for (const altId of allLeadIds) {
+                const alt = shareInfoForLeadObservation(obsMap, altId);
+                if (alt.observationEmailShareStatus !== 'none') {
+                    obsShare = alt;
+                    break;
+                }
+            }
+        }
+        Object.assign(lead, obsShare);
 
         const [salesRes, subRes] = await Promise.all([
-            query(`SELECT id, name, email, phone FROM sales_leads WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] })),
-            query(`SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email FROM submissions WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] }))
+            query(
+                `SELECT id, name, email, phone, gbp_observation, ai_visibility_observation, notes, status, industry, website, address, audit_id
+                 FROM sales_leads WHERE id::text = ANY($1::text[]) LIMIT 1`,
+                [allLeadIds]
+            ).catch(() => ({ rows: [] as any[] })),
+            query(
+                `SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email
+                 FROM submissions WHERE id::text = ANY($1::text[])`,
+                [allLeadIds]
+            ).catch(() => ({ rows: [] as any[] }))
         ]);
 
-        const leadName = (salesRes.rows[0]?.name || subRes.rows[0]?.bname || subRes.rows[0]?.name || '').trim().toLowerCase();
-        const leadEmail = (salesRes.rows[0]?.email || subRes.rows[0]?.email || '').trim().toLowerCase();
+        if (salesRes.rows[0]) {
+            const s = salesRes.rows[0];
+            lead.businessName = s.name || lead.businessName;
+            lead.email = s.email || lead.email;
+            lead.phone = s.phone || lead.phone;
+            lead.website = s.website || lead.website;
+            lead.address = s.address || lead.address;
+            lead.industry = s.industry || lead.industry;
+            lead.notes = s.notes || lead.notes;
+            lead.status = s.status || lead.status;
+            lead.gbpObservation = s.gbp_observation || lead.gbpObservation || '';
+            lead.aiVisibilityObservation =
+                s.ai_visibility_observation || lead.aiVisibilityObservation || '';
+            if (s.audit_id) {
+                lead.auditId = String(s.audit_id);
+                lead.reportUrl = reportShareUrl(String(s.audit_id));
+            }
+        }
+
+        const leadName = (
+            salesRes.rows[0]?.name ||
+            subRes.rows[0]?.bname ||
+            subRes.rows[0]?.name ||
+            ''
+        )
+            .trim()
+            .toLowerCase();
+        const leadEmail = (salesRes.rows[0]?.email || subRes.rows[0]?.email || '')
+            .trim()
+            .toLowerCase();
 
         const [tasksRes, activitiesRes] = await Promise.all([
-            query(`
+            query(
+                `
                 SELECT 
                     id,
                     lead_id AS "leadId",
@@ -704,8 +801,11 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
                     CASE WHEN status = 'pending' THEN 1 WHEN status = 'in_progress' THEN 2 ELSE 3 END,
                     due_date ASC NULLS LAST,
                     created_at DESC
-            `, [allLeadIds]),
-            query(`
+            `,
+                [allLeadIds]
+            ),
+            query(
+                `
                 SELECT DISTINCT
                     a.id,
                     a.lead_id AS "leadId",
@@ -726,7 +826,9 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
                   AND a.activity_type IN ('call_log', 'status_change', 'note', 'task_event')
                 ORDER BY a.created_at DESC
                 LIMIT 200
-            `, [allLeadIds, leadName || null, leadEmail || null])
+            `,
+                [allLeadIds, leadName || null, leadEmail || null]
+            )
         ]);
 
         res.json({
@@ -737,6 +839,138 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
     } catch (err: any) {
         console.error('Sales get lead CRM error:', err);
         res.status(500).json({ error: err.message || 'Failed to fetch lead CRM' });
+    }
+});
+
+router.post('/leads/:id/share-observations-email', async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = String(req.params.id || '').trim();
+        const agentId = String((req as any).user?.id || '');
+        if (!leadId || !agentId) {
+            return res.status(400).json({ success: false, error: 'Missing lead id' });
+        }
+
+        const owns = await agentOwnsLead(agentId, leadId);
+        if (!owns) {
+            return res.status(403).json({
+                success: false,
+                error: 'You can only email leads assigned to you.'
+            });
+        }
+
+        const allLeadIds = await resolveAllLeadIds(leadId);
+        const { rows: salesRows } = await query(
+            `SELECT id, name, email, gbp_observation, ai_visibility_observation
+             FROM sales_leads WHERE id::text = ANY($1::text[]) LIMIT 1`,
+            [allLeadIds]
+        );
+        let businessName = String(salesRows[0]?.name || '').trim();
+        let email = String(salesRows[0]?.email || '').trim().toLowerCase();
+        let gbp = String(salesRows[0]?.gbp_observation || '').trim();
+        let ai = String(salesRows[0]?.ai_visibility_observation || '').trim();
+        const canonicalLeadId = String(salesRows[0]?.id || leadId);
+
+        if (!email || (!gbp && !ai)) {
+            const metaMap = await fetchLeadMetadataMap([leadId]);
+            const meta = metaMap.get(leadId) || {};
+            businessName = businessName || String(meta.businessName || '').trim();
+            email = email || String(meta.email || '').trim().toLowerCase();
+            gbp = gbp || String(meta.gbpObservation || '').trim();
+            ai = ai || String(meta.aiVisibilityObservation || '').trim();
+        }
+
+        const bodyEmail = String((req.body as { email?: string } | undefined)?.email || '')
+            .trim()
+            .toLowerCase();
+        if (bodyEmail) email = bodyEmail;
+
+        if (!email || !email.includes('@')) {
+            return res.status(400).json({
+                success: false,
+                error: 'A valid business email is required to send observations.'
+            });
+        }
+        if (!gbp && !ai) {
+            return res.status(400).json({
+                success: false,
+                error: 'Add GBP or AI visibility observations before emailing.'
+            });
+        }
+
+        // Persist prompted / override email so the lead profile shows the real recipient
+        if (bodyEmail || !String(salesRows[0]?.email || '').trim()) {
+            try {
+                await query(`UPDATE sales_leads SET email = $1, updated_at = NOW() WHERE id::text = $2`, [
+                    email,
+                    canonicalLeadId
+                ]);
+            } catch (emailSaveErr) {
+                console.warn('Could not persist observation recipient email on lead:', emailSaveErr);
+            }
+        }
+
+        const openToken = newLeadObservationEmailToken();
+        const openTrackingUrl = leadEmailOpenTrackingUrl(openToken);
+        const logoTrackingUrl = leadEmailLogoTrackingUrl(openToken);
+        const requestFullAuditUrl = leadFullAuditRequestUrl(openToken);
+
+        const result = await sendLeadObservationsEmail({
+            to: email,
+            businessName: businessName || 'there',
+            gbpObservation: gbp || null,
+            aiVisibilityObservation: ai || null,
+            openTrackingUrl,
+            logoTrackingUrl,
+            requestFullAuditUrl
+        });
+
+        if (!result.sent) {
+            return res.status(502).json({
+                success: false,
+                error:
+                    (result as { error?: string }).error ||
+                    'Email could not be delivered via SES. Check sender identity and try again.'
+            });
+        }
+
+        // Only record "sent" after SES accepts — avoids false Sent badges when delivery fails
+        await recordLeadObservationEmailSend({
+            token: openToken,
+            leadId: canonicalLeadId,
+            toEmail: email,
+            sentByUserId: agentId
+        });
+
+        try {
+            const agentName = (req as any).user?.name || 'Sales Agent';
+            await query(
+                `INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note)
+                 VALUES ($1, $2, $3, 'note', 'observation_email', $4)`,
+                [
+                    canonicalLeadId,
+                    agentId,
+                    agentName,
+                    `Sent observation email (GBP / AI visibility) to ${email}`
+                ]
+            );
+        } catch (actErr) {
+            console.warn('Could not record observation email activity:', actErr);
+        }
+
+        return res.json({
+            success: true,
+            to: email,
+            emailShareStatus: 'sent',
+            observationEmailShareStatus: 'sent',
+            messageId: (result as { messageId?: string | null }).messageId || null
+        });
+    } catch (err: any) {
+        console.error('Sales share-observations-email error:', err);
+        res.status(500).json({
+            success: false,
+            error: err.message || 'Failed to email observations'
+        });
     }
 });
 

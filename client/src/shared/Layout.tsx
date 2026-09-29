@@ -336,26 +336,25 @@ export default function Layout() {
     const initials = (userName || userEmail || 'U').charAt(0).toUpperCase();
 
     
-    const logoScale = sidebarWidth / SIDEBAR_DEFAULT;
-    const logoHeight = Math.round(Math.min(64, Math.max(40, 52 * logoScale)));
-    const logoWidth = Math.round(Math.min(240, Math.max(120, (sidebarWidth - 40) * 0.9)));
+    const logoMaxW = Math.max(120, sidebarWidth - 32);
+    const logoH = Math.round(Math.min(44, Math.max(32, logoMaxW * 0.22)));
 
     const sidebar = (
         <>
-            <div className="px-5 pt-5 pb-5 shrink-0 flex items-start justify-between gap-2 border-b-2 border-[#E2E8F0]">
+            <div className="min-h-14 px-4 py-2.5 shrink-0 flex items-center justify-between gap-2 min-w-0">
                 {orgLogoUrl ? (
                     <img
                         src={orgLogoUrl}
                         alt="Business logo"
-                        className="shrink-0 object-contain object-left"
-                        style={{ height: logoHeight, width: logoWidth, maxWidth: '100%' }}
+                        className="w-auto max-w-full object-contain object-left min-w-0"
+                        style={{ height: logoH, maxWidth: logoMaxW }}
                     />
                 ) : (
                     <img
                         src="/localseo.png"
                         alt="Local SEO"
-                        className="shrink-0 object-contain object-left"
-                        style={{ height: logoHeight, width: logoWidth, maxWidth: '100%' }}
+                        className="w-auto max-w-full object-contain object-left min-w-0"
+                        style={{ height: logoH, maxWidth: logoMaxW }}
                     />
                 )}
                 <button
@@ -432,7 +431,7 @@ export default function Layout() {
         <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden" style={brandStyle}>
             {}
             <aside
-                className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden print:hidden"
+                className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden print:hidden min-w-0"
                 style={{ width: sidebarWidth }}
             >
                 {sidebar}
@@ -443,14 +442,15 @@ export default function Layout() {
                     onPointerDown={(e) => {
                         if (e.button !== 0) return;
                         e.preventDefault();
+                        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
                         resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
                         setResizing(true);
                     }}
-                    className="absolute inset-y-0 right-0 z-20 w-1.5 translate-x-1/2 cursor-sidebar-resize touch-none"
+                    className="absolute inset-y-0 right-0 z-20 w-2 cursor-sidebar-resize touch-none"
                 >
                     <span
-                        className={`pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 ${
-                            resizing ? 'bg-[var(--brand-primary)]' : 'bg-transparent hover:bg-[#CBD5E1]'
+                        className={`pointer-events-none absolute inset-y-0 right-0 w-px ${
+                            resizing ? 'bg-[var(--brand-primary)]' : 'bg-transparent'
                         }`}
                     />
                 </div>
@@ -472,7 +472,7 @@ export default function Layout() {
             )}
 
             <div className="flex-1 flex flex-col min-w-0 min-h-0">
-                <header className="shrink-0 sticky top-0 z-30 flex items-center justify-between px-4 sm:px-6 py-3 border-b border-[#E2E8F0] bg-white print:hidden">
+                <header className="h-14 shrink-0 sticky top-0 z-30 flex items-center justify-between px-4 sm:px-6 border-b border-[#E2E8F0] bg-white print:hidden">
                     <div className="flex items-center gap-3">
                         <button
                             type="button"

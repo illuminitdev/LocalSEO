@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { query } from './db';
 
 export type EmailShareStatus = 'none' | 'sent' | 'opened';
@@ -22,7 +24,7 @@ export function apiPublicOrigin() {
         process.env.BACKEND_URL ||
         ''
     ).trim();
-    // Do NOT fall back to FRONTEND_URL — pixel must hit the API host, not the SPA
+    
     return (raw || 'http://localhost:4000').replace(/\/$/, '');
 }
 
@@ -30,14 +32,14 @@ export function newAuditEmailOpenToken() {
     return crypto.randomBytes(24).toString('hex');
 }
 
-/** Visible logo URL (marks opened when Gmail loads images). */
+
 export function auditEmailLogoTrackingUrl(token: string) {
     const t = String(token || '').trim();
     if (!t) return '';
     return `${apiPublicOrigin()}/api/public/audit-email-open/${t}/logo.png`;
 }
 
-/** Tiny pixel fallback. */
+
 export function auditEmailOpenTrackingUrl(token: string) {
     const t = String(token || '').trim();
     if (!t) return '';
@@ -145,17 +147,33 @@ export function shareInfoForAudit(
     return map.get(id) || EMPTY_SHARE;
 }
 
-/** 1x1 transparent GIF */
-export const TRANSPARENT_GIF = Buffer.from(
-    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+
+const FALLBACK_1X1_PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
     'base64'
 );
 
-/**
- * Valid 1×1 PNG — shown larger in the email as the brand mark.
- * When Gmail loads this image, we mark the send as opened.
- */
-export const ZAPP_EMAIL_LOGO_PNG = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+function loadZappEmailLogoPng(): Buffer {
+    const candidates = [
+        
+        path.join(__dirname, '..', 'assets', 'zappsites-email-logo.png'),
+        path.join(__dirname, '..', '..', 'assets', 'zappsites-email-logo.png'),
+        path.join(process.cwd(), 'assets', 'zappsites-email-logo.png')
+    ];
+    for (const p of candidates) {
+        try {
+            if (fs.existsSync(p)) return fs.readFileSync(p);
+        } catch {
+            
+        }
+    }
+    console.warn('[email] zappsites-email-logo.png not found — using 1×1 fallback');
+    return FALLBACK_1X1_PNG;
+}
+
+export const ZAPP_EMAIL_LOGO_PNG = loadZappEmailLogoPng();
+
+export const TRANSPARENT_GIF = Buffer.from(
+    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
     'base64'
 );

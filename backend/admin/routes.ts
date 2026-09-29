@@ -5,6 +5,8 @@ import usersRoutes from './usersRoutes';
 import catalogRoutes from './catalogRoutes';
 import growthAuditLeadsRoutes from './growthAuditLeadsRoutes';
 import crmRoutes from './crmRoutes';
+import notificationsRoutes from './notificationsRoutes';
+import fullAuditRequestsRoutes from './fullAuditRequestsRoutes';
 
 const router = Router();
 
@@ -14,5 +16,7 @@ router.use(usersRoutes);
 router.use(catalogRoutes);
 router.use(growthAuditLeadsRoutes);
 router.use(crmRoutes);
+router.use(notificationsRoutes);
+router.use(fullAuditRequestsRoutes);
 
 export default router;

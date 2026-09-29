@@ -74,10 +74,6 @@ function collectBySection(checks: any[] = []): Record<string, any[]> {
 }
 
 
-
-
-
-
 export function computeTriadScore(checks = [], context: { localRank?: any } = {}) {
   const bySection = collectBySection(checks);
   const id = (prefix) => checks.filter((c) => String(c.id).startsWith(prefix));

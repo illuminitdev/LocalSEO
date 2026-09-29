@@ -1,5 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { X, AlertCircle, Check, Trash2, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, type ElementType } from 'react';
+import {
+    X,
+    AlertCircle,
+    Check,
+    Trash2,
+    Loader2,
+    BarChart3,
+    Phone,
+    FileText,
+    UserPlus,
+    Plus,
+    Pencil
+} from 'lucide-react';
 import {
     type LeadTask,
     type TaskType,
@@ -23,15 +35,15 @@ interface EditTaskModalProps {
 const TASK_TYPES: Array<{
     type: TaskType;
     label: string;
-    icon: string;
+    icon: ElementType;
     defaultTitle: string;
     defaultPriority: TaskPriority;
 }> = [
-    { type: 'prepare_audit', label: 'Prepare Audit', icon: '📊', defaultTitle: 'Prepare & Review Growth Audit', defaultPriority: 'high' },
-    { type: 'follow_up_call', label: 'Follow-Up Call', icon: '📞', defaultTitle: 'Follow-up Call with Lead', defaultPriority: 'medium' },
-    { type: 'send_proposal', label: 'Send Proposal', icon: '📄', defaultTitle: 'Send Service Proposal & Pricing', defaultPriority: 'high' },
-    { type: 'onboard_customer', label: 'Onboard Customer', icon: '🚀', defaultTitle: 'Onboard as New Customer', defaultPriority: 'urgent' },
-    { type: 'custom', label: 'Custom Task', icon: '📌', defaultTitle: 'Custom Task', defaultPriority: 'medium' },
+    { type: 'prepare_audit', label: 'Prepare Audit', icon: BarChart3, defaultTitle: 'Prepare & Review Growth Audit', defaultPriority: 'high' },
+    { type: 'follow_up_call', label: 'Follow-Up Call', icon: Phone, defaultTitle: 'Follow-up Call with Lead', defaultPriority: 'medium' },
+    { type: 'send_proposal', label: 'Send Proposal', icon: FileText, defaultTitle: 'Send Service Proposal & Pricing', defaultPriority: 'high' },
+    { type: 'onboard_customer', label: 'Onboard Customer', icon: UserPlus, defaultTitle: 'Onboard as New Customer', defaultPriority: 'urgent' },
+    { type: 'custom', label: 'Custom Task', icon: Plus, defaultTitle: 'Custom Task', defaultPriority: 'medium' },
 ];
 
 function normalizeTaskType(type?: string): TaskType {
@@ -174,8 +186,8 @@ export default function EditTaskModal({
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                     <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-sm">
-                            ✏️
+                        <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center">
+                            <Pencil className="w-4 h-4" />
                         </div>
                         <div>
                             <h2 className="text-sm font-bold text-slate-900">Edit CRM Task</h2>
@@ -207,7 +219,9 @@ export default function EditTaskModal({
                             Task Type
                         </label>
                         <div className="flex flex-wrap gap-1.5">
-                            {TASK_TYPES.map((t) => (
+                            {TASK_TYPES.map((t) => {
+                                const Icon = t.icon;
+                                return (
                                 <button
                                     key={t.type}
                                     type="button"
@@ -219,10 +233,11 @@ export default function EditTaskModal({
                                             : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                                     )}
                                 >
-                                    <span>{t.icon}</span>
+                                    <Icon className="w-3.5 h-3.5 shrink-0" />
                                     <span>{t.label}</span>
                                 </button>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
 

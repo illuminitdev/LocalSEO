@@ -36,7 +36,7 @@ const COUNTRY_SUFFIX_ALIASES = [
   { canon: 'southafrica', keys: ['south africa', 'southafrica', 'za'] }
 ];
 
-/** Street type abbreviations → full forms (Rd ≈ Road, etc.). */
+
 const STREET_ABBREV: Array<[RegExp, string]> = [
   [/\brd\b/g, 'road'],
   [/\bstreet\b/g, 'street'],
@@ -59,7 +59,7 @@ const STREET_ABBREV: Array<[RegExp, string]> = [
 
 const COUNTRY_CANONS = new Set(COUNTRY_SUFFIX_ALIASES.map((c) => c.canon));
 
-/** Normalize address text; UK ≈ United Kingdom; Rd ≈ Road. */
+
 function normAddress(s) {
   let t = String(s || '')
     .toLowerCase()
@@ -83,7 +83,7 @@ function normAddress(s) {
   return t;
 }
 
-/** Drop trailing country so UK vs United Kingdom never blocks a match. */
+
 function stripTrailingCountry(normalized) {
   const t = String(normalized || '').trim();
   if (!t) return '';

@@ -1,5 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { X, AlertCircle, Check, Users, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, type ElementType } from 'react';
+import {
+    X,
+    AlertCircle,
+    Check,
+    Users,
+    Sparkles,
+    BarChart3,
+    Phone,
+    FileText,
+    UserPlus,
+    Plus
+} from 'lucide-react';
 import {
     type TaskType,
     type TaskPriority,
@@ -19,15 +30,15 @@ interface BulkAssignTasksModalProps {
 const TASK_PRESETS: Array<{
     type: TaskType;
     label: string;
-    icon: string;
+    icon: ElementType;
     defaultTitle: string;
     defaultPriority: TaskPriority;
 }> = [
-    { type: 'follow_up_call', label: 'Follow-Up Call', icon: '📞', defaultTitle: 'Follow-up Call with Lead', defaultPriority: 'medium' },
-    { type: 'prepare_audit', label: 'Prepare Audit', icon: '📊', defaultTitle: 'Prepare & Review Growth Audit', defaultPriority: 'high' },
-    { type: 'send_proposal', label: 'Send Proposal', icon: '📄', defaultTitle: 'Send Service Proposal & Pricing', defaultPriority: 'medium' },
-    { type: 'onboard_customer', label: 'Onboard Customer', icon: '🚀', defaultTitle: 'Onboard as New Customer', defaultPriority: 'urgent' },
-    { type: 'custom', label: 'Custom Task', icon: '📌', defaultTitle: 'Custom Task', defaultPriority: 'medium' }
+    { type: 'follow_up_call', label: 'Follow-Up Call', icon: Phone, defaultTitle: 'Follow-up Call with Lead', defaultPriority: 'medium' },
+    { type: 'prepare_audit', label: 'Prepare Audit', icon: BarChart3, defaultTitle: 'Prepare & Review Growth Audit', defaultPriority: 'high' },
+    { type: 'send_proposal', label: 'Send Proposal', icon: FileText, defaultTitle: 'Send Service Proposal & Pricing', defaultPriority: 'medium' },
+    { type: 'onboard_customer', label: 'Onboard Customer', icon: UserPlus, defaultTitle: 'Onboard as New Customer', defaultPriority: 'urgent' },
+    { type: 'custom', label: 'Custom Task', icon: Plus, defaultTitle: 'Custom Task', defaultPriority: 'medium' }
 ];
 
 const PRIORITIES: Array<{ value: TaskPriority; label: string }> = [
@@ -191,6 +202,7 @@ export default function BulkAssignTasksModal({
                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                                     {TASK_PRESETS.map((preset) => {
                                         const isSelected = taskType === preset.type;
+                                        const Icon = preset.icon;
                                         return (
                                             <button
                                                 key={preset.type}
@@ -203,7 +215,7 @@ export default function BulkAssignTasksModal({
                                                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                                                 )}
                                             >
-                                                <span>{preset.icon}</span>
+                                                <Icon className="w-3.5 h-3.5 shrink-0" />
                                                 <span className="truncate">{preset.label}</span>
                                             </button>
                                         );

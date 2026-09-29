@@ -28,7 +28,8 @@ import {
     fetchCrmTasks,
     createCrmTask,
     deleteCrmTask,
-    fetchLeadActivities
+    fetchLeadActivities,
+    updateAdminCrmLead
 } from './adminApi';
 import EditTaskModal from './EditTaskModal';
 import { cn } from '../shared/utils';
@@ -66,6 +67,9 @@ export type GrowthAuditLeadRef = {
     importFileName?: string | null;
     importUploadedAt?: string | null;
     spreadsheetStatus?: string | null;
+    assignedTo?: string | null;
+    assignedAgentName?: string | null;
+    assignedAgentEmail?: string | null;
     latestActivity?: {
         type: string;
         disposition?: string;
@@ -116,10 +120,17 @@ export default function LeadCrmDrawer({
     const [taskType, setTaskType] = useState<TaskType>('prepare_audit');
     const [taskTitle, setTaskTitle] = useState(TASK_PRESETS[0].defaultTitle);
     const [taskNotes, setTaskNotes] = useState('');
-    const [taskAssignee, setTaskAssignee] = useState<string>('');
+    const [taskAssignee, setTaskAssignee] = useState<string>(() => String(lead.assignedTo || ''));
     const [taskPriority, setTaskPriority] = useState<TaskPriority>('medium');
     const [taskDueDate, setTaskDueDate] = useState<string>('');
     const [submittingTask, setSubmittingTask] = useState(false);
+    const [reassigning, setReassigning] = useState(false);
+    const [showReassign, setShowReassign] = useState(false);
+    const [reassignTo, setReassignTo] = useState<string>(() => String(lead.assignedTo || ''));
+    const [currentAssignedTo, setCurrentAssignedTo] = useState<string | null>(lead.assignedTo || null);
+    const [currentAssignedName, setCurrentAssignedName] = useState<string | null>(
+        lead.assignedAgentName || null
+    );
 
     
     const [successToast, setSuccessToast] = useState<string | null>(null);
@@ -127,6 +138,14 @@ export default function LeadCrmDrawer({
     
     const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
     const [editingTask, setEditingTask] = useState<LeadTask | null>(null);
+
+    useEffect(() => {
+        setCurrentAssignedTo(lead.assignedTo || null);
+        setCurrentAssignedName(lead.assignedAgentName || null);
+        setTaskAssignee(String(lead.assignedTo || ''));
+        setReassignTo(String(lead.assignedTo || ''));
+        setShowReassign(false);
+    }, [lead.id, lead.assignedTo, lead.assignedAgentName]);
 
     const loadLeadData = useCallback(async () => {
         if (!lead?.id) return;
@@ -139,12 +158,27 @@ export default function LeadCrmDrawer({
             ]);
             setTasks(tasksData);
             setActivities(activitiesData);
+
+            // Infer assignee from open tasks if lead metadata missing
+            if (!lead.assignedTo && !lead.assignedAgentName) {
+                const openAssigned = tasksData.find(
+                    (t) =>
+                        t.assignedToUserId &&
+                        (t.status === 'pending' || t.status === 'in_progress')
+                );
+                if (openAssigned?.assignedToUserId) {
+                    setCurrentAssignedTo(openAssigned.assignedToUserId);
+                    setCurrentAssignedName(openAssigned.assignedToName || null);
+                    setTaskAssignee(openAssigned.assignedToUserId);
+                    setReassignTo(openAssigned.assignedToUserId);
+                }
+            }
         } catch (err: any) {
             setError(err.message || 'Failed to load CRM data');
         } finally {
             setLoading(false);
         }
-    }, [lead?.id]);
+    }, [lead?.id, lead.assignedTo, lead.assignedAgentName]);
 
     useEffect(() => {
         loadLeadData();
@@ -156,6 +190,31 @@ export default function LeadCrmDrawer({
             setTaskTitle(preset.defaultTitle);
         }
         setTaskPriority(preset.defaultPriority);
+    };
+
+    const handleReassignLead = async (nextAgentId: string | null) => {
+        setReassigning(true);
+        setError('');
+        try {
+            await updateAdminCrmLead(lead.id, { assignedTo: nextAgentId });
+            const agent = salesAgents.find((a) => a.id === nextAgentId);
+            setCurrentAssignedTo(nextAgentId);
+            setCurrentAssignedName(agent?.name || (nextAgentId ? 'Sales agent' : null));
+            setTaskAssignee(nextAgentId || '');
+            setReassignTo(nextAgentId || '');
+            setShowReassign(false);
+            setSuccessToast(
+                nextAgentId
+                    ? `Lead reassigned to ${agent?.name || 'sales agent'}.`
+                    : 'Lead assignment cleared.'
+            );
+            setTimeout(() => setSuccessToast(null), 3000);
+            onTaskUpdated?.();
+        } catch (err: any) {
+            setError(err.message || 'Failed to update assignment');
+        } finally {
+            setReassigning(false);
+        }
     };
 
     const handleCreateTask = async (e: React.FormEvent) => {
@@ -179,6 +238,12 @@ export default function LeadCrmDrawer({
             setTaskTitle('');
             setTaskNotes('');
             setTaskDueDate('');
+
+            if (taskAssignee) {
+                const agent = salesAgents.find((a) => a.id === taskAssignee);
+                setCurrentAssignedTo(taskAssignee);
+                setCurrentAssignedName(agent?.name || 'Sales agent');
+            }
 
             await loadLeadData();
             onTaskUpdated?.();
@@ -336,6 +401,75 @@ export default function LeadCrmDrawer({
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     {activeTab === 'tasks' ? (
                         <>
+                            {(currentAssignedTo || currentAssignedName) && (
+                                <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 space-y-3">
+                                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                                        <div className="min-w-0">
+                                            <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
+                                                Already assigned
+                                            </p>
+                                            <p className="mt-1 text-sm font-bold text-indigo-950 flex items-center gap-1.5">
+                                                <User className="w-4 h-4 text-indigo-500 shrink-0" />
+                                                <span className="truncate">
+                                                    {currentAssignedName || 'Sales agent'}
+                                                </span>
+                                            </p>
+                                            <p className="mt-1 text-xs text-indigo-800/80">
+                                                This lead is assigned to this telecaller. Use Edit on an
+                                                existing task to change its assignee, or reassign the lead
+                                                below.
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowReassign((v) => !v)}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-white border border-indigo-200 text-indigo-800 hover:bg-indigo-100"
+                                            >
+                                                <Pencil className="w-3.5 h-3.5" />
+                                                {showReassign ? 'Close' : 'Reassign'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={reassigning}
+                                                onClick={() => handleReassignLead(null)}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-white border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {showReassign ? (
+                                        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-indigo-200/70">
+                                            <select
+                                                value={reassignTo}
+                                                onChange={(e) => setReassignTo(e.target.value)}
+                                                className="flex-1 min-w-[180px] px-3 py-2 text-sm bg-white border border-indigo-200 rounded-xl text-slate-800"
+                                            >
+                                                <option value="">Select sales agent…</option>
+                                                {salesAgents.map((agent) => (
+                                                    <option key={agent.id} value={agent.id}>
+                                                        {agent.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                type="button"
+                                                disabled={
+                                                    reassigning ||
+                                                    !reassignTo ||
+                                                    reassignTo === currentAssignedTo
+                                                }
+                                                onClick={() => handleReassignLead(reassignTo || null)}
+                                                className="px-3.5 py-2 text-xs font-bold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                                            >
+                                                {reassigning ? 'Saving…' : 'Save assignee'}
+                                            </button>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            )}
+
                             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
                                 <div>
                                     <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
@@ -562,10 +696,11 @@ export default function LeadCrmDrawer({
                                                         <button
                                                             type="button"
                                                             onClick={() => setEditingTask(task)}
-                                                            className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                                                            title="Edit Task"
+                                                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors"
+                                                            title="Edit task / change assignee"
                                                         >
                                                             <Pencil className="w-3.5 h-3.5" />
+                                                            Edit
                                                         </button>
 
                                                         <button
@@ -724,7 +859,18 @@ export default function LeadCrmDrawer({
                     task={editingTask}
                     salesAgents={salesAgents}
                     onClose={() => setEditingTask(null)}
-                    onSuccess={() => {
+                    onSuccess={(updatedTask) => {
+                        if (updatedTask?.assignedToUserId) {
+                            setCurrentAssignedTo(updatedTask.assignedToUserId);
+                            setCurrentAssignedName(
+                                updatedTask.assignedToName ||
+                                    salesAgents.find((a) => a.id === updatedTask.assignedToUserId)?.name ||
+                                    'Sales agent'
+                            );
+                            setTaskAssignee(updatedTask.assignedToUserId);
+                        } else if (updatedTask && updatedTask.assignedToUserId === null) {
+                            // Keep lead-level assignment unless cleared via Reassign/Clear
+                        }
                         setEditingTask(null);
                         setSuccessToast('Task updated successfully');
                         loadLeadData();

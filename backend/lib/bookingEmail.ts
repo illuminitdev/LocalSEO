@@ -6,8 +6,14 @@ function emailFrom() {
     return process.env.BOOKING_EMAIL_FROM || 'info@zappsites.com';
 }
 
+/** Shown in inboxes as "ZappSites" — never bare info@… */
+function emailFromHeader() {
+    return `"ZappSites" <${emailFrom()}>`;
+}
+
+/** SES FromEmailAddress with display name so Gmail/Outlook show ZappSites */
 function emailFromAddress() {
-    return `ZappSites <${emailFrom()}>`;
+    return emailFromHeader();
 }
 
 function getSesClient() {
@@ -28,35 +34,15 @@ function formatDeposit(depositAmount: any, currency = 'GBP') {
 }
 
 async function sendMail({ to, subject, text, html }: any) {
-    const from = emailFrom();
-    const fromAddress = emailFromAddress();
-    try {
-        const client = getSesClient();
-        await client.send(
-            new SendEmailCommand({
-                FromEmailAddress: fromAddress,
-                Destination: { ToAddresses: [to] },
-                Content: {
-                    Simple: {
-                        Subject: { Data: subject, Charset: 'UTF-8' },
-                        Body: {
-                            Text: { Data: text || '', Charset: 'UTF-8' },
-                            ...(html ? { Html: { Data: html, Charset: 'UTF-8' } } : {})
-                        }
-                    }
-                }
-            })
-        );
-        return { sent: true, mode: 'ses', to };
-    } catch (err: any) {
-        console.error('[booking-email] SES send failed:', err?.message || err);
-        console.log('[booking-email] email logged (not delivered):');
-        console.log(`  From: ${fromAddress}`);
-        console.log(`  To: ${to}`);
-        console.log(`  Subject: ${subject}`);
-        console.log(text);
-        return { sent: false, mode: 'logged', to };
-    }
+    // Use the same Raw MIME path as attachment emails — more reliable with SES identities
+    // and display names than Simple Content.
+    return sendMailWithAttachment({
+        to,
+        subject,
+        text,
+        html,
+        attachment: null
+    });
 }
 
 async function sendBookingConfirmationEmail({
@@ -274,7 +260,7 @@ async function sendMailWithAttachment({
     attachment?: { filename: string; contentType: string; content: Buffer } | null;
 }) {
     const from = emailFrom();
-    const fromHeader = `ZappSites <${from}>`;
+    const fromHeader = emailFromHeader();
     const fromAddress = emailFromAddress();
     const boundaryMixed = `mixed_${Date.now().toString(36)}`;
     const boundaryAlt = `alt_${Date.now().toString(36)}`;
@@ -341,21 +327,13 @@ async function sendMailWithAttachment({
             ``
         ].join('\r\n');
     } else {
-        raw = [
-            ...headers,
-            `Content-Type: multipart/alternative; boundary="${boundaryAlt}"`,
-            ``,
-            `--${boundaryAlt}`,
-            textPart,
-            ...(html ? [`--${boundaryAlt}`, htmlPart] : []),
-            `--${boundaryAlt}--`,
-            ``
-        ].join('\r\n');
+        // Reuse the same multipart/alternative body used for attached sends
+        raw = [...headers, alternative, ``].join('\r\n');
     }
 
     try {
         const client = getSesClient();
-        await client.send(
+        const out = await client.send(
             new SendEmailCommand({
                 FromEmailAddress: fromAddress,
                 Destination: { ToAddresses: [to] },
@@ -366,16 +344,29 @@ async function sendMailWithAttachment({
                 }
             })
         );
+        const messageId = String((out as { MessageId?: string })?.MessageId || '').trim();
+        console.log('[booking-email] SES accepted', {
+            to,
+            from: fromAddress,
+            subject: subject.slice(0, 80),
+            messageId: messageId || null,
+            attached: Boolean(includeAttachment)
+        });
         return {
             sent: true,
             mode: 'ses' as const,
             to,
-            attached: Boolean(includeAttachment)
+            attached: Boolean(includeAttachment),
+            messageId: messageId || null
         };
     } catch (err: any) {
-        console.error('[booking-email] SES raw send failed:', err?.message || err);
+        const detail =
+            err?.message ||
+            err?.name ||
+            (typeof err === 'string' ? err : 'SES send failed');
+        console.error('[booking-email] SES raw send failed:', detail, err?.$metadata || '');
         console.log('[booking-email] email logged (not delivered):');
-        console.log(`  From: ${fromAddress}`);
+        console.log(`  From: ${fromHeader}`);
         console.log(`  To: ${to}`);
         console.log(`  Subject: ${subject}`);
         console.log(text);
@@ -383,7 +374,9 @@ async function sendMailWithAttachment({
             sent: false,
             mode: 'logged' as const,
             to,
-            attached: Boolean(includeAttachment)
+            attached: Boolean(includeAttachment),
+            messageId: null,
+            error: String(detail)
         };
     }
 }
@@ -453,7 +446,7 @@ async function sendFullAuditShareEmail({
     const safePixel = track && /^https?:\/\//i.test(track) ? escapeHtml(track) : '';
 
     const logoImg = safeLogo
-        ? `<img src="${safeLogo}" width="28" height="28" alt="ZappSites" border="0" style="display:block;width:28px;height:28px;border:0;border-radius:6px;background:#F59E0B;" />`
+        ? `<img src="${safeLogo}" width="36" height="36" alt="ZappSites" border="0" style="display:block;width:36px;height:36px;border:0;border-radius:50%;" />`
         : '';
 
     const pixel = safePixel
@@ -588,10 +581,191 @@ async function sendFullAuditShareEmail({
     });
 }
 
+function formatObservationHtml(raw: string) {
+    const lines = String(raw || '')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+    if (!lines.length) return '';
+    const looksListed = lines.every((l) => /^\d+[\).\]]\s+/.test(l) || /^[-•*]\s+/.test(l));
+    if (looksListed || lines.length > 1) {
+        const items = lines
+            .map((l) => l.replace(/^\d+[\).\]]\s+/, '').replace(/^[-•*]\s+/, ''))
+            .map(
+                (l) =>
+                    `<li style="margin:0 0 8px;padding:0;color:#334155;font-size:14px;line-height:1.55;">${escapeHtml(l)}</li>`
+            )
+            .join('');
+        return `<ul style="margin:0;padding:0 0 0 18px;">${items}</ul>`;
+    }
+    return `<p style="margin:0;font-size:14px;color:#334155;line-height:1.6;">${escapeHtml(raw).replace(/\n/g, '<br/>')}</p>`;
+}
+
+async function sendLeadObservationsEmail({
+    to,
+    businessName,
+    gbpObservation,
+    aiVisibilityObservation,
+    openTrackingUrl,
+    logoTrackingUrl,
+    requestFullAuditUrl
+}: {
+    to: string;
+    businessName?: string | null;
+    gbpObservation?: string | null;
+    aiVisibilityObservation?: string | null;
+    openTrackingUrl?: string | null;
+    logoTrackingUrl?: string | null;
+    requestFullAuditUrl?: string | null;
+}) {
+    const biz = String(businessName || 'there').trim() || 'there';
+    const gbp = String(gbpObservation || '').trim();
+    const ai = String(aiVisibilityObservation || '').trim();
+    const track = String(openTrackingUrl || '').trim();
+    const logoTrack = String(logoTrackingUrl || openTrackingUrl || '').trim();
+    const requestUrl = String(requestFullAuditUrl || '').trim();
+    const subject = `A few visibility notes for ${biz}`;
+
+    const textParts = [
+        `Hi ${biz},`,
+        '',
+        'We took a quick look at how your business shows up online and found a few things worth sharing.'
+    ];
+    if (gbp) {
+        textParts.push('', 'On your Google Business Profile, we noticed:', gbp);
+    }
+    if (ai) {
+        textParts.push('', 'On AI / search visibility, we noticed:', ai);
+    }
+    textParts.push(
+        '',
+        'If you would like us to dig deeper, you can request a full main audit and we will get back to you.',
+        requestUrl ? `Request a full main audit: ${requestUrl}` : '',
+        '',
+        'Thanks,',
+        'ZappSites'
+    );
+    const text = textParts.filter((line) => line !== '').join('\n');
+
+    const safeBiz = escapeHtml(biz);
+    const gbpHtml = gbp ? formatObservationHtml(gbp) : '';
+    const aiHtml = ai ? formatObservationHtml(ai) : '';
+    const safeLogo =
+        logoTrack && /^https?:\/\//i.test(logoTrack) ? escapeHtml(logoTrack) : '';
+    const safePixel = track && /^https?:\/\//i.test(track) ? escapeHtml(track) : '';
+    const safeRequest =
+        requestUrl && /^https?:\/\//i.test(requestUrl) ? escapeHtml(requestUrl) : '';
+
+    const logoImg = safeLogo
+        ? `<img src="${safeLogo}" width="36" height="36" alt="ZappSites" border="0" style="display:block;width:36px;height:36px;border:0;border-radius:50%;" />`
+        : '';
+    const pixel = safePixel
+        ? `<img src="${safePixel}" width="1" height="1" alt="" border="0" style="width:1px;height:1px;border:0;display:block;" />`
+        : '';
+
+    const gbpBlock = gbp
+        ? `
+            <tr>
+              <td style="padding:0 0 20px;">
+                <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#0F172A;">Google Business Profile</p>
+                <p style="margin:0 0 10px;font-size:14px;color:#64748B;line-height:1.5;">Here is what we found on your listing:</p>
+                ${gbpHtml}
+              </td>
+            </tr>`
+        : '';
+
+    const aiBlock = ai
+        ? `
+            <tr>
+              <td style="padding:0 0 20px;">
+                <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#0F172A;">AI visibility</p>
+                <p style="margin:0 0 10px;font-size:14px;color:#64748B;line-height:1.5;">Here is what we found for AI / search visibility:</p>
+                ${aiHtml}
+              </td>
+            </tr>`
+        : '';
+
+    const ctaBlock = safeRequest
+        ? `
+            <tr>
+              <td style="padding:8px 0 0;">
+                <p style="margin:0 0 14px;font-size:14px;color:#475569;line-height:1.55;">
+                  Want us to take a deeper look? Request a full main audit and we will complete it, then get back to you.
+                </p>
+                <a href="${safeRequest}" style="display:inline-block;background:#111827;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:11px 18px;border-radius:6px;">
+                  Request a full main audit
+                </a>
+              </td>
+            </tr>`
+        : '';
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:#F7F7F8;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F7F7F8;padding:32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:540px;background:#ffffff;border:1px solid #E5E7EB;">
+          <tr>
+            <td style="padding:20px 28px;border-bottom:1px solid #E5E7EB;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="padding-right:12px;vertical-align:middle;">${logoImg}</td>
+                  <td style="vertical-align:middle;">
+                    <div style="font-size:16px;font-weight:700;color:#111827;">ZappSites</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 28px 8px;">
+              <p style="margin:0 0 12px;font-size:16px;color:#111827;line-height:1.4;">Hi ${safeBiz},</p>
+              <p style="margin:0 0 20px;font-size:14px;color:#4B5563;line-height:1.6;">
+                We took a quick look at how your business shows up online and found a few things worth sharing.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 28px 24px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                ${gbpBlock}
+                ${aiBlock}
+                ${ctaBlock}
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 28px;border-top:1px solid #E5E7EB;">
+              <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.5;">Thanks,<br/>ZappSites</p>
+            </td>
+          </tr>
+        </table>
+        ${pixel}
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    if (logoTrack) {
+        console.log('[booking-email] lead-obs open-track logo', logoTrack.slice(0, 80));
+    }
+
+    return sendMail({ to, subject, text, html });
+}
+
 export {
     sendMail,
     sendMailWithAttachment,
     sendFullAuditShareEmail,
+    sendLeadObservationsEmail,
     sendBookingConfirmationEmail,
     sendHostBookingNotification,
     sendInvoiceEmail,

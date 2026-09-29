@@ -210,6 +210,9 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
             const sharePath = String(payload.sharePath || '').trim() || null;
             const scoreRaw = payload.scoreTotal ?? auditData.scoreTotal ?? auditData.score?.total ?? null;
 
+            const serviceRaw =
+                String(payload.service || payload.primaryService || payload.businessType || payload.serviceLabel || '').trim() ||
+                null;
             map.set(String(row.id), {
                 id: String(row.id),
                 businessName: String(payload.businessName || business.name || 'Lead').trim(),
@@ -220,7 +223,9 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
                 city: String(payload.city || business.city || '').trim(),
                 scoreTotal: scoreRaw != null && Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw) : null,
                 reportUrl: sharePath ? `${origin}${sharePath.startsWith('/') ? '' : '/'}${sharePath}` : null,
-                source: String(payload.source || 'growth_audit').trim()
+                source: String(payload.source || 'growth_audit').trim(),
+                auditId: String(payload.auditId || row.audit_id || '').trim() || null,
+                industry: cleanBusinessCategory(serviceRaw)
             });
         }
     } catch {}
@@ -234,17 +239,35 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
                 [missing]
             );
             for (const row of salesRows) {
+                const auditId = String(row.audit_id || '').trim() || null;
                 map.set(String(row.id), {
                     id: String(row.id),
                     businessName: row.name || 'Lead',
                     phone: row.phone || '',
                     email: row.email || '',
-                    website: '',
-                    address: '',
+                    website: row.website || '',
+                    address: row.address || '',
                     city: '',
                     scoreTotal: null,
-                    reportUrl: null,
-                    source: row.source || 'sales_lead'
+                    reportUrl: auditId ? `${zappSitesOrigin()}/audit-report/${auditId}` : null,
+                    source: row.source || 'sales_lead',
+                    auditId,
+                    industry: cleanBusinessCategory(row.industry),
+                    status: row.status || 'new',
+                    notes: row.notes || null,
+                    gbpObservation: row.gbp_observation || null,
+                    aiVisibilityObservation: row.ai_visibility_observation || null,
+                    leadOpportunity: row.lead_opportunity || null,
+                    opportunityLevel: row.opportunity_level || null,
+                    isCustomer: Boolean(row.is_customer),
+                    convertedAt: row.converted_at || null,
+                    assignedTo: row.assigned_to || null,
+                    assignedAgentName: row.assigned_agent_name || null,
+                    spreadsheetStatus: row.spreadsheet_status || '',
+                    spreadsheetStatus1: row.spreadsheet_status_1 || '',
+                    spreadsheetStatus2: row.spreadsheet_status_2 || '',
+                    spreadsheetStatus3: row.spreadsheet_status_3 || '',
+                    updatedAt: row.updated_at || row.created_at || null
                 });
             }
         } catch {}
