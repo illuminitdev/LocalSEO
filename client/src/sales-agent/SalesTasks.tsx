@@ -16,7 +16,8 @@ import {
     Eye,
     Globe,
     ChevronLeft,
-    ChevronRight
+    ChevronRight,
+    Calendar
 } from 'lucide-react';
 import LeadStatusHistoryModal from '../admin/LeadStatusHistoryModal';
 import {
@@ -410,22 +411,25 @@ export default function SalesTasks() {
                     </select>
 
                     <div className="flex items-center gap-1.5">
-                        <select
-                            value={statusDateFilter}
-                            onChange={(e) => {
-                                setStatusDateFilter(e.target.value as StatusDateFilter);
-                                setCurrentPage(1);
-                            }}
-                            className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
-                            title="Filter by status updated date"
-                        >
-                            <option value="all">📅 Status Date: All</option>
-                            <option value="today">Today</option>
-                            <option value="yesterday">Yesterday</option>
-                            <option value="7days">Last 7 Days</option>
-                            <option value="30days">Last 30 Days</option>
-                            <option value="custom">Custom Date…</option>
-                        </select>
+                        <div className="relative">
+                            <Calendar className="w-3.5 h-3.5 text-[#94A3B8] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <select
+                                value={statusDateFilter}
+                                onChange={(e) => {
+                                    setStatusDateFilter(e.target.value as StatusDateFilter);
+                                    setCurrentPage(1);
+                                }}
+                                className="pl-8 pr-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
+                                title="Filter by status updated date"
+                            >
+                                <option value="all">Status Date: All</option>
+                                <option value="today">Today</option>
+                                <option value="yesterday">Yesterday</option>
+                                <option value="7days">Last 7 Days</option>
+                                <option value="30days">Last 30 Days</option>
+                                <option value="custom">Custom Date…</option>
+                            </select>
+                        </div>
                         {statusDateFilter === 'custom' && (
                             <input
                                 type="date"
