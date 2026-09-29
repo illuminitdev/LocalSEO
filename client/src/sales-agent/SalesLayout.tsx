@@ -368,16 +368,11 @@ export default function SalesLayout() {
                                 title="Notifications"
                             >
                                 <Bell className="w-4 h-4 text-slate-700" />
-                                <span
-                                    className={cn(
-                                        'absolute -top-1.5 -right-1.5 px-1.5 min-w-[18px] h-4.5 rounded-full text-[10px] font-black flex items-center justify-center border-2 border-white transition-all',
-                                        unreadCount > 0
-                                            ? 'bg-rose-500 text-white'
-                                            : 'bg-slate-200 text-slate-600'
-                                    )}
-                                >
-                                    {unreadCount}
-                                </span>
+                                {unreadCount > 0 && (
+                                    <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center leading-none shadow-sm">
+                                        {unreadCount > 9 ? '9+' : unreadCount}
+                                    </span>
+                                )}
                             </button>
 
                             {notifOpen && (
