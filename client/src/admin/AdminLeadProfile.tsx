@@ -27,7 +27,11 @@ import {
 } from './adminApi';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { cn } from '../shared/utils';
-import { emailShareStatusHint, emailShareStatusLabel } from '../shared/emailShareStatus';
+import {
+    emailShareStatusHint,
+    emailShareStatusLabel,
+    emailShareStatusTimeLines
+} from '../shared/emailShareStatus';
 
 function formatTimestamp(isoString?: string | null) {
     if (!isoString) return '';
@@ -232,6 +236,16 @@ export default function AdminLeadProfile() {
     const showCrmStatus = Boolean(crmStatus && crmStatus.toLowerCase() !== 'new');
     const obsLabel = emailShareStatusLabel(lead.observationEmailShareStatus);
     const auditLabel = emailShareStatusLabel(lead.emailShareStatus);
+    const obsTimes = {
+        sentAt: lead.observationEmailSentAt,
+        openedAt: lead.observationEmailOpenedAt
+    };
+    const auditTimes = {
+        sentAt: lead.emailShareSentAt,
+        openedAt: lead.emailShareOpenedAt
+    };
+    const obsTimeLines = emailShareStatusTimeLines(obsTimes);
+    const auditTimeLines = emailShareStatusTimeLines(auditTimes);
 
     return (
         <div className="space-y-6 max-w-4xl mx-auto pb-16">
@@ -245,30 +259,44 @@ export default function AdminLeadProfile() {
                 </Link>
                 <div className="flex items-center gap-2 flex-wrap">
                     {obsLabel ? (
-                        <span
-                            className={cn(
-                                'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
-                                lead.observationEmailShareStatus === 'opened'
-                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                    : 'bg-slate-50 text-slate-600 border-slate-200'
-                            )}
-                            title={emailShareStatusHint(lead.observationEmailShareStatus)}
-                        >
-                            Email: {obsLabel}
-                        </span>
+                        <div className="flex flex-col items-end gap-0.5">
+                            <span
+                                className={cn(
+                                    'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
+                                    lead.observationEmailShareStatus === 'opened'
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                                )}
+                                title={emailShareStatusHint(lead.observationEmailShareStatus, obsTimes)}
+                            >
+                                Email: {obsLabel}
+                            </span>
+                            {obsTimeLines.map((line) => (
+                                <span key={line} className="text-[10px] font-medium text-slate-500 whitespace-nowrap">
+                                    {line}
+                                </span>
+                            ))}
+                        </div>
                     ) : null}
                     {auditLabel ? (
-                        <span
-                            className={cn(
-                                'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
-                                lead.emailShareStatus === 'opened'
-                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                    : 'bg-slate-50 text-slate-600 border-slate-200'
-                            )}
-                            title={emailShareStatusHint(lead.emailShareStatus)}
-                        >
-                            Audit email: {auditLabel}
-                        </span>
+                        <div className="flex flex-col items-end gap-0.5">
+                            <span
+                                className={cn(
+                                    'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
+                                    lead.emailShareStatus === 'opened'
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                                )}
+                                title={emailShareStatusHint(lead.emailShareStatus, auditTimes)}
+                            >
+                                Audit email: {auditLabel}
+                            </span>
+                            {auditTimeLines.map((line) => (
+                                <span key={line} className="text-[10px] font-medium text-slate-500 whitespace-nowrap">
+                                    {line}
+                                </span>
+                            ))}
+                        </div>
                     ) : null}
                     {!editing ? (
                         <button

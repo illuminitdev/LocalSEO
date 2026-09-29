@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import {
     ArrowLeft,
     Phone,
@@ -33,7 +33,8 @@ import {
     confirmAndShareFullAuditEmail,
     confirmAndShareLeadObservationsEmail,
     emailShareStatusLabel,
-    emailShareStatusHint
+    emailShareStatusHint,
+    emailShareStatusTimeLines
 } from './salesApi';
 import { cn } from '../shared/utils';
 import {
@@ -43,8 +44,17 @@ import {
     Award
 } from 'lucide-react';
 
+type LeadDetailLocationState = {
+    from?: string;
+    fromLabel?: string;
+} | null;
+
 export default function SalesLeadDetail() {
     const { id } = useParams<{ id: string }>();
+    const location = useLocation();
+    const navState = (location.state as LeadDetailLocationState) || null;
+    const backTo = navState?.from || '/sales';
+    const backLabel = navState?.fromLabel ? `Back to ${navState.fromLabel}` : 'Back to Dashboard';
     const [lead, setLead] = useState<SalesUnifiedLead | null>(null);
     const [tasks, setTasks] = useState<SalesLeadTask[]>([]);
     const [activities, setActivities] = useState<SalesLeadActivity[]>([]);
@@ -199,8 +209,8 @@ export default function SalesLeadDetail() {
     if (!lead) {
         return (
             <div className="space-y-4 max-w-4xl mx-auto">
-                <Link to="/sales" className="inline-flex items-center gap-1 text-xs font-bold text-[#64748B] hover:text-[#0F172A]">
-                    <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
+                <Link to={backTo} className="inline-flex items-center gap-1 text-xs font-bold text-[#64748B] hover:text-[#0F172A]">
+                    <ArrowLeft className="w-3.5 h-3.5" /> {backLabel}
                 </Link>
                 <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-sm text-red-700">
                     {error || 'Lead not found or no permission.'}
@@ -210,17 +220,27 @@ export default function SalesLeadDetail() {
     }
 
     const bizName = lead.businessName || 'Lead';
+    const obsTimes = {
+        sentAt: lead.observationEmailSentAt,
+        openedAt: lead.observationEmailOpenedAt
+    };
+    const auditTimes = {
+        sentAt: lead.emailShareSentAt,
+        openedAt: lead.emailShareOpenedAt
+    };
+    const obsTimeLines = emailShareStatusTimeLines(obsTimes);
+    const auditTimeLines = emailShareStatusTimeLines(auditTimes);
 
     return (
         <div className="space-y-6 max-w-5xl mx-auto pb-16 animate-in fade-in duration-300">
             {}
             <div className="flex items-center justify-between">
                 <Link
-                    to="/sales"
+                    to={backTo}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#E2E8F0] hover:bg-[#F8FAFC] text-xs font-bold text-[#475569] rounded-xl transition-colors shadow-2xs"
                 >
                     <ArrowLeft className="w-3.5 h-3.5" />
-                    Back to Dashboard
+                    {backLabel}
                 </Link>
 
                 <div className="flex items-center gap-2">
@@ -253,17 +273,24 @@ export default function SalesLeadDetail() {
                         </a>
                     )}
                     {emailShareStatusLabel(lead.observationEmailShareStatus) ? (
-                        <span
-                            className={cn(
-                                'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
-                                lead.observationEmailShareStatus === 'opened'
-                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                    : 'bg-slate-50 text-slate-600 border-slate-200'
-                            )}
-                            title={emailShareStatusHint(lead.observationEmailShareStatus)}
-                        >
-                            Email: {emailShareStatusLabel(lead.observationEmailShareStatus)}
-                        </span>
+                        <div className="flex flex-col items-end gap-0.5">
+                            <span
+                                className={cn(
+                                    'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
+                                    lead.observationEmailShareStatus === 'opened'
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                                )}
+                                title={emailShareStatusHint(lead.observationEmailShareStatus, obsTimes)}
+                            >
+                                Email: {emailShareStatusLabel(lead.observationEmailShareStatus)}
+                            </span>
+                            {obsTimeLines.map((line) => (
+                                <span key={line} className="text-[10px] font-medium text-[#64748B] whitespace-nowrap">
+                                    {line}
+                                </span>
+                            ))}
+                        </div>
                     ) : null}
                     <button
                         type="button"
@@ -293,17 +320,24 @@ export default function SalesLeadDetail() {
                     {lead.auditId ? (
                         <>
                             {emailShareStatusLabel(lead.emailShareStatus) ? (
-                                <span
-                                    className={cn(
-                                        'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
-                                        lead.emailShareStatus === 'opened'
-                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                            : 'bg-slate-50 text-slate-600 border-slate-200'
-                                    )}
-                                    title={emailShareStatusHint(lead.emailShareStatus)}
-                                >
-                                    PDF: {emailShareStatusLabel(lead.emailShareStatus)}
-                                </span>
+                                <div className="flex flex-col items-end gap-0.5">
+                                    <span
+                                        className={cn(
+                                            'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
+                                            lead.emailShareStatus === 'opened'
+                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                : 'bg-slate-50 text-slate-600 border-slate-200'
+                                        )}
+                                        title={emailShareStatusHint(lead.emailShareStatus, auditTimes)}
+                                    >
+                                        PDF: {emailShareStatusLabel(lead.emailShareStatus)}
+                                    </span>
+                                    {auditTimeLines.map((line) => (
+                                        <span key={line} className="text-[10px] font-medium text-[#64748B] whitespace-nowrap">
+                                            {line}
+                                        </span>
+                                    ))}
+                                </div>
                             ) : null}
                             <button
                                 type="button"

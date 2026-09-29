@@ -35,7 +35,11 @@ import {
     updateCrmTask
 } from './adminApi';
 import { cn } from '../shared/utils';
-import { emailShareStatusLabel, emailShareStatusHint } from '../shared/emailShareStatus';
+import {
+    emailShareStatusLabel,
+    emailShareStatusHint,
+    emailShareStatusTimeLines
+} from '../shared/emailShareStatus';
 import TaskCompletionModal, { type CrmTaskStatus } from '../shared/TaskCompletionModal';
 
 export default function AdminLeadDetail() {
@@ -177,6 +181,16 @@ export default function AdminLeadDetail() {
 
     const bizName = lead.businessName || 'Lead';
     const shareLabel = emailShareStatusLabel(lead.emailShareStatus);
+    const auditTimes = {
+        sentAt: lead.emailShareSentAt,
+        openedAt: lead.emailShareOpenedAt
+    };
+    const obsTimes = {
+        sentAt: lead.observationEmailSentAt,
+        openedAt: lead.observationEmailOpenedAt
+    };
+    const auditTimeLines = emailShareStatusTimeLines(auditTimes);
+    const obsTimeLines = emailShareStatusTimeLines(obsTimes);
     const latestAct = activities.length > 0 ? activities[0] : null;
     const status1 = String(lead.spreadsheetStatus1 || '').trim();
     const status2 = String(lead.spreadsheetStatus2 || '').trim();
@@ -244,17 +258,24 @@ export default function AdminLeadDetail() {
                     {lead.auditId ? (
                         <>
                             {shareLabel ? (
-                                <span
-                                    className={cn(
-                                        'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
-                                        lead.emailShareStatus === 'opened'
-                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                            : 'bg-slate-50 text-slate-600 border-slate-200'
-                                    )}
-                                    title={emailShareStatusHint(lead.emailShareStatus)}
-                                >
-                                    Audit email: {shareLabel}
-                                </span>
+                                <div className="flex flex-col items-end gap-0.5">
+                                    <span
+                                        className={cn(
+                                            'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
+                                            lead.emailShareStatus === 'opened'
+                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                : 'bg-slate-50 text-slate-600 border-slate-200'
+                                        )}
+                                        title={emailShareStatusHint(lead.emailShareStatus, auditTimes)}
+                                    >
+                                        Audit email: {shareLabel}
+                                    </span>
+                                    {auditTimeLines.map((line) => (
+                                        <span key={line} className="text-[10px] font-medium text-slate-500 whitespace-nowrap">
+                                            {line}
+                                        </span>
+                                    ))}
+                                </div>
                             ) : null}
                             <button
                                 type="button"
@@ -268,17 +289,24 @@ export default function AdminLeadDetail() {
                         </>
                     ) : null}
                     {emailShareStatusLabel(lead.observationEmailShareStatus) ? (
-                        <span
-                            className={cn(
-                                'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
-                                lead.observationEmailShareStatus === 'opened'
-                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                    : 'bg-slate-50 text-slate-600 border-slate-200'
-                            )}
-                            title={emailShareStatusHint(lead.observationEmailShareStatus)}
-                        >
-                            Email: {emailShareStatusLabel(lead.observationEmailShareStatus)}
-                        </span>
+                        <div className="flex flex-col items-end gap-0.5">
+                            <span
+                                className={cn(
+                                    'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
+                                    lead.observationEmailShareStatus === 'opened'
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                                )}
+                                title={emailShareStatusHint(lead.observationEmailShareStatus, obsTimes)}
+                            >
+                                Email: {emailShareStatusLabel(lead.observationEmailShareStatus)}
+                            </span>
+                            {obsTimeLines.map((line) => (
+                                <span key={line} className="text-[10px] font-medium text-slate-500 whitespace-nowrap">
+                                    {line}
+                                </span>
+                            ))}
+                        </div>
                     ) : null}
                 </div>
             </div>
