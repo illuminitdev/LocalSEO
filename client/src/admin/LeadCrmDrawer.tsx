@@ -82,17 +82,19 @@ export type GrowthAuditLeadRef = {
 const NOTES_MAX = 500;
 
 const TASK_PRESETS: Array<{
+    id: string;
     type: TaskType;
     label: string;
     icon: ElementType;
     defaultTitle: string;
     defaultPriority: TaskPriority;
 }> = [
-    { type: 'prepare_audit', label: 'Prepare Audit', icon: BarChart3, defaultTitle: 'Prepare & Review Growth Audit', defaultPriority: 'high' },
-    { type: 'follow_up_call', label: 'Follow-Up Call', icon: Phone, defaultTitle: 'Follow-up Call with Lead', defaultPriority: 'medium' },
-    { type: 'send_proposal', label: 'Send Proposal', icon: FileText, defaultTitle: 'Send Service Proposal & Pricing', defaultPriority: 'high' },
-    { type: 'onboard_customer', label: 'Onboard Customer', icon: UserPlus, defaultTitle: 'Onboard as New Customer', defaultPriority: 'urgent' },
-    { type: 'custom', label: '+ Custom Task', icon: Plus, defaultTitle: 'Custom Task', defaultPriority: 'medium' }
+    { id: 'initial_call', type: 'follow_up_call', label: 'Initial Call', icon: Phone, defaultTitle: 'Initial Call with Lead', defaultPriority: 'medium' },
+    { id: 'follow_up_call', type: 'follow_up_call', label: 'Follow-Up Call', icon: Phone, defaultTitle: 'Follow-up Call with Lead', defaultPriority: 'medium' },
+    { id: 'prepare_audit', type: 'prepare_audit', label: 'Prepare Audit', icon: BarChart3, defaultTitle: 'Prepare & Review Growth Audit', defaultPriority: 'high' },
+    { id: 'send_proposal', type: 'send_proposal', label: 'Send Proposal', icon: FileText, defaultTitle: 'Send Service Proposal & Pricing', defaultPriority: 'high' },
+    { id: 'onboard_customer', type: 'onboard_customer', label: 'Onboard Customer', icon: UserPlus, defaultTitle: 'Onboard as New Customer', defaultPriority: 'urgent' },
+    { id: 'custom', type: 'custom', label: '+ Custom Task', icon: Plus, defaultTitle: 'Custom Task', defaultPriority: 'medium' }
 ];
 
 interface LeadCrmDrawerProps {
@@ -116,8 +118,8 @@ export default function LeadCrmDrawer({
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    
-    const [taskType, setTaskType] = useState<TaskType>('prepare_audit');
+    const [selectedPresetId, setSelectedPresetId] = useState<string>('initial_call');
+    const [taskType, setTaskType] = useState<TaskType>('follow_up_call');
     const [taskTitle, setTaskTitle] = useState(TASK_PRESETS[0].defaultTitle);
     const [taskNotes, setTaskNotes] = useState('');
     const [taskAssignee, setTaskAssignee] = useState<string>(() => String(lead.assignedTo || ''));
@@ -184,14 +186,6 @@ export default function LeadCrmDrawer({
         loadLeadData();
     }, [loadLeadData]);
 
-    const handleSelectPreset = (preset: typeof TASK_PRESETS[0]) => {
-        setTaskType(preset.type);
-        if (preset.defaultTitle) {
-            setTaskTitle(preset.defaultTitle);
-        }
-        setTaskPriority(preset.defaultPriority);
-    };
-
     const handleReassignLead = async (nextAgentId: string | null) => {
         setReassigning(true);
         setError('');
@@ -215,6 +209,15 @@ export default function LeadCrmDrawer({
         } finally {
             setReassigning(false);
         }
+    };
+
+    const handleSelectPreset = (preset: typeof TASK_PRESETS[0]) => {
+        setSelectedPresetId(preset.id);
+        setTaskType(preset.type);
+        if (preset.defaultTitle) {
+            setTaskTitle(preset.defaultTitle);
+        }
+        setTaskPriority(preset.defaultPriority);
     };
 
     const handleCreateTask = async (e: React.FormEvent) => {
@@ -484,10 +487,10 @@ export default function LeadCrmDrawer({
                                 <div className="flex flex-wrap gap-2">
                                     {TASK_PRESETS.map((preset) => {
                                         const Icon = preset.icon;
-                                        const selected = taskType === preset.type;
+                                        const selected = selectedPresetId === preset.id;
                                         return (
                                             <button
-                                                key={preset.type}
+                                                key={preset.id}
                                                 type="button"
                                                 onClick={() => handleSelectPreset(preset)}
                                                 className={cn(

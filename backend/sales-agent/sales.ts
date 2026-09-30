@@ -6,6 +6,7 @@ export const LEAD_STATUSES = [
     'contacted',
     'in_progress',
     'callback',
+    'follow_up',
     'interested',
     'not_interested',
     'converted',
@@ -54,7 +55,7 @@ export async function ensureCrmTables() {
 
             ALTER TABLE sales_leads DROP CONSTRAINT IF EXISTS sales_leads_status_check;
             ALTER TABLE sales_leads ADD CONSTRAINT sales_leads_status_check CHECK (
-                status IN ('new', 'contacted', 'in_progress', 'callback', 'interested', 'not_interested', 'converted', 'completed', 'pending')
+                status IN ('new', 'contacted', 'in_progress', 'callback', 'follow_up', 'interested', 'not_interested', 'converted', 'completed', 'pending')
             );
 
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS industry TEXT DEFAULT '';
@@ -105,6 +106,7 @@ export async function ensureCrmTables() {
             );
             ALTER TABLE lead_tasks ADD COLUMN IF NOT EXISTS created_by_role TEXT DEFAULT 'admin';
             ALTER TABLE lead_tasks ADD COLUMN IF NOT EXISTS created_by_name TEXT DEFAULT 'Admin';
+            ALTER TABLE lead_tasks ADD COLUMN IF NOT EXISTS assigned_to_role TEXT DEFAULT 'sales_agent';
             CREATE INDEX IF NOT EXISTS idx_lead_tasks_lead_id ON lead_tasks(lead_id);
             CREATE INDEX IF NOT EXISTS idx_lead_tasks_assigned_to ON lead_tasks(assigned_to_user_id);
             CREATE INDEX IF NOT EXISTS idx_lead_tasks_status ON lead_tasks(status);
@@ -434,6 +436,10 @@ export async function logCall({
     if (status && LEAD_STATUSES.includes(status)) {
         params.push(status);
         sets.push(`status = $${params.length}`);
+        if (status === 'converted') {
+            sets.push(`is_customer = TRUE`);
+            sets.push(`converted_at = COALESCE(converted_at, NOW())`);
+        }
     } else if (outcome === 'callback') {
         params.push('callback');
         sets.push(`status = $${params.length}`);
@@ -494,6 +500,10 @@ export async function updateAssignedLead(
         }
         params.push(patch.status);
         sets.push(`status = $${params.length}`);
+        if (patch.status === 'converted') {
+            sets.push(`is_customer = TRUE`);
+            sets.push(`converted_at = COALESCE(converted_at, NOW())`);
+        }
     }
 
     if (patch.notes != null) {

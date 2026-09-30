@@ -224,6 +224,7 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
                 scoreTotal: scoreRaw != null && Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw) : null,
                 reportUrl: sharePath ? `${origin}${sharePath.startsWith('/') ? '' : '/'}${sharePath}` : null,
                 source: String(payload.source || 'growth_audit').trim(),
+                status: String(payload.status || 'new').trim().toLowerCase(),
                 auditId: String(payload.auditId || row.audit_id || '').trim() || null,
                 industry: cleanBusinessCategory(serviceRaw)
             });

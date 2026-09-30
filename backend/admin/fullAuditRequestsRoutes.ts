@@ -211,14 +211,18 @@ router.patch('/full-audit-requests/:id', requireAdmin, async (req: Request, res:
         if (nextAssigned && nextAuditId && nextStatus === 'completed') {
             try {
                 let taskLeadId = leadId;
+                let bizName = String(rows[0].business_name || '').trim();
                 if (!taskLeadId) {
                     const email = String(rows[0].to_email || '').trim().toLowerCase();
                     if (email) {
                         const { rows: byEmail } = await query(
-                            `SELECT id FROM sales_leads WHERE LOWER(TRIM(email)) = $1 ORDER BY updated_at DESC NULLS LAST LIMIT 1`,
+                            `SELECT id, name FROM sales_leads WHERE LOWER(TRIM(email)) = $1 ORDER BY updated_at DESC NULLS LAST LIMIT 1`,
                             [email]
                         ).catch(() => ({ rows: [] as any[] }));
-                        taskLeadId = String(byEmail[0]?.id || '').trim();
+                        if (byEmail[0]) {
+                            taskLeadId = String(byEmail[0].id).trim();
+                            if (!bizName && byEmail[0].name) bizName = byEmail[0].name;
+                        }
                     }
                 }
                 if (taskLeadId) {
@@ -227,9 +231,9 @@ router.patch('/full-audit-requests/:id', requireAdmin, async (req: Request, res:
                         `SELECT id FROM lead_tasks
                          WHERE lead_id = $1
                            AND assigned_to_user_id = $2
-                           AND task_type = 'prepare_audit'
+                           AND task_type IN ('prepare_audit', 'follow_up_call')
                            AND status IN ('pending', 'in_progress')
-                           AND notes ILIKE $3
+                           AND (notes ILIKE $3 OR title ILIKE '%Growth Audit Ready%')
                          LIMIT 1`,
                         [taskLeadId, nextAssigned, `%${nextAuditId}%`]
                     ).catch(() => ({ rows: [] as any[] }));
@@ -238,12 +242,12 @@ router.patch('/full-audit-requests/:id', requireAdmin, async (req: Request, res:
                         await query(
                             `INSERT INTO lead_tasks
                              (lead_id, assigned_to_user_id, task_type, title, notes, priority, status, created_by_role, created_by_name)
-                             VALUES ($1, $2, 'prepare_audit', $3, $4, 'high', 'pending', 'admin', 'Admin')`,
+                             VALUES ($1, $2, 'follow_up_call', $3, $4, 'high', 'pending', 'admin', 'Admin')`,
                             [
                                 taskLeadId,
                                 nextAssigned,
-                                'Share full audit PDF',
-                                `Full audit ready (${nextAuditId}). Email the PDF report to the business from CRM / Sales.`
+                                `Growth Audit Ready: Deliver & Pitch to ${bizName || 'Lead'}`,
+                                `Full Growth Audit is ready (${nextAuditId}). Review the live report and share the PDF report with the business.`
                             ]
                         );
                     }
@@ -252,7 +256,7 @@ router.patch('/full-audit-requests/:id', requireAdmin, async (req: Request, res:
                          VALUES ($1, 'Admin', 'task_event', 'full_audit_assigned', $2)`,
                         [
                             taskLeadId,
-                            `Full audit ${nextAuditId} completed and assigned to sales agent for email share`
+                            `Admin published Full Growth Audit (${nextAuditId}) and assigned report back to sales agent to deliver to client`
                         ]
                     );
                 } else {

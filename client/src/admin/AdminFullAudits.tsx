@@ -424,16 +424,34 @@ export default function AdminFullAudits() {
         setShowForm(false);
         setCreateMessage('');
         setStepIndex(0);
-        setMessage(
-            prefillRequestId
-                ? 'Full audit ready — pick a sales agent to assign.'
-                : 'Full audit ready — report opened in a new tab.'
-        );
+
         if (prefillRequestId) {
-            pendingAssignRef.current = { reqId: prefillRequestId, auditId };
+            const req = requests.find((r) => r.id === prefillRequestId);
+            const agentId = req?.assignedToUserId;
+            if (agentId) {
+                try {
+                    await updateFullAuditRequest(prefillRequestId, {
+                        status: 'completed',
+                        fulfilledAuditId: auditId,
+                        assignedToUserId: agentId
+                    });
+                    setMessage(
+                        `🎉 Full Growth Audit ready and automatically assigned back to ${req.assignedAgentName || 'the requesting sales agent'}!`
+                    );
+                } catch {
+                    pendingAssignRef.current = { reqId: prefillRequestId, auditId };
+                    setFulfillAuditId(auditId);
+                    setMessage('Full audit ready — please confirm assignment.');
+                }
+            } else {
+                pendingAssignRef.current = { reqId: prefillRequestId, auditId };
+                setFulfillAuditId(auditId);
+                setMessage('Full audit ready — pick a sales agent to assign.');
+            }
             setPrefillRequestId(null);
-            setFulfillAuditId(auditId);
             setTab('requests');
+        } else {
+            setMessage('Full audit ready — report opened in a new tab.');
         }
         load();
     };
@@ -744,7 +762,9 @@ export default function AdminFullAudits() {
                                 <thead className="bg-[#F8FAFC] text-[11px] uppercase tracking-wider text-[#64748B]">
                                     <tr>
                                         <th className="px-4 py-2.5 font-bold">Business</th>
-                                        <th className="px-4 py-2.5 font-bold">Email</th>
+                                        <th className="px-4 py-2.5 font-bold">Source</th>
+                                        <th className="px-4 py-2.5 font-bold">Sales Agent</th>
+                                        <th className="px-4 py-2.5 font-bold">Contact</th>
                                         <th className="px-4 py-2.5 font-bold">Requested</th>
                                         <th className="px-4 py-2.5 font-bold">Status</th>
                                         <th className="px-4 py-2.5 font-bold text-right">Actions</th>
@@ -759,9 +779,10 @@ export default function AdminFullAudits() {
                                             Boolean(req.assignedToUserId || req.assignedAgentName);
                                         const isOpen =
                                             req.status === 'pending' || req.status === 'in_progress';
+                                        const isSalesRequest = req.source === 'sales_agent_request';
 
                                         return (
-                                        <tr key={req.id} className="align-top">
+                                        <tr key={req.id} className="align-top hover:bg-[#F8FAFC]/60 transition-colors">
                                             <td className="px-4 py-3">
                                                 <div className="font-bold text-[#0F172A]">{req.businessName || '—'}</div>
                                                 {req.fulfilledAuditId ? (
@@ -770,10 +791,43 @@ export default function AdminFullAudits() {
                                                     </div>
                                                 ) : null}
                                             </td>
+                                            <td className="px-4 py-3">
+                                                <span
+                                                    className={cn(
+                                                        'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider border',
+                                                        isSalesRequest
+                                                            ? 'bg-purple-50 text-purple-800 border-purple-200'
+                                                            : 'bg-blue-50 text-blue-800 border-blue-200'
+                                                    )}
+                                                >
+                                                    {isSalesRequest ? 'Sales Agent' : 'Inbound CTA'}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                {req.assignedAgentName || req.assignedAgentEmail ? (
+                                                    <div>
+                                                        <div className="text-xs font-bold text-[#0F172A]">
+                                                            {req.assignedAgentName || 'Assigned Agent'}
+                                                        </div>
+                                                        {req.assignedAgentEmail ? (
+                                                            <div className="text-[10px] text-[#64748B]">
+                                                                {req.assignedAgentEmail}
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-xs text-[#94A3B8] italic">Unassigned</span>
+                                                )}
+                                            </td>
                                             <td className="px-4 py-3 text-xs text-[#334155]">{req.toEmail || '—'}</td>
                                             <td className="px-4 py-3 text-xs text-[#64748B]">
                                                 {req.requestedAt
-                                                    ? new Date(req.requestedAt).toLocaleString()
+                                                    ? new Date(req.requestedAt).toLocaleString(undefined, {
+                                                          month: 'short',
+                                                          day: 'numeric',
+                                                          hour: '2-digit',
+                                                          minute: '2-digit'
+                                                      })
                                                     : '—'}
                                             </td>
                                             <td className="px-4 py-3">
@@ -782,11 +836,6 @@ export default function AdminFullAudits() {
                                                         <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-emerald-50 text-emerald-800 border-emerald-200">
                                                             Assigned
                                                         </span>
-                                                        <div className="text-[11px] font-semibold text-[#334155] mt-1">
-                                                            {req.assignedAgentName ||
-                                                                req.assignedAgentEmail ||
-                                                                'Sales agent'}
-                                                        </div>
                                                     </div>
                                                 ) : (
                                                     <span
@@ -813,7 +862,7 @@ export default function AdminFullAudits() {
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => openAssignModal(req)}
-                                                                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-[#0F172A] text-white hover:bg-[#1E293B] transition-colors"
+                                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-[#0F172A] text-white hover:bg-[#1E293B] transition-colors"
                                                                 >
                                                                     <Check className="w-3.5 h-3.5" />
                                                                     Assign
@@ -822,7 +871,7 @@ export default function AdminFullAudits() {
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => openNewFormFromRequest(req)}
-                                                                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-[#F59E0B] text-[#0F172A] hover:bg-[#FBBF24] transition-colors"
+                                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-[#F59E0B] text-[#0F172A] hover:bg-[#FBBF24] transition-colors"
                                                                     title="Publish a full audit PDF before assigning"
                                                                 >
                                                                     <Plus className="w-3.5 h-3.5" />

@@ -17,6 +17,7 @@ export interface SalesLeadTask {
     createdAt: string;
     updatedAt: string;
     assignedToUserId?: string;
+    assignedToRole?: 'sales_agent' | 'developer_seo' | 'developer' | 'seo' | 'admin' | string;
     createdByRole?: 'admin' | 'self' | string;
     createdByName?: string;
     leadBusinessName?: string;
@@ -30,6 +31,7 @@ export interface SalesLeadTask {
     leadAuditId?: string | null;
     leadSource?: string;
     leadIndustry?: string;
+    leadStatus?: string;
     emailShareStatus?: 'none' | 'sent' | 'opened';
     emailShareSentAt?: string | null;
     emailShareOpenedAt?: string | null;
@@ -152,9 +154,19 @@ export async function createSalesTask(task: {
     notes?: string;
     priority?: SalesTaskPriority;
     due_date?: string | null;
+    assigned_to_role?: string;
+    assigned_to_user_id?: string | null;
 }): Promise<SalesLeadTask> {
     const res = await apiPost('/api/sales/tasks', task);
     return res.task;
+}
+
+export async function updateSalesLeadStatus(
+    leadId: string,
+    updates: { status: string; notes?: string }
+): Promise<{ success: boolean; lead: SalesUnifiedLead }> {
+    const res = await apiPatch(`/api/sales/leads/${encodeURIComponent(leadId)}`, updates);
+    return res;
 }
 
 export async function fetchSalesLeadCrm(leadId: string): Promise<SalesLeadCrmDetail> {

@@ -151,7 +151,8 @@ async function fetchLeadMetadataMap(leadIds: string[]) {
                 scoreTotal: scoreRaw != null && Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw) : null,
                 auditId,
                 reportUrl: reportUrlFromSharePath(sharePath, auditId),
-                source: String(payload.source || 'growth_audit').trim()
+                source: String(payload.source || 'growth_audit').trim(),
+                status: String(payload.status || 'new').trim().toLowerCase()
             });
         }
     } catch {}
@@ -402,7 +403,9 @@ router.get('/tasks', async (req: Request, res: Response) => {
         const createdBy = String(req.query.createdBy || '').trim();
 
         const params: any[] = [agentId];
-        const where: string[] = ['t.assigned_to_user_id = $1'];
+        const where: string[] = [
+            `(t.assigned_to_user_id = $1 OR (t.created_by_role = 'self' AND t.lead_id IN (SELECT id::text FROM sales_leads WHERE assigned_to = $1)))`
+        ];
 
         if (status && status !== 'all') {
             params.push(status);
@@ -443,6 +446,7 @@ router.get('/tasks', async (req: Request, res: Response) => {
                 t.created_at AS "createdAt",
                 t.updated_at AS "updatedAt",
                 t.assigned_to_user_id AS "assignedToUserId",
+                COALESCE(t.assigned_to_role, 'sales_agent') AS "assignedToRole",
                 COALESCE(t.created_by_role, 'admin') AS "createdByRole",
                 COALESCE(t.created_by_name, 'Admin') AS "createdByName"
             FROM lead_tasks t
@@ -486,6 +490,7 @@ router.get('/tasks', async (req: Request, res: Response) => {
                 leadAuditId: meta.auditId || null,
                 leadSource: meta.source || '',
                 leadIndustry: String(meta.industry || '').trim() || '',
+                leadStatus: meta.status || (meta.isCustomer ? 'converted' : 'new'),
                 emailShareStatus: share.emailShareStatus,
                 emailShareSentAt: share.emailShareSentAt,
                 emailShareOpenedAt: share.emailShareOpenedAt
@@ -511,7 +516,9 @@ router.post('/tasks', async (req: Request, res: Response) => {
             title,
             notes = '',
             priority = 'medium',
-            due_date = null
+            due_date = null,
+            assigned_to_role = 'sales_agent',
+            assigned_to_user_id = null
         } = req.body || {};
 
         const effectiveLeadId = (lead_id && String(lead_id).trim()) ? String(lead_id).trim() : 'general';
@@ -519,16 +526,22 @@ router.post('/tasks', async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Task title is required.' });
         }
 
-        const validTaskTypes = ['prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom'];
+        const validTaskTypes = [
+            'prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom',
+            'call', 'follow_up', 'audit_review', 'proposal', 'meeting', 'email', 'other'
+        ];
         const sanitizedTaskType = validTaskTypes.includes(task_type) ? task_type : 'follow_up_call';
 
         const validPriorities = ['low', 'medium', 'high', 'urgent'];
         const sanitizedPriority = validPriorities.includes(priority) ? priority : 'medium';
 
+        const targetRole = String(assigned_to_role || (sanitizedTaskType === 'prepare_audit' ? 'developer_seo' : 'sales_agent')).trim();
+        const targetUserId = targetRole === 'sales_agent' ? (assigned_to_user_id || agentId) : (assigned_to_user_id || null);
+
         const { rows } = await query(`
             INSERT INTO lead_tasks (
-                lead_id, task_type, title, notes, priority, status, assigned_to_user_id, due_date, created_by_role, created_by_name
-            ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, 'self', $8)
+                lead_id, task_type, title, notes, priority, status, assigned_to_user_id, assigned_to_role, due_date, created_by_role, created_by_name
+            ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, 'self', $9)
             RETURNING 
                 id,
                 lead_id AS "leadId",
@@ -542,6 +555,7 @@ router.post('/tasks', async (req: Request, res: Response) => {
                 created_at AS "createdAt",
                 updated_at AS "updatedAt",
                 assigned_to_user_id AS "assignedToUserId",
+                assigned_to_role AS "assignedToRole",
                 created_by_role AS "createdByRole",
                 created_by_name AS "createdByName"
         `, [
@@ -550,12 +564,63 @@ router.post('/tasks', async (req: Request, res: Response) => {
             String(title).trim(),
             String(notes || '').trim(),
             sanitizedPriority,
-            agentId,
+            targetUserId,
+            targetRole,
             due_date || null,
             agentName
         ]);
 
         const task = rows[0];
+
+        // Record task creation activity on lead timeline
+        if (effectiveLeadId !== 'general') {
+            try {
+                const roleDesc = targetRole === 'developer_seo' || targetRole === 'developer' || targetRole === 'seo'
+                    ? 'Developer / SEO Team'
+                    : 'Self (Sales Agent)';
+                await query(`
+                    INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note)
+                    VALUES ($1, $2, $3, 'task_event', $4, $5)
+                `, [
+                    effectiveLeadId,
+                    agentId,
+                    agentName,
+                    sanitizedTaskType,
+                    `Created Task: "${task.title}" (Assigned to: ${roleDesc})${notes ? ` - ${notes}` : ''}`
+                ]);
+            } catch {}
+
+            // If task is prepare_audit, also route directly into full_audit_requests for Admin Full Audits section
+            if (sanitizedTaskType === 'prepare_audit') {
+                try {
+                    const { rows: leadRows } = await query(
+                        `SELECT name, email FROM sales_leads WHERE id::text = $1 LIMIT 1`,
+                        [effectiveLeadId]
+                    );
+                    const bName = String(leadRows[0]?.name || title || 'Lead').trim();
+                    const bEmail = String(leadRows[0]?.email || '').trim().toLowerCase();
+
+                    await query(`
+                        INSERT INTO full_audit_requests (
+                            lead_id, business_name, to_email, status, source, assigned_to_user_id, notes, requested_at
+                        ) VALUES ($1, $2, $3, 'pending', 'sales_agent_request', $4, $5, NOW())
+                    `, [
+                        effectiveLeadId,
+                        bName,
+                        bEmail,
+                        agentId,
+                        notes ? String(notes).trim() : null
+                    ]);
+
+                    await query(
+                        `UPDATE sales_leads SET status = 'interested', updated_at = NOW() WHERE id::text = $1`,
+                        [effectiveLeadId]
+                    ).catch(() => {});
+                } catch (auditReqErr) {
+                    console.warn('Could not record into full_audit_requests:', auditReqErr);
+                }
+            }
+        }
 
         res.status(201).json({ task });
     } catch (err: any) {
@@ -793,6 +858,7 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
                     created_at AS "createdAt",
                     updated_at AS "updatedAt",
                     assigned_to_user_id AS "assignedToUserId",
+                    COALESCE(assigned_to_role, 'sales_agent') AS "assignedToRole",
                     COALESCE(created_by_role, 'admin') AS "createdByRole",
                     COALESCE(created_by_name, 'Admin') AS "createdByName"
                 FROM lead_tasks

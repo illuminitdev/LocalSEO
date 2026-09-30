@@ -122,6 +122,7 @@ export type LeadTask = {
     leadSource?: string | null;
     leadIndustry?: string | null;
     leadAuditId?: string | null;
+    leadStatus?: string | null;
     emailShareStatus?: 'none' | 'sent' | 'opened';
     emailShareSentAt?: string | null;
     emailShareOpenedAt?: string | null;

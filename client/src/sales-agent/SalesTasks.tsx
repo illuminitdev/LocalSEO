@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     CheckSquare,
-    Check,
     Phone,
     RefreshCw,
     Search,
@@ -60,6 +59,30 @@ const PRIORITY_BADGES: Record<SalesTaskPriority, { label: string; bg: string; te
     low: { label: 'Low', bg: 'bg-slate-50 border-slate-200', text: 'text-slate-600', dot: 'bg-slate-400' }
 };
 
+export const LEAD_STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; border: string; dot: string }> = {
+    new: { label: 'New', bg: 'bg-slate-50', text: 'text-slate-700', border: 'border-slate-200', dot: 'bg-slate-400' },
+    contacted: { label: 'Contacted', bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', dot: 'bg-blue-500' },
+    follow_up: { label: 'Follow Up', bg: 'bg-amber-50', text: 'text-amber-800', border: 'border-amber-200', dot: 'bg-amber-500' },
+    callback: { label: 'Callback', bg: 'bg-amber-50', text: 'text-amber-800', border: 'border-amber-200', dot: 'bg-amber-500' },
+    in_progress: { label: 'In Progress', bg: 'bg-amber-50', text: 'text-amber-900', border: 'border-amber-300', dot: 'bg-amber-500' },
+    interested: { label: 'Interested', bg: 'bg-emerald-50', text: 'text-emerald-800', border: 'border-emerald-300', dot: 'bg-emerald-500' },
+    not_interested: { label: 'Not Interested', bg: 'bg-rose-50', text: 'text-rose-800', border: 'border-rose-200', dot: 'bg-rose-400' },
+    converted: { label: 'Converted 🎉', bg: 'bg-purple-50', text: 'text-purple-800', border: 'border-purple-300', dot: 'bg-purple-500' },
+    completed: { label: 'Completed', bg: 'bg-emerald-50', text: 'text-emerald-800', border: 'border-emerald-300', dot: 'bg-emerald-500' },
+    pending: { label: 'New', bg: 'bg-slate-50', text: 'text-slate-700', border: 'border-slate-200', dot: 'bg-slate-400' }
+};
+
+export function getLeadStatusConfig(status?: string | null) {
+    const raw = String(status || 'new').toLowerCase().trim().replace(/[-\s]/g, '_');
+    return LEAD_STATUS_CONFIG[raw] || {
+        label: (status || 'New').replace(/[_]/g, ' '),
+        bg: 'bg-slate-50',
+        text: 'text-slate-700',
+        border: 'border-slate-200',
+        dot: 'bg-slate-400'
+    };
+}
+
 function normalizeTaskIndustry(task: SalesLeadTask): string {
     const raw = String(task.leadIndustry || '').trim();
     if (!raw || /^sheet\s*\d+$/i.test(raw)) return 'General';
@@ -109,7 +132,6 @@ export default function SalesTasks() {
         try {
             const [taskList, industryList] = await Promise.all([
                 fetchSalesTasks({
-                    status: statusFilter !== 'all' ? statusFilter : undefined,
                     priority: priorityFilter !== 'all' ? priorityFilter : undefined,
                     taskType: typeFilter !== 'all' ? typeFilter : undefined,
                     createdBy: 'admin',
@@ -125,7 +147,7 @@ export default function SalesTasks() {
         } finally {
             setLoading(false);
         }
-    }, [statusFilter, priorityFilter, typeFilter, dueTodayOnly]);
+    }, [priorityFilter, typeFilter, dueTodayOnly]);
 
     useEffect(() => {
         loadData();
@@ -163,6 +185,47 @@ export default function SalesTasks() {
         return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     }, [industries, tasks]);
 
+interface GroupedSalesTask {
+    leadId: string;
+    primaryTask: SalesLeadTask;
+    totalTasks: number;
+    tasks: SalesLeadTask[];
+}
+
+const STATUS_PRIORITY_ORDER: Record<string, number> = {
+    in_progress: 0,
+    pending: 1,
+    cancelled: 2,
+    completed: 3
+};
+
+const TASK_PRIORITY_ORDER: Record<string, number> = {
+    urgent: 0,
+    high: 1,
+    medium: 2,
+    low: 3
+};
+
+function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
+    const sA = STATUS_PRIORITY_ORDER[a.status] ?? 99;
+    const sB = STATUS_PRIORITY_ORDER[b.status] ?? 99;
+    if (sA !== sB) return sA - sB;
+
+    const pA = TASK_PRIORITY_ORDER[a.priority] ?? 99;
+    const pB = TASK_PRIORITY_ORDER[b.priority] ?? 99;
+    if (pA !== pB) return pA - pB;
+
+    if (a.dueDate && b.dueDate) {
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+    }
+    if (a.dueDate && !b.dueDate) return -1;
+    if (!a.dueDate && b.dueDate) return 1;
+
+    const dateA = new Date(a.updatedAt || a.createdAt).getTime();
+    const dateB = new Date(b.updatedAt || b.createdAt).getTime();
+    return dateB - dateA;
+}
+
     const industryScopedTasks = useMemo(() => {
         if (industryFilter === 'all') return tasks;
         const selected = industryKey(industryFilter);
@@ -170,6 +233,14 @@ export default function SalesTasks() {
     }, [tasks, industryFilter]);
 
     const filteredTasks = industryScopedTasks.filter((t) => {
+        if (statusFilter !== 'all') {
+            const stat = String(t.leadStatus || 'new').toLowerCase().trim();
+            if (statusFilter === 'follow_up') {
+                if (stat !== 'follow_up' && stat !== 'callback') return false;
+            } else if (stat !== statusFilter.toLowerCase().trim()) {
+                return false;
+            }
+        }
         if (leadKindFilter === 'full_audit' && !isFullAuditTask(t)) return false;
         if (leadKindFilter === 'leads' && isFullAuditTask(t)) return false;
         const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
@@ -184,25 +255,51 @@ export default function SalesTasks() {
             (t.leadBusinessName && t.leadBusinessName.toLowerCase().includes(q)) ||
             (t.leadPhone && t.leadPhone.includes(q)) ||
             (t.leadEmail && t.leadEmail.toLowerCase().includes(q)) ||
+            (t.leadStatus && t.leadStatus.toLowerCase().includes(q)) ||
             normalizeTaskIndustry(t).toLowerCase().includes(q)
         );
     });
 
-    
-    const totalPages = Math.max(1, Math.ceil(filteredTasks.length / TASKS_PER_PAGE));
+    const dedupedTasks = useMemo(() => {
+        const groups = new Map<string, SalesLeadTask[]>();
+        for (const t of filteredTasks) {
+            const key = t.leadId || t.id;
+            const list = groups.get(key);
+            if (list) {
+                list.push(t);
+            } else {
+                groups.set(key, [t]);
+            }
+        }
+
+        const result: GroupedSalesTask[] = [];
+        for (const [key, list] of groups.entries()) {
+            list.sort(compareTasksForPrimary);
+            result.push({
+                leadId: key,
+                primaryTask: list[0],
+                totalTasks: list.length,
+                tasks: list
+            });
+        }
+        return result;
+    }, [filteredTasks]);
+
+    const totalPages = Math.max(1, Math.ceil(dedupedTasks.length / TASKS_PER_PAGE));
     const safePage = Math.min(currentPage, totalPages);
-    const pagedTasks = filteredTasks.slice((safePage - 1) * TASKS_PER_PAGE, safePage * TASKS_PER_PAGE);
+    const pagedGroups = dedupedTasks.slice((safePage - 1) * TASKS_PER_PAGE, safePage * TASKS_PER_PAGE);
 
     const goToPage = (page: number) => setCurrentPage(Math.max(1, Math.min(page, totalPages)));
 
     const fullAuditCount = industryScopedTasks.filter(isFullAuditTask).length;
     const leadsOnlyCount = industryScopedTasks.length - fullAuditCount;
 
-    const pendingCount = industryScopedTasks.filter((t) => t.status === 'pending').length;
-    const inProgressCount = industryScopedTasks.filter((t) => t.status === 'in_progress').length;
-    const completedCount = industryScopedTasks.filter((t) => t.status === 'completed').length;
+    const newLeadsCount = industryScopedTasks.filter((t) => (t.leadStatus || 'new') === 'new').length;
+    const contactedCount = industryScopedTasks.filter((t) => t.leadStatus === 'contacted').length;
+    const followUpCount = industryScopedTasks.filter((t) => t.leadStatus === 'follow_up' || t.leadStatus === 'callback').length;
+    const interestedCount = industryScopedTasks.filter((t) => t.leadStatus === 'interested').length;
+    const convertedCount = industryScopedTasks.filter((t) => t.leadStatus === 'converted').length;
     const dueTodayCount = industryScopedTasks.filter((t) => t.dueDate && t.status !== 'completed' && t.dueDate.startsWith(new Date().toISOString().slice(0, 10))).length;
-    const totalAssignedCount = industryScopedTasks.length;
 
     return (
         <div className="space-y-6 max-w-6xl mx-auto pb-16 animate-in fade-in duration-300">
@@ -228,98 +325,121 @@ export default function SalesTasks() {
                 </button>
             </div>
 
-            {}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                {}
+            {/* Metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {/* New */}
                 <button
                     type="button"
                     onClick={() => {
-                        setStatusFilter(statusFilter === 'pending' ? 'all' : 'pending');
+                        setStatusFilter(statusFilter === 'new' ? 'all' : 'new');
                         setDueTodayOnly(false);
                         setCurrentPage(1);
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-slate-300",
-                        statusFilter === 'pending' && !dueTodayOnly ? "border-slate-800 ring-2 ring-slate-800/20 bg-slate-50/50" : "border-[#E2E8F0]"
+                        statusFilter === 'new' && !dueTodayOnly ? "border-slate-800 ring-2 ring-slate-800/20 bg-slate-50/50" : "border-[#E2E8F0]"
                     )}
                 >
                     <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-[#64748B]">Pending</span>
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-[#64748B]">New</span>
                         <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
                             <ListTodo className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-1.5">{pendingCount}</p>
-                    <p className="text-[10px] text-[#94A3B8] mt-0.5">Not started</p>
+                    <p className="text-2xl font-black text-[#0F172A] mt-1.5">{newLeadsCount}</p>
+                    <p className="text-[10px] text-[#94A3B8] mt-0.5">Fresh leads</p>
                 </button>
 
-                {/* In Progress */}
+                {/* Contacted */}
                 <button
                     type="button"
                     onClick={() => {
-                        setStatusFilter(statusFilter === 'in_progress' ? 'all' : 'in_progress');
+                        setStatusFilter(statusFilter === 'contacted' ? 'all' : 'contacted');
+                        setDueTodayOnly(false);
+                        setCurrentPage(1);
+                    }}
+                    className={cn(
+                        "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-blue-300",
+                        statusFilter === 'contacted' && !dueTodayOnly ? "border-blue-500 ring-2 ring-blue-500/20 bg-blue-50/30" : "border-[#E2E8F0]"
+                    )}
+                >
+                    <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-blue-800">Contacted</span>
+                        <div className="w-7 h-7 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                            <Phone className="w-3.5 h-3.5" />
+                        </div>
+                    </div>
+                    <p className="text-2xl font-black text-blue-950 mt-1.5">{contactedCount}</p>
+                    <p className="text-[10px] text-blue-700 font-medium mt-0.5">Outreach made</p>
+                </button>
+
+                {/* Follow Up */}
+                <button
+                    type="button"
+                    onClick={() => {
+                        setStatusFilter(statusFilter === 'follow_up' ? 'all' : 'follow_up');
                         setDueTodayOnly(false);
                         setCurrentPage(1);
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-amber-300",
-                        statusFilter === 'in_progress' && !dueTodayOnly ? "border-amber-500 ring-2 ring-amber-500/20 bg-amber-50/30" : "border-[#E2E8F0]"
+                        statusFilter === 'follow_up' && !dueTodayOnly ? "border-amber-500 ring-2 ring-amber-500/20 bg-amber-50/30" : "border-[#E2E8F0]"
                     )}
                 >
                     <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800">In Progress</span>
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800">Follow Up</span>
                         <div className="w-7 h-7 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
                             <Clock className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-amber-950 mt-1.5">{inProgressCount}</p>
-                    <p className="text-[10px] text-amber-700 font-medium mt-0.5">Work started</p>
+                    <p className="text-2xl font-black text-amber-950 mt-1.5">{followUpCount}</p>
+                    <p className="text-[10px] text-amber-700 font-medium mt-0.5">Callbacks pending</p>
                 </button>
 
-                {/* Completed */}
+                {/* Interested */}
                 <button
                     type="button"
                     onClick={() => {
-                        setStatusFilter(statusFilter === 'completed' ? 'all' : 'completed');
+                        setStatusFilter(statusFilter === 'interested' ? 'all' : 'interested');
                         setDueTodayOnly(false);
                         setCurrentPage(1);
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-emerald-300",
-                        statusFilter === 'completed' && !dueTodayOnly ? "border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/30" : "border-[#E2E8F0]"
+                        statusFilter === 'interested' && !dueTodayOnly ? "border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/30" : "border-[#E2E8F0]"
                     )}
                 >
                     <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Completed</span>
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Interested</span>
                         <div className="w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
                             <CheckSquare className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-emerald-950 mt-1.5">{completedCount}</p>
-                    <p className="text-[10px] text-emerald-700 font-medium mt-0.5">Finished items</p>
+                    <p className="text-2xl font-black text-emerald-950 mt-1.5">{interestedCount}</p>
+                    <p className="text-[10px] text-emerald-700 font-medium mt-0.5">High intent</p>
                 </button>
 
-                {/* Total Assigned */}
+                {/* Converted */}
                 <button
                     type="button"
                     onClick={() => {
-                        setStatusFilter('all');
+                        setStatusFilter(statusFilter === 'converted' ? 'all' : 'converted');
                         setDueTodayOnly(false);
                         setCurrentPage(1);
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-purple-300",
-                        statusFilter === 'all' && !dueTodayOnly ? "border-purple-500 ring-2 ring-purple-500/20 bg-purple-50/30" : "border-[#E2E8F0]"
+                        statusFilter === 'converted' && !dueTodayOnly ? "border-purple-500 ring-2 ring-purple-500/20 bg-purple-50/30" : "border-[#E2E8F0]"
                     )}
                 >
                     <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-purple-800">Total Assigned</span>
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-purple-800">Converted</span>
                         <div className="w-7 h-7 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
                             <Shield className="w-3.5 h-3.5" />
                         </div>
                     </div>
-                    <p className="text-2xl font-black text-[#0F172A] mt-1.5">{totalAssignedCount}</p>
-                    <p className="text-[10px] text-[#94A3B8] mt-0.5">From admin team</p>
+                    <p className="text-2xl font-black text-purple-950 mt-1.5">{convertedCount}</p>
+                    <p className="text-[10px] text-purple-700 font-medium mt-0.5">Customers 🎉</p>
                 </button>
 
                 {/* Due Today */}
@@ -342,7 +462,7 @@ export default function SalesTasks() {
                         </div>
                     </div>
                     <p className="text-2xl font-black text-rose-950 mt-1.5">{dueTodayCount}</p>
-                    <p className="text-[10px] text-rose-600 font-semibold mt-0.5">Requires action</p>
+                    <p className="text-[10px] text-rose-600 font-semibold mt-0.5">Tasks due today</p>
                 </button>
             </div>
 
@@ -358,7 +478,6 @@ export default function SalesTasks() {
                 </div>
             )}
 
-            {}
             <div className="bg-white border border-[#E2E8F0] rounded-2xl p-3.5 shadow-xs">
                 <div className="flex flex-wrap items-center gap-2">
                     <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -377,11 +496,13 @@ export default function SalesTasks() {
                         onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                     >
-                        <option value="all">All Statuses ({industryScopedTasks.length})</option>
-                        <option value="pending">Pending ({industryScopedTasks.filter((t) => t.status === 'pending').length})</option>
-                        <option value="in_progress">In Progress ({industryScopedTasks.filter((t) => t.status === 'in_progress').length})</option>
-                        <option value="completed">Completed ({industryScopedTasks.filter((t) => t.status === 'completed').length})</option>
-                        <option value="cancelled">Cancelled ({industryScopedTasks.filter((t) => t.status === 'cancelled').length})</option>
+                        <option value="all">All Lead Statuses ({industryScopedTasks.length})</option>
+                        <option value="new">New ({newLeadsCount})</option>
+                        <option value="contacted">Contacted ({contactedCount})</option>
+                        <option value="follow_up">Follow Up ({followUpCount})</option>
+                        <option value="interested">Interested ({interestedCount})</option>
+                        <option value="converted">Converted ({convertedCount})</option>
+                        <option value="not_interested">Not Interested ({industryScopedTasks.filter((t) => t.leadStatus === 'not_interested').length})</option>
                     </select>
 
                     <select
@@ -489,7 +610,7 @@ export default function SalesTasks() {
                 <div className="p-4 border-b border-[#F1F5F9] flex items-center justify-between">
                     <h2 className="text-sm font-bold text-[#0F172A] flex items-center gap-2">
                         <CheckSquare className="w-4 h-4 text-amber-500" />
-                        Task Queue ({filteredTasks.length})
+                        Task Queue ({dedupedTasks.length})
                     </h2>
                 </div>
 
@@ -498,7 +619,7 @@ export default function SalesTasks() {
                         <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-[#F59E0B]" />
                         <p className="text-sm font-semibold">Loading admin assigned tasks…</p>
                     </div>
-                ) : !filteredTasks.length ? (
+                ) : !dedupedTasks.length ? (
                     <div className="p-12 text-center text-[#64748B]">
                         <CheckSquare className="w-8 h-8 text-[#CBD5E1] mx-auto mb-2" />
                         <p className="text-sm font-bold text-[#0F172A]">No tasks found</p>
@@ -510,19 +631,18 @@ export default function SalesTasks() {
                     </div>
                 ) : (
                     <div className="w-full overflow-x-auto">
-                        <table className="w-full table-fixed text-left border-collapse text-sm min-w-[900px]">
+                        <table className="w-full table-fixed text-left border-collapse text-sm min-w-[800px]">
                             <thead>
                                 <tr className="border-b border-[#E2E8F0] bg-slate-50/60 text-[11px] font-bold text-[#64748B] uppercase tracking-wider">
-                                    <th className="py-4 px-5 w-[24%]">Task</th>
-                                    <th className="py-4 px-5 w-[18%]">Name / Business</th>
-                                    <th className="py-4 px-5 w-[18%]">Contact Info</th>
-                                    <th className="py-4 px-5 w-[10%]">Priority</th>
+                                    <th className="py-4 px-5 w-[36%]">Name / Business</th>
+                                    <th className="py-4 px-5 w-[26%]">Contact Info</th>
+                                    <th className="py-4 px-5 w-[11%]">Priority</th>
                                     <th className="py-4 px-5 w-[14%] text-center">Status</th>
-                                    <th className="py-4 px-5 w-[16%] text-right">View Details</th>
+                                    <th className="py-4 px-5 w-[13%] text-right">View Details</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#F1F5F9]">
-                                {pagedTasks.map((task) => {
+                                {pagedGroups.map(({ primaryTask: task, totalTasks }) => {
                                     const isDone = task.status === 'completed';
                                     const prioConf = PRIORITY_BADGES[task.priority] || PRIORITY_BADGES.medium;
                                     const businessName = task.leadBusinessName || 'Lead';
@@ -530,7 +650,7 @@ export default function SalesTasks() {
 
                                     return (
                                         <tr
-                                            key={task.id}
+                                            key={task.leadId || task.id}
                                             className={cn(
                                                 'transition-colors group',
                                                 isDone
@@ -539,25 +659,23 @@ export default function SalesTasks() {
                                             )}
                                         >
                                             <td className="py-5 px-5 align-middle overflow-hidden">
-                                                <div
-                                                    className={cn(
-                                                        'font-semibold text-sm leading-snug truncate',
-                                                        isDone ? 'text-emerald-950' : 'text-[#0F172A]'
-                                                    )}
-                                                    title={task.title}
-                                                >
-                                                    {task.title}
-                                                </div>
-                                            </td>
-
-                                            <td className="py-5 px-5 align-middle overflow-hidden">
                                                 <div className="min-w-0">
-                                                    <span
-                                                        className="block truncate font-semibold text-[#0F172A] text-sm"
-                                                        title={businessName}
-                                                    >
-                                                        {businessName}
-                                                    </span>
+                                                    <div className="flex items-center gap-2 max-w-full">
+                                                        <span
+                                                            className="truncate font-semibold text-[#0F172A] text-sm"
+                                                            title={businessName}
+                                                        >
+                                                            {businessName}
+                                                        </span>
+                                                        {totalTasks > 1 && (
+                                                            <span
+                                                                className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200"
+                                                                title={`${totalTasks} tasks for this lead`}
+                                                            >
+                                                                {totalTasks} Tasks
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                     <span className="block text-[11px] text-[#64748B] truncate mt-1">
                                                         {industry}
                                                         {task.leadAddress
@@ -629,46 +747,40 @@ export default function SalesTasks() {
                                             </td>
 
                                             <td className="py-5 px-5 align-middle">
-                                                <div className="flex flex-col items-center min-w-0 gap-1.5">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setSelectedHistoryTask(task)}
-                                                        className={cn(
-                                                            'inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-md border cursor-pointer hover:shadow-xs transition-all group/badge max-w-full',
-                                                            task.status === 'completed'
-                                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                                                                : task.status === 'in_progress'
-                                                                  ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-                                                                  : task.status === 'cancelled'
-                                                                    ? 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
-                                                                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                                                        )}
-                                                        title="Click to view status history"
-                                                    >
-                                                        {task.status === 'completed' && (
-                                                            <Check className="w-3 h-3 text-emerald-600 shrink-0" />
-                                                        )}
-                                                        {task.status === 'in_progress' && (
-                                                            <Clock className="w-3 h-3 text-amber-600 shrink-0" />
-                                                        )}
-                                                        {task.status === 'cancelled' && (
-                                                            <X className="w-3 h-3 text-rose-600 shrink-0" />
-                                                        )}
-                                                        <span className="capitalize truncate">
-                                                            {task.status.replace('_', ' ')}
-                                                        </span>
-                                                        <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100 shrink-0" />
-                                                    </button>
-                                                    <div
-                                                        className="flex items-center gap-1 text-[10px] text-[#94A3B8] font-medium truncate max-w-full"
-                                                        title="Last updated"
-                                                    >
-                                                        <Clock className="w-2.5 h-2.5 shrink-0" />
-                                                        <span className="truncate">
-                                                            {fmtDate(task.updatedAt || task.completedAt || task.createdAt)}
-                                                        </span>
-                                                    </div>
-                                                </div>
+                                                {(() => {
+                                                    const leadStatKey = String(task.leadStatus || 'new').toLowerCase().trim();
+                                                    const statusConf = getLeadStatusConfig(leadStatKey);
+                                                    return (
+                                                        <div className="flex flex-col items-center min-w-0 gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setSelectedHistoryTask(task)}
+                                                                className={cn(
+                                                                    'inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-md border cursor-pointer hover:shadow-xs transition-all group/badge max-w-full',
+                                                                    statusConf.bg,
+                                                                    statusConf.text,
+                                                                    statusConf.border
+                                                                )}
+                                                                title="Click to view/update lead status timeline"
+                                                            >
+                                                                <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', statusConf.dot)} />
+                                                                <span className="capitalize truncate">
+                                                                    {statusConf.label}
+                                                                </span>
+                                                                <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100 shrink-0" />
+                                                            </button>
+                                                            <div
+                                                                className="flex items-center gap-1 text-[10px] text-[#94A3B8] font-medium truncate max-w-full"
+                                                                title="Last updated"
+                                                            >
+                                                                <Clock className="w-2.5 h-2.5 shrink-0" />
+                                                                <span className="truncate">
+                                                                    {fmtDate(task.updatedAt || task.completedAt || task.createdAt)}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </td>
 
                                             <td className="py-5 px-5 align-middle text-right">
@@ -691,7 +803,7 @@ export default function SalesTasks() {
                     </div>
                 )}
 
-                {filteredTasks.length > 0 && (
+                {dedupedTasks.length > 0 && (
                     <div className="p-3.5 sm:p-4 bg-slate-50/70 border-t border-[#E2E8F0] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-[#64748B]">
                         <p>
                             Showing{' '}
@@ -700,12 +812,12 @@ export default function SalesTasks() {
                             </span>{' '}
                             to{' '}
                             <span className="font-semibold text-[#0F172A]">
-                                {Math.min(safePage * TASKS_PER_PAGE, filteredTasks.length)}
+                                {Math.min(safePage * TASKS_PER_PAGE, dedupedTasks.length)}
                             </span>{' '}
                             of{' '}
-                            <span className="font-semibold text-[#0F172A]">{filteredTasks.length}</span> tasks
+                            <span className="font-semibold text-[#0F172A]">{dedupedTasks.length}</span> leads
                         </p>
-                        {filteredTasks.length > TASKS_PER_PAGE ? (
+                        {dedupedTasks.length > TASKS_PER_PAGE ? (
                             <div className="flex items-center justify-between sm:justify-end gap-2">
                                 <button
                                     type="button"
@@ -737,11 +849,11 @@ export default function SalesTasks() {
                     isOpen={Boolean(selectedHistoryTask)}
                     leadId={selectedHistoryTask.leadId}
                     leadName={selectedHistoryTask.leadBusinessName || selectedHistoryTask.title}
-                    currentStatus={selectedHistoryTask.status || 'pending'}
+                    currentStatus={selectedHistoryTask.leadStatus || 'new'}
                     initialNote={selectedHistoryTask.notes}
                     initialDate={selectedHistoryTask.updatedAt || selectedHistoryTask.createdAt}
                     authorName={(selectedHistoryTask as any).assignedToName || undefined}
-                    readOnly={true}
+                    readOnly={false}
                     onClose={() => setSelectedHistoryTask(null)}
                     onStatusUpdated={async () => {
                         await loadData();

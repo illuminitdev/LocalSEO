@@ -949,12 +949,17 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     const leadId = String(send.lead_id || '').trim();
                     const toEmail = String(send.to_email || '').trim().toLowerCase();
                     let businessName = '';
+                    let assignedAgentId = send.sent_by_user_id || null;
+
                     try {
                         const { rows } = await query(
-                            `SELECT name FROM sales_leads WHERE id::text = $1 LIMIT 1`,
+                            `SELECT name, assigned_to FROM sales_leads WHERE id::text = $1 LIMIT 1`,
                             [leadId]
                         );
-                        businessName = String(rows[0]?.name || '').trim();
+                        if (rows[0]) {
+                            businessName = String(rows[0]?.name || '').trim();
+                            if (rows[0]?.assigned_to) assignedAgentId = rows[0].assigned_to;
+                        }
                     } catch {
                         /* ignore */
                     }
@@ -984,10 +989,38 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     } else {
                         await query(
                             `INSERT INTO full_audit_requests
-                             (lead_id, observation_email_token, business_name, to_email, status, source)
-                             VALUES ($1, $2, $3, $4, 'pending', 'email_cta')`,
-                            [leadId, token, businessName || 'Lead', toEmail]
+                             (lead_id, observation_email_token, business_name, to_email, status, source, assigned_to_user_id)
+                             VALUES ($1, $2, $3, $4, 'pending', 'email_cta', $5)`,
+                            [leadId, token, businessName || 'Lead', toEmail, assignedAgentId]
                         );
+
+                        // 1. Update lead status to interested
+                        await query(
+                            `UPDATE sales_leads SET status = 'interested', updated_at = NOW() WHERE id::text = $1`,
+                            [leadId]
+                        ).catch(() => {});
+
+                        // 2. Log customer audit request activity
+                        await query(
+                            `INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note)
+                             VALUES ($1, $2, 'Customer', 'status_change', 'audit_requested', $3)`,
+                            [leadId, assignedAgentId, `Customer clicked "Request Full Growth Audit" from email CTA`]
+                        ).catch(() => {});
+
+                        // 3. Create urgent task for assigned Sales Agent
+                        if (assignedAgentId) {
+                            await query(
+                                `INSERT INTO lead_tasks (
+                                    lead_id, task_type, title, notes, priority, status, assigned_to_user_id, created_by_role, created_by_name
+                                 ) VALUES ($1, 'follow_up_call', $2, $3, 'urgent', 'pending', $4, 'customer', 'Customer')`,
+                                [
+                                    leadId,
+                                    `Customer Requested Full Audit - Follow up with ${businessName || 'Lead'}`,
+                                    `Customer clicked Request Full Audit in the observation email. Call customer to qualify and gather specific requirements before submitting to Admin.`,
+                                    assignedAgentId
+                                ]
+                            ).catch(() => {});
+                        }
                     }
                     okPage = true;
                 }

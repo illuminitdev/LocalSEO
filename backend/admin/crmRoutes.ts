@@ -131,6 +131,7 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
                 leadSource: meta.source || '',
                 leadIndustry: meta.industry || '',
                 leadAuditId: meta.auditId || null,
+                leadStatus: meta.status || (meta.isCustomer ? 'converted' : 'new'),
                 emailShareStatus: share.emailShareStatus,
                 emailShareSentAt: share.emailShareSentAt,
                 emailShareOpenedAt: share.emailShareOpenedAt,
@@ -1117,6 +1118,10 @@ router.patch('/crm/leads/:id', requireAdmin, async (req: Request, res: Response)
         if (status !== undefined) {
             params.push(status);
             updates.push(`status = $${params.length}`);
+            if (status === 'converted') {
+                updates.push(`is_customer = TRUE`);
+                updates.push(`converted_at = COALESCE(converted_at, NOW())`);
+            }
         }
         if (notes !== undefined) {
             params.push(String(notes || '').trim());

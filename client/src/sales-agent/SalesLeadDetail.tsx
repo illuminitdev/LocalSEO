@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import TaskCompletionModal, { type CrmTaskStatus } from '../shared/TaskCompletionModal';
 import LeadStatusHistoryModal from '../admin/LeadStatusHistoryModal';
+import RequestAuditModal from './RequestAuditModal';
+import AddLeadTaskModal from './AddLeadTaskModal';
 import {
     type SalesUnifiedLead,
     type SalesLeadTask,
@@ -29,7 +31,7 @@ import {
     type SalesTaskStatus,
     fetchSalesLeadCrm,
     updateSalesTask,
-    convertLeadToCustomer,
+    updateSalesLeadStatus,
     confirmAndShareFullAuditEmail,
     confirmAndShareLeadObservationsEmail,
     emailShareStatusLabel,
@@ -37,11 +39,14 @@ import {
     emailShareStatusTimeLines
 } from './salesApi';
 import { cn } from '../shared/utils';
+import { resolveAuditReportUrl } from '../shared/apiConfig';
 import {
     Lightbulb,
     Bot,
     Store,
-    Award
+    Award,
+    BarChart3,
+    Sparkles
 } from 'lucide-react';
 
 type LeadDetailLocationState = {
@@ -61,11 +66,37 @@ export default function SalesLeadDetail() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [msg, setMsg] = useState('');
-    const [converting, setConverting] = useState(false);
     const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
     const [showLeadHistoryModal, setShowLeadHistoryModal] = useState(false);
+    const [showAuditModal, setShowAuditModal] = useState(false);
+    const [showReminderModal, setShowReminderModal] = useState(false);
+    const [updatingLeadStatus, setUpdatingLeadStatus] = useState(false);
     const [sharingAudit, setSharingAudit] = useState(false);
     const [sharingObservations, setSharingObservations] = useState(false);
+
+    const handleUpdateLeadStatus = async (newStatus: string) => {
+        if (!id || updatingLeadStatus) return;
+        setUpdatingLeadStatus(true);
+        setError('');
+        try {
+            await updateSalesLeadStatus(id, { status: newStatus });
+            const statusLabels: Record<string, string> = {
+                new: 'Lead status set to New ⚪',
+                contacted: 'Lead status set to Contacted 🔵',
+                follow_up: 'Lead status set to Follow-Up / Callback 🟡',
+                callback: 'Lead status set to Callback 🟡',
+                interested: 'Lead status set to Interested 🟢',
+                not_interested: 'Lead status set to Not Interested 🔴',
+                converted: 'Lead status set to Converted 🎉'
+            };
+            setMsg(statusLabels[newStatus] || `Lead status updated to ${newStatus}`);
+            await loadLead();
+        } catch (err: any) {
+            setError(err.message || 'Failed to update lead status');
+        } finally {
+            setUpdatingLeadStatus(false);
+        }
+    };
 
     const loadLead = useCallback(async () => {
         if (!id) return;
@@ -130,23 +161,6 @@ export default function SalesLeadDetail() {
             setError(err.message || 'Failed to update task');
         } finally {
             setModalLoading(false);
-        }
-    };
-
-    const handleConvertToCustomer = async () => {
-        if (!id) return;
-        if (!window.confirm(`Convert ${lead?.businessName || 'this lead'} into an active Customer?`)) return;
-
-        setConverting(true);
-        setError('');
-        try {
-            await convertLeadToCustomer(id, 'Converted to Customer from Sales Lead Detail');
-            setMsg('🎉 Lead successfully converted to Customer!');
-            await loadLead();
-        } catch (err: any) {
-            setError(err.message || 'Failed to convert lead');
-        } finally {
-            setConverting(false);
         }
     };
 
@@ -244,34 +258,28 @@ export default function SalesLeadDetail() {
                 </Link>
 
                 <div className="flex items-center gap-2">
-                    {lead.isCustomer ? (
+                    {lead.isCustomer && (
                         <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl border border-emerald-200">
                             <Award className="w-4 h-4 text-emerald-600" />
                             Active Customer
                         </span>
-                    ) : (
-                        <button
-                            type="button"
-                            onClick={handleConvertToCustomer}
-                            disabled={converting}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors disabled:opacity-50"
-                        >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>{converting ? 'Converting...' : 'Convert to Customer'}</span>
-                        </button>
                     )}
 
-                    {lead.reportUrl && (
-                        <a
-                            href={lead.reportUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 text-xs font-bold rounded-xl transition-colors shadow-2xs"
-                        >
-                            <span>View Live SEO Audit</span>
-                            <ArrowUpRight className="w-3.5 h-3.5" />
-                        </a>
-                    )}
+                    {(() => {
+                        const liveUrl = resolveAuditReportUrl(lead.reportUrl || lead.auditId || '');
+                        if (!liveUrl) return null;
+                        return (
+                            <a
+                                href={liveUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 text-xs font-bold rounded-xl transition-colors shadow-2xs"
+                            >
+                                <span>View Live Growth Audit</span>
+                                <ArrowUpRight className="w-3.5 h-3.5" />
+                            </a>
+                        );
+                    })()}
                     {emailShareStatusLabel(lead.observationEmailShareStatus) ? (
                         <div className="flex flex-col items-end gap-0.5">
                             <span
@@ -415,6 +423,83 @@ export default function SalesLeadDetail() {
                             <Phone className="w-3.5 h-3.5 text-[#F59E0B]" />
                             Log Call & Activity
                         </Link>
+                    </div>
+                </div>
+
+                {/* Dedicated Lead Level Status Bar */}
+                <div className="p-4 rounded-2xl bg-slate-900 text-white shadow-xs space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                                Lead Status:
+                            </span>
+                            <span className={cn(
+                                "px-3 py-1 rounded-xl text-xs font-extrabold uppercase tracking-wider border shadow-xs flex items-center gap-1.5",
+                                lead.status === 'converted' ? "bg-purple-500/20 text-purple-300 border-purple-500/40" :
+                                lead.status === 'interested' ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" :
+                                (lead.status === 'follow_up' || lead.status === 'callback') ? "bg-amber-500/20 text-amber-300 border-amber-500/40" :
+                                lead.status === 'contacted' ? "bg-blue-500/20 text-blue-300 border-blue-500/40" :
+                                lead.status === 'not_interested' ? "bg-rose-500/20 text-rose-300 border-rose-500/40" :
+                                "bg-slate-700/50 text-slate-200 border-slate-600"
+                            )}>
+                                <span className={cn(
+                                    "w-2 h-2 rounded-full",
+                                    lead.status === 'converted' ? "bg-purple-400 animate-pulse" :
+                                    lead.status === 'interested' ? "bg-emerald-400 animate-pulse" :
+                                    (lead.status === 'follow_up' || lead.status === 'callback') ? "bg-amber-400" :
+                                    lead.status === 'contacted' ? "bg-blue-400" :
+                                    lead.status === 'not_interested' ? "bg-rose-400" :
+                                    "bg-slate-400"
+                                )} />
+                                {(lead.status || 'new').replace(/_/g, ' ')}
+                            </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowLeadHistoryModal(true)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
+                                title="View status history timeline"
+                            >
+                                <History className="w-3.5 h-3.5 text-amber-400" />
+                                <span>Status Timeline</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Quick 1-Click Status Change Buttons at Lead Level */}
+                    <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                            Change Lead Status (Lead Level):
+                        </p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                            {[
+                                { status: 'new', label: 'New Lead', icon: Sparkles, bg: 'hover:bg-slate-800 border-slate-700 text-slate-300', active: 'bg-slate-800 border-slate-400 text-white ring-2 ring-slate-400/40 shadow-xs' },
+                                { status: 'contacted', label: 'Contacted', icon: Phone, bg: 'hover:bg-blue-950/60 border-blue-900/60 text-blue-300', active: 'bg-blue-900/60 border-blue-400 text-blue-200 ring-2 ring-blue-500/40 shadow-xs' },
+                                { status: 'follow_up', label: 'Follow Up', icon: Clock, bg: 'hover:bg-amber-950/60 border-amber-900/60 text-amber-300', active: 'bg-amber-900/60 border-amber-400 text-amber-200 ring-2 ring-amber-500/40 shadow-xs' },
+                                { status: 'interested', label: 'Interested', icon: CheckCircle2, bg: 'hover:bg-emerald-950/60 border-emerald-900/60 text-emerald-300', active: 'bg-emerald-900/60 border-emerald-400 text-emerald-200 ring-2 ring-emerald-500/40 shadow-xs' },
+                                { status: 'not_interested', label: 'Not Interested', icon: X, bg: 'hover:bg-rose-950/60 border-rose-900/60 text-rose-300', active: 'bg-rose-900/60 border-rose-400 text-rose-200 ring-2 ring-rose-500/40 shadow-xs' },
+                                { status: 'converted', label: 'Converted 🎉', icon: Award, bg: 'hover:bg-purple-950/60 border-purple-900/60 text-purple-300', active: 'bg-purple-900/60 border-purple-400 text-purple-200 ring-2 ring-purple-500/40 shadow-xs' }
+                            ].map((item) => {
+                                const isCurrent = (lead.status || 'new') === item.status;
+                                return (
+                                    <button
+                                        key={item.status}
+                                        type="button"
+                                        disabled={updatingLeadStatus}
+                                        onClick={() => handleUpdateLeadStatus(item.status)}
+                                        className={cn(
+                                            "px-2.5 py-2 rounded-xl text-xs font-bold border transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50",
+                                            isCurrent ? item.active : `bg-slate-800/60 ${item.bg}`
+                                        )}
+                                    >
+                                        <item.icon className="w-3.5 h-3.5 shrink-0" />
+                                        <span className="truncate">{item.label}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
                 </div>
 
@@ -700,7 +785,7 @@ export default function SalesLeadDetail() {
                 <div className="lg:col-span-6 space-y-6">
                     {}
                     <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs">
-                        <div className="flex items-center justify-between mb-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                             <div className="flex items-center gap-2">
                                 <CheckSquare className="w-4 h-4 text-[#F59E0B]" />
                                 <h2 className="text-base font-black text-[#0F172A]">Tasks for this Lead</h2>
@@ -708,22 +793,39 @@ export default function SalesLeadDetail() {
                                     {tasks.length}
                                 </span>
                             </div>
-                            <Link
-                                to={`/sales/reminders?leadId=${encodeURIComponent(id || '')}`}
-                                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0F172A] hover:text-[#D97706] bg-[#F8FAFC] border border-[#E2E8F0] px-3 py-1.5 rounded-xl transition-colors hover:bg-white shadow-2xs"
-                            >
-                                <Bell className="w-3.5 h-3.5 text-[#F59E0B]" />
-                                <span>+ Add Reminder</span>
-                            </Link>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAuditModal(true)}
+                                    className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-xl transition-colors shadow-2xs cursor-pointer"
+                                    title="Request SEO / Developer team to generate Growth Audit"
+                                >
+                                    <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>+ Request Audit (SEO/Dev)</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowReminderModal(true)}
+                                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0F172A] hover:text-[#D97706] bg-[#F8FAFC] border border-[#E2E8F0] px-3 py-1.5 rounded-xl transition-colors hover:bg-white shadow-2xs cursor-pointer"
+                                    title="Add self reminder or scheduled call"
+                                >
+                                    <Bell className="w-3.5 h-3.5 text-[#F59E0B]" />
+                                    <span>+ Add Reminder</span>
+                                </button>
+                            </div>
                         </div>
 
-                        {}
                         {!tasks.length ? (
-                            <p className="text-xs text-[#94A3B8] text-center py-4">No tasks assigned for this lead yet.</p>
+                            <div className="text-center py-6 text-[#94A3B8] border border-dashed border-slate-200 rounded-xl">
+                                <CheckSquare className="w-6 h-6 mx-auto mb-1 text-slate-300" />
+                                <p className="text-xs font-semibold">No tasks assigned for this lead yet.</p>
+                                <p className="text-[11px] text-slate-400 mt-0.5">Use the buttons above to request an audit or add a follow-up reminder.</p>
+                            </div>
                         ) : (
                             <ul className="space-y-2">
                                 {tasks.map((t) => {
                                     const isDone = t.status === 'completed';
+                                    const isDevSeoAssigned = (t as any).assignedToRole === 'developer_seo' || (t as any).assignedToRole === 'developer' || (t as any).assignedToRole === 'seo';
                                     return (
                                         <li
                                             key={t.id}
@@ -737,15 +839,20 @@ export default function SalesLeadDetail() {
                                                     <p className={cn('text-xs font-bold', isDone ? 'text-emerald-950 font-bold' : 'text-[#0F172A]')}>
                                                         {t.title}
                                                     </p>
-                                                    {t.createdByRole === 'admin' ? (
+                                                    {isDevSeoAssigned ? (
+                                                        <span className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider">
+                                                            <BarChart3 className="w-2.5 h-2.5 text-indigo-600" />
+                                                            SEO / Dev Assigned
+                                                        </span>
+                                                    ) : t.createdByRole === 'admin' ? (
                                                         <span className="inline-flex items-center gap-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider">
                                                             <Shield className="w-2.5 h-2.5 text-purple-600" />
                                                             Admin Assigned
                                                         </span>
                                                     ) : (
-                                                        <span className="inline-flex items-center gap-0.5 rounded border border-slate-200 bg-slate-100 text-slate-700 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider">
-                                                            <User className="w-2.5 h-2.5 text-slate-500" />
-                                                            Self Created
+                                                        <span className="inline-flex items-center gap-0.5 rounded border border-amber-200 bg-amber-50 text-amber-800 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider">
+                                                            <Bell className="w-2.5 h-2.5 text-amber-600" />
+                                                            Self Reminder
                                                         </span>
                                                     )}
                                                 </div>
@@ -915,6 +1022,36 @@ export default function SalesLeadDetail() {
                     readOnly={true}
                     onClose={() => setSelectedHistoryTask(null)}
                     onStatusUpdated={async () => {
+                        await loadLead();
+                    }}
+                />
+            )}
+
+            {/* Request Growth Audit Modal (Assigned to Developer / SEO) */}
+            {showAuditModal && id && (
+                <RequestAuditModal
+                    isOpen={showAuditModal}
+                    leadId={id}
+                    leadName={lead?.businessName || 'Lead'}
+                    leadWebsite={lead?.website}
+                    leadPhone={lead?.phone}
+                    onClose={() => setShowAuditModal(false)}
+                    onSuccess={async () => {
+                        setMsg('Growth Audit requested! Task assigned to Developer / SEO Team 🎉');
+                        await loadLead();
+                    }}
+                />
+            )}
+
+            {/* Add Self Reminder / Task Modal */}
+            {showReminderModal && id && (
+                <AddLeadTaskModal
+                    isOpen={showReminderModal}
+                    leadId={id}
+                    leadName={lead?.businessName || 'Lead'}
+                    onClose={() => setShowReminderModal(false)}
+                    onSuccess={async () => {
+                        setMsg('Follow-up reminder saved successfully! 🔔');
                         await loadLead();
                     }}
                 />
