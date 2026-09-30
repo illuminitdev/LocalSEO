@@ -161,22 +161,16 @@ export class AuditWorkerStack extends cdk.Stack {
         );
 
     
-    const dataForSeoLogin =
-      stage === 'prod'
-        ? secretsmanager.Secret.fromSecretNameV2(
-            this,
-            'DataForSeoLogin',
-            'Zappsites/prod/DATAFORSEO_LOGIN'
-          )
-        : null;
-    const dataForSeoPassword =
-      stage === 'prod'
-        ? secretsmanager.Secret.fromSecretNameV2(
-            this,
-            'DataForSeoPassword',
-            'Zappsites/prod/DATAFORSEO_PASSWORD'
-          )
-        : null;
+    const dataForSeoLogin = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      'DataForSeoLogin',
+      'Zappsites/prod/DATAFORSEO_LOGIN'
+    );
+    const dataForSeoPassword = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      'DataForSeoPassword',
+      'Zappsites/prod/DATAFORSEO_PASSWORD'
+    );
 
     geminiSecret.grantRead(workerLambda);
     if (placesSecret) placesSecret.grantRead(workerLambda);
@@ -208,7 +202,7 @@ export class AuditWorkerStack extends cdk.Stack {
 
 
 
-    if (!reuseExistingQueue) {
+    if (!reuseExistingQueue || stage === 'dev') {
       workerLambda.addEventSource(
         new lambdaEventSources.SqsEventSource(this.auditQueue, {
           batchSize: 1,
@@ -227,9 +221,10 @@ export class AuditWorkerStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'SqsTriggerNote', {
-      value: reuseExistingQueue
-        ? 'Event source mapping managed outside CFN (reuse existing Enabled mapping on audit-jobs queue)'
-        : 'Event source mapping created by this stack',
+      value:
+        !reuseExistingQueue || stage === 'dev'
+          ? 'Event source mapping created by this stack'
+          : 'Event source mapping managed outside CFN (reuse existing Enabled mapping on audit-jobs queue)',
     });
 
     cdk.Tags.of(this).add('Project', 'Zappsites');

@@ -5,7 +5,7 @@ import { applyWebsiteChecks } from '../audit/checksWebsite.js';
 import { runLighthouse } from '../audit/lighthouseRunner.js';
 import { captureHomepageScreenshot } from '../audit/homepageScreenshot.js';
 import { fallbackPillarDecks } from '../audit/pillarFixDecks.js';
-import { buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
+import { aeoSpecsFromSearchLines, buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
 import { buildGeoChecklist, applyGeoChecklistToChecks } from '../audit/geoChecklist.js';
 import { computeScore } from '../audit/score.js';
 import { generateAiReport, generateDeepAiReport, ensureNarrativeSections } from '../audit/geminiReport.js';
@@ -18,6 +18,7 @@ import {
   captureMapsScreenshotFromTask,
   captureOrganicLocalPackScreenshot,
   checkAiEngineMentionsMulti,
+  suggestAeoGoogleSearches,
   detectDuplicateListings,
   fetchBacklinksSummary,
   fetchGbpMyBusinessInfo,
@@ -233,7 +234,7 @@ async function mergeGbpFromMapsHit(
     photoUrls,
     photoSource: photoSource || prev.photoSource || null,
     outsideImageUrl,
-    evidence: `Matched Google Maps listing via DataForSEO: ${gbpName || hit.placeId}`,
+    evidence: `Matched Google Maps listing: ${gbpName || hit.placeId}`,
     serviceQuery: prev.serviceQuery || null
   };
 }
@@ -499,9 +500,11 @@ async function enrichFromDataForSeo(audit: any) {
           fetchGbpUpdates({
             placeId: placeId || undefined,
             keyword: placeId ? undefined : String(keyword),
+            fallbackKeyword: [businessName || gbp.gbpName, locationLabel].filter(Boolean).join(' '),
             ...locOpts,
             depth: 10,
-            recentDays: 60
+            recentDays: 60,
+            timeoutMs: 75000
           }),
           fetchGbpReviewsSample({
             placeId: placeId || undefined,
@@ -567,10 +570,12 @@ async function enrichFromDataForSeo(audit: any) {
 
       audit.gbpLookup = {
         ...(audit.gbpLookup || {}),
+        postsOk: updates.ok,
         hasRecentPosts: updates.hasRecentPosts,
         postsEvidence: updates.evidence,
         recentPostAt: updates.recentPostAt,
         postsTotal: updates.totalPosts,
+        reviewsOk: reviews.ok,
         ownerRepliesLikely: reviews.ownerRepliesLikely,
         ownerRepliesEvidence: reviews.evidence,
         reviewReplyRate: reviews.replyRate,
@@ -597,10 +602,12 @@ async function enrichFromDataForSeo(audit: any) {
         hoursEvidence: info.hoursEvidence,
         hasServices: info.hasServices,
         servicesCount: info.servicesCount,
+        infoOk: info.ok,
         hasProducts: info.hasProducts,
         productsEvidence: info.productsEvidence,
         gbpInfoEvidence: info.evidence,
         cid: info.cid || null,
+        qaOk: qa.ok,
         hasQa: qa.hasQa,
         qaEvidence: qa.evidence,
         qaQuestionCount: qa.questionCount,
@@ -778,7 +785,7 @@ async function enrichFromDataForSeo(audit: any) {
       });
       const engines = [
         ['chatgpt', 'ChatGPT'],
-        ['claude', 'Claude (API)'],
+        ['claude', 'Claude'],
         ['gemini', 'Gemini']
       ] as const;
       audit.gbpLookup = {
@@ -802,9 +809,29 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  // AEO Visual: 5
+  // AEO Visual: ChatGPT writes 4 searches for this service, then Google screenshots those searches.
+  let aeoSpecs = buildAeoQuerySpecs(audit);
   try {
-    const aeoSpecs = buildAeoQuerySpecs(audit);
+    const lines = await suggestAeoGoogleSearches({
+      service,
+      city: locationLabel || String(business.city || business.searchAreaLabel || '').trim(),
+      businessName
+    });
+    aeoSpecs =
+      aeoSpecsFromSearchLines(lines, {
+        business: {
+          businessName,
+          service,
+          serviceLabel: service,
+          city: locationLabel || String(business.city || '').trim(),
+          searchAreaLabel: locationLabel || String(business.searchAreaLabel || '').trim()
+        }
+      }) || aeoSpecs;
+  } catch (aeoQueryErr) {
+    console.warn('[auditWorker] AEO search questions failed:', (aeoQueryErr as Error).message);
+  }
+  audit.aeoQuerySpecs = aeoSpecs;
+  try {
     const aeoShots: SerpScreenshotResult[] = [];
     const batchSize = 2;
     for (let i = 0; i < aeoSpecs.length; i += batchSize) {
@@ -826,7 +853,7 @@ async function enrichFromDataForSeo(audit: any) {
   } catch (aeoShotErr) {
     const err = aeoShotErr as Error;
     console.warn('[auditWorker] AEO SERP screenshots failed:', err.message);
-    audit.aeoSerpScreenshots = buildAeoQuerySpecs(audit).map((spec) => ({
+    audit.aeoSerpScreenshots = aeoSpecs.map((spec) => ({
       query: spec.query,
       skipped: true,
       reason: err.message || 'AEO screenshot failed',
@@ -904,7 +931,9 @@ export const main: SQSHandler = async (event: SQSEvent) => {
                 gbpName: String(audit.gbpLookup.gbpName || ''),
                 address: String(audit.gbpLookup.address || ''),
                 websiteOnGbp: String(audit.gbpLookup.websiteOnGbp || ''),
-                primaryTypeDisplayName: String(audit.gbpLookup.primaryTypeDisplayName || '')
+                primaryTypeDisplayName: String(audit.gbpLookup.primaryTypeDisplayName || ''),
+                hasBacklinks: audit.gbpLookup.hasBacklinks === true ? true : audit.gbpLookup.hasBacklinks === false ? false : null,
+                backlinksEvidence: String(audit.gbpLookup.backlinksEvidence || '')
               }
             : null,
           napPhonePass: napPhone === 'pass' ? true : napPhone === 'fail' ? false : null,
@@ -992,7 +1021,7 @@ export const main: SQSHandler = async (event: SQSEvent) => {
               ...aiLocal,
               // Always keep factual Maps ranking 
               mapsRanking: deckLocal.mapsRanking || aiLocal.mapsRanking,
-              coreChecklist: aiLocal.coreChecklist || deckLocal.coreChecklist,
+              coreChecklist: deckLocal.coreChecklist || aiLocal.coreChecklist,
               inconsistencies: Array.isArray(aiLocal.inconsistencies) && aiLocal.inconsistencies.length
                 ? aiLocal.inconsistencies
                 : deckLocal.inconsistencies
@@ -1000,13 +1029,17 @@ export const main: SQSHandler = async (event: SQSEvent) => {
             aeoFixes: {
               ...deckAeo,
               ...aiAeo,
+              visualIntro: deckAeo.visualIntro,
               aeoChecklist: deckAeo.aeoChecklist || aiAeo.aeoChecklist || null,
-              
               queryCards: measuredAeoCards
             },
             geoFixes: {
               ...deckGeo,
               ...aiGeo,
+              visualIntro: deckGeo.visualIntro,
+              verifyHint: deckGeo.verifyHint,
+              goalLine: deckGeo.goalLine,
+              geoChecklist: deckGeo.geoChecklist || aiGeo.geoChecklist || null,
               queryCards:
                 Array.isArray(aiGeo.queryCards) &&
                 aiGeo.queryCards.some((c: any) => Array.isArray(c?.mapsResults) && c.mapsResults.length)

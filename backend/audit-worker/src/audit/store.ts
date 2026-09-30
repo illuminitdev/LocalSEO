@@ -345,10 +345,14 @@ export function publicReportView(audit: AuditRecord | null) {
           reviewsLookRecent: (audit.gbpLookup as Record<string, unknown>).reviewsLookRecent ?? null,
           reviewRecencyEvidence:
             (audit.gbpLookup as Record<string, unknown>).reviewRecencyEvidence || null,
+          postsOk: (audit.gbpLookup as Record<string, unknown>).postsOk ?? null,
           hasRecentPosts: (audit.gbpLookup as Record<string, unknown>).hasRecentPosts ?? null,
           postsEvidence: (audit.gbpLookup as Record<string, unknown>).postsEvidence || null,
           recentPostAt: (audit.gbpLookup as Record<string, unknown>).recentPostAt || null,
           postsTotal: (audit.gbpLookup as Record<string, unknown>).postsTotal ?? null,
+          reviewsOk: (audit.gbpLookup as Record<string, unknown>).reviewsOk ?? null,
+          qaOk: (audit.gbpLookup as Record<string, unknown>).qaOk ?? null,
+          infoOk: (audit.gbpLookup as Record<string, unknown>).infoOk ?? null,
           hasQa: (audit.gbpLookup as Record<string, unknown>).hasQa ?? null,
           qaEvidence: (audit.gbpLookup as Record<string, unknown>).qaEvidence || null,
           hasHours: (audit.gbpLookup as Record<string, unknown>).hasHours ?? null,
@@ -425,7 +429,9 @@ export function publicReportView(audit: AuditRecord | null) {
               .slice(0, 9)
               .map((row: any) => ({
                 engine: row?.engine || null,
-                label: row?.label || null,
+                label: String(row?.label || '')
+                  .replace(/\s*\((?:scraped ui|api)\)/gi, '')
+                  .trim() || null,
                 prompt: row?.prompt || null,
                 promptKey:
                   row?.promptKey === 'near' ||
@@ -441,7 +447,12 @@ export function publicReportView(audit: AuditRecord | null) {
                   : [],
                 answerExcerpt: String(row?.answerExcerpt || '').slice(0, 2000),
                 skipped: Boolean(row?.skipped),
-                reason: row?.reason || null,
+                reason: String(row?.reason || '')
+                  .replace(
+                    /[^.!?\n]*(?:dataforseo|llm scraper|consumer ui|top 5|llm responses|scraped ui|claude \(api\))[^.!?\n]*[.!?]?/gi,
+                    ''
+                  )
+                  .trim() || null,
                 capturedAt: row?.capturedAt || null
               }));
           })(),

@@ -37,7 +37,7 @@ const STAGE_CONFIG: Record<
     dbSecretName: 'ZappsitesDatabase-dev/credentials',
     
     clientOrigin: process.env.CLIENT_ORIGIN || 'https://test.zappsites.com',
-    zappSitesOrigin: process.env.ZAPP_SITES_ORIGIN || 'https://staging.zappsites.com',
+    zappSitesOrigin: process.env.ZAPP_SITES_ORIGIN_DEV || 'https://staging.zappsites.com',
   },
   prod: {
     vpcId: 'vpc-00cb8c1fb56aa6e38',
@@ -88,17 +88,25 @@ export class LocalSeoApiStack extends cdk.Stack {
     
     
     
+    const prodZappSitesApi = 'https://dvj0p5k5d0.execute-api.us-east-1.amazonaws.com';
     const zappSitesApiBase =
-      (stage === 'prod'
-        ? process.env.ZAPP_SITES_API_BASE_PROD
-        : process.env.ZAPP_SITES_API_BASE_DEV) ||
-      process.env.ZAPP_SITES_API_BASE ||
-      'https://dvj0p5k5d0.execute-api.us-east-1.amazonaws.com';
-    const auditOpsSecretStage = zappSitesApiBase.includes('dvj0p5k5d0') ? 'prod' : stage;
+      stage === 'prod'
+        ? process.env.ZAPP_SITES_API_BASE_PROD ||
+          process.env.ZAPP_SITES_API_BASE ||
+          prodZappSitesApi
+        : String(process.env.ZAPP_SITES_API_BASE_DEV || '').trim();
+    if (stage === 'dev' && !zappSitesApiBase) {
+      throw new Error(
+        'Set ZAPP_SITES_API_BASE_DEV in backend/.env before deploying LocalSeoApi-dev. Do not fall back to the prod ZappSites API.'
+      );
+    }
+    if (stage === 'dev' && zappSitesApiBase.includes('dvj0p5k5d0')) {
+      throw new Error('ZAPP_SITES_API_BASE_DEV must not be the prod ZappSites API (dvj0p5k5d0).');
+    }
     const auditOpsSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
       'AuditOpsSecret',
-      `Zappsites/${auditOpsSecretStage}/AUDIT_OPS_SECRET`
+      `Zappsites/${stage}/AUDIT_OPS_SECRET`
     );
 
     const backendRoot = path.join(__dirname, '..', '..');

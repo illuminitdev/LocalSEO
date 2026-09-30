@@ -63,10 +63,16 @@ export function applyWebsiteChecks(
   const bodyLower = () => String(home?.bodyText || '').toLowerCase();
 
   if (!home) {
+    const statuses = (Array.isArray(crawl?.errors) ? crawl.errors : [])
+      .map((e) => Number(e?.status))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const evidence = statuses.includes(403)
+      ? 'Website returned 403 and could not be read'
+      : 'Website could not be fetched';
     for (const c of checks) {
       if (c.source === 'crawl' || c.source === 'lighthouse') {
         c.status = 'fail';
-        c.evidence = 'Website could not be fetched';
+        c.evidence = evidence;
       }
     }
     return checks;

@@ -141,18 +141,18 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
         : fromCheck(checkByLabel(checks, /products added|products\b/i));
 
   const qaSe: StatusEv =
-    gbp.hasQa === true
+    gbp.qaOk === true && gbp.hasQa === true
       ? { status: 'yes', evidence: gbp.qaEvidence || 'GBP Q&A present' }
-      : gbp.hasQa === false
+      : gbp.qaOk === true && gbp.hasQa === false
         ? { status: 'no', evidence: gbp.qaEvidence || 'No GBP Q&A found' }
-        : { status: 'no', evidence: 'No GBP Q&A found' };
+        : { status: 'unknown', evidence: gbp.qaEvidence || 'GBP Q&A not measured' };
 
   const reviewRecencySe: StatusEv =
-    gbp.reviewsLookRecent === true
+    gbp.reviewsOk === true && gbp.reviewsLookRecent === true
       ? { status: 'yes', evidence: gbp.reviewRecencyEvidence || 'Recent reviews found' }
-      : gbp.reviewsLookRecent === false
+      : gbp.reviewsOk === true && gbp.reviewsLookRecent === false
         ? { status: 'no', evidence: gbp.reviewRecencyEvidence || 'No recent reviews' }
-        : { status: 'no', evidence: 'No recent reviews found' };
+        : { status: 'unknown', evidence: gbp.reviewRecencyEvidence || 'Review recency not measured' };
 
   const photosCheck = fromCheck(
     checkByLabel(checks, /photos updated|photos\b/i) || checkById(checks, 'gbp_13')
@@ -162,34 +162,34 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
       ? photosCheck
       : fromBool(hasPhotos ? true : listed ? false : null, 'Photos present on listing', 'No photos detected', 'Photos not confirmed');
 
-  const reviewResponseCheck = fromCheck(
-    checkByLabel(checks, /responding to reviews|review replies/i) || checkById(checks, 'gbp_11')
-  );
-  let reviewResponseSe: StatusEv = reviewResponseCheck;
-  if (typeof gbp.reviewReplyRate === 'number' && Number.isFinite(gbp.reviewReplyRate)) {
+  let reviewResponseSe: StatusEv;
+  if (gbp.reviewsOk === true && typeof gbp.reviewReplyRate === 'number' && Number.isFinite(gbp.reviewReplyRate)) {
     const rate = Number(gbp.reviewReplyRate);
     reviewResponseSe =
       rate >= 50
         ? { status: 'yes', evidence: gbp.ownerRepliesEvidence || `Owner reply rate ${rate}%` }
         : { status: 'no', evidence: gbp.ownerRepliesEvidence || `Owner reply rate ${rate}%` };
-  } else if (gbp.ownerRepliesLikely === true) {
+  } else if (gbp.reviewsOk === true && gbp.ownerRepliesLikely === true) {
     reviewResponseSe = { status: 'yes', evidence: gbp.ownerRepliesEvidence || 'Owner replies detected' };
-  } else if (gbp.ownerRepliesLikely === false) {
+  } else if (gbp.reviewsOk === true && gbp.ownerRepliesLikely === false) {
     reviewResponseSe = { status: 'no', evidence: gbp.ownerRepliesEvidence || 'Few or no owner replies' };
   } else {
-    reviewResponseSe = { status: 'no', evidence: 'Few or no owner replies found' };
+    reviewResponseSe = {
+      status: 'unknown',
+      evidence: gbp.ownerRepliesEvidence || 'Review replies not measured'
+    };
   }
 
-  const postsCheck = fromCheck(
-    checkByLabel(checks, /posts being used|google posts/i) || checkById(checks, 'gbp_18')
-  );
-  let postsSe: StatusEv = postsCheck;
-  if (gbp.hasRecentPosts === true) {
+  const postsTotal = typeof gbp.postsTotal === 'number' ? gbp.postsTotal : null;
+  let postsSe: StatusEv;
+  if (gbp.postsOk === true && postsTotal != null && postsTotal > 0) {
+    postsSe = { status: 'yes', evidence: gbp.postsEvidence || `${postsTotal} Google Post(s) found` };
+  } else if (gbp.postsOk === true && postsTotal === 0) {
+    postsSe = { status: 'no', evidence: gbp.postsEvidence || 'No Google Posts found on listing' };
+  } else if (gbp.postsOk !== true && gbp.hasRecentPosts === true) {
     postsSe = { status: 'yes', evidence: gbp.postsEvidence || 'Recent Google Posts found' };
-  } else if (gbp.hasRecentPosts === false) {
-    postsSe = { status: 'no', evidence: gbp.postsEvidence || 'No recent Google Posts' };
   } else {
-    postsSe = { status: 'no', evidence: 'No recent Google Posts found' };
+    postsSe = { status: 'unknown', evidence: gbp.postsEvidence || 'Google Posts not measured' };
   }
 
   const svcChecks = checks.filter((c) => c.section === 'service_pages');
@@ -197,8 +197,21 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   if (svcChecks.length) {
     const pass = svcChecks.filter((c) => c.status === 'pass').length;
     const fail = svcChecks.filter((c) => c.status === 'fail').length;
+    const fetchOnly =
+      fail > 0 &&
+      svcChecks
+        .filter((c) => c.status === 'fail')
+        .every((c) =>
+          /could not be fetched|could not be read|returned 403/i.test(String(c.evidence || ''))
+        );
+    const fetchEvidence = svcChecks.find((c) => c.status === 'fail')?.evidence;
     if (pass > 0 && fail === 0) servicePagesSe = { status: 'yes', evidence: `${pass} service page(s) found` };
-    else if (fail > 0) servicePagesSe = { status: 'no', evidence: `${fail} service page(s) missing` };
+    else if (fetchOnly) {
+      servicePagesSe = {
+        status: 'no',
+        evidence: String(fetchEvidence || 'Website could not be fetched')
+      };
+    } else if (fail > 0) servicePagesSe = { status: 'no', evidence: `${fail} service page(s) missing` };
     else servicePagesSe = { status: 'unknown', evidence: 'Service pages inconclusive' };
   }
 
@@ -233,7 +246,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   if (mapsVis.status === 'unknown') {
     if (inPack) mapsSe = { status: 'yes', evidence: `Maps / pack #${localRank.position}` };
     else if (localRank.query) mapsSe = { status: 'no', evidence: `Not in top results for “${localRank.query}”` };
-    else mapsSe = { status: 'no', evidence: 'Not found in Google Maps results for the local query' };
+    else mapsSe = { status: 'unknown', evidence: 'Maps visibility not measured' };
   }
 
   const packVis = fromCheck(checkById(checks, 'maps_vis_1') || checkByLabel(checks, /local pack visibility/i));
@@ -241,7 +254,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   if (packVis.status === 'unknown') {
     if (inPack) packSe = { status: 'yes', evidence: `In Local Pack at #${localRank.position}` };
     else if (localRank.query) packSe = { status: 'no', evidence: `Not in Local Pack for “${localRank.query}”` };
-    else packSe = { status: 'no', evidence: 'Not found in Local Pack for the local query' };
+    else packSe = { status: 'unknown', evidence: 'Local Pack visibility not measured' };
   }
 
   const top = Array.isArray(localRank.topResults) ? localRank.topResults : [];
@@ -249,14 +262,14 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
     ? { status: 'yes', evidence: `${top.length} competitors captured for measured query` }
     : localRank.query
       ? { status: 'no', evidence: `No competitors returned for “${localRank.query}”` }
-      : { status: 'no', evidence: 'No competitors returned for the local query' };
+      : { status: 'unknown', evidence: 'Competitor comparison not measured' };
 
   const serviceVisSe: StatusEv = localRank.query
     ? {
         status: inPack ? 'yes' : 'no',
         evidence: `Measured query: “${localRank.query}”${inPack ? ` (#${localRank.position})` : ' — not in results'}`
       }
-    : { status: 'no', evidence: 'Not found for the local service query' };
+    : { status: 'unknown', evidence: 'Service-level visibility not measured' };
 
   const ratingSe: StatusEv =
     gbp.rating != null

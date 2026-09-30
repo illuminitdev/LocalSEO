@@ -40,10 +40,9 @@ export function buildGeoFixes(audit) {
 
   return {
     title: 'GEO: Google + AI visibility',
-    visualIntro:
-      'ChatGPT and Gemini are measured via DataForSEO LLM Scraper (consumer UI). Claude is measured via the LLM Responses API. Re-check with the same prompts on each product if you want to compare.',
-    goalLine: `Win Local Pack for “${measuredQuery}” and get cited in ChatGPT / Claude / Gemini for ${geoPromptSummary}.`,
-    verifyHint: `ChatGPT / Gemini = scraped UI Top 5; Claude = API + web search. Re-check yourself: search Google for “${measuredQuery}”, then ask ChatGPT / Claude / Gemini: ${geoPromptSummary}.`,
+    visualIntro: 'What ChatGPT, Claude, and Gemini say when someone asks about this business and its services.',
+    goalLine: `Win Local Pack for “${measuredQuery}” and get cited in ChatGPT, Claude, and Gemini for ${geoPromptSummary}.`,
+    verifyHint: `Search Google for “${measuredQuery}”, then ask ChatGPT, Claude, and Gemini: ${geoPromptSummary}.`,
     queryCards: [
       {
         query: measuredQuery,
