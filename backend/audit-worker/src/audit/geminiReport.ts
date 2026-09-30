@@ -35,6 +35,100 @@ function stripEmojiText(text) {
     .trim();
 }
 
+const VENDOR_SENTENCE =
+  /[^.!?\n]*(?:dataforseo|llm scraper|consumer ui|top 5|llm responses|scraped ui|claude \(api\))[^.!?\n]*[.!?]?/gi;
+
+function scrubVendorText(text) {
+  if (!text || typeof text !== 'string') return text;
+  if (text.startsWith('data:image/')) return text;
+  return text
+    .replace(VENDOR_SENTENCE, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.;:])/g, '$1')
+    .trim();
+}
+
+function scrubVendorDeep(value) {
+  if (value == null) return value;
+  if (typeof value === 'string') return scrubVendorText(value);
+  if (Array.isArray(value)) return value.map((item) => scrubVendorDeep(item));
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) out[key] = scrubVendorDeep(item);
+    return out;
+  }
+  return value;
+}
+
+function buildMeasuredRoadmap(audit) {
+  const business = audit?.business || {};
+  const name = String(business.businessName || 'this business').trim();
+  const service = String(business.serviceLabel || business.service || 'the service').trim();
+  const city = String(business.searchAreaLabel || business.city || 'the local area').trim();
+  const failed = (audit?.checklist?.checks || []).filter((c) => c?.status === 'fail');
+  const pick = (pred, fallbacks) => {
+    const items = failed
+      .filter(pred)
+      .slice(0, 4)
+      .map((c) => `Fix “${c.label}” for ${name}: ${String(c.evidence || 'measured gap on this audit').slice(0, 140)}`);
+    for (const fallback of fallbacks) {
+      if (items.length >= 4) break;
+      items.push(fallback);
+    }
+    return items.slice(0, 4);
+  };
+  return [
+    {
+      month: 1,
+      title: 'Foundation',
+      items: pick(
+        (c) => /gbp|nap|web|onpage|conv|maps|local/i.test(`${c.section || ''} ${c.id || ''}`),
+        [
+          `Make the Google listing for ${name} match the website name, phone, and address in ${city}`,
+          `Publish Google Posts about ${service} in ${city} and reply to recent reviews`,
+          `Add a ${service} page that names the areas covered around ${city}`,
+          `Check photos, hours, and services on the Google listing for ${name}`
+        ]
+      )
+    },
+    {
+      month: 2,
+      title: 'Answers',
+      items: pick(
+        (c) => /^(aeo_|ai_)/.test(String(c.id || '')) || /faq/i.test(String(c.label || '')),
+        [
+          `Add short FAQ answers for the ${service} questions customers ask in ${city}`,
+          `Put the service and the city in the first paragraph of the ${service} page`,
+          `Mark the FAQ with FAQ schema on the ${service} pages`,
+          `Add a clear quote or contact path on the ${service} page`
+        ]
+      )
+    },
+    {
+      month: 3,
+      title: 'AI visibility',
+      items: pick(
+        (c) => String(c.id || '').startsWith('geo_'),
+        [
+          `Use the same name, ${service}, and ${city} on the website, Google listing, and citations`,
+          `Ask ChatGPT, Claude, and Gemini who they recommend for ${service} in ${city} and record whether ${name} is named`,
+          `Add ${name} to local directories that already list ${service} businesses in ${city}`,
+          `Publish one page that answers a real ${service} problem for customers in ${city}`
+        ]
+      )
+    }
+  ];
+}
+
+function roadmapIsWeak(roadmap) {
+  if (!Array.isArray(roadmap) || roadmap.length < 3) return true;
+  return roadmap.some(
+    (month) =>
+      !Array.isArray(month?.items) ||
+      month.items.filter((item) => String(item || '').trim().length > 24).length < 3
+  );
+}
+
 function stripEmojiDeep(value) {
   if (value == null) return value;
   if (typeof value === 'string') return stripEmojiText(value);
@@ -456,6 +550,17 @@ EMOJI RULE (must follow):
 - Never use emojis, emoticons, or pictographs in any JSON string field (headlines, summaries, titles, details, decks, roadmap, next steps).
 - Use plain professional text only. Icons are added by the report UI separately.
 
+SOURCE RULE (must follow):
+- Never name DataForSEO, scrapers, consumer UI, Top 5, LLM Responses, scraped UI, or any API used to measure results.
+- Say ChatGPT, Claude, and Gemini only. Do not say how the answers were collected.
+
+ROADMAP RULES (must follow):
+- Exactly 3 months, and each month has 4 concrete tasks for this business.
+- Month 1 fixes Google Business Profile and website gaps taken from the failed checks.
+- Month 2 adds the FAQ and on-page answers the failed AEO checks need.
+- Month 3 makes ChatGPT, Claude, and Gemini more likely to name this business for this service and city.
+- Name the business, the service, and the city in the tasks. Do not write generic tasks such as "monitor rankings" or "improve SEO".
+
 CRITICAL PHONE RULES (must follow):
 - Measured crawl phones: ${JSON.stringify(sitePhones)}
 - Phone NAP card: ${JSON.stringify(phoneCard || null)}
@@ -541,7 +646,7 @@ Return ONLY JSON:
   "geoFixes": {
     "title": "GEO: Google + AI visibility",
     "visualIntro": "one sentence about the MEASURED Google Local Pack query from localRank — tell the user to re-type that exact query to verify; do NOT invent other queries or AI Overview",
-    "verifyHint": "ChatGPT/Gemini = scraped UI; Claude = API. Cross-check the measured Google query and the same GEO prompts",
+    "verifyHint": "Search the measured Google query, then ask ChatGPT, Claude, and Gemini the same local questions.",
     "queryCards": [
       {
         "query": "MUST equal gbpLookup.localRank.query exactly",
@@ -648,7 +753,7 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
           : fallbacks.geoFixes.actions
       };
 
-      return stripEmojiDeep(
+      return scrubVendorDeep(stripEmojiDeep(
         ensureNarrativeSections(
           {
             generatedAt: new Date().toISOString(),
@@ -663,7 +768,7 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
             criticalIssues: Array.isArray(parsed.criticalIssues) ? parsed.criticalIssues.slice(0, 4) : [],
             findings: Array.isArray(parsed.findings) ? parsed.findings.slice(0, 6) : [],
             priorityFixes: Array.isArray(parsed.priorityFixes) ? parsed.priorityFixes.slice(0, 3) : [],
-            roadmap: Array.isArray(parsed.roadmap) ? parsed.roadmap.slice(0, 3) : [],
+            roadmap: roadmapIsWeak(parsed.roadmap) ? buildMeasuredRoadmap(audit) : parsed.roadmap.slice(0, 3),
             localSeoFixes,
             aeoFixes,
             geoFixes,
@@ -674,6 +779,7 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
           },
           audit
         )
+      )
       );
     } catch (err) {
       lastError = err;

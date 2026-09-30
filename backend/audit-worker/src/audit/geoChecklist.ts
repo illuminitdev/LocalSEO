@@ -69,9 +69,10 @@ function recommendedLikely(text: string, mentioned: boolean): boolean {
   );
 }
 
-function statusFromBool(v: boolean | null | undefined, yesEv: string, noEv: string, _unkEv?: string) {
+function statusFromBool(v: boolean | null | undefined, yesEv: string, noEv: string, unkEv?: string) {
   if (v === true) return { status: 'yes' as const, evidence: yesEv };
-  return { status: 'no' as const, evidence: noEv };
+  if (v === false) return { status: 'no' as const, evidence: noEv };
+  return { status: 'no' as const, evidence: unkEv || noEv || 'Not confirmed' };
 }
 
 function enginesForPromptKey(engines: AiEngine[], key: 'near' | 'best' | 'near_me'): AiEngine[] {
@@ -299,6 +300,8 @@ export function buildGeoChecklist(opts: {
     address?: string;
     websiteOnGbp?: string;
     primaryTypeDisplayName?: string;
+    hasBacklinks?: boolean | null;
+    backlinksEvidence?: string;
   } | null;
   napPhonePass?: boolean | null;
   napAddressPass?: boolean | null;
@@ -370,7 +373,7 @@ export function buildGeoChecklist(opts: {
         anyMeasured ? anyMentioned : null,
         `Mentioned in ${engines.filter((e) => e.mentioned).map((e) => e.label || e.engine).join(' / ') || 'AI'}`,
         'Not mentioned in measured ChatGPT / Claude / Gemini answers',
-        'AI answers not measured yet'
+        'ChatGPT, Claude, and Gemini answers were not confirmed for this business'
       );
       return item('geo_ai_1', 'Business mentioned in AI answers', s.status, s.evidence);
     })(),
@@ -379,7 +382,7 @@ export function buildGeoChecklist(opts: {
         anyMeasured ? recommended : null,
         'AI answer uses recommendation language with the brand',
         'No clear recommendation language with the brand in measured answers',
-        'AI answers not measured yet'
+        'ChatGPT, Claude, and Gemini answers were not confirmed for this business'
       );
       return item('geo_ai_2', 'Business recommended for local searches', s.status, s.evidence);
     })(),
@@ -391,7 +394,9 @@ export function buildGeoChecklist(opts: {
           ? `Service/location signals present for “${nearSlice[0]?.prompt || query || `${service} near ${city}`}”`
           : 'Service + location not visible in measured AI / Maps',
         'Not visible for service + location in measured AI / Maps',
-        'Service or location not provided'
+        service && city
+          ? 'Service + location visibility was not confirmed for this business'
+          : 'Service or location not provided'
       );
       return item('geo_ai_3', 'Service + location visibility', s.status, s.evidence);
     })(),
@@ -401,7 +406,7 @@ export function buildGeoChecklist(opts: {
           'geo_ai_4',
           '"Best" query visibility',
           'no',
-          'Not mentioned for “best” style local query'
+          '“Best” style prompt was not confirmed for this business'
         );
       }
       const s = statusFromBool(
@@ -410,7 +415,7 @@ export function buildGeoChecklist(opts: {
           ? `Mentioned for “${bestSlice[0]?.prompt || 'best …'}”`
           : 'Visible for measured “best” style query',
         `Not mentioned for “${bestSlice[0]?.prompt || 'best …'}”`,
-        '“Best” style prompt not measured yet'
+        '“Best” style prompt was not confirmed for this business'
       );
       return item('geo_ai_4', '"Best" query visibility', s.status, s.evidence);
     })(),
@@ -422,7 +427,7 @@ export function buildGeoChecklist(opts: {
           'geo_ai_5',
           '"Near me" query visibility',
           'no',
-          'Not found for near-me style local query'
+          'Near-me visibility was not confirmed for this business'
         );
       }
       const s = statusFromBool(
@@ -433,24 +438,32 @@ export function buildGeoChecklist(opts: {
             ? `Mentioned for “${slice[0]?.prompt || 'near me'}”`
             : 'Mentioned for near-me style prompt',
         `Not mentioned for “${slice[0]?.prompt || 'near me'}”`,
-        'Near-me visibility not measured'
+        'Near-me visibility was not confirmed for this business'
       );
       return item('geo_ai_5', '"Near me" query visibility', s.status, s.evidence);
     })(),
     item(
       'geo_ai_6',
       'Problem/solution query visibility',
-      /how to|faq|what (causes|to do)|get rid of/i.test(corpus) ? 'yes' : 'no',
-      /how to|faq|what (causes|to do)|get rid of/i.test(corpus)
-        ? 'Problem/solution or FAQ language found on site'
-        : 'No problem/solution or FAQ language found on site'
+      !corpus.trim()
+        ? 'no'
+        : /how to|faq|what (causes|to do)|get rid of/i.test(corpus)
+          ? 'yes'
+          : 'no',
+      !corpus.trim()
+        ? 'Site content was not confirmed for problem/solution questions'
+        : /how to|faq|what (causes|to do)|get rid of/i.test(corpus)
+          ? 'Problem/solution or FAQ language found on site'
+          : 'No problem/solution or FAQ language found on site'
     ),
     (() => {
       const s = statusFromBool(
         anyMeasured && competitors.length ? Boolean(competitorInAi) : null,
         'Competitors from Local Pack also appear in AI answers',
         'Local Pack competitors not detected in AI answer text',
-        competitors.length ? 'AI answers not measured yet' : 'No Local Pack competitors to compare'
+        competitors.length
+          ? 'ChatGPT, Claude, and Gemini answers were not confirmed for this business'
+          : 'No Local Pack competitors to compare'
       );
       return item('geo_ai_7', 'Competitor mentions in AI answers', s.status, s.evidence);
     })(),
@@ -462,7 +475,7 @@ export function buildGeoChecklist(opts: {
         ? 'Brand mentioned, but AI answers do not provide a stable ranked order'
         : anyMeasured
           ? 'Brand not mentioned — no recommendation position'
-          : 'No clear AI recommendation position found'
+          : 'Recommendation order was not confirmed for this business'
     )
   ];
 
@@ -473,7 +486,7 @@ export function buildGeoChecklist(opts: {
         ? false
         : opts.gbp?.listedOnMaps && opts.gbp?.gbpName
           ? true
-          : false;
+          : null;
 
   const entity: GeoChecklistItem[] = [
     item(
@@ -566,7 +579,14 @@ export function buildGeoChecklist(opts: {
       'no',
       'No local publication mentions found'
     ),
-    item('geo_ext_5', 'Local backlinks', 'no', 'No local backlinks confirmed'),
+    item(
+      'geo_ext_5',
+      'Local backlinks',
+      opts.gbp?.hasBacklinks === true ? 'yes' : 'no',
+      opts.gbp?.hasBacklinks === true
+        ? opts.gbp.backlinksEvidence || 'Referring links found'
+        : opts.gbp?.backlinksEvidence || 'No local backlinks confirmed'
+    ),
     item(
       'geo_ext_6',
       'Brand mentions',

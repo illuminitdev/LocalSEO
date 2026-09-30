@@ -80,7 +80,11 @@ function applyLocalLocation(
   task.location_code = 2826;
 }
 
-async function downloadImageAsDataUrl(url: string, maxBytes = 1_200_000): Promise<string | null> {
+async function downloadImageAsDataUrl(
+  url: string,
+  maxBytes = 1_200_000,
+  maxBase64 = 900_000
+): Promise<string | null> {
   const u = String(url || '').trim();
   if (!u) return null;
   if (u.startsWith('data:image/')) return u;
@@ -95,8 +99,7 @@ async function downloadImageAsDataUrl(url: string, maxBytes = 1_200_000): Promis
     const ct = (res.headers.get('content-type') || 'image/jpeg').split(';')[0];
     if (!/^image\//i.test(ct)) return null;
     const b64 = buf.toString('base64');
-    
-    if (b64.length > 900_000) return null;
+    if (b64.length > maxBase64) return null;
     return `data:${ct};base64,${b64}`;
   } catch {
     return null;
@@ -111,54 +114,58 @@ export async function captureSerpScreenshotDataUrl(
   const id = String(taskId || '').trim();
   if (!id || !requireDataForSeoConfigured()) return null;
 
-  const controller = new AbortController();
-  const timeoutMs = opts?.timeoutMs ?? 45000;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch('https://api.dataforseo.com/v3/serp/screenshot', {
-      method: 'POST',
-      headers: {
-        Authorization: basicAuthHeader(),
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify([
-        {
-          task_id: id,
-          browser_preset: 'desktop',
-          browser_screen_width: 1280,
-          browser_screen_height: 900,
-          page: 1
-        }
-      ]),
-      signal: controller.signal
-    });
-    const data: any = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      console.warn('[dataForSeo] screenshot HTTP', res.status, data?.status_message || '');
-      return null;
-    }
-    const taskResult = Array.isArray(data?.tasks) ? data.tasks[0] : null;
-    if (!taskResult || taskResult.status_code !== 20000) {
+  const timeoutMs = opts?.timeoutMs ?? 70000;
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      const res = await fetch('https://api.dataforseo.com/v3/serp/screenshot', {
+        method: 'POST',
+        headers: {
+          Authorization: basicAuthHeader(),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify([
+          {
+            task_id: id,
+            browser_preset: 'desktop',
+            browser_screen_width: 1280,
+            browser_screen_height: 900,
+            page: 1
+          }
+        ]),
+        signal: controller.signal
+      });
+      const data: any = await res.json().catch(() => ({}));
+      const taskResult = Array.isArray(data?.tasks) ? data.tasks[0] : null;
+      const code = Number(taskResult?.status_code);
+      if (res.ok && code === 20000) {
+        const imageUrl =
+          taskResult?.result?.[0]?.items?.[0]?.image ||
+          taskResult?.result?.[0]?.items?.[0]?.image_url ||
+          null;
+        if (!imageUrl) return null;
+        const image = await downloadImageAsDataUrl(String(imageUrl), 4_000_000, 4_000_000);
+        if (image) return image;
+      }
       console.warn(
         '[dataForSeo] screenshot status:',
-        taskResult?.status_code,
-        taskResult?.status_message || data?.status_message
+        code || res.status,
+        taskResult?.status_message || data?.status_message || ''
       );
-      return null;
+      const retryable = !res.ok || code === 40601 || code === 40602 || code === 50000 || !code;
+      if (!retryable) return null;
+    } catch (err: any) {
+      const msg = err?.name === 'AbortError' ? 'timeout' : err?.message;
+      console.warn('[dataForSeo] screenshot failed:', msg);
+    } finally {
+      clearTimeout(timer);
     }
-    const imageUrl =
-      taskResult?.result?.[0]?.items?.[0]?.image ||
-      taskResult?.result?.[0]?.items?.[0]?.image_url ||
-      null;
-    if (!imageUrl) return null;
-    return downloadImageAsDataUrl(String(imageUrl));
-  } catch (err: any) {
-    const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
-    console.warn('[dataForSeo] screenshot failed:', msg);
-    return null;
-  } finally {
-    clearTimeout(timer);
+    if (Date.now() - started + 4000 >= timeoutMs) break;
+    await sleepMs(4000);
   }
+  return null;
 }
 
 async function cropSerpScreenshotToLocalPack(
@@ -385,7 +392,7 @@ export async function captureOrganicLocalPackScreenshot(opts: {
     return {
       query,
       skipped: true,
-      reason: 'DataForSEO not configured',
+      reason: 'Search results not measured',
       capturedAt: new Date().toISOString()
     };
   }
@@ -491,7 +498,7 @@ export async function captureAeoSerpScreenshot(opts: {
     return {
       query,
       skipped: true,
-      reason: 'DataForSEO not configured',
+      reason: 'Search results not measured',
       capturedAt: new Date().toISOString()
     };
   }
@@ -507,75 +514,62 @@ export async function captureAeoSerpScreenshot(opts: {
   };
   applyLocalLocation(task, opts);
 
-  const controller = new AbortController();
-  const timeoutMs = opts.timeoutMs ?? 60000;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
-      method: 'POST',
-      headers: {
-        Authorization: basicAuthHeader(),
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify([task]),
-      signal: controller.signal
-    });
-    const data: any = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return {
-        query,
-        skipped: true,
-        reason: `organic HTTP ${res.status}`,
-        capturedAt: new Date().toISOString()
-      };
-    }
-    const taskResult = Array.isArray(data?.tasks) ? data.tasks[0] : null;
-    if (!taskResult || taskResult.status_code !== 20000) {
-      return {
-        query,
-        skipped: true,
-        reason: String(taskResult?.status_message || 'organic task failed'),
-        capturedAt: new Date().toISOString()
-      };
-    }
-    const taskId = String(taskResult.id || '').trim();
-    if (!taskId) {
-      return {
-        query,
-        skipped: true,
-        reason: 'No organic task id',
-        capturedAt: new Date().toISOString()
-      };
-    }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await sleepMs(2500);
+    const controller = new AbortController();
+    const timeoutMs = opts.timeoutMs ?? 45000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
+        method: 'POST',
+        headers: {
+          Authorization: basicAuthHeader(),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify([task]),
+        signal: controller.signal
+      });
+      const data: any = await res.json().catch(() => ({}));
+      const taskResult = Array.isArray(data?.tasks) ? data.tasks[0] : null;
+      const taskId = String(taskResult?.id || '').trim();
+      if (!res.ok || !taskResult || taskResult.status_code !== 20000 || !taskId) {
+        console.warn(
+          '[dataForSeo] AEO search attempt',
+          attempt + 1,
+          taskResult?.status_code || res.status,
+          taskResult?.status_message || ''
+        );
+        continue;
+      }
 
-    let dataUrl = await captureSerpScreenshotDataUrl(taskId, { timeoutMs: 55000 });
-    if (!dataUrl) {
-      return {
-        query,
-        skipped: true,
-        reason: 'Screenshot unavailable',
-        capturedAt: new Date().toISOString()
-      };
+      let dataUrl = await captureSerpScreenshotDataUrl(taskId, { timeoutMs: 50000 });
+      if (!dataUrl) {
+        console.warn('[dataForSeo] AEO screenshot attempt', attempt + 1, 'no image');
+        continue;
+      }
+      dataUrl = await cropSerpScreenshotToLocalPack(dataUrl, null, {
+        maxHeight: 720,
+        minHeight: 420,
+        quality: 58,
+        maxBase64Len: 1_200_000
+      });
+      if (dataUrl.startsWith('data:image/')) {
+        return { dataUrl, query, capturedAt: new Date().toISOString() };
+      }
+    } catch (err: any) {
+      const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
+      console.warn('[dataForSeo] AEO screenshot attempt', attempt + 1, msg || 'failed');
+    } finally {
+      clearTimeout(timer);
     }
-    // Compact top strip for AEO Visual grid (no local-pack-specific crop)
-    dataUrl = await cropSerpScreenshotToLocalPack(dataUrl, null, {
-      maxHeight: 520,
-      minHeight: 420,
-      quality: 52,
-      maxBase64Len: 380_000
-    });
-    return { dataUrl, query, capturedAt: new Date().toISOString() };
-  } catch (err: any) {
-    const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
-    return {
-      query,
-      skipped: true,
-      reason: msg || 'AEO SERP screenshot failed',
-      capturedAt: new Date().toISOString()
-    };
-  } finally {
-    clearTimeout(timer);
   }
+
+  return {
+    query,
+    skipped: true,
+    reason: 'Google results could not be captured',
+    capturedAt: new Date().toISOString()
+  };
 }
 
 export async function captureMapsScreenshotFromTask(
@@ -824,10 +818,10 @@ export function buildDeepLocalRank(opts: {
     topResults,
     evidence:
       position != null
-        ? `DataForSEO Maps: appears at #${position} for “${opts.query}”`
+        ? `Appears at #${position} on Google Maps for “${opts.query}”`
         : topResults.length
-          ? `DataForSEO Maps: not in top ${topResults.length} for “${opts.query}”`
-          : `DataForSEO Maps: not in results for “${opts.query}”`,
+          ? `Not in the top ${topResults.length} on Google Maps for “${opts.query}”`
+          : `Not in Google Maps results for “${opts.query}”`,
     source: 'dataforseo-maps'
   };
 }
@@ -1180,6 +1174,23 @@ function parseDfsTimestamp(raw: unknown): Date | null {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
+async function postAndPollBusinessData(
+  postPath: string,
+  getPath: string,
+  task: Record<string, unknown>,
+  timeoutMs: number
+): Promise<any | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const taskId = await postBusinessDataTask(postPath, task);
+    const ready = taskId
+      ? await pollBusinessDataTaskGet(getPath, taskId, { timeoutMs })
+      : null;
+    if (ready) return ready;
+    if (attempt < 2) await sleepMs(2000);
+  }
+  return null;
+}
+
 export type GbpUpdatesResult = {
   ok: boolean;
   totalPosts: number;
@@ -1200,18 +1211,19 @@ export async function fetchGbpUpdates(opts: {
   depth?: number;
   timeoutMs?: number;
   recentDays?: number;
+  fallbackKeyword?: string;
 }): Promise<GbpUpdatesResult> {
   const unknown = (ev: string): GbpUpdatesResult => ({
     ok: false,
     totalPosts: 0,
     recentPosts: 0,
     recentPostAt: null,
-    hasRecentPosts: false,
-    evidence: ev || 'No recent Google Posts found'
+    hasRecentPosts: null,
+    evidence: ev
   });
-  if (!requireDataForSeoConfigured()) return unknown('No recent Google Posts found');
+  if (!requireDataForSeoConfigured()) return unknown('Google Posts not measured');
   const keyword = businessDataKeyword(opts);
-  if (!keyword) return unknown('No recent Google Posts found');
+  if (!keyword) return unknown('Missing place_id or keyword — Google Posts not measured');
 
   try {
     const task: Record<string, unknown> = {
@@ -1220,51 +1232,58 @@ export async function fetchGbpUpdates(opts: {
       depth: opts.depth ?? 10
     };
     applyBusinessDataLocation(task, opts);
-    const taskId = await postBusinessDataTask(
-      'business_data/google/my_business_updates/task_post',
-      task
-    );
-    if (!taskId) return unknown('No recent Google Posts found');
-
-    const ready = await pollBusinessDataTaskGet(
-      'business_data/google/my_business_updates/task_get',
-      taskId,
-      { timeoutMs: opts.timeoutMs ?? 60000 }
-    );
-    if (!ready) return unknown('No recent Google Posts found');
+    const loadUpdates = (taskKeyword: string) => {
+      const nextTask: Record<string, unknown> = { ...task, keyword: taskKeyword };
+      return postAndPollBusinessData(
+        'business_data/google/my_business_updates/task_post',
+        'business_data/google/my_business_updates/task_get',
+        nextTask,
+        opts.timeoutMs ?? 75000
+      );
+    };
+    let ready = await loadUpdates(keyword);
+    const fallbackKeyword = String(opts.fallbackKeyword || '').trim();
+    if (!ready && fallbackKeyword && fallbackKeyword !== keyword) {
+      ready = await loadUpdates(fallbackKeyword);
+    }
+    if (!ready) return unknown('Google Posts fetch failed or timed out — not measured');
 
     const result = Array.isArray(ready.result) ? ready.result[0] : ready.result;
-    const items = Array.isArray(result?.items) ? result.items : [];
+    const rawItems = Array.isArray(result?.items) ? result.items : [];
+    const items = rawItems.filter((it: any) => {
+      const t = String(it?.type || '').toLowerCase();
+      if (!t) return true;
+      return /update|post/.test(t);
+    });
     const recentDays = opts.recentDays ?? 60;
     const cutoff = Date.now() - recentDays * 24 * 60 * 60 * 1000;
     let recentPosts = 0;
     let newest: Date | null = null;
     for (const it of items) {
-      const ts = parseDfsTimestamp(it?.timestamp) || parseDfsTimestamp(it?.post_date);
+      const ts =
+        parseDfsTimestamp(it?.timestamp) ||
+        parseDfsTimestamp(it?.post_date) ||
+        parseDfsTimestamp(it?.datetime) ||
+        parseDfsTimestamp(it?.time);
       if (ts && (!newest || ts > newest)) newest = ts;
       if (ts && ts.getTime() >= cutoff) recentPosts += 1;
-      else if (!ts && items.length) {
-        
-      }
     }
     const totalPosts = items.length;
     const hasRecentPosts = recentPosts > 0;
     const recentPostAt = newest ? newest.toISOString() : null;
+    const newestBit = recentPostAt ? ` (newest ${recentPostAt.slice(0, 10)})` : '';
     return {
       ok: true,
       totalPosts,
       recentPosts,
       recentPostAt,
       hasRecentPosts,
-      evidence: hasRecentPosts
-        ? `${recentPosts} Google Post(s) in last ${recentDays} days` +
-          (recentPostAt ? ` (newest ${recentPostAt.slice(0, 10)})` : '')
-        : totalPosts
-          ? `No posts in last ${recentDays} days (${totalPosts} older post(s) found)`
-          : 'No Google Posts found on listing'
+      evidence: totalPosts
+        ? `${totalPosts} Google Post(s) found, ${recentPosts} in last ${recentDays} days${newestBit}`
+        : 'No Google Posts found on listing'
     };
   } catch (err) {
-    return unknown('No recent Google Posts found');
+    return unknown(`Google Posts fetch failed — not measured (${(err as Error)?.message || 'error'})`);
   }
 }
 
@@ -1298,17 +1317,17 @@ export async function fetchGbpReviewsSample(opts: {
     ok: false,
     reviewCount: 0,
     repliedCount: 0,
-    replyRate: 0,
-    ownerRepliesLikely: false,
-    reviewsLookRecent: false,
+    replyRate: null,
+    ownerRepliesLikely: null,
+    reviewsLookRecent: null,
     newestReviewAt: null,
-    evidence: ev || 'Few or no owner replies found',
-    recencyEvidence: ev || 'No recent reviews found',
+    evidence: ev,
+    recencyEvidence: ev,
     samples: []
   });
-  if (!requireDataForSeoConfigured()) return unknown('Few or no owner replies found');
+  if (!requireDataForSeoConfigured()) return unknown('Reviews not measured');
   const keyword = businessDataKeyword(opts);
-  if (!keyword) return unknown('Few or no owner replies found');
+  if (!keyword) return unknown('Missing place_id or keyword — reviews not measured');
 
   try {
     const task: Record<string, unknown> = {
@@ -1318,15 +1337,13 @@ export async function fetchGbpReviewsSample(opts: {
       sort_by: 'newest'
     };
     applyBusinessDataLocation(task, opts);
-    const taskId = await postBusinessDataTask('business_data/google/reviews/task_post', task);
-    if (!taskId) return unknown('Few or no owner replies found');
-
-    const ready = await pollBusinessDataTaskGet(
+    const ready = await postAndPollBusinessData(
+      'business_data/google/reviews/task_post',
       'business_data/google/reviews/task_get',
-      taskId,
-      { timeoutMs: opts.timeoutMs ?? 60000 }
+      task,
+      opts.timeoutMs ?? 60000
     );
-    if (!ready) return unknown('Few or no owner replies found');
+    if (!ready) return unknown('Google reviews fetch failed or timed out — not measured');
 
     const result = Array.isArray(ready.result) ? ready.result[0] : ready.result;
     const items = Array.isArray(result?.items) ? result.items : [];
@@ -1340,8 +1357,8 @@ export async function fetchGbpReviewsSample(opts: {
         ownerRepliesLikely: false,
         reviewsLookRecent: false,
         newestReviewAt: null,
-        evidence: 'Few or no owner replies found',
-        recencyEvidence: 'No recent reviews found',
+        evidence: 'No reviews returned for this listing',
+        recencyEvidence: 'No reviews returned for this listing',
         samples: []
       };
     }
@@ -1403,7 +1420,7 @@ export async function fetchGbpReviewsSample(opts: {
       samples: samples.slice(0, 10)
     };
   } catch (err) {
-    return unknown('Few or no owner replies found');
+    return unknown(`Google reviews fetch failed — not measured (${(err as Error)?.message || 'error'})`);
   }
 }
 
@@ -1446,7 +1463,7 @@ export async function fetchGbpMyBusinessInfo(opts: {
     cid: null,
     evidence: ev
   });
-  if (!requireDataForSeoConfigured()) return unknown('DataForSEO not configured');
+  if (!requireDataForSeoConfigured()) return unknown('Business profile details not measured');
   const keyword = businessDataKeyword(opts);
   if (!keyword) return unknown('Missing business keyword / place_id');
 
@@ -1551,12 +1568,12 @@ export async function fetchGbpQa(opts: {
     ok: false,
     questionCount: 0,
     answeredCount: 0,
-    hasQa: false,
-    evidence: ev || 'No GBP Q&A found'
+    hasQa: null,
+    evidence: ev
   });
-  if (!requireDataForSeoConfigured()) return unknown('No GBP Q&A found');
+  if (!requireDataForSeoConfigured()) return unknown('GBP Q&A not measured');
   const keyword = businessDataKeyword(opts);
-  if (!keyword) return unknown('No GBP Q&A found');
+  if (!keyword) return unknown('Missing place_id or keyword — GBP Q&A not measured');
 
   try {
     const task: Record<string, unknown> = {
@@ -1578,9 +1595,11 @@ export async function fetchGbpQa(opts: {
       }
     );
     const data: any = await res.json().catch(() => ({}));
-    if (!res.ok) return unknown('No GBP Q&A found');
+    if (!res.ok) return unknown(`GBP Q&A request failed (HTTP ${res.status}) — not measured`);
     const t = Array.isArray(data?.tasks) ? data.tasks[0] : null;
-    if (!t || t.status_code !== 20000) return unknown('No GBP Q&A found');
+    if (!t || t.status_code !== 20000) {
+      return unknown(`GBP Q&A task failed — not measured (${String(t?.status_message || 'no result')})`);
+    }
     const result = Array.isArray(t.result) ? t.result[0] : t.result;
     const withAnswers = Array.isArray(result?.items) ? result.items : [];
     const without = Array.isArray(result?.items_without_answers) ? result.items_without_answers : [];
@@ -1597,7 +1616,7 @@ export async function fetchGbpQa(opts: {
           : 'No GBP Q&A found'
     };
   } catch (err) {
-    return unknown('No GBP Q&A found');
+    return unknown(`GBP Q&A fetch failed — not measured (${(err as Error)?.message || 'error'})`);
   }
 }
 
@@ -1620,7 +1639,7 @@ export async function fetchBacklinksSummary(opts: {
     hasBacklinks: null,
     evidence: ev
   });
-  if (!requireDataForSeoConfigured()) return unknown('DataForSEO not configured');
+  if (!requireDataForSeoConfigured()) return unknown('Not measured');
   let target = String(opts.website || '')
     .trim()
     .replace(/^https?:\/\//i, '')
@@ -1689,7 +1708,7 @@ export async function fetchOrganicLocalRank(opts: {
     position: null,
     evidence: ev
   });
-  if (!requireDataForSeoConfigured()) return unknown('DataForSEO not configured');
+  if (!requireDataForSeoConfigured()) return unknown('Not measured');
   const keyword = String(opts.keyword || '').trim();
   if (!keyword) return unknown('Missing organic keyword');
 
@@ -1784,7 +1803,7 @@ export async function measureGeoGridVisibility(opts: {
     inGrid: null,
     evidence: ev
   });
-  if (!requireDataForSeoConfigured()) return unknown('DataForSEO not configured');
+  if (!requireDataForSeoConfigured()) return unknown('Not measured');
   const keyword = String(opts.keyword || '').trim();
   if (!keyword || !Number.isFinite(opts.lat) || !Number.isFinite(opts.lng)) {
     return unknown('Missing keyword or coordinates for geo-grid');
@@ -1907,7 +1926,7 @@ async function fetchLlmResponseLive(opts: {
   timeoutMs?: number;
   withTemperature?: boolean;
 }): Promise<{ text: string; error?: string }> {
-  if (!requireDataForSeoConfigured()) return { text: '', error: 'DataForSEO not configured' };
+  if (!requireDataForSeoConfigured()) return { text: '', error: 'Not measured' };
   const prompt = String(opts.prompt || '').trim().slice(0, 500);
   if (!prompt) return { text: '', error: 'Empty prompt' };
 
@@ -1951,22 +1970,22 @@ async function fetchLlmResponseLive(opts: {
     });
     const data: any = await res.json().catch(() => ({}));
     if (!res.ok) {
-      return { text: '', error: `HTTP ${res.status} ${data?.status_message || ''}`.trim() };
+      return { text: '', error: 'No answer returned' };
     }
     const taskResult = Array.isArray(data?.tasks) ? data.tasks[0] : null;
     if (!taskResult || taskResult.status_code !== 20000) {
       return {
         text: '',
-        error: String(taskResult?.status_message || data?.status_message || 'LLM task failed')
+        error: 'No answer returned'
       };
     }
     const result = Array.isArray(taskResult.result) ? taskResult.result[0] : taskResult.result;
     const text = extractLlmAnswerText(result);
-    if (!text) return { text: '', error: 'Empty LLM answer' };
+    if (!text) return { text: '', error: 'No answer returned' };
     return { text };
   } catch (err: any) {
     const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
-    return { text: '', error: msg || 'LLM request failed' };
+    return { text: '', error: 'No answer returned' };
   } finally {
     clearTimeout(timer);
   }
@@ -1992,7 +2011,7 @@ async function fetchLlmWithModelFallback(opts: {
     });
     if (last.text) return last;
     const err = last.error || '';
-    // Rate limit — wait once and retry same model
+    
     if (/rate_limit/i.test(err)) {
       await sleepMs(4000);
       last = await fetchLlmResponseLive({
@@ -2093,7 +2112,7 @@ function formatTop5List(names: string[]): string {
     .join('\n');
 }
 
-/** Prefer ChatGPT local-business cards; else numbered/bullet lines from scraped markdown. */
+
 function normalizeScraperTop5(result: any): { top5: string; fullText: string } {
   const fullText = collectScraperMarkdown(result);
   const fromCards = extractLocalBusinessTitlesFromScraper(result);
@@ -2105,7 +2124,7 @@ function normalizeScraperTop5(result: any): { top5: string; fullText: string } {
     return { top5: formatTop5List(fromLines), fullText };
   }
   if (fullText) {
-    // Last resort: keep a short prose excerpt (not a fake ranked list).
+    
     return { top5: sanitizeLlmExcerpt(fullText, 420), fullText };
   }
   return { top5: '', fullText: '' };
@@ -2117,7 +2136,7 @@ async function fetchLlmScraperLive(opts: {
   timeoutMs?: number;
 }): Promise<{ text: string; top5: string; error?: string }> {
   if (!requireDataForSeoConfigured()) {
-    return { text: '', top5: '', error: 'DataForSEO not configured' };
+    return { text: '', top5: '', error: 'Not measured' };
   }
   const keyword = String(opts.keyword || '').trim().slice(0, 2000);
   if (!keyword) return { text: '', top5: '', error: 'Empty keyword' };
@@ -2162,7 +2181,7 @@ async function fetchLlmScraperLive(opts: {
       return {
         text: '',
         top5: '',
-        error: String(taskResult?.status_message || data?.status_message || 'LLM scraper task failed')
+        error: 'No answer returned'
       };
     }
     const result = Array.isArray(taskResult.result) ? taskResult.result[0] : taskResult.result;
@@ -2173,10 +2192,112 @@ async function fetchLlmScraperLive(opts: {
     return { text: fullText || top5, top5: top5 || sanitizeLlmExcerpt(fullText, 420) };
   } catch (err: any) {
     const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
-    return { text: '', top5: '', error: msg || 'LLM scraper request failed' };
+    return { text: '', top5: '', error: 'No answer returned' };
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchChatGptPlain(opts: {
+  modelName: string;
+  systemMessage: string;
+  userPrompt: string;
+  timeoutMs?: number;
+  webSearch?: boolean;
+}): Promise<{ text: string; retryModel: boolean }> {
+  if (!requireDataForSeoConfigured()) return { text: '', retryModel: false };
+  const userPrompt = String(opts.userPrompt || '').trim().slice(0, 500);
+  const systemMessage = String(opts.systemMessage || '').trim().slice(0, 500);
+  if (!userPrompt || !systemMessage) return { text: '', retryModel: false };
+
+  const task: Record<string, unknown> = {
+    user_prompt: userPrompt,
+    system_message: systemMessage,
+    model_name: opts.modelName,
+    max_output_tokens: 220,
+    temperature: 0.3,
+    web_search: opts.webSearch === true
+  };
+
+  const controller = new AbortController();
+  const timeoutMs = opts.timeoutMs ?? 45000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch('https://api.dataforseo.com/v3/ai_optimization/chat_gpt/llm_responses/live', {
+      method: 'POST',
+      headers: {
+        Authorization: basicAuthHeader(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify([task]),
+      signal: controller.signal
+    });
+    const data: any = await res.json().catch(() => ({}));
+    const taskResult = Array.isArray(data?.tasks) ? data.tasks[0] : null;
+    const statusMessage = String(taskResult?.status_message || data?.status_message || '');
+    if (!res.ok || !taskResult || taskResult.status_code !== 20000) {
+      console.warn('[dataForSeo] AEO search questions failed:', statusMessage || 'no answer');
+      return {
+        text: '',
+        retryModel: /model_name/i.test(statusMessage)
+      };
+    }
+    const result = Array.isArray(taskResult.result) ? taskResult.result[0] : taskResult.result;
+    return { text: extractLlmAnswerText(result), retryModel: false };
+  } catch (err: any) {
+    const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
+    console.warn('[dataForSeo] AEO search questions failed:', msg || 'no answer');
+    return { text: '', retryModel: false };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Four Google search lines for AEO Visual. */
+export async function suggestAeoGoogleSearches(opts: {
+  service: string;
+  city: string;
+  businessName: string;
+}): Promise<string[]> {
+  const service = String(opts.service || '').replace(/\s+/g, ' ').trim();
+  const city = String(opts.city || '').replace(/\s+/g, ' ').trim();
+  const businessName = String(opts.businessName || '').replace(/\s+/g, ' ').trim();
+  if (!service || !city || !businessName || !requireDataForSeoConfigured()) return [];
+
+  const systemMessage =
+    'Return exactly 4 Google search lines and nothing else. No numbering or commentary. ' +
+    'Lines 1 and 2 are questions a local customer would type about this service in this city. Do not put the business name in lines 1 or 2. ' +
+    'Lines 3 and 4 include the business name, the service, and the city. ' +
+    'Make the questions specific to this service, such as cost, how to choose, repair, install, or whether this company is a good choice. ' +
+    'Each line under 90 characters.';
+  const userPrompt = `Service: ${service.slice(0, 80)}. City: ${city.slice(0, 60)}. Business: ${businessName.slice(0, 80)}.`;
+  const models = ['gpt-4.1-mini', 'gpt-4o-mini'];
+
+  for (const modelName of models) {
+    const first = await fetchChatGptPlain({
+      modelName,
+      systemMessage,
+      userPrompt,
+      webSearch: false
+    });
+    let text = first.text;
+    if (!text) {
+      const second = await fetchChatGptPlain({
+        modelName,
+        systemMessage,
+        userPrompt,
+        webSearch: true
+      });
+      text = second.text;
+    }
+    const lines = String(text || '')
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^(\d+[\).\]]\s*|[-*•]\s*)/, '').replace(/^["']|["']$/g, '').trim())
+      .filter((line) => line && !/^(here|these|sure|google searches)\b/i.test(line));
+    if (lines.length >= 4) return lines.slice(0, 4);
+    if (!first.retryModel && text) break;
+  }
+  return [];
 }
 
 export async function checkAiEngineMentions(opts: {
@@ -2214,17 +2335,19 @@ export async function checkAiEngineMentions(opts: {
   if (!prompt || !businessName) {
     return [
       skippedRow('chatgpt', 'ChatGPT', 'Missing prompt or business name'),
-      skippedRow('claude', 'Claude (API)', 'Missing prompt or business name'),
+      skippedRow('claude', 'Claude', 'Missing prompt or business name'),
       skippedRow('gemini', 'Gemini', 'Missing prompt or business name')
     ];
   }
 
-  // ChatGPT + Gemini: consumer UI via LLM Scraper. Claude: LLM Responses API only.
-  const [gpt, claude] = await Promise.all([
-    fetchLlmScraperLive({
+  const [gpt, claude, gemini] = await Promise.all([
+    fetchLlmWithModelFallback({
       platform: 'chat_gpt',
-      keyword: prompt,
-      timeoutMs: 90000
+      models: ['gpt-4.1-mini', 'gpt-4o-mini'],
+      prompt,
+      city,
+      address,
+      timeoutMs: 60000
     }),
     fetchLlmWithModelFallback({
       platform: 'claude',
@@ -2233,13 +2356,16 @@ export async function checkAiEngineMentions(opts: {
       city,
       address,
       timeoutMs: 60000
+    }),
+    fetchLlmWithModelFallback({
+      platform: 'gemini',
+      models: ['gemini-2.5-flash', 'gemini-2.0-flash'],
+      prompt,
+      city,
+      address,
+      timeoutMs: 60000
     })
   ]);
-  const gemini = await fetchLlmScraperLive({
-    platform: 'gemini',
-    keyword: prompt,
-    timeoutMs: 90000
-  });
 
   const toScraperRow = (
     engine: AiEngineCheckResult['engine'],
@@ -2289,9 +2415,9 @@ export async function checkAiEngineMentions(opts: {
   };
 
   return [
-    toScraperRow('chatgpt', 'ChatGPT', gpt),
-    toApiRow('claude', 'Claude (API)', claude),
-    toScraperRow('gemini', 'Gemini', gemini)
+    toApiRow('chatgpt', 'ChatGPT', gpt),
+    toApiRow('claude', 'Claude', claude),
+    toApiRow('gemini', 'Gemini', gemini)
   ];
 }
 
