@@ -26,6 +26,7 @@ import { clearToken, setMustChangePassword } from '../auth/auth';
 import GroundingModal from '../dashboard/GroundingModal';
 import PlacesMap from '../../shared/PlacesMap';
 import { useEntitlements } from '../../shared/EntitlementsContext';
+import { useToast } from '../../shared/Toast';
 import { FEATURE_LABELS, PLANS, type FeatureKey } from '../../shared/planCatalog';
 import {
     DEFAULT_BRAND_PRIMARY,
@@ -102,6 +103,7 @@ function SectionCard({
 
 export default function Account() {
     const navigate = useNavigate();
+    const { show } = useToast();
     const [params] = useSearchParams();
     const forcePassword = params.get('forcePassword') === '1';
     const [loadError, setLoadError] = useState('');
@@ -133,7 +135,6 @@ export default function Account() {
     const [email, setEmail] = useState('');
     const [avatarUrl, setAvatarUrl] = useState('');
     const [avatarBusy, setAvatarBusy] = useState(false);
-    const [profileMsg, setProfileMsg] = useState('');
     const [profileErr, setProfileErr] = useState('');
     const [profileBusy, setProfileBusy] = useState(false);
     const [showPasswordForm, setShowPasswordForm] = useState(forcePassword);
@@ -146,14 +147,12 @@ export default function Account() {
         tradeType: '',
         serviceArea: ''
     });
-    const [orgMsg, setOrgMsg] = useState('');
     const [orgErr, setOrgErr] = useState('');
     const [orgBusy, setOrgBusy] = useState(false);
 
     const [logoUrl, setLogoUrl] = useState('');
     const [brandPrimary, setBrandPrimary] = useState(DEFAULT_BRAND_PRIMARY);
     const [brandSecondary, setBrandSecondary] = useState(DEFAULT_BRAND_SECONDARY);
-    const [brandMsg, setBrandMsg] = useState('');
     const [brandErr, setBrandErr] = useState('');
     const [brandBusy, setBrandBusy] = useState(false);
     const [logoBusy, setLogoBusy] = useState(false);
@@ -164,7 +163,6 @@ export default function Account() {
     const [showCurrentPassword, setShowCurrentPassword] = useState(false);
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-    const [passMsg, setPassMsg] = useState('');
     const [passErr, setPassErr] = useState('');
     const [passBusy, setPassBusy] = useState(false);
 
@@ -286,7 +284,6 @@ export default function Account() {
     const saveProfile = async (e: FormEvent) => {
         e.preventDefault();
         setProfileBusy(true);
-        setProfileMsg('');
         setProfileErr('');
         try {
             const data = await apiPatch('/api/auth/profile', {
@@ -303,7 +300,7 @@ export default function Account() {
                 phone: updated.phone || ''
             }));
 
-            setProfileMsg('Profile saved.');
+            show('Profile saved.');
         } catch (err: any) {
             setProfileErr(err.message);
         } finally {
@@ -329,7 +326,7 @@ export default function Account() {
                 name: displayName || 'User',
                 avatarUrl: presign.publicUrl
             });
-            setProfileMsg('Profile picture updated.');
+            show('Profile picture updated.');
         } catch (err: any) {
             setProfileErr(err.message || 'Upload failed (set MEDIA_BUCKET for S3)');
         } finally {
@@ -340,7 +337,6 @@ export default function Account() {
     const saveBusiness = async (e: FormEvent) => {
         e.preventDefault();
         setOrgBusy(true);
-        setOrgMsg('');
         setOrgErr('');
         try {
             const updated = await apiPatch('/api/host/organization', org);
@@ -352,7 +348,7 @@ export default function Account() {
                 tradeType: updated.trade_type || '',
                 serviceArea: updated.service_area || ''
             });
-            setOrgMsg('Business details saved.');
+            show('Business details saved.');
             setEditingOrg(false);
         } catch (err: any) {
             setOrgErr(err.message);
@@ -364,7 +360,6 @@ export default function Account() {
     const uploadLogo = async (file: File) => {
         setLogoBusy(true);
         setBrandErr('');
-        setBrandMsg('');
         try {
             if (file.size > 5 * 1024 * 1024) throw new Error('Logo must be under 5MB');
             const presign = await apiPost('/api/host/media/presign', {
@@ -384,7 +379,7 @@ export default function Account() {
                 brandPrimary,
                 brandSecondary
             });
-            setBrandMsg('Logo updated.');
+            show('Logo updated.');
         } catch (err: any) {
             setBrandErr(err.message || 'Upload failed (set MEDIA_BUCKET for S3)');
         } finally {
@@ -395,12 +390,11 @@ export default function Account() {
     const clearLogo = async () => {
         setLogoBusy(true);
         setBrandErr('');
-        setBrandMsg('');
         try {
             await apiPatch('/api/host/organization', { logoUrl: '' });
             setLogoUrl('');
             applyBrand({ logoUrl: '', brandPrimary, brandSecondary });
-            setBrandMsg('Logo removed.');
+            show('Logo removed.');
         } catch (err: any) {
             setBrandErr(err.message || 'Could not remove logo');
         } finally {
@@ -415,7 +409,6 @@ export default function Account() {
             return;
         }
         setBrandBusy(true);
-        setBrandMsg('');
         setBrandErr('');
         try {
             const updated = await apiPatch('/api/host/organization', {
@@ -433,7 +426,7 @@ export default function Account() {
                 brandPrimary: updated.brand_primary || brandPrimary,
                 brandSecondary: updated.brand_secondary || brandSecondary
             });
-            setBrandMsg('Brand colors saved — sidebar and workspace updated.');
+            show('Brand colors saved — sidebar and workspace updated.');
         } catch (err: any) {
             setBrandErr(err.message);
         } finally {
@@ -443,7 +436,6 @@ export default function Account() {
 
     const resetBranding = async () => {
         setBrandBusy(true);
-        setBrandMsg('');
         setBrandErr('');
         try {
             const updated = await apiPatch('/api/host/organization', {
@@ -463,7 +455,7 @@ export default function Account() {
                 brandPrimary: updated.brand_primary || DEFAULT_BRAND_PRIMARY,
                 brandSecondary: updated.brand_secondary || DEFAULT_BRAND_SECONDARY
             });
-            setBrandMsg('Branding reset to LocalPulse defaults.');
+            show('Branding reset to LocalPulse defaults.');
         } catch (err: any) {
             setBrandErr(err.message || 'Could not reset branding');
         } finally {
@@ -478,11 +470,10 @@ export default function Account() {
             return;
         }
         setPassBusy(true);
-        setPassMsg('');
         setPassErr('');
         try {
             await apiPatch('/api/auth/password', { currentPassword, newPassword });
-            setPassMsg('Password updated.');
+            show('Password updated.');
             setCurrentPassword('');
             setNewPassword('');
             setConfirmPassword('');
@@ -660,7 +651,6 @@ export default function Account() {
                             </label>
 
                             {profileErr && <p className="text-xs text-red-600 mt-2">{profileErr}</p>}
-                            {profileMsg && <p className="text-xs text-emerald-700 mt-2">{profileMsg}</p>}
                         </div>
 
                         {/* ── Right: Personal information ── */}
@@ -881,7 +871,6 @@ export default function Account() {
                     ) : (
                         <form onSubmit={savePassword} className="space-y-4 max-w-md">
                             {passErr && <p className="text-sm text-red-700">{passErr}</p>}
-                            {passMsg && <p className="text-sm text-emerald-700">{passMsg}</p>}
                             <label className="block text-sm font-semibold text-[#334155]">
                                 Current password
                                 <div className="relative mt-1.5">
@@ -996,7 +985,6 @@ export default function Account() {
                     </div>
 
                     {brandErr && <p className="mb-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{brandErr}</p>}
-                    {brandMsg && <p className="mb-3 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">{brandMsg}</p>}
 
                     <form onSubmit={saveBranding} className="space-y-4">
                         {/* ── Logo Section ── */}
@@ -1217,7 +1205,6 @@ export default function Account() {
                     subtitle="Trading name and contact used for bookings and your workspace."
                 >
                     {orgErr && <p className="mb-3 text-sm text-red-700">{orgErr}</p>}
-                    {orgMsg && <p className="mb-3 text-sm text-emerald-700">{orgMsg}</p>}
 
                     {!editingOrg && hasOrgDetails ? (
                         <div className="space-y-4">
@@ -1332,7 +1319,6 @@ export default function Account() {
                                     onClick={() => {
                                         setEditingOrg(false);
                                         setOrgErr('');
-                                        setOrgMsg('');
                                     }}
                                     className="px-5 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B] hover:bg-[#F8FAFC]"
                                 >

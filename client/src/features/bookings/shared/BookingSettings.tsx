@@ -27,6 +27,7 @@ import {
     type LucideIcon
 } from 'lucide-react';
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, cn, formatCents } from '../../../shared/utils';
+import { useToast } from '../../../shared/Toast';
 import AvailabilityEditor, { type AvailabilitySavePayload, type AvailabilitySettings } from './AvailabilityEditor';
 import {
     getBookingPreset,
@@ -122,6 +123,7 @@ type Props = {
 };
 
 export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, initialDashboard, onRefresh }: Props) {
+    const { show } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
     const tabParam = searchParams.get('tab');
     const [loading, setLoading] = useState(true);
@@ -333,6 +335,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
             setWeeklyRules(payload.weeklyRules);
             if (availScope === 'org') setSettings(payload.settings);
             setSaved(true);
+            show('Saved.');
             onRefresh?.();
             setTimeout(() => setSaved(false), 2000);
         } catch (e: any) {
@@ -554,6 +557,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 reminderInvoiceDays: org.reminder_invoice_days ?? 3
             });
             setSaved(true);
+            show('Saved.');
             setSavingProfile(false);
             setTimeout(() => setSaved(false), 2000);
             onRefresh?.();
@@ -679,7 +683,6 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 </div>
 
                 {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
-                {saved && <p className="text-sm text-emerald-700 bg-emerald-50 rounded-xl px-4 py-2">Saved.</p>}
 
                 {tab === 'menu' && hasCatalogTab && (
                     <RestaurantMenuEditor

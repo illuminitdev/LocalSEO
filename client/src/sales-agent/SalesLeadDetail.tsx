@@ -37,6 +37,7 @@ import {
     emailShareStatusTimeLines
 } from './salesApi';
 import { cn } from '../shared/utils';
+import { useToast } from '../shared/Toast';
 import {
     Lightbulb,
     Bot,
@@ -53,6 +54,7 @@ export default function SalesLeadDetail() {
     const { id } = useParams<{ id: string }>();
     const location = useLocation();
     const navState = (location.state as LeadDetailLocationState) || null;
+    const { show } = useToast();
     const backTo = navState?.from || '/sales';
     const backLabel = navState?.fromLabel ? `Back to ${navState.fromLabel}` : 'Back to Dashboard';
     const [lead, setLead] = useState<SalesUnifiedLead | null>(null);
@@ -60,7 +62,6 @@ export default function SalesLeadDetail() {
     const [activities, setActivities] = useState<SalesLeadActivity[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [msg, setMsg] = useState('');
     const [converting, setConverting] = useState(false);
     const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
     const [showLeadHistoryModal, setShowLeadHistoryModal] = useState(false);
@@ -123,7 +124,7 @@ export default function SalesLeadDetail() {
                 pending: 'Task moved to Pending 📋',
                 cancelled: 'Task marked as Cancelled ❌'
             };
-            setMsg(statusLabels[nextStatus] || 'Task status updated.');
+            show(statusLabels[nextStatus] || 'Task status updated.');
             await loadLead();
             setConfirmModalTask(null);
         } catch (err: any) {
@@ -141,7 +142,7 @@ export default function SalesLeadDetail() {
         setError('');
         try {
             await convertLeadToCustomer(id, 'Converted to Customer from Sales Lead Detail');
-            setMsg('🎉 Lead successfully converted to Customer!');
+            show('Lead successfully converted to Customer!');
             await loadLead();
         } catch (err: any) {
             setError(err.message || 'Failed to convert lead');
@@ -155,7 +156,6 @@ export default function SalesLeadDetail() {
         if (!auditId) return;
         setSharingAudit(true);
         setError('');
-        setMsg('');
         try {
             const res = await confirmAndShareFullAuditEmail({
                 auditId,
@@ -163,7 +163,7 @@ export default function SalesLeadDetail() {
                 email: lead?.email
             });
             if (!res) return;
-            setMsg(
+            show(
                 res.attached === false
                     ? `Report emailed to ${res.to} (link only — PDF was too large to attach).`
                     : `Report emailed to ${res.to}.`
@@ -180,7 +180,6 @@ export default function SalesLeadDetail() {
         if (!id) return;
         setSharingObservations(true);
         setError('');
-        setMsg('');
         try {
             const res = await confirmAndShareLeadObservationsEmail({
                 leadId: id,
@@ -188,7 +187,7 @@ export default function SalesLeadDetail() {
                 email: lead?.email
             });
             if (!res) return;
-            setMsg(`Observations emailed to ${res.to}.`);
+            show(`Observations emailed to ${res.to}.`);
             await loadLead();
         } catch (err: any) {
             setError(err.message || 'Could not email observations');
@@ -363,12 +362,6 @@ export default function SalesLeadDetail() {
                 <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
                     <span>{error}</span>
-                </div>
-            )}
-            {msg && (
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                    <span>{msg}</span>
                 </div>
             )}
 

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Megaphone, Send, Link2, Copy, Check, X, FileText, Mail, BarChart2 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '../../shared/utils';
+import { useToast } from '../../shared/Toast';
 
 export default function Marketing() {
+    const { show } = useToast();
     const [site, setSite] = useState({ siteHeadline: '', siteBlurb: '', siteServices: '', marketingEnabled: true });
     const [campaigns, setCampaigns] = useState<any[]>([]);
     const [name, setName] = useState('');
@@ -10,7 +12,6 @@ export default function Marketing() {
     const [bodyText, setBodyText] = useState('');
     const [statusFilter, setStatusFilter] = useState('active');
     const [error, setError] = useState('');
-    const [info, setInfo] = useState('');
     const [slug, setSlug] = useState('');
     const [copied, setCopied] = useState(false);
     const [showBanner, setShowBanner] = useState(true);
@@ -51,8 +52,7 @@ export default function Marketing() {
         setError('');
         try {
             await apiPatch('/api/host/marketing/site', site);
-            setInfo('Mini-site saved successfully!');
-            setTimeout(() => setInfo(''), 3000);
+            show('Mini-site saved successfully!');
         } catch (e: any) {
             setError(e.message || 'Failed to save mini-site');
         } finally {
@@ -71,14 +71,13 @@ export default function Marketing() {
             const created = await apiPost('/api/host/campaigns', { name, subject, bodyText, statusFilter });
             if (!isDraft) {
                 const sent = await apiPost(`/api/host/campaigns/${created.campaign.id}/send`, {});
-                setInfo(`Campaign sent successfully to ${sent.campaign.sent_count || 0} clients!`);
+                show(`Campaign sent successfully to ${sent.campaign.sent_count || 0} clients!`);
             } else {
-                setInfo('Campaign saved as draft');
+                show('Campaign saved as draft');
             }
             setName('');
             setSubject('');
             setBodyText('');
-            setTimeout(() => setInfo(''), 3500);
             load();
         } catch (e: any) {
             setError(e.message || 'Failed to process campaign');
@@ -115,14 +114,6 @@ export default function Marketing() {
                 <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center justify-between">
                     <span>{error}</span>
                     <button onClick={() => setError('')} className="text-red-400 hover:text-red-600">
-                        <X className="w-4 h-4" />
-                    </button>
-                </div>
-            )}
-            {info && (
-                <div className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center justify-between">
-                    <span>{info}</span>
-                    <button onClick={() => setInfo('')} className="text-emerald-400 hover:text-emerald-600">
                         <X className="w-4 h-4" />
                     </button>
                 </div>

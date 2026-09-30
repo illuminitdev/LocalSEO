@@ -19,6 +19,7 @@ import {
     X
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiDelete, cn } from '../../shared/utils';
+import { useToast } from '../../shared/Toast';
 
 const AVATAR_COLORS = [
     { bg: 'bg-orange-100', text: 'text-orange-800' },
@@ -36,6 +37,7 @@ function getAvatarStyle(name: string) {
 
 export default function Team() {
     const navigate = useNavigate();
+    const { show } = useToast();
     const [members, setMembers] = useState<any[]>([]);
     const [invites, setInvites] = useState<any[]>([]);
     const [error, setError] = useState('');
@@ -128,7 +130,12 @@ export default function Team() {
                 bookable: inviteForm.bookable
             });
             setShowInviteModal(false);
-            setInfo(res.link ? `Invite created: ${res.link}` : 'Invite sent successfully.');
+            if (res.link) {
+                setInfo(`Invite created: ${res.link}`);
+            } else {
+                setInfo('');
+                show('Invite sent successfully.');
+            }
             setInviteForm({ name: '', email: '', role: 'owner', bookable: true });
             await load();
         } catch (err: any) {

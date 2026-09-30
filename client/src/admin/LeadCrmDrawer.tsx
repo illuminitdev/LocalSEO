@@ -33,6 +33,7 @@ import {
 } from './adminApi';
 import EditTaskModal from './EditTaskModal';
 import { cn } from '../shared/utils';
+import { useToast } from '../shared/Toast';
 
 export type GrowthAuditLeadRef = {
     id: string;
@@ -110,6 +111,7 @@ export default function LeadCrmDrawer({
     onTaskUpdated,
     onViewDetails
 }: LeadCrmDrawerProps) {
+    const { show } = useToast();
     const [activeTab, setActiveTab] = useState<'tasks' | 'activities'>('tasks');
     const [tasks, setTasks] = useState<LeadTask[]>([]);
     const [activities, setActivities] = useState<LeadActivity[]>([]);
@@ -131,9 +133,6 @@ export default function LeadCrmDrawer({
     const [currentAssignedName, setCurrentAssignedName] = useState<string | null>(
         lead.assignedAgentName || null
     );
-
-    
-    const [successToast, setSuccessToast] = useState<string | null>(null);
 
     
     const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
@@ -203,12 +202,11 @@ export default function LeadCrmDrawer({
             setTaskAssignee(nextAgentId || '');
             setReassignTo(nextAgentId || '');
             setShowReassign(false);
-            setSuccessToast(
+            show(
                 nextAgentId
                     ? `Lead reassigned to ${agent?.name || 'sales agent'}.`
                     : 'Lead assignment cleared.'
             );
-            setTimeout(() => setSuccessToast(null), 3000);
             onTaskUpdated?.();
         } catch (err: any) {
             setError(err.message || 'Failed to update assignment');
@@ -247,8 +245,7 @@ export default function LeadCrmDrawer({
 
             await loadLeadData();
             onTaskUpdated?.();
-            setSuccessToast('Task assigned successfully!');
-            setTimeout(() => setSuccessToast(null), 3000);
+            show('Task assigned successfully!');
         } catch (err: any) {
             setError(err.message || 'Failed to create task');
         } finally {
@@ -374,22 +371,6 @@ export default function LeadCrmDrawer({
                         Call Logs & History
                     </button>
                 </div>
-
-                {successToast && (
-                    <div className="mx-6 mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                        <div className="flex items-center gap-2 font-medium">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>{successToast}</span>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => setSuccessToast(null)}
-                            className="text-emerald-600 hover:text-emerald-800 p-0.5 rounded"
-                        >
-                            <X className="w-3.5 h-3.5" />
-                        </button>
-                    </div>
-                )}
 
                 {error && (
                     <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 flex items-center gap-2">
@@ -872,13 +853,13 @@ export default function LeadCrmDrawer({
                             // Keep lead-level assignment unless cleared via Reassign/Clear
                         }
                         setEditingTask(null);
-                        setSuccessToast('Task updated successfully');
+                        show('Task updated successfully');
                         loadLeadData();
                         if (onTaskUpdated) onTaskUpdated();
                     }}
                     onDeleted={() => {
                         setEditingTask(null);
-                        setSuccessToast('Task deleted successfully');
+                        show('Task deleted successfully');
                         loadLeadData();
                         if (onTaskUpdated) onTaskUpdated();
                     }}

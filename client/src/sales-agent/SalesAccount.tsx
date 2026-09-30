@@ -13,6 +13,7 @@ import {
     UserRound
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '../shared/utils';
+import { useToast } from '../shared/Toast';
 import { clearToken, setMustChangePassword } from '../features/auth/auth';
 
 const fieldClass =
@@ -110,6 +111,7 @@ function SectionCard({
 
 export default function SalesAccount() {
     const navigate = useNavigate();
+    const { show } = useToast();
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [phone] = useState('');
@@ -128,7 +130,6 @@ export default function SalesAccount() {
     const [passBusy, setPassBusy] = useState(false);
 
     const [error, setError] = useState('');
-    const [msg, setMsg] = useState('');
 
     useEffect(() => {
         apiGet('/api/sales/me')
@@ -161,7 +162,6 @@ export default function SalesAccount() {
     const uploadAvatar = async (file: File) => {
         setAvatarBusy(true);
         setError('');
-        setMsg('');
         try {
             const presign = await apiPost('/api/auth/avatar/presign', {
                 contentType: file.type || 'image/jpeg'
@@ -177,7 +177,7 @@ export default function SalesAccount() {
                 name: name || 'Sales Agent',
                 avatarUrl: presign.publicUrl
             });
-            setMsg('Profile picture updated.');
+            show('Profile picture updated.');
         } catch (err: any) {
             setError(err.message || 'Upload failed');
         } finally {
@@ -189,7 +189,6 @@ export default function SalesAccount() {
         e.preventDefault();
         setProfileBusy(true);
         setError('');
-        setMsg('');
         try {
             const data = await apiPatch('/api/auth/profile', {
                 name: profileName,
@@ -197,7 +196,7 @@ export default function SalesAccount() {
             });
             setName(data.user?.name || profileName);
             setAvatarUrl(data.user?.avatarUrl || avatarUrl);
-            setMsg('Profile updated.');
+            show('Profile updated.');
             setEditingProfile(false);
         } catch (err: any) {
             setError(err.message || 'Could not update profile');
@@ -214,7 +213,6 @@ export default function SalesAccount() {
         }
         setPassBusy(true);
         setError('');
-        setMsg('');
         try {
             await apiPatch('/api/sales/password', { currentPassword, newPassword });
             setMustChangePassword(false);
@@ -223,7 +221,7 @@ export default function SalesAccount() {
             setNewPassword('');
             setConfirmPassword('');
             setShowPasswordForm(false);
-            setMsg('Password updated successfully.');
+            show('Password updated successfully.');
         } catch (err: any) {
             setError(err.message || 'Could not update password');
         } finally {
@@ -279,12 +277,6 @@ export default function SalesAccount() {
                     {error}
                 </p>
             )}
-            {msg && (
-                <p className="mb-6 text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 shadow-xs">
-                    {msg}
-                </p>
-            )}
-
             <div className="space-y-7">
                 {}
                 <section className="rounded-2xl border border-[#E2E8F0] bg-white shadow-[0_10px_40px_-18px_rgba(15,23,42,0.2)] overflow-hidden">

@@ -16,6 +16,7 @@ import {
     Loader2
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity, updateDashboardStats } from '../../shared/utils';
+import { useToast } from '../../shared/Toast';
 import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
 
 const REQUIRED_FIELDS = ['name', 'category', 'address', 'phone'] as const;
@@ -32,11 +33,11 @@ const EMPTY_PROFILE = {
 };
 
 export default function ProfileAudit() {
+    const { show } = useToast();
     const [mode, setMode] = useState<'view' | 'edit'>('view');
     const [isAuditing, setIsAuditing] = useState(false);
     const [auditResult, setAuditResult] = useState<any>(null);
     const [isSaving, setIsSaving] = useState(false);
-    const [savedOk, setSavedOk] = useState('');
     const [formData, setFormData] = useState({ ...EMPTY_PROFILE });
     const [error, setError] = useState('');
     const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
@@ -84,7 +85,6 @@ export default function ProfileAudit() {
 
     const startEdit = () => {
         setError('');
-        setSavedOk('');
         setFieldErrors({});
         setMode('edit');
     };
@@ -149,7 +149,6 @@ export default function ProfileAudit() {
 
         setIsSaving(true);
         setError('');
-        setSavedOk('');
         try {
             await saveBusinessProfile();
             if (auditResult?.score) {
@@ -161,7 +160,7 @@ export default function ProfileAudit() {
                 icon: 'CheckCircle',
                 color: 'text-[#FF8800]'
             });
-            setSavedOk('Business info saved. Connected to AI Insights, rankings, citations, and other listing tools.');
+            show('Business info saved. Connected to AI Insights, rankings, citations, and other listing tools.');
             setMode('view');
         } catch (err: any) {
             setError(err.message || 'Could not save profile');
@@ -208,13 +207,6 @@ export default function ProfileAudit() {
             {error && (
                 <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5">
                     {error}
-                </p>
-            )}
-
-            {savedOk && (
-                <p className="mb-6 text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2.5 flex items-start gap-2">
-                    <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" />
-                    {savedOk}
                 </p>
             )}
 
