@@ -36,6 +36,7 @@ import {
     deleteSalesTask
 } from './salesApi';
 import { apiGet, cn } from '../shared/utils';
+import { useToast } from '../shared/Toast';
 
 type SalesLead = {
     id: string;
@@ -170,6 +171,7 @@ const PRIORITY_BADGES: Record<SalesTaskPriority, { label: string; bg: string; te
 };
 
 export default function SalesReminders() {
+    const { show } = useToast();
     const [searchParams] = useSearchParams();
     const initialLeadId = searchParams.get('leadId') || '';
 
@@ -177,7 +179,6 @@ export default function SalesReminders() {
     const [leads, setLeads] = useState<SalesLead[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [successToast, setSuccessToast] = useState<string | null>(null);
     const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
     const [showLearnMore, setShowLearnMore] = useState(false);
 
@@ -287,8 +288,7 @@ export default function SalesReminders() {
             setDueDateTime('');
             setSelectedLeadId('');
             setPriority(REMINDER_FORM_CONFIG[taskType].defaultPriority);
-            setSuccessToast('Self reminder created successfully! 🔔');
-            setTimeout(() => setSuccessToast(null), 3500);
+            show('Self reminder created successfully!');
             await loadData();
         } catch (err: any) {
             setError(err.message || 'Failed to create reminder');
@@ -316,8 +316,7 @@ export default function SalesReminders() {
                 status: nextStatus,
                 notes: statusNotes !== undefined ? statusNotes : undefined
             });
-            setSuccessToast(`Reminder marked as ${nextStatus.replace('_', ' ')}!`);
-            setTimeout(() => setSuccessToast(null), 3000);
+            show(`Reminder marked as ${nextStatus.replace('_', ' ')}!`);
             await loadData();
             setConfirmModalTask(null);
         } catch (err: any) {
@@ -336,8 +335,7 @@ export default function SalesReminders() {
         setError('');
         try {
             await deleteSalesTask(taskId);
-            setSuccessToast('Reminder deleted.');
-            setTimeout(() => setSuccessToast(null), 3000);
+            show('Reminder deleted.');
             await loadData();
         } catch (err: any) {
             setError(err.message || 'Failed to delete reminder');
@@ -416,19 +414,6 @@ export default function SalesReminders() {
                     <span>Refresh</span>
                 </button>
             </div>
-
-            {/* Success Toast */}
-            {successToast && (
-                <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center justify-between text-xs text-emerald-900 font-bold shadow-xs animate-in fade-in">
-                    <div className="flex items-center gap-2">
-                        <Check className="w-4 h-4 text-emerald-600" />
-                        <span>{successToast}</span>
-                    </div>
-                    <button type="button" onClick={() => setSuccessToast(null)} className="text-emerald-700 hover:text-emerald-950">
-                        <X className="w-4 h-4" />
-                    </button>
-                </div>
-            )}
 
             {/* Error Message */}
             {error && (

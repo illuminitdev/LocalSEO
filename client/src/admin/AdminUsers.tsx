@@ -17,6 +17,7 @@ import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { PLANS } from '../shared/planCatalog';
 import { isBookingPlanId } from '../features/bookings/shared/bookingIndustryPresets';
 import { cn } from '../shared/utils';
+import { useToast } from '../shared/Toast';
 
 type AdminUser = {
     kind: 'user' | 'invite' | 'converted_lead';
@@ -95,11 +96,11 @@ function serviceOf(user: AdminUser) {
 }
 
 export default function AdminUsers() {
+    const { show } = useToast();
     const [users, setUsers] = useState<AdminUser[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
     const [activeLeadRef, setActiveLeadRef] = useState<GrowthAuditLeadRef | null>(null);
     const [error, setError] = useState('');
-    const [msg, setMsg] = useState('');
     const [query, setQuery] = useState('');
     const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
     const [serviceFilter, setServiceFilter] = useState('');
@@ -242,7 +243,6 @@ export default function AdminUsers() {
         }
         setAddBusy(true);
         setError('');
-        setMsg('');
         try {
             await adminPost('/api/admin/users', {
                 name: form.name.trim(),
@@ -256,7 +256,7 @@ export default function AdminUsers() {
                         ? form.bookingIndustryId
                         : undefined
             });
-            setMsg('User created.');
+            show('User created.');
             setAddOpen(false);
             resetForm();
             load();
@@ -276,7 +276,6 @@ export default function AdminUsers() {
         const key = user.userId || user.leadId || user.invite?.id || user.email;
         setDeletingKey(key);
         setError('');
-        setMsg('');
         try {
             if (user.kind === 'user' && user.userId) {
                 await adminDelete(`/api/admin/users/user/${user.userId}`);
@@ -287,7 +286,7 @@ export default function AdminUsers() {
             } else {
                 throw new Error('Nothing to delete.');
             }
-            setMsg(`Deleted ${label}.`);
+            show(`Deleted ${label}.`);
             load();
         } catch (err: any) {
             setError(err.message || 'Could not delete');
@@ -318,11 +317,6 @@ export default function AdminUsers() {
 
             {error && (
                 <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">{error}</p>
-            )}
-            {msg && (
-                <p className="text-sm text-emerald-900 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5">
-                    {msg}
-                </p>
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">

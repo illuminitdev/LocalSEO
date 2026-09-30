@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { adminGet, adminPatch, adminPost } from './adminApi';
 import { cn } from '../shared/utils';
+import { useToast } from '../shared/Toast';
 
 function PasswordField({
     id,
@@ -62,6 +63,7 @@ function PasswordField({
 }
 
 export default function AdminSettings() {
+    const { show } = useToast();
     const fileRef = useRef<HTMLInputElement>(null);
     const [email, setEmail] = useState('');
     const [avatarUrl, setAvatarUrl] = useState('');
@@ -70,8 +72,6 @@ export default function AdminSettings() {
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState('');
-    const [msg, setMsg] = useState('');
-    const [profileMsg, setProfileMsg] = useState('');
     const [profileErr, setProfileErr] = useState('');
     const [busy, setBusy] = useState(false);
     const [loadError, setLoadError] = useState('');
@@ -92,7 +92,6 @@ export default function AdminSettings() {
     const uploadAvatar = async (file: File) => {
         setAvatarBusy(true);
         setProfileErr('');
-        setProfileMsg('');
         try {
             if (file.size > 5 * 1024 * 1024) {
                 throw new Error('Maximum size is 5MB.');
@@ -109,7 +108,7 @@ export default function AdminSettings() {
             await adminPatch('/api/admin/settings/avatar', { avatarUrl: presign.publicUrl });
             setAvatarUrl(presign.publicUrl);
             notifyAvatar(presign.publicUrl);
-            setProfileMsg('Profile photo updated.');
+            show('Profile photo updated.');
         } catch (err: any) {
             setProfileErr(err.message || 'Upload failed (set MEDIA_BUCKET for S3)');
         } finally {
@@ -120,12 +119,11 @@ export default function AdminSettings() {
     const clearAvatar = async () => {
         setAvatarBusy(true);
         setProfileErr('');
-        setProfileMsg('');
         try {
             await adminPatch('/api/admin/settings/avatar', { avatarUrl: '' });
             setAvatarUrl('');
             notifyAvatar('');
-            setProfileMsg('Profile photo removed.');
+            show('Profile photo removed.');
         } catch (err: any) {
             setProfileErr(err.message || 'Could not remove photo');
         } finally {
@@ -136,7 +134,6 @@ export default function AdminSettings() {
     const savePassword = async (e: FormEvent) => {
         e.preventDefault();
         setError('');
-        setMsg('');
         if (newPassword !== confirmPassword) {
             setError('New passwords do not match.');
             return;
@@ -147,7 +144,7 @@ export default function AdminSettings() {
                 currentPassword,
                 newPassword
             });
-            setMsg(data.message || 'Password updated.');
+            show(data.message || 'Password updated.');
             setCurrentPassword('');
             setNewPassword('');
             setConfirmPassword('');
@@ -261,11 +258,6 @@ export default function AdminSettings() {
                             {profileErr}
                         </p>
                     )}
-                    {profileMsg && (
-                        <p className="mt-3 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
-                            {profileMsg}
-                        </p>
-                    )}
                 </div>
 
                 <div className="px-5 sm:px-6 py-4 border-t border-[#E2E8F0] bg-[#F8FAFC] text-sm">
@@ -290,11 +282,6 @@ export default function AdminSettings() {
                 <form onSubmit={savePassword} className="p-5 sm:p-6 space-y-4">
                     {error && (
                         <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</p>
-                    )}
-                    {msg && (
-                        <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
-                            {msg}
-                        </p>
                     )}
                     <PasswordField
                         id="admin-current-password"
