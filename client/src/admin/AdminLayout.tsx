@@ -22,6 +22,7 @@ interface AdminNotification {
 }
 
 const READ_NOTIFS_KEY = 'lp.admin.readNotifs';
+const CLEARED_NOTIFS_KEY = 'lp.admin.clearedNotifs';
 
 function loadReadNotifIds(): Set<string> {
     try {
@@ -37,6 +38,25 @@ function loadReadNotifIds(): Set<string> {
 function saveReadNotifIds(ids: Set<string>) {
     try {
         localStorage.setItem(READ_NOTIFS_KEY, JSON.stringify(Array.from(ids).slice(-200)));
+    } catch {
+        /* ignore */
+    }
+}
+
+function loadClearedNotifIds(): Set<string> {
+    try {
+        const stored = localStorage.getItem(CLEARED_NOTIFS_KEY);
+        if (!stored) return new Set();
+        const arr = JSON.parse(stored);
+        return new Set(Array.isArray(arr) ? arr.map(String) : []);
+    } catch {
+        return new Set();
+    }
+}
+
+function saveClearedNotifIds(ids: Set<string>) {
+    try {
+        localStorage.setItem(CLEARED_NOTIFS_KEY, JSON.stringify(Array.from(ids).slice(-400)));
     } catch {
         /* ignore */
     }
@@ -79,8 +99,11 @@ function NotificationBell({ notifRef, notifOpen, setNotifOpen }: {
             const data = await adminGet('/api/admin/notifications');
             const list = Array.isArray(data?.notifications) ? data.notifications : [];
             const readSet = loadReadNotifIds();
+            const cleared = loadClearedNotifIds();
             setNotifications(
-                list.map((n: any) => ({
+                list
+                .filter((n: any) => !cleared.has(String(n.id)))
+                .map((n: any) => ({
                     id: String(n.id),
                     type: (['lead', 'task', 'audit', 'system', 'alert'].includes(n.type) ? n.type : 'system') as NotifType,
                     title: String(n.title || 'Update'),
@@ -106,6 +129,16 @@ function NotificationBell({ notifRef, notifOpen, setNotifOpen }: {
     useEffect(() => {
         if (notifOpen) loadNotifications();
     }, [notifOpen, loadNotifications]);
+
+    const clearAll = () => {
+        const cleared = loadClearedNotifIds();
+        notifications.forEach((n) => cleared.add(n.id));
+        saveClearedNotifIds(cleared);
+        const readSet = loadReadNotifIds();
+        notifications.forEach((n) => readSet.add(n.id));
+        saveReadNotifIds(readSet);
+        setNotifications([]);
+    };
 
     const markAllRead = () => {
         const readSet = loadReadNotifIds();
@@ -167,16 +200,27 @@ function NotificationBell({ notifRef, notifOpen, setNotifOpen }: {
                                 </span>
                             )}
                         </div>
-                        {unreadCount > 0 && (
-                            <button
-                                type="button"
-                                id="admin-notif-mark-all-read"
-                                onClick={markAllRead}
-                                className="flex items-center gap-1 text-[11px] font-semibold text-amber-600 hover:text-amber-700 transition-colors px-2 py-1 rounded-lg hover:bg-amber-50"
-                            >
-                                <CheckCheck className="w-3.5 h-3.5" />
-                                Mark all read
-                            </button>
+                        {notifications.length > 0 && (
+                            <div className="flex items-center gap-1">
+                                {unreadCount > 0 && (
+                                    <button
+                                        type="button"
+                                        id="admin-notif-mark-all-read"
+                                        onClick={markAllRead}
+                                        className="flex items-center gap-1 text-[11px] font-semibold text-amber-600 hover:text-amber-700 transition-colors px-2 py-1 rounded-lg hover:bg-amber-50"
+                                    >
+                                        <CheckCheck className="w-3.5 h-3.5" />
+                                        Mark all read
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={clearAll}
+                                    className="text-[11px] font-semibold text-[#64748B] hover:text-[#0F172A] transition-colors px-2 py-1 rounded-lg hover:bg-[#F1F5F9]"
+                                >
+                                    Clear all
+                                </button>
+                            </div>
                         )}
                     </div>
 
