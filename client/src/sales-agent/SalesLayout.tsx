@@ -116,7 +116,7 @@ export default function SalesLayout() {
                         read: readSet.has(String(t.id))
                     };
                 })
-                .filter((item) => !cleared.has(item.id));
+                .filter((item: SalesNotificationItem) => !cleared.has(item.id));
 
             setNotifications(items);
         } catch {  }
@@ -494,7 +494,7 @@ export default function SalesLayout() {
                                         )}
                                     </div>
 
-                                    {/* Footer */}
+                                    {}
                                     <div className="border-t border-slate-100 px-4 py-2 bg-slate-50/60 rounded-b-2xl flex items-center justify-between">
                                         <button
                                             type="button"
