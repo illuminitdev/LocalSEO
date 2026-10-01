@@ -28,16 +28,17 @@ function checkById(checks: CheckRow[], id: string): CheckRow | undefined {
   return checks.find((c) => c.id === id);
 }
 
-function fromCheck(c: CheckRow | undefined, yesEv?: string, noEv?: string): StatusEv {
-  if (!c) return { status: 'no', evidence: noEv || 'Not found / not confirmed' };
+function fromCheck(c: CheckRow | undefined, yesEv?: string, noEv?: string, unkEv?: string): StatusEv {
+  if (!c) return { status: 'no', evidence: noEv || unkEv || 'Not confirmed' };
   if (c.status === 'pass') return { status: 'yes', evidence: yesEv || c.evidence || 'Pass' };
   if (c.status === 'fail') return { status: 'no', evidence: noEv || c.evidence || 'Fail' };
-  return { status: 'no', evidence: noEv || c.evidence || 'Not found / not confirmed' };
+  return { status: 'no', evidence: noEv || c.evidence || unkEv || 'Not confirmed' };
 }
 
-function fromBool(v: boolean | null | undefined, yesEv: string, noEv: string, _unkEv?: string): StatusEv {
+function fromBool(v: boolean | null | undefined, yesEv: string, noEv: string, unkEv?: string): StatusEv {
   if (v === true) return { status: 'yes', evidence: yesEv };
-  return { status: 'no', evidence: noEv };
+  if (v === false) return { status: 'no', evidence: noEv };
+  return { status: 'no', evidence: unkEv || noEv || 'Not confirmed' };
 }
 
 function item(id: string, label: string, se: StatusEv): AeoChecklistItem {
@@ -53,7 +54,7 @@ function prefer(...ses: StatusEv[]): StatusEv {
   if (yes) return yes;
   const no = ses.find((s) => s.status === 'no');
   if (no) return no;
-  return ses[0] || { status: 'no', evidence: 'Not found / not confirmed' };
+  return { status: 'no', evidence: 'Not confirmed' };
 }
 
 
@@ -70,7 +71,6 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
     String(business.serviceLabel || business.service || '').trim() || 'local services';
   const city =
     String(business.searchAreaLabel || business.city || '').trim() || 'the local area';
-  const inPack = typeof localRank.position === 'number';
   const measuredQuery = String(localRank.query || '').trim();
 
   const aeo1 = fromCheck(checkById(checks, 'aeo_1'), 'FAQPage schema found', 'No FAQPage schema');
@@ -105,20 +105,23 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
     'Weak about / entity authority content'
   );
 
-  const aiQPass = checks.filter((c) => String(c.id).startsWith('ai_q_') && c.status === 'pass').length;
-  const aiQFail = checks.filter((c) => String(c.id).startsWith('ai_q_') && c.status === 'fail').length;
+  const aiQRows = checks.filter((c) => String(c.id).startsWith('ai_q_'));
+  const aiQPass = aiQRows.filter((c) => c.status === 'pass').length;
+  const aiQFail = aiQRows.filter((c) => c.status === 'fail').length;
   const aiQSe: StatusEv =
     aiQPass >= 2
       ? { status: 'yes', evidence: `${aiQPass} content answer checks passed` }
-      : {
-          status: 'no',
-          evidence: aiQPass
-            ? `Only ${aiQPass} content answer check(s) passed`
-            : 'Content answer checks not confirmed'
-        };
+      : aiQFail > 0
+        ? {
+            status: 'no',
+            evidence: aiQPass
+              ? `Only ${aiQPass} content answer check(s) passed`
+              : 'Content answer checks failed'
+          }
+        : { status: 'no', evidence: 'Content answer checks not confirmed' };
 
   const svcChecks = checks.filter((c) => c.section === 'service_pages');
-  let servicePagesSe: StatusEv = { status: 'no', evidence: 'No service pages found' };
+  let servicePagesSe: StatusEv = { status: 'no', evidence: 'Service pages not confirmed' };
   if (svcChecks.length) {
     const pass = svcChecks.filter((c) => c.status === 'pass').length;
     const fail = svcChecks.filter((c) => c.status === 'fail').length;
@@ -146,11 +149,10 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
           );
 
   const napMismatch = nap.some((c: any) => c?.status === 'mismatch');
-  const napMatch =
-    nap.length > 0 && nap.every((c: any) => c?.status === 'match' || c?.status === 'unknown');
+  const napHasMatch = nap.some((c: any) => c?.status === 'match');
   const napSe: StatusEv = napMismatch
     ? { status: 'no', evidence: 'NAP mismatch between Google and website' }
-    : napMatch
+    : napHasMatch
       ? { status: 'yes', evidence: 'Business information consistent across Google and website' }
       : { status: 'no', evidence: 'Business information consistency not confirmed' };
 
@@ -160,42 +162,63 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
           status: 'yes',
           evidence: `${gbp.reviewCount} Google reviews${gbp.rating != null ? `, rated ${gbp.rating}` : ''}`
         }
-      : prefer(testimonials, reviewsMention);
+      : Number(gbp.reviewCount) === 0
+        ? { status: 'no', evidence: 'No Google reviews recorded' }
+        : prefer(testimonials, reviewsMention);
 
-  const nearMeSe: StatusEv = measuredQuery
-    ? inPack
-      ? { status: 'yes', evidence: `In measured local results for “${measuredQuery}” (#${localRank.position})` }
-      : { status: 'no', evidence: `Not in measured local results for “${measuredQuery}”` }
-    : prefer(aeo4, fromCheck(checkById(checks, 'geo_5')));
-
-  const bestSe: StatusEv = prefer(
-    aeo4,
-    fromBool(
-      inPack ? true : measuredQuery ? false : false,
-      `Visible for measured local query “${measuredQuery || `best ${service} near ${city}`}”`,
-      `Not visible for measured “best / near” style local query`,
-      'Not found for the local best / near query'
-    )
-  );
+  const nearMeSe: StatusEv = prefer(aeo4, aeo3);
+  const bestSe: StatusEv = prefer(aeo3, aeo4);
 
   const bookingSe = prefer(contactForm, telLinks, phoneVis, quoteCta);
 
-  // SERP answer surfaces are not positively measured for this brand — treat as gaps.
   const noAnswerSurface: StatusEv = {
     status: 'no',
-    evidence: 'Not winning measured answer surfaces for local questions'
+    evidence: 'This answer box was not confirmed for this business'
   };
-  const competitorCompareSe: StatusEv = Array.isArray(localRank.topResults) && localRank.topResults.length
-    ? {
-        status: 'no',
-        evidence: `Competitors captured for “${measuredQuery || 'local query'}” — brand not shown as the answer winner`
-      }
-    : noAnswerSurface;
+  const competitorCompareSe: StatusEv =
+    Array.isArray(localRank.topResults) && localRank.topResults.length
+      ? {
+          status: 'no',
+          evidence: `Competitors captured for “${measuredQuery || 'local query'}” — question-level answer winner was not confirmed for this business`
+        }
+      : noAnswerSurface;
+
+  const shots = Array.isArray((audit as { aeoSerpScreenshots?: unknown[] }).aeoSerpScreenshots)
+    ? ((audit as { aeoSerpScreenshots?: Array<{ serpMeasured?: boolean; businessInAnswerBox?: boolean; businessInPaa?: boolean }> })
+        .aeoSerpScreenshots as Array<{
+        serpMeasured?: boolean;
+        businessInAnswerBox?: boolean;
+        businessInPaa?: boolean;
+      }>)
+    : [];
+  const measuredShots = shots.filter((shot) => shot && shot.serpMeasured === true);
+  const snippetSe: StatusEv = !measuredShots.length
+    ? { status: 'unknown', evidence: 'Not measured on this run' }
+    : measuredShots.some((shot) => shot.businessInAnswerBox === true)
+      ? { status: 'yes', evidence: 'The business name appears in a Google answer box for these searches.' }
+      : {
+          status: 'no',
+          evidence: 'These searches were measured, and the business name is not in the answer box.'
+        };
+  const paaSe: StatusEv = !measuredShots.length
+    ? { status: 'unknown', evidence: 'Not measured on this run' }
+    : measuredShots.some((shot) => shot.businessInPaa === true)
+      ? { status: 'yes', evidence: 'The business name appears in People Also Ask for these searches.' }
+      : {
+          status: 'no',
+          evidence: 'These searches were measured, and the business name is not in People Also Ask.'
+        };
 
   const faqCoverage = prefer(aeo2, onpageFaq, aeo1);
+  const servicePlusLocMeasured =
+    serviceAreas.status === 'yes' || locSe.status === 'yes' || anyPass(checks, ['aeo_3'])
+      ? true
+      : serviceAreas.status === 'no' || locSe.status === 'no'
+        ? false
+        : null;
   const servicePlusLoc = prefer(
     fromBool(
-      anyPass(checks, ['aeo_3']) && (serviceAreas.status === 'yes' || locSe.status === 'yes'),
+      servicePlusLocMeasured,
       `Service + location content for ${service} in ${city}`,
       'Service + location content incomplete',
       'Service + location content not confirmed'
@@ -247,9 +270,12 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
         id: 'aeo_visibility',
         title: 'AEO Visibility',
         items: [
-          item('aeo_vis_ai', 'Google AI/search answer visibility', noAnswerSurface),
-          item('aeo_vis_snippet', 'Featured snippet visibility', noAnswerSurface),
-          item('aeo_vis_paa', 'People Also Ask visibility', noAnswerSurface),
+          item('aeo_vis_ai', 'Google AI/search answer visibility', {
+            status: 'unknown',
+            evidence: 'Not measured on this run'
+          }),
+          item('aeo_vis_snippet', 'Featured snippet visibility', snippetSe),
+          item('aeo_vis_paa', 'People Also Ask visibility', paaSe),
           item('aeo_vis_local_q', 'Local question visibility', nearMeSe),
           item('aeo_vis_competitor', 'Question-level competitor comparison', competitorCompareSe)
         ]

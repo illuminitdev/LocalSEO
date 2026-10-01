@@ -35,6 +35,7 @@ import {
     updateCrmTask
 } from './adminApi';
 import { cn } from '../shared/utils';
+import { useToast } from '../shared/Toast';
 import {
     emailShareStatusLabel,
     emailShareStatusHint,
@@ -45,13 +46,13 @@ import TaskCompletionModal, { type CrmTaskStatus } from '../shared/TaskCompletio
 export default function AdminLeadDetail() {
     const { id } = useParams<{ id: string }>();
     const location = useLocation();
+    const { show } = useToast();
     const [lead, setLead] = useState<AdminLeadCrmDetail['lead'] | null>(null);
     const [tasks, setTasks] = useState<LeadTask[]>([]);
     const [activities, setActivities] = useState<LeadActivity[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [msg, setMsg] = useState('');
     const [converting, setConverting] = useState(false);
     const [sharingAudit, setSharingAudit] = useState(false);
     const [editingTask, setEditingTask] = useState<LeadTask | null>(null);
@@ -118,7 +119,7 @@ export default function AdminLeadDetail() {
                 status: nextStatus as LeadTask['status'],
                 notes: statusNotes !== undefined ? statusNotes : undefined
             });
-            setMsg('Task status updated.');
+            show('Task status updated.');
             await loadLead();
             setConfirmModalTask(null);
         } catch (err: any) {
@@ -135,7 +136,7 @@ export default function AdminLeadDetail() {
         setError('');
         try {
             await convertAdminCrmLead(id, 'Converted to Customer from Admin Lead Detail');
-            setMsg('Lead successfully converted to Customer.');
+            show('Lead successfully converted to Customer.');
             await loadLead();
         } catch (err: any) {
             setError(err.message || 'Failed to convert lead');
@@ -157,10 +158,9 @@ export default function AdminLeadDetail() {
         }
         setSharingAudit(true);
         setError('');
-        setMsg('');
         try {
             const res = await shareFullAuditEmail(auditId, { email });
-            setMsg(
+            show(
                 res.attached === false
                     ? `Report emailed to ${res.to} (link only — PDF was too large to attach).`
                     : `Report emailed to ${res.to}.`
@@ -331,12 +331,6 @@ export default function AdminLeadDetail() {
                 <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
                     <span>{error}</span>
-                </div>
-            )}
-            {msg && (
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                    <span>{msg}</span>
                 </div>
             )}
 

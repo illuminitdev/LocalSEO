@@ -27,6 +27,7 @@ import {
 } from './adminApi';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { cn } from '../shared/utils';
+import { useToast } from '../shared/Toast';
 import {
     emailShareStatusHint,
     emailShareStatusLabel,
@@ -154,10 +155,10 @@ function leadToDrawerRef(lead: LeadProfile): GrowthAuditLeadRef {
 export default function AdminLeadProfile() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const { show } = useToast();
     const [lead, setLead] = useState<LeadProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [msg, setMsg] = useState('');
     const [editing, setEditing] = useState(false);
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState<EditForm | null>(null);
@@ -200,7 +201,6 @@ export default function AdminLeadProfile() {
         if (!id || !form) return;
         setSaving(true);
         setError('');
-        setMsg('');
         try {
             await updateAdminCrmLead(id, {
                 name: form.name,
@@ -218,7 +218,7 @@ export default function AdminLeadProfile() {
                 spreadsheetStatus2: form.spreadsheetStatus2,
                 spreadsheetStatus3: form.spreadsheetStatus3
             } as any);
-            setMsg('Lead details saved.');
+            show('Lead details saved.');
             setEditing(false);
             await loadLead();
         } catch (err: any) {
@@ -334,7 +334,6 @@ export default function AdminLeadProfile() {
                             onClick={() => {
                                 setForm(formFromLead(lead));
                                 setEditing(true);
-                                setMsg('');
                             }}
                             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition-colors shadow-2xs"
                         >
@@ -410,11 +409,6 @@ export default function AdminLeadProfile() {
             {error ? (
                 <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                     {error}
-                </div>
-            ) : null}
-            {msg ? (
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-                    {msg}
                 </div>
             ) : null}
 
@@ -787,7 +781,6 @@ export default function AdminLeadProfile() {
                     onClose={() => setAssignOpen(false)}
                     onTaskUpdated={() => {
                         loadLead();
-                        setMsg('Task assigned.');
                     }}
                     onViewDetails={() => setAssignOpen(false)}
                 />

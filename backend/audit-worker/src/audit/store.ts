@@ -4,6 +4,9 @@ import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
 import { buildChecklist } from './checklistSchema.js';
 import { computeScore } from './score.js';
+import { buildAeoCoreChecklist } from './aeoCoreChecklist.js';
+import { buildLocalSeoCoreChecklist } from './localSeoCoreChecklist.js';
+import { scrubVendorDeep } from './geminiReport.js';
 import { isDatabaseEnabled, query } from '../lib/db.js';
 import { resolveSearchArea } from '../lib/searchArea.js';
 import type { AuditCreateInput, AuditRecord, ChecklistCheck } from '../types.js';
@@ -136,11 +139,26 @@ export async function saveAudit(audit: AuditRecord) {
       pillars: audit.presence.pillars
     } as AuditRecord['score'];
   } else {
+    const gbpLookup = audit.gbpLookup as {
+      localRank?: unknown;
+      aiEngineChecks?: unknown;
+      geoChecklist?: unknown;
+    } | null;
+    const aeoChecklist = buildAeoCoreChecklist(audit);
+    const localSeoChecklist = buildLocalSeoCoreChecklist(audit);
     audit.score = computeScore(audit.checklist?.checks || [], {
-      localRank: (audit.gbpLookup as { localRank?: unknown } | null)?.localRank || null
+      localRank: gbpLookup?.localRank || null,
+      aiEngineChecks: Array.isArray(gbpLookup?.aiEngineChecks) ? gbpLookup.aiEngineChecks : [],
+      aeoChecklist,
+      aeoQueries: Array.isArray(audit.aeoSerpScreenshots) ? audit.aeoSerpScreenshots : [],
+      localSeoChecklist,
+      geoChecklist: (gbpLookup?.geoChecklist as { groups?: Array<{ items?: any[] }> } | null) || null
     }) as AuditRecord['score'];
   }
   audit.topFixes = deriveTopFixes(audit);
+  if (audit.aiReport) {
+    audit.aiReport = scrubVendorDeep(audit.aiReport) as AuditRecord['aiReport'];
+  }
 
   if (isDatabaseEnabled()) {
     await saveAuditToDb(audit);
@@ -265,7 +283,7 @@ export function deriveTopFixes(audit: AuditRecord) {
 
 export function publicReportView(audit: AuditRecord | null) {
   if (!audit || !audit.published) return null;
-  return {
+  return scrubVendorDeep({
     id: audit.id,
     auditKind: audit.auditKind || null,
     publishedAt: audit.publishedAt,
@@ -345,10 +363,14 @@ export function publicReportView(audit: AuditRecord | null) {
           reviewsLookRecent: (audit.gbpLookup as Record<string, unknown>).reviewsLookRecent ?? null,
           reviewRecencyEvidence:
             (audit.gbpLookup as Record<string, unknown>).reviewRecencyEvidence || null,
+          postsOk: (audit.gbpLookup as Record<string, unknown>).postsOk ?? null,
           hasRecentPosts: (audit.gbpLookup as Record<string, unknown>).hasRecentPosts ?? null,
           postsEvidence: (audit.gbpLookup as Record<string, unknown>).postsEvidence || null,
           recentPostAt: (audit.gbpLookup as Record<string, unknown>).recentPostAt || null,
           postsTotal: (audit.gbpLookup as Record<string, unknown>).postsTotal ?? null,
+          reviewsOk: (audit.gbpLookup as Record<string, unknown>).reviewsOk ?? null,
+          qaOk: (audit.gbpLookup as Record<string, unknown>).qaOk ?? null,
+          infoOk: (audit.gbpLookup as Record<string, unknown>).infoOk ?? null,
           hasQa: (audit.gbpLookup as Record<string, unknown>).hasQa ?? null,
           qaEvidence: (audit.gbpLookup as Record<string, unknown>).qaEvidence || null,
           hasHours: (audit.gbpLookup as Record<string, unknown>).hasHours ?? null,
@@ -425,7 +447,9 @@ export function publicReportView(audit: AuditRecord | null) {
               .slice(0, 9)
               .map((row: any) => ({
                 engine: row?.engine || null,
-                label: row?.label || null,
+                label: String(row?.label || '')
+                  .replace(/\s*\((?:scraped ui|api)\)/gi, '')
+                  .trim() || null,
                 prompt: row?.prompt || null,
                 promptKey:
                   row?.promptKey === 'near' ||
@@ -441,7 +465,12 @@ export function publicReportView(audit: AuditRecord | null) {
                   : [],
                 answerExcerpt: String(row?.answerExcerpt || '').slice(0, 2000),
                 skipped: Boolean(row?.skipped),
-                reason: row?.reason || null,
+                reason: String(row?.reason || '')
+                  .replace(
+                    /[^.!?\n]*(?:dataforseo|llm scraper|consumer ui|top 5|llm responses|scraped ui|claude \(api\))[^.!?\n]*[.!?]?/gi,
+                    ''
+                  )
+                  .trim() || null,
                 capturedAt: row?.capturedAt || null
               }));
           })(),
@@ -519,5 +548,5 @@ export function publicReportView(audit: AuditRecord | null) {
           })()
         }
       : null
-  };
+  });
 }

@@ -159,17 +159,21 @@ export default function Layout() {
             if (!mustChange) {
                 try {
                     sessionStorage.removeItem(PW_NOTIF_READ_KEY);
+                    sessionStorage.removeItem('lp.customer.clearedNotifs');
                 } catch {
                     /* ignore */
                 }
                 return without;
             }
             let read = false;
+            let cleared = false;
             try {
                 read = sessionStorage.getItem(PW_NOTIF_READ_KEY) === '1';
+                cleared = sessionStorage.getItem('lp.customer.clearedNotifs') === '1';
             } catch {
                 read = false;
             }
+            if (cleared) return without;
             return [
                 {
                     id: PW_NOTIF_ID,
@@ -191,6 +195,18 @@ export default function Layout() {
         window.addEventListener('localpulse-auth', onAuth);
         return () => window.removeEventListener('localpulse-auth', onAuth);
     }, []);
+
+    const clearAll = () => {
+        try {
+            if (notifications.some((n) => n.id === PW_NOTIF_ID)) {
+                sessionStorage.setItem(PW_NOTIF_READ_KEY, '1');
+                sessionStorage.setItem('lp.customer.clearedNotifs', '1');
+            }
+        } catch {
+            /* ignore */
+        }
+        setNotifications([]);
+    };
 
     const markAllRead = () => {
         try {
@@ -552,15 +568,26 @@ export default function Layout() {
                                                 </span>
                                             )}
                                         </div>
-                                        {unreadCount > 0 && (
-                                            <button
-                                                type="button"
-                                                onClick={markAllRead}
-                                                className="text-xs font-semibold text-[var(--brand-primary,#F59E0B)] hover:underline flex items-center gap-1 cursor-pointer"
-                                            >
-                                                <CheckCheck className="w-3.5 h-3.5" />
-                                                Mark all as read
-                                            </button>
+                                        {notifications.length > 0 && (
+                                            <div className="flex items-center gap-2">
+                                                {unreadCount > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={markAllRead}
+                                                        className="text-xs font-semibold text-[var(--brand-primary,#F59E0B)] hover:underline flex items-center gap-1 cursor-pointer"
+                                                    >
+                                                        <CheckCheck className="w-3.5 h-3.5" />
+                                                        Mark all as read
+                                                    </button>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={clearAll}
+                                                    className="text-xs font-semibold text-[#64748B] hover:text-[#0F172A] cursor-pointer"
+                                                >
+                                                    Clear all
+                                                </button>
+                                            </div>
                                         )}
                                     </div>
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Send, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiDelete, cn, formatCents } from '../../shared/utils';
+import { useToast } from '../../shared/Toast';
 
 type LineItem = { description: string; quantity: number; unit_price_cents: number };
 
@@ -247,6 +248,7 @@ function QuotesList() {
 }
 
 function QuoteEditor({ isNew }: { isNew?: boolean }) {
+    const { show } = useToast();
     const { id } = useParams();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
@@ -264,7 +266,6 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
     const [publicToken, setPublicToken] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-    const [info, setInfo] = useState('');
 
     const subtotal = useMemo(
         () => lines.reduce((s, li) => s + Math.round((Number(li.quantity) || 0) * (Number(li.unit_price_cents) || 0)), 0),
@@ -339,8 +340,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
             } else {
                 const data = await apiPatch(`/api/host/quotes/${id}`, payload());
                 setStatus(data.quote.status);
-                setInfo('Saved successfully');
-                setTimeout(() => setInfo(''), 3000);
+                show('Saved successfully');
             }
         } catch (e: any) {
             setError(e.message || 'Save failed');
@@ -369,8 +369,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
             const data = await apiPost(`/api/host/quotes/${quoteId}/send`, {});
             setStatus(data.quote.status);
             setPublicToken(data.quote.public_token);
-            setInfo('Quote emailed to client');
-            setTimeout(() => setInfo(''), 3500);
+            show('Quote emailed to client');
         } catch (e: any) {
             setError(e.message || 'Send failed');
         } finally {
@@ -406,14 +405,6 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                 <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center justify-between">
                     <span>{error}</span>
                     <button onClick={() => setError('')} className="text-red-400 hover:text-red-600">
-                        <X className="w-4 h-4" />
-                    </button>
-                </div>
-            )}
-            {info && (
-                <div className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center justify-between">
-                    <span>{info}</span>
-                    <button onClick={() => setInfo('')} className="text-emerald-400 hover:text-emerald-600">
                         <X className="w-4 h-4" />
                     </button>
                 </div>

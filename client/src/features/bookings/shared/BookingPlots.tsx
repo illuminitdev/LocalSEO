@@ -26,6 +26,7 @@ import {
     X
 } from 'lucide-react';
 import { apiGet, apiPost, formatCents, cn, restrictPhoneInput } from '../../../shared/utils';
+import { useToast } from '../../../shared/Toast';
 import { setBookingOrgSlug } from './bookingUtils';
 import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
 import BookingSettingsPanel from './BookingSettings';
@@ -144,11 +145,11 @@ function getGroupLabel(dateStr: string): string {
 }
 
 export default function BookingPlots() {
+    const { show } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
     const panel = searchParams.get('panel') === 'settings' ? 'settings' : 'board';
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [info, setInfo] = useState('');
     const [data, setData] = useState<any>(null);
     const [services, setServices] = useState<BookingService[]>([]);
     const [addingService, setAddingService] = useState(false);
@@ -478,13 +479,12 @@ export default function BookingPlots() {
         const amountCents = Math.round(pounds * 100);
         setBusy(payDialog.id);
         setError('');
-        setInfo('');
         try {
             const result = await apiPost(`/api/host/bookings/${payDialog.id}/invoice`, { amountCents });
             if (result.skipped) {
                 setError(result.reason || 'Nothing to charge for this booking.');
             } else {
-                setInfo(`Payment request sent${result.invoiceUrl ? ' — invoice link ready' : ''}.`);
+                show(`Payment request sent${result.invoiceUrl ? ' — invoice link ready' : ''}.`);
                 setPayDialog(null);
             }
             await load();
@@ -572,14 +572,13 @@ export default function BookingPlots() {
         if (!window.confirm('Cancel this booking? If the customer paid a deposit, it will be refunded to their card.')) return;
         setBusy(id);
         setError('');
-        setInfo('');
         try {
             const result = await apiPost(`/api/host/bookings/${id}/cancel`, {});
             if (result.refundError) {
                 setError(`Booking cancelled, but refund failed: ${result.refundError}. Refund manually in Stripe.`);
             } else if (result.refund && !result.refund.skipped) {
                 const toCustomer = ((result.refund.refundToCustomerCents || result.refund.amountCents || 0) / 100).toFixed(2);
-                setInfo(`Refund sent to customer (£${toCustomer}).`);
+                show(`Refund sent to customer (£${toCustomer}).`);
             }
             await load();
         } catch (e: any) {
@@ -842,7 +841,6 @@ export default function BookingPlots() {
 
             {/* Error / Success Notifications */}
             {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">{error}</p>}
-            {info && <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5">{info}</p>}
 
             {/* QR Code Modal Dialog */}
             {showQrModal && (

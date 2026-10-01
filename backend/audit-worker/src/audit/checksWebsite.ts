@@ -63,10 +63,16 @@ export function applyWebsiteChecks(
   const bodyLower = () => String(home?.bodyText || '').toLowerCase();
 
   if (!home) {
+    const statuses = (Array.isArray(crawl?.errors) ? crawl.errors : [])
+      .map((e) => Number(e?.status))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const evidence = statuses.includes(403)
+      ? 'Website returned 403 and could not be read'
+      : 'Website could not be fetched';
     for (const c of checks) {
       if (c.source === 'crawl' || c.source === 'lighthouse') {
         c.status = 'fail';
-        c.evidence = 'Website could not be fetched';
+        c.evidence = evidence;
       }
     }
     return checks;
@@ -281,6 +287,14 @@ export function applyWebsiteChecks(
     setCheck(byId, 'tech_1', 'unknown', 'Lighthouse not available');
   }
   setCheck(byId, 'tech_2', home.viewport ? 'pass' : 'fail', home.viewport || 'No viewport');
+  {
+    const layout = lighthouse?.mobileLayout;
+    const measured = layout && (layout.pass === true || layout.pass === false);
+    const evidence = layout?.evidence || 'Mobile layout requires Lighthouse';
+    const status = measured ? (layout.pass ? 'pass' : 'fail') : 'unknown';
+    setCheck(byId, 'web_basic_3', status, evidence);
+    setCheck(byId, 'tech_2', status, evidence);
+  }
   setCheck(
     byId,
     'tech_3',

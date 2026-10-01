@@ -31,6 +31,7 @@ import {
 } from './adminApi';
 import EditTaskModal from './EditTaskModal';
 import { cn } from '../shared/utils';
+import { useToast } from '../shared/Toast';
 
 export type GrowthAuditLeadRef = {
     id: string;
@@ -110,6 +111,8 @@ export default function LeadCrmDrawer({
     onTaskUpdated,
     onViewDetails
 }: LeadCrmDrawerProps) {
+    const { show } = useToast();
+    const [activeTab, setActiveTab] = useState<'tasks' | 'activities'>('tasks');
     const [tasks, setTasks] = useState<LeadTask[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -130,7 +133,6 @@ export default function LeadCrmDrawer({
         lead.assignedAgentName || null
     );
 
-    const [successToast, setSuccessToast] = useState<string | null>(null);
     const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
     const [editingTask, setEditingTask] = useState<LeadTask | null>(null);
 
@@ -186,12 +188,11 @@ export default function LeadCrmDrawer({
             setTaskAssignee(nextAgentId || '');
             setReassignTo(nextAgentId || '');
             setShowReassign(false);
-            setSuccessToast(
+            show(
                 nextAgentId
                     ? `Lead reassigned to ${agent?.name || 'sales agent'}.`
                     : 'Lead assignment cleared.'
             );
-            setTimeout(() => setSuccessToast(null), 3000);
             onTaskUpdated?.();
         } catch (err: any) {
             setError(err.message || 'Failed to update assignment');
@@ -239,8 +240,7 @@ export default function LeadCrmDrawer({
 
             await loadLeadData();
             onTaskUpdated?.();
-            setSuccessToast('Task assigned successfully!');
-            setTimeout(() => setSuccessToast(null), 3000);
+            show('Task assigned successfully!');
         } catch (err: any) {
             setError(err.message || 'Failed to create task');
         } finally {
@@ -340,21 +340,32 @@ export default function LeadCrmDrawer({
                     </button>
                 </div>
 
-                {successToast && (
-                    <div className="mx-6 mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                        <div className="flex items-center gap-2 font-medium">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>{successToast}</span>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => setSuccessToast(null)}
-                            className="text-emerald-600 hover:text-emerald-800 p-0.5 rounded"
-                        >
-                            <X className="w-3.5 h-3.5" />
-                        </button>
-                    </div>
-                )}
+                <div className="flex border-b border-slate-200 bg-white px-6 shrink-0">
+                    <button
+                        onClick={() => setActiveTab('tasks')}
+                        className={cn(
+                            'py-3 px-1 mr-6 text-sm font-semibold border-b-2 flex items-center gap-2 transition-colors',
+                            activeTab === 'tasks'
+                                ? 'border-amber-500 text-amber-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                        )}
+                    >
+                        <CheckCircle2 className="w-4 h-4" />
+                        Tasks & Assignment
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('activities')}
+                        className={cn(
+                            'py-3 px-1 text-sm font-semibold border-b-2 flex items-center gap-2 transition-colors',
+                            activeTab === 'activities'
+                                ? 'border-amber-500 text-amber-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                        )}
+                    >
+                        <Clock className="w-4 h-4" />
+                        Call Logs & History
+                    </button>
+                </div>
 
                 {error && (
                     <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 flex items-center gap-2">
@@ -705,13 +716,13 @@ export default function LeadCrmDrawer({
                             // Keep lead-level assignment unless cleared via Reassign/Clear
                         }
                         setEditingTask(null);
-                        setSuccessToast('Task updated successfully');
+                        show('Task updated successfully');
                         loadLeadData();
                         if (onTaskUpdated) onTaskUpdated();
                     }}
                     onDeleted={() => {
                         setEditingTask(null);
-                        setSuccessToast('Task deleted successfully');
+                        show('Task deleted successfully');
                         loadLeadData();
                         if (onTaskUpdated) onTaskUpdated();
                     }}

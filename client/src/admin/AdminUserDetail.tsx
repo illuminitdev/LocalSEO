@@ -11,6 +11,7 @@ import {
     ListTodo,
     ShieldCheck
 } from 'lucide-react';
+import { useToast } from '../shared/Toast';
 import {
     adminGet,
     adminPatch,
@@ -256,9 +257,9 @@ function SalesAgentDetailBody({ user }: { user: AdminUser }) {
 
 export default function AdminUserDetail() {
     const { kind, id } = useParams<{ kind: string; id: string }>();
+    const { show } = useToast();
     const [user, setUser] = useState<AdminUser | null>(null);
     const [error, setError] = useState('');
-    const [msg, setMsg] = useState('');
     const [busy, setBusy] = useState(false);
 
     const load = () => {
@@ -278,13 +279,12 @@ export default function AdminUserDetail() {
     const assignPlan = async (planId: string) => {
         if (!user?.organization?.id) return;
         setBusy(true);
-        setMsg('');
         setError('');
         try {
             await adminPatch(`/api/admin/organizations/${user.organization.id}/subscription`, {
                 planId: planId || null
             });
-            setMsg('Plan updated.');
+            show('Plan updated.');
             load();
         } catch (err: any) {
             setError(err.message);
@@ -324,11 +324,6 @@ export default function AdminUserDetail() {
 
             {error && (
                 <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">{error}</p>
-            )}
-            {msg && (
-                <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5">
-                    {msg}
-                </p>
             )}
 
             <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">

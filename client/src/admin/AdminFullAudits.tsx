@@ -41,6 +41,7 @@ import {
 import { AUDIT_SERVICE_OPTIONS, resolveAuditService } from './auditServices';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { resolveAuditReportUrl } from '../shared/apiConfig';
+import { useToast } from '../shared/Toast';
 import { cn } from '../shared/utils';
 
 const PAGE_SIZE = 10;
@@ -118,7 +119,9 @@ const CRAWL_STEPS = [
 const EMPTY_FORM = {
     businessName: '',
     website: '',
-    emailOrPhone: '',
+    contact: '',
+    extraContact: '',
+    showExtraContact: false,
     address: '',
     city: '',
     serviceId: '',
@@ -126,25 +129,29 @@ const EMPTY_FORM = {
     contactName: ''
 };
 
-/** Split a combined contact value into email and/or phone for the API. */
-function splitEmailOrPhone(raw: string): { email: string; phone: string } {
-    const value = String(raw || '').trim();
-    if (!value) return { email: '', phone: '' };
-    if (value.includes('@')) {
-        return { email: value, phone: '' };
-    }
-    return { email: '', phone: value };
-}
-
 function isValidEmailOrPhone(raw: string): boolean {
     const value = String(raw || '').trim();
     if (!value) return false;
     if (value.includes('@')) {
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
     }
-    // At least 7 digits after stripping formatting
     const digits = value.replace(/\D/g, '');
     return digits.length >= 7;
+}
+
+/** Keep whichever values are a valid email and a valid phone. */
+function contactsFromForm(contact: string, extraContact: string, showExtraContact: boolean) {
+    const values = [contact, showExtraContact ? extraContact : ''].map((v) => String(v || '').trim()).filter(Boolean);
+    let email = '';
+    let phone = '';
+    for (const value of values) {
+        if (value.includes('@')) {
+            if (!email) email = value;
+        } else if (!phone) {
+            phone = value;
+        }
+    }
+    return { email, phone };
 }
 
 async function copyText(text: string) {
@@ -173,6 +180,7 @@ function auditToLeadRef(a: FullAuditListItem): GrowthAuditLeadRef {
 }
 
 export default function AdminFullAudits() {
+    const { show } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
     const activeTab = searchParams.get('tab') === 'requests' ? 'requests' : 'audits';
     const [audits, setAudits] = useState<FullAuditListItem[]>([]);
@@ -181,7 +189,6 @@ export default function AdminFullAudits() {
     const [activeLead, setActiveLead] = useState<GrowthAuditLeadRef | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [message, setMessage] = useState('');
     const [busyId, setBusyId] = useState('');
     const [busyAction, setBusyAction] = useState<'share' | 'delete' | ''>('');
     const [page, setPage] = useState(1);
@@ -300,12 +307,11 @@ export default function AdminFullAudits() {
         setForm({
             ...EMPTY_FORM,
             businessName: req.businessName || '',
-            emailOrPhone: req.toEmail || ''
+            contact: req.toEmail || ''
         });
         setShowForm(true);
         setTab('audits');
         setError('');
-        setMessage('');
         updateFullAuditRequest(req.id, { status: 'in_progress' }).catch(() => {});
     };
 
@@ -320,7 +326,6 @@ export default function AdminFullAudits() {
         setFulfillAgentId(req.assignedToUserId || '');
         setAssignSaving(false);
         setError('');
-        setMessage('');
     };
 
     const openAssignModalForAudit = (audit: FullAuditListItem) => {
@@ -351,7 +356,6 @@ export default function AdminFullAudits() {
             setFulfillAgentId('');
             setAssignSaving(false);
             setError('');
-            setMessage('');
         }
     };
 
@@ -388,7 +392,7 @@ export default function AdminFullAudits() {
                 businessName: req.businessName || selected?.businessName,
                 leadId: req.leadId
             });
-            setMessage('Assigned — sales agent will see this in CRM to deliver the PDF.');
+            show('Assigned — sales agent will see this in CRM to deliver the PDF.');
             setAssignModalReq(null);
             setFulfillAuditId('');
             setFulfillAgentId('');
@@ -431,7 +435,6 @@ export default function AdminFullAudits() {
     const openNewForm = () => {
         setShowForm(true);
         setError('');
-        setMessage('');
         setCreateMessage('');
     };
 
@@ -461,7 +464,11 @@ export default function AdminFullAudits() {
         setShowForm(false);
         setCreateMessage('');
         setStepIndex(0);
-
+        show(
+            prefillRequestId
+                ? 'Full audit ready — pick a sales agent to assign.'
+                : 'Full audit ready — report opened in a new tab.'
+        );
         if (prefillRequestId) {
             const req = requests.find((r) => r.id === prefillRequestId);
             const agentId = req?.assignedToUserId;
@@ -472,23 +479,23 @@ export default function AdminFullAudits() {
                         fulfilledAuditId: auditId,
                         assignedToUserId: agentId
                     });
-                    setMessage(
+                    show(
                         `🎉 Full Growth Audit ready and automatically assigned back to ${req.assignedAgentName || 'the requesting sales agent'}!`
                     );
                 } catch {
                     pendingAssignRef.current = { reqId: prefillRequestId, auditId };
                     setFulfillAuditId(auditId);
-                    setMessage('Full audit ready — please confirm assignment.');
+                    show('Full audit ready — please confirm assignment.');
                 }
             } else {
                 pendingAssignRef.current = { reqId: prefillRequestId, auditId };
                 setFulfillAuditId(auditId);
-                setMessage('Full audit ready — pick a sales agent to assign.');
+                show('Full audit ready — pick a sales agent to assign.');
             }
             setPrefillRequestId(null);
             setTab('requests');
         } else {
-            setMessage('Full audit ready — report opened in a new tab.');
+            show('Full audit ready — report opened in a new tab.');
         }
         load();
     };
@@ -511,8 +518,12 @@ export default function AdminFullAudits() {
             setError('City is required');
             return;
         }
-        if (!isValidEmailOrPhone(form.emailOrPhone)) {
-            setError('Email or phone is required (enter a valid email or phone number)');
+        if (!isValidEmailOrPhone(form.contact)) {
+            setError('Enter a valid email or phone number');
+            return;
+        }
+        if (form.showExtraContact && form.extraContact.trim() && !isValidEmailOrPhone(form.extraContact)) {
+            setError('The extra contact must be a valid email or phone number');
             return;
         }
 
@@ -526,12 +537,11 @@ export default function AdminFullAudits() {
             return;
         }
 
-        const { email, phone } = splitEmailOrPhone(form.emailOrPhone);
+        const { email, phone } = contactsFromForm(form.contact, form.extraContact, form.showExtraContact);
 
         setCreating(true);
         setStepIndex(0);
         setError('');
-        setMessage('');
         setCreateMessage('Looking up Maps / GBP, then crawling the website…');
 
         try {
@@ -622,7 +632,8 @@ export default function AdminFullAudits() {
 
     const onCopy = async (url: string) => {
         const ok = await copyText(url);
-        setMessage(ok ? 'Shareable link copied.' : url);
+        if (ok) show('Shareable link copied.');
+        else setError('Could not copy the link.');
     };
 
     const onShare = async (a: FullAuditListItem) => {
@@ -648,10 +659,9 @@ export default function AdminFullAudits() {
         setBusyId(a.id);
         setBusyAction('share');
         setError('');
-        setMessage('');
         try {
             const res = await shareFullAuditEmail(a.id, { email });
-            setMessage(
+            show(
                 res.attached === false
                     ? `Report emailed to ${res.to} (link only — PDF was too large to attach).`
                     : `Report emailed to ${res.to}.`
@@ -675,7 +685,7 @@ export default function AdminFullAudits() {
         try {
             await deleteFullAudit(a.id);
             setAudits((prev) => prev.filter((x) => x.id !== a.id));
-            setMessage('Audit deleted.');
+            show('Audit deleted.');
         } catch (err: any) {
             setError(err.message || 'Could not delete audit');
         } finally {
@@ -745,11 +755,6 @@ export default function AdminFullAudits() {
             {error ? (
                 <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
                     {error}
-                </p>
-            ) : null}
-            {message ? (
-                <p className="text-sm text-emerald-900 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5">
-                    {message}
                 </p>
             ) : null}
 
@@ -1090,16 +1095,50 @@ export default function AdminFullAudits() {
                                     className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
                                 />
                             </label>
-                            <label className="block text-sm font-semibold text-[#0F172A]">
+                            <div className="block text-sm font-semibold text-[#0F172A]">
                                 Email or phone <span className="text-red-500">*</span>
-                                <input
-                                    required
-                                    value={form.emailOrPhone}
-                                    onChange={(e) => setForm({ ...form, emailOrPhone: e.target.value })}
-                                    placeholder="company@example.com or +44…"
-                                    className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
-                                />
-                            </label>
+                                <div className="mt-1.5 flex items-center gap-2">
+                                    <input
+                                        required
+                                        value={form.contact}
+                                        onChange={(e) => setForm({ ...form, contact: e.target.value })}
+                                        placeholder="company@example.com or +44…"
+                                        className="min-w-0 flex-1 px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
+                                    />
+                                    {!form.showExtraContact ? (
+                                        <button
+                                            type="button"
+                                            aria-label="Add email and phone"
+                                            title="Add email and phone"
+                                            onClick={() => setForm({ ...form, showExtraContact: true })}
+                                            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#F59E0B] bg-[#FFFBEB] text-[#F59E0B] hover:bg-[#FEF3C7]"
+                                        >
+                                            <Plus className="h-5 w-5" strokeWidth={3} />
+                                        </button>
+                                    ) : null}
+                                </div>
+                                {form.showExtraContact ? (
+                                    <div className="mt-2 flex items-center gap-2">
+                                        <input
+                                            value={form.extraContact}
+                                            onChange={(e) => setForm({ ...form, extraContact: e.target.value })}
+                                            placeholder="Add the other — email or mobile"
+                                            className="min-w-0 flex-1 px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
+                                        />
+                                        <button
+                                            type="button"
+                                            aria-label="Remove extra contact"
+                                            title="Remove extra contact"
+                                            onClick={() =>
+                                                setForm({ ...form, showExtraContact: false, extraContact: '' })
+                                            }
+                                            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E2E8F0] text-[#64748B] hover:bg-[#F8FAFC]"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                ) : null}
+                            </div>
                             <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
                                 Website
                                 <input

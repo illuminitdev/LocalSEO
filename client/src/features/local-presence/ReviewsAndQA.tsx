@@ -21,6 +21,7 @@ import {
     Lightbulb
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
+import { useToast } from '../../shared/Toast';
 import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
 
 interface Review {
@@ -707,13 +708,13 @@ const EXAMPLE_QUESTIONS = [
 ];
 
 export function QAAutoResponder() {
+    const { show } = useToast();
     const [kbText, setKbText] = useState('');
     const [questions, setQuestions] = useState<Question[]>([]);
     const [newQuestion, setNewQuestion] = useState('');
     const [answerStyle, setAnswerStyle] = useState('Professional & friendly');
     const [isGenerating, setIsGenerating] = useState<number | null>(null);
     const [isSavingKB, setIsSavingKB] = useState(false);
-    const [savedSuccess, setSavedSuccess] = useState('');
     const [showExamplesModal, setShowExamplesModal] = useState(false);
     const [error, setError] = useState('');
 
@@ -766,7 +767,6 @@ export function QAAutoResponder() {
     const handleSaveKB = async () => {
         setIsSavingKB(true);
         setError('');
-        setSavedSuccess('');
         try {
             await logDashboardActivity({
                 type: 'knowledge',
@@ -774,8 +774,7 @@ export function QAAutoResponder() {
                 icon: 'Activity',
                 color: 'text-[#0F172A]'
             });
-            setSavedSuccess('Knowledge saved successfully.');
-            setTimeout(() => setSavedSuccess(''), 3000);
+            show('Knowledge saved successfully.');
         } catch (err: any) {
             setError(err.message || 'Failed to save knowledge base');
         } finally {
@@ -806,13 +805,6 @@ export function QAAutoResponder() {
             {error && (
                 <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5">
                     {error}
-                </p>
-            )}
-
-            {savedSuccess && (
-                <p className="mb-6 text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2.5 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    {savedSuccess}
                 </p>
             )}
 

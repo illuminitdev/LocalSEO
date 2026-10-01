@@ -35,6 +35,114 @@ function stripEmojiText(text) {
     .trim();
 }
 
+const VENDOR_LINE =
+  /dataforseo|llm scraper|scraped ui|llm responses|consumer ui|\btop 5\b|claude\s*\(api\)/i;
+
+function scrubVendorText(text) {
+  if (!text || typeof text !== 'string') return text;
+  if (text.startsWith('data:image/')) return text;
+  const kept = text
+    .split('\n')
+    .filter((line) => !VENDOR_LINE.test(line))
+    .join('\n')
+    .replace(/[^.!?\n]*dataforseo[^.!?\n]*[.!?]?/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.;:])/g, '$1')
+    .trim();
+  return kept;
+}
+
+export function scrubVendorDeep(value) {
+  if (value == null) return value;
+  if (typeof value === 'string') return scrubVendorText(value);
+  if (Array.isArray(value)) return value.map((item) => scrubVendorDeep(item));
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) out[key] = scrubVendorDeep(item);
+    return out;
+  }
+  return value;
+}
+
+function isLocalSeoRoadmapCheck(c) {
+  const id = String(c?.id || '');
+  if (id.startsWith('aeo_') || id.startsWith('ai_') || id === 'onpage_10') return false;
+  if (id.startsWith('geo_') && id !== 'geo_5') return false;
+  if (['tech_12', 'tech_13', 'tech_14', 'tech_15'].includes(id)) return false;
+  return /gbp|nap|web|conv|maps|citation|local|geo_5|maps_vis/.test(`${c?.section || ''} ${id}`);
+}
+
+function isAeoRoadmapCheck(c) {
+  const id = String(c?.id || '');
+  return id.startsWith('aeo_') || id.startsWith('ai_') || id === 'onpage_10';
+}
+
+function isGeoRoadmapCheck(c) {
+  const id = String(c?.id || '');
+  if (id === 'geo_5') return false;
+  return id.startsWith('geo_') || ['tech_12', 'tech_13', 'tech_14', 'tech_15'].includes(id);
+}
+
+function buildMeasuredRoadmap(audit) {
+  const business = audit?.business || {};
+  const name = String(business.businessName || 'this business').trim();
+  const service = String(business.serviceLabel || business.service || 'the service').trim();
+  const city = String(business.searchAreaLabel || business.city || 'the local area').trim();
+  const failed = (audit?.checklist?.checks || []).filter((c) => c?.status === 'fail');
+  const pick = (pred, fallbacks) => {
+    const items = failed
+      .filter(pred)
+      .slice(0, 4)
+      .map((c) => `Fix “${c.label}” for ${name}: ${String(c.evidence || 'measured gap on this audit').slice(0, 140)}`);
+    for (const fallback of fallbacks) {
+      if (items.length >= 4) break;
+      items.push(fallback);
+    }
+    return items.slice(0, 4);
+  };
+  return [
+    {
+      month: 1,
+      title: 'Foundation',
+      items: pick(isLocalSeoRoadmapCheck, [
+        `Make the Google listing for ${name} match the website name, phone, and address in ${city}`,
+        `Align photos, hours, and services on the Google listing for ${name} in ${city}`,
+        `Add a ${service} page that names the areas covered around ${city}`,
+        `Confirm ${name} on the measured Google Maps query for ${service} in ${city}`
+      ])
+    },
+    {
+      month: 2,
+      title: 'Answers',
+      items: pick(isAeoRoadmapCheck, [
+        `Add 40–60 word answers for the ${service} questions customers ask in ${city}`,
+        `Add an FAQ block on the ${service} page for ${name} in ${city}`,
+        `Mark those answers with FAQPage schema on the ${service} pages`,
+        `Put ${service} and ${city} in the first paragraph of the ${name} service page`
+      ])
+    },
+    {
+      month: 3,
+      title: 'AI visibility',
+      items: pick(isGeoRoadmapCheck, [
+        `Use the same trading name for ${name} on the website, Google listing, and citations in ${city}`,
+        `Add sameAs links for ${name} so ChatGPT, Claude, and Gemini can connect the ${service} entity in ${city}`,
+        `Publish ${name} on the directories those AI answers already cite for ${service} in ${city}`,
+        `Recheck the measured prompts and record whether ChatGPT, Claude, and Gemini name ${name}`
+      ])
+    }
+  ];
+}
+
+function roadmapIsWeak(roadmap) {
+  if (!Array.isArray(roadmap) || roadmap.length < 3) return true;
+  return roadmap.some(
+    (month) =>
+      !Array.isArray(month?.items) ||
+      month.items.filter((item) => String(item || '').trim().length > 24).length < 3
+  );
+}
+
 function stripEmojiDeep(value) {
   if (value == null) return value;
   if (typeof value === 'string') return stripEmojiText(value);
@@ -64,7 +172,99 @@ function collectAuditChecks(audit) {
 }
 
 function areaFromCheck(c) {
-  return c?.pillar || c?.sectionTitle || c?.section || 'Local SEO';
+  return pillarForCheck(c);
+}
+
+function pillarForCheck(c) {
+  const id = String(c?.id || '');
+  const section = String(c?.section || '');
+  if (id === 'onpage_10' || id.startsWith('aeo_') || id.startsWith('ai_')) return 'AEO';
+  if (id === 'geo_5') return 'Local SEO';
+  if (id.startsWith('geo_') || ['tech_12', 'tech_13', 'tech_14', 'tech_15'].includes(id)) return 'GEO';
+  if (
+    section === 'gbp' ||
+    section === 'reviews' ||
+    section === 'website_basic' ||
+    section === 'website_homepage' ||
+    section === 'local_seo' ||
+    section === 'service_pages' ||
+    section === 'onpage_seo' ||
+    section === 'citations' ||
+    section === 'maps_competitors' ||
+    section === 'competitor_gap' ||
+    section === 'conversion' ||
+    section === 'technical_seo' ||
+    id.startsWith('nap_') ||
+    id.startsWith('maps_')
+  ) {
+    return 'Local SEO';
+  }
+  return 'Local SEO';
+}
+
+function normalizeIssueArea(area) {
+  const value = String(area || '').trim().toLowerCase();
+  if (value.startsWith('aeo') || value.includes('answer engine')) return 'AEO';
+  if (value.startsWith('geo')) return 'GEO';
+  if (value.startsWith('local')) return 'Local SEO';
+  return '';
+}
+
+function issueFromFailedCheck(c, pillar) {
+  const label = String(c?.label || `${pillar} gap`);
+  const evidence = String(c?.evidence || '');
+  return {
+    title: label,
+    detail: evidence,
+    impact: 'High',
+    area: pillar,
+    evidence,
+    recommendation: `Fix the measured ${pillar} gap: ${label}.`,
+    priority: 'High'
+  };
+}
+
+/** Keep four issues, and cover each pillar that actually failed. */
+function ensurePillarCriticalIssues(issues, audit) {
+  const failed = collectAuditChecks(audit).filter((c) => c.status === 'fail');
+  const pools = { 'Local SEO': [], AEO: [], GEO: [] };
+  for (const check of failed) {
+    const pillar = pillarForCheck(check);
+    if (pools[pillar]) pools[pillar].push(check);
+  }
+  const list = (Array.isArray(issues) ? issues : []).filter(Boolean).slice(0, 4);
+  const covered = () =>
+    new Set<string>(list.map((item) => normalizeIssueArea(item?.area)).filter(Boolean));
+
+  for (const pillar of ['Local SEO', 'AEO', 'GEO']) {
+    if (!pools[pillar].length || covered().has(pillar)) continue;
+    const built = issueFromFailedCheck(pools[pillar][0], pillar);
+    if (list.length < 4) {
+      list.push(built);
+      continue;
+    }
+    const counts = {};
+    list.forEach((item) => {
+      const area = normalizeIssueArea(item?.area) || 'other';
+      counts[area] = (counts[area] || 0) + 1;
+    });
+    let replaceAt = list.findIndex((item) => {
+      const area = normalizeIssueArea(item?.area) || 'other';
+      return (counts[area] || 0) > 1;
+    });
+    if (replaceAt < 0) {
+      replaceAt = list.findIndex((item) => !normalizeIssueArea(item?.area));
+    }
+    if (replaceAt < 0) {
+      const mustKeep = new Set(
+        ['Local SEO', 'AEO', 'GEO'].filter((name) => covered().has(name) && counts[name] === 1)
+      );
+      const idx = [...list.keys()].reverse().find((index) => !mustKeep.has(normalizeIssueArea(list[index]?.area)));
+      replaceAt = idx == null ? list.length - 1 : idx;
+    }
+    list[replaceAt] = built;
+  }
+  return list.slice(0, 4);
 }
 
 /** Build fail-oriented critical issues from measured failed checks (never pass-worded labels). */
@@ -158,7 +358,7 @@ export function ensureNarrativeSections(aiReport, audit) {
     passedLabels
   });
   if (!critical.length) critical = detCritical;
-  out.criticalIssues = critical.slice(0, 4);
+  out.criticalIssues = ensurePillarCriticalIssues(critical.slice(0, 4), audit);
 
   if (!Array.isArray(out.strengths) || !out.strengths.length) {
     out.strengths = detStrengths;
@@ -288,7 +488,7 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
     const inPack = typeof localRank?.position === 'number';
     out.geoFixes = {
       ...out.geoFixes,
-      title: out.geoFixes.title || 'GEO: Google + AI visibility',
+      title: out.geoFixes.title || 'GEO: AI mentions and citations',
       queryCards: [
         {
           query: q,
@@ -443,10 +643,17 @@ export async function generateDeepAiReport(audit) {
 Tone: clear, commercial, British English. Do NOT invent ratings, rankings, credentials, phones, or crawl facts.
 Use only the measured JSON. Structure the narrative like a client deck: overall visibility, Local SEO / AEO / GEO, four critical issues, strengths, 90-day roadmap, plus three fix decks.
 For every issue use Issue → Evidence → Impact → Recommendation → Priority (fill evidence/recommendation/priority fields; keep title/detail/impact too).
-GEO visuals must describe Google Local Pack / Maps results only — never invent or request an AI Overview block.
+
+PILLAR CONTENT RULES (must follow):
+- Local SEO is the Google Business Profile, NAP, citations, website local pages, and the measured Google Maps query. Do not mention FAQ schema, ChatGPT, Claude, Gemini, or AI visibility in local_seo comments, localSeoFixes, or Local SEO issues.
+- AEO is whether the website answers the measured Google question searches with FAQ blocks, 40–60 word direct answers, and FAQPage schema. Do not explain an AEO gap as a Maps or Local Pack position.
+- GEO is whether ChatGPT, Claude, and Gemini name, recommend, or cite this business on the measured prompts. Write GEO from those AI excerpts. Do not describe the Local Pack as the GEO result, and do not invent an AI Overview block. Maps may appear only as a one-sentence Local SEO cross-reference.
+- executiveSummary is exactly three sentences, in this order: Local SEO, then AEO, then GEO.
+- pillarComments.local_seo, pillarComments.aeo, and pillarComments.geo are each one sentence and stay inside that pillar.
 
 CRITICAL ISSUES RULES (must follow):
 - criticalIssues must be REAL gaps from Failed checks only — never invent issues.
+- Include exactly 4 criticalIssues. When a pillar has a failed check, include at least one Local SEO issue, one AEO issue, and one GEO issue. Evidence for each issue comes only from that pillar.
 - NEVER list a Passed check (or positive GBP fact) as a critical issue. Forbidden titles include: "Photos present", "Business description present", "Opening hours present", "Categories present", "Services listed".
 - If photos/description/hours are present on GBP, do not claim they are missing.
 - strengths must come from Passed checks / positive measured facts only.
@@ -455,6 +662,17 @@ CRITICAL ISSUES RULES (must follow):
 EMOJI RULE (must follow):
 - Never use emojis, emoticons, or pictographs in any JSON string field (headlines, summaries, titles, details, decks, roadmap, next steps).
 - Use plain professional text only. Icons are added by the report UI separately.
+
+SOURCE RULE (must follow):
+- Never name DataForSEO, scrapers, consumer UI, Top 5, LLM Responses, scraped UI, or any API used to measure results.
+- Say ChatGPT, Claude, and Gemini only. Do not say how the answers were collected.
+
+ROADMAP RULES (must follow):
+- Exactly 3 months, and each month has 4 concrete tasks for this business.
+- Month 1 is Google Business Profile, NAP, and the measured Maps query. No FAQ tasks and no AI tasks.
+- Month 2 is FAQ blocks and on-page answers for the failed AEO checks only.
+- Month 3 is the GEO prompts where the brand was not mentioned: the same trading name, sameAs links, and the third-party sources those ChatGPT, Claude, and Gemini answers already cited.
+- Name the business, the service, and the city in the tasks. Do not write generic tasks such as "monitor rankings" or "improve SEO".
 
 CRITICAL PHONE RULES (must follow):
 - Measured crawl phones: ${JSON.stringify(sitePhones)}
@@ -497,13 +715,13 @@ ${JSON.stringify(passed)}
 Return ONLY JSON:
 {
   "headline": "short deck-style headline",
-  "executiveSummary": "2-4 sentences on digital presence gaps/opportunities across Local SEO, AEO, GEO",
+  "executiveSummary": "exactly 3 sentences: Local SEO, then AEO, then GEO",
   "overallVerdict": "one sentence",
   "scoreComment": "one sentence on the /100 weighted score",
   "pillarComments": {
-    "local_seo": "one sentence",
-    "aeo": "one sentence",
-    "geo": "one sentence"
+    "local_seo": "one sentence on GBP, NAP, citations, and the measured Maps query only",
+    "aeo": "one sentence on FAQ and direct answers for the measured question searches only",
+    "geo": "one sentence on whether ChatGPT, Claude, and Gemini name or cite this business only"
   },
   "strengths": ["up to 4 strengths"],
   "criticalIssues": [
@@ -522,7 +740,7 @@ Return ONLY JSON:
   ],
   "localSeoFixes": {
     "title": "Local SEO: The Fixes",
-    "takeaway": "one sentence why NAP consistency matters",
+    "takeaway": "one sentence on NAP consistency and the measured Maps query — no FAQ or AI",
     "inconsistencies": [
       { "field": "address|phone|hours|brand|website", "title": "", "gbpShows": "", "websiteShows": "", "status": "match|mismatch|unknown", "tone": "green|amber|purple|teal" }
     ],
@@ -536,12 +754,12 @@ Return ONLY JSON:
     "priorities": [
       { "priority": "Critical|High|Medium", "title": "", "detail": "", "howTo": "concrete how-to steps", "issue": "", "evidence": "", "impact": "", "recommendation": "" }
     ],
-    "opportunity": "one sentence opportunity — do NOT invent 'Brand is not mentioned' red-tag style notes"
+    "opportunity": "one sentence on FAQ and 40-60 word answers for the measured question searches — do not mention Maps rank"
   },
   "geoFixes": {
-    "title": "GEO: Google + AI visibility",
-    "visualIntro": "one sentence about the MEASURED Google Local Pack query from localRank — tell the user to re-type that exact query to verify; do NOT invent other queries or AI Overview",
-    "verifyHint": "ChatGPT/Gemini = scraped UI; Claude = API. Cross-check the measured Google query and the same GEO prompts",
+    "title": "GEO: AI mentions and citations",
+    "visualIntro": "one sentence on whether ChatGPT, Claude, and Gemini name this business for the measured prompts — do not describe the Local Pack",
+    "verifyHint": "Ask ChatGPT, Claude, and Gemini the measured prompts and record whether this business is named.",
     "queryCards": [
       {
         "query": "MUST equal gbpLookup.localRank.query exactly",
@@ -555,8 +773,8 @@ Return ONLY JSON:
         "measured": true
       }
     ],
-    "goalLine": "win the measured Google query and get cited in ChatGPT / Claude",
-    "opportunity": "one sentence based on localRank + whether brand is mentioned in AI engines — never invent AI Overview",
+    "goalLine": "get named and cited by ChatGPT, Claude, and Gemini for the measured prompts",
+    "opportunity": "one sentence leading with which engines mentioned or missed this business — Maps only as a short Local SEO cross-reference — never invent AI Overview",
     "actions": [
       { "title": "", "detail": "", "howTo": "concrete how-to steps", "priority": "High|Medium", "issue": "", "evidence": "", "impact": "", "recommendation": "" }
     ]
@@ -568,8 +786,8 @@ Return ONLY JSON:
 }
 
 For every criticalIssue, finding, priorityFix, and deck action/priority use Issue → Evidence → Impact → Recommendation → Priority (map title/detail/why/action into those fields; keep existing keys too).
-Include exactly 4 criticalIssues, 4-6 findings, exactly 3 priorityFixes, roadmap months 1–3,
-do NOT generate aeoFixes.queryCards / featuredSnippet / paaQuestions (AEO Visual uses measured Google SERP screenshots), 2 geoFixes.queryCards, 3-4 actions per Local SEO and GEO decks, 3-4 AEO priorities.
+Include exactly 4 criticalIssues covering Local SEO, AEO, and GEO when those pillars have failed checks, 4-6 findings, exactly 3 priorityFixes, roadmap months 1–3,
+do NOT generate aeoFixes.queryCards / featuredSnippet / paaQuestions (AEO Visual uses measured Google SERP screenshots). geoFixes.queryCards may keep the single measured Maps query for the existing report layout; do not narrate that card as the GEO finding. 3-4 Local SEO actions on GBP, NAP, citations, or Maps. 3-4 GEO actions on AI mentions and citations. 3-4 AEO priorities on FAQ and direct answers.
 Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (you may refine titles only — never change phone/address facts or invent missing phones).`;
 
   let lastError;
@@ -619,6 +837,8 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
         ...fallbacks.aeoFixes,
         ...(parsed.aeoFixes || {}),
         aeoChecklist: fallbacks.aeoFixes.aeoChecklist || parsed.aeoFixes?.aeoChecklist || null,
+        visualIntro: fallbacks.aeoFixes.visualIntro,
+        opportunity: fallbacks.aeoFixes.opportunity,
         priorities: Array.isArray(parsed.aeoFixes?.priorities)
           ? parsed.aeoFixes.priorities.slice(0, 4)
           : fallbacks.aeoFixes.priorities,
@@ -631,7 +851,7 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
       const geoFixes = {
         ...fallbacks.geoFixes,
         ...(parsed.geoFixes || {}),
-        // Always prefer measured Google query cards from fallbacks (cross-checkable)
+        // Maps payload stays for the report layout. The GEO words come from the deck.
         queryCards: Array.isArray(fallbacks.geoFixes.queryCards)
           ? fallbacks.geoFixes.queryCards
           : [],
@@ -641,14 +861,17 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
             ? parsed.geoFixes.aiEngines
             : [],
         geoChecklist: fallbacks.geoFixes.geoChecklist || parsed.geoFixes?.geoChecklist || null,
-        verifyHint: fallbacks.geoFixes.verifyHint || parsed.geoFixes?.verifyHint || '',
-        visualIntro: fallbacks.geoFixes.visualIntro || parsed.geoFixes?.visualIntro || '',
+        title: fallbacks.geoFixes.title,
+        verifyHint: fallbacks.geoFixes.verifyHint,
+        visualIntro: fallbacks.geoFixes.visualIntro,
+        goalLine: fallbacks.geoFixes.goalLine,
+        opportunity: fallbacks.geoFixes.opportunity,
         actions: Array.isArray(parsed.geoFixes?.actions)
           ? parsed.geoFixes.actions.slice(0, 4)
           : fallbacks.geoFixes.actions
       };
 
-      return stripEmojiDeep(
+      return scrubVendorDeep(stripEmojiDeep(
         ensureNarrativeSections(
           {
             generatedAt: new Date().toISOString(),
@@ -663,7 +886,7 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
             criticalIssues: Array.isArray(parsed.criticalIssues) ? parsed.criticalIssues.slice(0, 4) : [],
             findings: Array.isArray(parsed.findings) ? parsed.findings.slice(0, 6) : [],
             priorityFixes: Array.isArray(parsed.priorityFixes) ? parsed.priorityFixes.slice(0, 3) : [],
-            roadmap: Array.isArray(parsed.roadmap) ? parsed.roadmap.slice(0, 3) : [],
+            roadmap: roadmapIsWeak(parsed.roadmap) ? buildMeasuredRoadmap(audit) : parsed.roadmap.slice(0, 3),
             localSeoFixes,
             aeoFixes,
             geoFixes,
@@ -674,6 +897,7 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
           },
           audit
         )
+      )
       );
     } catch (err) {
       lastError = err;

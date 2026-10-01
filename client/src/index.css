@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
-@theme {
+:root {
+  --brand-primary: #F59E0B;
+  --brand-secondary: #0F172A;
   --color-canvas: #F8FAFC;
   --color-navy: #0F172A;
   --color-navy-deep: #111827;
@@ -11,18 +13,16 @@
   --color-line: #E2E8F0;
 }
 
-:root {
-  --brand-primary: #F59E0B;
-  --brand-secondary: #0F172A;
-}
-
 html {
   overflow-x: clip;
   -webkit-text-size-adjust: 100%;
 }
 
 body {
-  @apply bg-white text-[#0F172A] antialiased;
+  background-color: #fff;
+  color: #0F172A;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   font-family: 'Inter', system-ui, sans-serif;
   overflow-x: clip;
   min-height: 100dvh;
@@ -33,7 +33,7 @@ body {
   min-width: 0;
 }
 
-/* Host app accents that follow org branding (set on :root by OrgBrandProvider) */
+
 .bg-brand {
   background-color: var(--brand-primary);
 }
@@ -50,7 +50,7 @@ body {
   color: var(--brand-secondary);
 }
 
-/* Notch / home-indicator safe areas on mobile */
+
 .safe-pt {
   padding-top: max(0.75rem, env(safe-area-inset-top));
 }
@@ -89,12 +89,12 @@ button:disabled,
   }
 }
 
-/* Sidebar resize: simple ↔ cursor (not the OS col-resize ←||→) */
+
 .cursor-sidebar-resize {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath fill='%23ffffff' stroke='%230F172A' stroke-width='1.25' stroke-linejoin='round' d='M3 16l7-6v4h12v-4l7 6-7 6v-4H10v4z'/%3E%3C/svg%3E") 16 16, ew-resize;
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='12' viewBox='0 0 18 8'%3E%3Cpath fill='%23ffffff' stroke='%230F172A' stroke-width='0.65' stroke-linejoin='round' d='M0.7 4 L4 1.15 V3.2 H14 V1.15 L17.3 4 L14 6.85 V4.8 H4 V6.85 Z'/%3E%3C/svg%3E") 13 6, ew-resize;
 }
 
-/* Branding color inputs: force circular swatch (native color wells are square) */
+
 .brand-color-swatch {
   -webkit-appearance: none;
   appearance: none;
