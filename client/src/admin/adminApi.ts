@@ -350,6 +350,16 @@ export async function updateFullAuditRequest(
     return res.request;
 }
 
+export async function assignFullAuditToAgent(payload: {
+    requestId?: string;
+    auditId: string;
+    agentId: string;
+    businessName?: string;
+    leadId?: string;
+}): Promise<{ success: boolean; message: string }> {
+    return adminPost('/api/admin/full-audit-requests/assign', payload);
+}
+
 
 
 

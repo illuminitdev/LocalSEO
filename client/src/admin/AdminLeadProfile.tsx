@@ -72,6 +72,36 @@ type EditForm = {
     spreadsheetStatus3: string;
 };
 
+const STANDARD_INDUSTRIES = [
+    'Dental',
+    'Healthcare & Medical',
+    'Roofing & Gutters',
+    'Doors & Shutters',
+    'Plumbing & Heating',
+    'HVAC & Air Conditioning',
+    'Electrician & Electrical',
+    'Legal & Law',
+    'Accounting & Finance',
+    'Real Estate & Property',
+    'Auto Repair & Services',
+    'Restaurants & Food',
+    'Construction & Building',
+    'Cleaning Services',
+    'Landscaping & Gardening',
+    'Beauty & Salons',
+    'Fitness & Gyms',
+    'Retail & E-commerce',
+    'Technology & IT',
+    'General'
+];
+
+const STANDARD_PRIORITIES = [
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'urgent', label: 'Urgent' }
+];
+
 function formFromLead(lead: LeadProfile): EditForm {
     return {
         name: lead.businessName || '',
@@ -398,9 +428,7 @@ export default function AdminLeadProfile() {
                                 ['phone', 'Phone'],
                                 ['email', 'Email'],
                                 ['website', 'Website'],
-                                ['address', 'Address'],
-                                ['industry', 'Industry'],
-                                ['opportunityLevel', 'Priority']
+                                ['address', 'Address']
                             ] as Array<[keyof EditForm, string]>
                         ).map(([key, label]) => (
                             <label key={key} className="block text-xs space-y-1">
@@ -412,6 +440,90 @@ export default function AdminLeadProfile() {
                                 />
                             </label>
                         ))}
+
+                        {/* Industry Dropdown with Other / Manual Entry */}
+                        <div className="block text-xs space-y-1">
+                            <span className="font-bold text-slate-500 uppercase tracking-wider">Industry</span>
+                            <select
+                                value={
+                                    STANDARD_INDUSTRIES.some((i) => i.toLowerCase() === (form.industry || '').trim().toLowerCase())
+                                        ? STANDARD_INDUSTRIES.find((i) => i.toLowerCase() === (form.industry || '').trim().toLowerCase())
+                                        : form.industry
+                                        ? '__other__'
+                                        : ''
+                                }
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '__other__') {
+                                        if (STANDARD_INDUSTRIES.some((i) => i.toLowerCase() === (form.industry || '').trim().toLowerCase())) {
+                                            setForm({ ...form, industry: '' });
+                                        }
+                                    } else {
+                                        setForm({ ...form, industry: val });
+                                    }
+                                }}
+                                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 bg-white"
+                            >
+                                <option value="">Select industry...</option>
+                                {STANDARD_INDUSTRIES.map((ind) => (
+                                    <option key={ind} value={ind}>
+                                        {ind}
+                                    </option>
+                                ))}
+                                <option value="__other__">Other</option>
+                            </select>
+                            {(!form.industry || !STANDARD_INDUSTRIES.some((i) => i.toLowerCase() === (form.industry || '').trim().toLowerCase())) && (
+                                <input
+                                    type="text"
+                                    placeholder="Specify industry..."
+                                    value={form.industry}
+                                    onChange={(e) => setForm({ ...form, industry: e.target.value })}
+                                    className="w-full mt-1.5 px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 bg-slate-50/50 focus:bg-white"
+                                />
+                            )}
+                        </div>
+
+                        {/* Priority Dropdown with Other / Manual Entry */}
+                        <div className="block text-xs space-y-1">
+                            <span className="font-bold text-slate-500 uppercase tracking-wider">Priority</span>
+                            <select
+                                value={
+                                    STANDARD_PRIORITIES.some((p) => p.value === (form.opportunityLevel || '').toLowerCase().trim())
+                                        ? (form.opportunityLevel || '').toLowerCase().trim()
+                                        : form.opportunityLevel
+                                        ? '__other__'
+                                        : ''
+                                }
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '__other__') {
+                                        if (STANDARD_PRIORITIES.some((p) => p.value === (form.opportunityLevel || '').toLowerCase().trim())) {
+                                            setForm({ ...form, opportunityLevel: '' });
+                                        }
+                                    } else {
+                                        setForm({ ...form, opportunityLevel: val });
+                                    }
+                                }}
+                                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 bg-white capitalize"
+                            >
+                                <option value="">Select priority...</option>
+                                {STANDARD_PRIORITIES.map((p) => (
+                                    <option key={p.value} value={p.value}>
+                                        {p.label}
+                                    </option>
+                                ))}
+                                <option value="__other__">Other</option>
+                            </select>
+                            {(!form.opportunityLevel || !STANDARD_PRIORITIES.some((p) => p.value === (form.opportunityLevel || '').toLowerCase().trim())) && (
+                                <input
+                                    type="text"
+                                    placeholder="Specify priority..."
+                                    value={form.opportunityLevel}
+                                    onChange={(e) => setForm({ ...form, opportunityLevel: e.target.value })}
+                                    className="w-full mt-1.5 px-3 py-2 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 bg-slate-50/50 focus:bg-white"
+                                />
+                            )}
+                        </div>
                     </div>
                     {(
                         [

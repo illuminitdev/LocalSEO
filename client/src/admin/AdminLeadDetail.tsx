@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import {
     ArrowLeft,
     Phone,
@@ -44,6 +44,7 @@ import TaskCompletionModal, { type CrmTaskStatus } from '../shared/TaskCompletio
 
 export default function AdminLeadDetail() {
     const { id } = useParams<{ id: string }>();
+    const location = useLocation();
     const [lead, setLead] = useState<AdminLeadCrmDetail['lead'] | null>(null);
     const [tasks, setTasks] = useState<LeadTask[]>([]);
     const [activities, setActivities] = useState<LeadActivity[]>([]);
@@ -59,9 +60,9 @@ export default function AdminLeadDetail() {
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: LeadTask } | null>(null);
     const [modalLoading, setModalLoading] = useState(false);
 
-    const loadLead = useCallback(async () => {
+    const loadLead = useCallback(async (silent = false) => {
         if (!id) return;
-        setLoading(true);
+        if (!silent) setLoading(true);
         setError('');
         try {
             const [data, agents] = await Promise.all([
@@ -73,9 +74,11 @@ export default function AdminLeadDetail() {
             setActivities(data.activities || []);
             setSalesAgents(agents);
         } catch (err: any) {
-            setError(err.message || 'Failed to load lead CRM data');
+            if (!silent) {
+                setError(err.message || 'Failed to load lead CRM data');
+            }
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     }, [id]);
 
@@ -83,10 +86,23 @@ export default function AdminLeadDetail() {
         loadLead();
     }, [loadLead]);
 
+    // Scroll to tasks section if opened with hash #tasks or state scrollTo: 'tasks'
+    useEffect(() => {
+        if (location.hash === '#tasks' || (location.state as any)?.scrollTo === 'tasks') {
+            const timer = setTimeout(() => {
+                const el = document.getElementById('tasks-section');
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }, 250);
+            return () => clearTimeout(timer);
+        }
+    }, [location.hash, location.state]);
+
     useEffect(() => {
         if (lead?.emailShareStatus !== 'sent' && lead?.observationEmailShareStatus !== 'sent') return;
         const timer = window.setInterval(() => {
-            loadLead();
+            loadLead(true);
         }, 8000);
         return () => window.clearInterval(timer);
     }, [lead?.emailShareStatus, lead?.observationEmailShareStatus, loadLead]);
@@ -199,7 +215,7 @@ export default function AdminLeadDetail() {
     const hasSheetStatuses = Boolean(status1 || status2 || status3 || combinedSheet);
     const crmStatus = String(lead.status || latestAct?.disposition || '').trim();
     const showCrmPill = Boolean(crmStatus && crmStatus.toLowerCase() !== 'new');
-    const activeNote = lead.notes || latestAct?.note || '';
+    const activeNote = latestAct?.note || lead.notes || '';
     const activeDate = latestAct?.createdAt || lead.updatedAt || null;
     const activeAuthor = latestAct?.authorName || lead.assignedAgentName || null;
     const taskNotes = tasks.filter((t) => String(t.notes || '').trim());
@@ -522,13 +538,28 @@ export default function AdminLeadDetail() {
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 <div className="lg:col-span-6 space-y-6">
-                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
+                    <div id="tasks-section" className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs scroll-mt-6">
                         <div className="flex items-center gap-2 mb-4">
                             <CheckSquare className="w-4 h-4 text-amber-500" />
                             <h2 className="text-base font-black text-slate-900">Tasks for this Lead</h2>
-                            <span className="bg-slate-100 text-slate-600 text-xs font-bold px-2 py-0.5 rounded-full">
-                                {tasks.length}
-                            </span>
+                            {(() => {
+                                const activeCount = tasks.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').length;
+                                if (activeCount > 0) {
+                                    return (
+                                        <span className="bg-amber-100 text-amber-900 border border-amber-300 text-xs font-black px-2 py-0.5 rounded-full shadow-2xs tracking-tight">
+                                            +{activeCount}
+                                        </span>
+                                    );
+                                }
+                                if (tasks.length > 0) {
+                                    return (
+                                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-2xs">
+                                            All Done
+                                        </span>
+                                    );
+                                }
+                                return null;
+                            })()}
                         </div>
 
                         {!tasks.length ? (

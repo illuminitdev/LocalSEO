@@ -134,7 +134,6 @@ export default function SalesTasks() {
                 fetchSalesTasks({
                     priority: priorityFilter !== 'all' ? priorityFilter : undefined,
                     taskType: typeFilter !== 'all' ? typeFilter : undefined,
-                    createdBy: 'admin',
                     dueToday: dueTodayOnly
                 }),
                 fetchSalesIndustries().catch(() => [] as Array<{ name: string; count: number }>)
@@ -151,11 +150,18 @@ export default function SalesTasks() {
 
     useEffect(() => {
         loadData();
+        const handler = () => {
+            loadData();
+        };
+        window.addEventListener('sales:task-updated', handler);
+        return () => {
+            window.removeEventListener('sales:task-updated', handler);
+        };
     }, [loadData]);
 
-    const openLeadDetails = (task: SalesLeadTask) => {
-        navigate(`/sales/leads/${encodeURIComponent(task.leadId)}`, {
-            state: { from: '/sales/tasks', fromLabel: 'Tasks' }
+    const openLeadDetails = (task: SalesLeadTask, focusSection?: string) => {
+        navigate(`/sales/leads/${encodeURIComponent(task.leadId)}${focusSection ? `#${focusSection}` : ''}`, {
+            state: { from: '/sales/tasks', fromLabel: 'Tasks', scrollTo: focusSection }
         });
     };
 
@@ -189,6 +195,7 @@ interface GroupedSalesTask {
     leadId: string;
     primaryTask: SalesLeadTask;
     totalTasks: number;
+    pendingTasks: number;
     tasks: SalesLeadTask[];
 }
 
@@ -275,10 +282,12 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
         const result: GroupedSalesTask[] = [];
         for (const [key, list] of groups.entries()) {
             list.sort(compareTasksForPrimary);
+            const pendingCount = list.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').length;
             result.push({
                 leadId: key,
                 primaryTask: list[0],
                 totalTasks: list.length,
+                pendingTasks: pendingCount,
                 tasks: list
             });
         }
@@ -634,20 +643,19 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                         <table className="w-full table-fixed text-left border-collapse text-sm min-w-[800px]">
                             <thead>
                                 <tr className="border-b border-[#E2E8F0] bg-slate-50/60 text-[11px] font-bold text-[#64748B] uppercase tracking-wider">
-                                    <th className="py-4 px-5 w-[36%]">Name / Business</th>
-                                    <th className="py-4 px-5 w-[26%]">Contact Info</th>
-                                    <th className="py-4 px-5 w-[11%]">Priority</th>
-                                    <th className="py-4 px-5 w-[14%] text-center">Status</th>
-                                    <th className="py-4 px-5 w-[13%] text-right">View Details</th>
+                                    <th className="py-4 pl-6 pr-4 w-[32%]">Name / Business</th>
+                                    <th className="py-4 px-4 w-[24%]">Contact Info</th>
+                                    <th className="py-4 px-4 w-[11%]">Priority</th>
+                                    <th className="py-4 px-4 w-[18%] text-center">Status</th>
+                                    <th className="py-4 pr-6 pl-4 w-[15%] text-right">View Details</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#F1F5F9]">
-                                {pagedGroups.map(({ primaryTask: task, totalTasks }) => {
-                                    const isDone = task.status === 'completed';
+                                {pagedGroups.map(({ primaryTask: task, pendingTasks }) => {
+                                    const isDone = pendingTasks === 0;
                                     const prioConf = PRIORITY_BADGES[task.priority] || PRIORITY_BADGES.medium;
                                     const businessName = task.leadBusinessName || 'Lead';
                                     const industry = normalizeTaskIndustry(task);
-
                                     return (
                                         <tr
                                             key={task.leadId || task.id}
@@ -658,22 +666,37 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                                                     : 'hover:bg-slate-50/60'
                                             )}
                                         >
-                                            <td className="py-5 px-5 align-middle overflow-hidden">
+                                            <td className="py-5 pl-6 pr-4 align-middle overflow-hidden">
                                                 <div className="min-w-0">
                                                     <div className="flex items-center gap-2 max-w-full">
-                                                        <span
-                                                            className="truncate font-semibold text-[#0F172A] text-sm"
-                                                            title={businessName}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openLeadDetails(task, 'tasks')}
+                                                            className="truncate font-semibold text-[#0F172A] hover:text-amber-600 transition-colors text-sm text-left cursor-pointer"
+                                                            title={`View ${businessName} tasks & details`}
                                                         >
                                                             {businessName}
-                                                        </span>
-                                                        {totalTasks > 1 && (
-                                                            <span
-                                                                className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200"
-                                                                title={`${totalTasks} tasks for this lead`}
+                                                        </button>
+                                                        {pendingTasks > 0 ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openLeadDetails(task, 'tasks')}
+                                                                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-2xs tracking-tight transition-all hover:scale-105 cursor-pointer"
+                                                                title={`${pendingTasks} active task${pendingTasks > 1 ? 's' : ''} remaining — Click to view tasks`}
                                                             >
-                                                                {totalTasks} Tasks
-                                                            </span>
+                                                                <ListTodo className="w-3 h-3 text-amber-700 shrink-0" />
+                                                                +{pendingTasks}
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openLeadDetails(task, 'tasks')}
+                                                                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs transition-all hover:scale-105 cursor-pointer"
+                                                                title="All assigned tasks completed for this lead — Click to view"
+                                                            >
+                                                                <CheckSquare className="w-3 h-3 text-emerald-600 shrink-0" />
+                                                                Done
+                                                            </button>
                                                         )}
                                                     </div>
                                                     <span className="block text-[11px] text-[#64748B] truncate mt-1">
@@ -681,13 +704,13 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                                                         {task.leadAddress
                                                             ? ` · ${task.leadAddress}`
                                                             : task.leadCity
-                                                              ? ` · ${task.leadCity}`
-                                                              : ''}
+                                                            ? ` · ${task.leadCity}`
+                                                            : ''}
                                                     </span>
                                                 </div>
                                             </td>
 
-                                            <td className="py-5 px-5 align-middle overflow-hidden">
+                                            <td className="py-5 px-4 align-middle overflow-hidden">
                                                 <div className="space-y-1.5 min-w-0">
                                                     {task.leadPhone ? (
                                                         <a
@@ -733,48 +756,46 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                                                 </div>
                                             </td>
 
-                                            <td className="py-5 px-5 align-middle">
+                                            <td className="py-5 px-4 align-middle">
                                                 <span
                                                     className={cn(
-                                                        'inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2.5 py-1 rounded-md border',
+                                                        'inline-flex items-center text-[10px] font-bold uppercase px-2.5 py-1 rounded-md border',
                                                         prioConf.bg,
                                                         prioConf.text
                                                     )}
                                                 >
-                                                    <span className={cn('w-1.5 h-1.5 rounded-full', prioConf.dot)} />
                                                     {prioConf.label}
                                                 </span>
                                             </td>
 
-                                            <td className="py-5 px-5 align-middle">
+                                            <td className="py-5 px-4 align-middle text-center">
                                                 {(() => {
                                                     const leadStatKey = String(task.leadStatus || 'new').toLowerCase().trim();
                                                     const statusConf = getLeadStatusConfig(leadStatKey);
                                                     return (
-                                                        <div className="flex flex-col items-center min-w-0 gap-1.5">
+                                                        <div className="flex flex-col items-center justify-center min-w-0 gap-1">
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setSelectedHistoryTask(task)}
                                                                 className={cn(
-                                                                    'inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-md border cursor-pointer hover:shadow-xs transition-all group/badge max-w-full',
+                                                                    'inline-flex items-center justify-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-lg border cursor-pointer hover:shadow-xs transition-all group/badge whitespace-nowrap',
                                                                     statusConf.bg,
                                                                     statusConf.text,
                                                                     statusConf.border
                                                                 )}
                                                                 title="Click to view/update lead status timeline"
                                                             >
-                                                                <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', statusConf.dot)} />
-                                                                <span className="capitalize truncate">
+                                                                <span className="capitalize whitespace-nowrap">
                                                                     {statusConf.label}
                                                                 </span>
-                                                                <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100 shrink-0" />
+                                                                <History className="w-3 h-3 opacity-40 group-hover/badge:opacity-90 shrink-0" />
                                                             </button>
                                                             <div
-                                                                className="flex items-center gap-1 text-[10px] text-[#94A3B8] font-medium truncate max-w-full"
+                                                                className="flex items-center justify-center gap-1 text-[10px] text-[#94A3B8] font-medium whitespace-nowrap"
                                                                 title="Last updated"
                                                             >
                                                                 <Clock className="w-2.5 h-2.5 shrink-0" />
-                                                                <span className="truncate">
+                                                                <span className="whitespace-nowrap">
                                                                     {fmtDate(task.updatedAt || task.completedAt || task.createdAt)}
                                                                 </span>
                                                             </div>
@@ -783,16 +804,15 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                                                 })()}
                                             </td>
 
-                                            <td className="py-5 px-5 align-middle text-right">
+                                            <td className="py-5 pr-6 pl-4 align-middle text-right whitespace-nowrap">
                                                 <button
                                                     type="button"
                                                     onClick={() => openLeadDetails(task)}
-                                                    className="text-xs font-semibold text-amber-800 hover:text-amber-950 bg-amber-50 hover:bg-amber-100 px-3 py-2 rounded-lg border border-amber-200 shadow-2xs transition-all inline-flex items-center gap-1.5"
+                                                    className="text-xs font-semibold text-amber-800 hover:text-amber-950 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg border border-amber-200 shadow-2xs transition-all inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
                                                     title="Open full lead details"
                                                 >
-                                                    <Eye className="w-3.5 h-3.5" />
-                                                    <span className="hidden sm:inline">View Details</span>
-                                                    <span className="sm:hidden">View</span>
+                                                    <Eye className="w-3.5 h-3.5 shrink-0" />
+                                                    <span>View Details</span>
                                                 </button>
                                             </td>
                                         </tr>

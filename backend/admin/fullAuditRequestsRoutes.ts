@@ -29,6 +29,51 @@ function mapRequestRow(row: any) {
 router.get('/full-audit-requests', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
+
+        // Auto-sync any prepare_audit tasks from lead_tasks into full_audit_requests if not already present
+        await query(`
+            INSERT INTO full_audit_requests (
+                lead_id, business_name, to_email, status, source, assigned_to_user_id, notes, requested_at
+            )
+            SELECT 
+                t.lead_id,
+                COALESCE(
+                    NULLIF(TRIM(sl.name), ''),
+                    NULLIF(TRIM(sub.payload->>'businessName'), ''),
+                    NULLIF(TRIM(sub.payload->>'name'), ''),
+                    REGEXP_REPLACE(t.title, '^(Full\\s+Growth\\s+Audit\\s+for|Audit\\s+for)\\s*', '', 'i'),
+                    'Lead'
+                ) AS business_name,
+                COALESCE(
+                    NULLIF(TRIM(sl.email), ''),
+                    NULLIF(TRIM(sub.email), ''),
+                    NULLIF(TRIM(sub.payload->>'email'), ''),
+                    ''
+                ) AS to_email,
+                CASE 
+                    WHEN t.status = 'completed' THEN 'completed'
+                    WHEN t.status = 'cancelled' THEN 'dismissed'
+                    ELSE 'pending'
+                END AS status,
+                'sales_agent_request' AS source,
+                u.id AS assigned_to_user_id,
+                COALESCE(t.notes, '') AS notes,
+                COALESCE(t.created_at, NOW()) AS requested_at
+            FROM lead_tasks t
+            LEFT JOIN sales_leads sl ON sl.id::text = t.lead_id
+            LEFT JOIN submissions sub ON sub.id::text = t.lead_id
+            LEFT JOIN users u ON u.id = t.assigned_to_user_id
+            WHERE t.task_type = 'prepare_audit'
+              AND t.lead_id IS NOT NULL 
+              AND t.lead_id != 'general'
+              AND NOT EXISTS (
+                  SELECT 1 FROM full_audit_requests far 
+                  WHERE far.lead_id = t.lead_id
+              )
+        `).catch((err) => {
+            console.warn('[full-audit-requests] auto-sync lead_tasks failed:', err?.message || err);
+        });
+
         const status = String(req.query.status || '').trim().toLowerCase();
         const params: any[] = [];
         let where = '';
@@ -281,6 +326,142 @@ router.patch('/full-audit-requests/:id', requireAdmin, async (req: Request, res:
     } catch (err: any) {
         console.error('Admin patch full-audit-requests error:', err);
         res.status(500).json({ error: err.message || 'Failed to update request' });
+    }
+});
+
+router.post('/full-audit-requests/assign', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const {
+            requestId,
+            auditId,
+            agentId,
+            businessName,
+            leadId: rawLeadId
+        } = req.body || {};
+
+        if (!auditId || !agentId) {
+            return res.status(400).json({ error: 'Both auditId and agentId are required.' });
+        }
+
+        // Get agent details
+        const { rows: uRows } = await query(`SELECT id, name, email FROM users WHERE id = $1`, [agentId]);
+        const agent = uRows[0];
+        if (!agent) return res.status(404).json({ error: 'Sales agent not found.' });
+
+        let finalLeadId = rawLeadId ? String(rawLeadId).trim() : '';
+
+        // If requestId was supplied and is a UUID, update that request
+        if (requestId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(requestId))) {
+            const { rows: reqRows } = await query(
+                `UPDATE full_audit_requests
+                 SET status = 'completed',
+                     fulfilled_audit_id = $2,
+                     assigned_to_user_id = $3,
+                     completed_at = NOW()
+                 WHERE id = $1
+                 RETURNING *`,
+                [requestId, auditId, agentId]
+            );
+            if (reqRows[0]?.lead_id) {
+                finalLeadId = reqRows[0].lead_id;
+            }
+        } else {
+            // Find existing request by auditId or create one
+            const { rows: existingReqs } = await query(
+                `SELECT id, lead_id FROM full_audit_requests WHERE fulfilled_audit_id = $1 OR lead_id = $1 LIMIT 1`,
+                [auditId]
+            );
+            if (existingReqs.length > 0) {
+                await query(
+                    `UPDATE full_audit_requests
+                     SET status = 'completed',
+                         fulfilled_audit_id = $2,
+                         assigned_to_user_id = $3,
+                         completed_at = NOW()
+                     WHERE id = $1`,
+                    [existingReqs[0].id, auditId, agentId]
+                );
+                if (existingReqs[0].lead_id) finalLeadId = existingReqs[0].lead_id;
+            } else {
+                await query(
+                    `INSERT INTO full_audit_requests (
+                        lead_id, business_name, status, source, fulfilled_audit_id, assigned_to_user_id, completed_at
+                    ) VALUES ($1, $2, 'completed', 'admin_audit', $3, $4, NOW())`,
+                    [finalLeadId || auditId, businessName || 'Business', auditId, agentId]
+                );
+            }
+        }
+
+        // Link audit_id and assigned_to on sales_leads
+        const bizName = String(businessName || '').trim();
+        try {
+            if (finalLeadId) {
+                await query(
+                    `UPDATE sales_leads
+                     SET audit_id = $1, assigned_to = $2, updated_at = NOW()
+                     WHERE id::text = $3`,
+                    [auditId, agentId, finalLeadId]
+                );
+            }
+            await query(
+                `UPDATE sales_leads
+                 SET audit_id = $1, assigned_to = $2, updated_at = NOW()
+                 WHERE audit_id = $1 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(name)) = LOWER(TRIM($3)))`,
+                [auditId, agentId, bizName]
+            );
+        } catch (linkErr) {
+            console.warn('Could not sync sales_leads assignment:', linkErr);
+        }
+
+        // Upsert or re-assign CRM task for the sales agent
+        try {
+            const taskLeadId = finalLeadId || auditId;
+            // Complete or update previous tasks for other agents if re-assigning
+            await query(
+                `UPDATE lead_tasks
+                 SET assigned_to_user_id = $1, updated_at = NOW()
+                 WHERE lead_id = $2 AND (notes ILIKE $3 OR title ILIKE '%Growth Audit Ready%')`,
+                [agentId, taskLeadId, `%${auditId}%`]
+            );
+
+            const { rows: existingTasks } = await query(
+                `SELECT id FROM lead_tasks
+                 WHERE lead_id = $1 AND assigned_to_user_id = $2 AND (notes ILIKE $3 OR title ILIKE '%Growth Audit Ready%')
+                 LIMIT 1`,
+                [taskLeadId, agentId, `%${auditId}%`]
+            );
+
+            if (!existingTasks[0]) {
+                await query(
+                    `INSERT INTO lead_tasks (
+                        lead_id, assigned_to_user_id, task_type, title, notes, priority, status, created_by_role, created_by_name
+                    ) VALUES ($1, $2, 'follow_up_call', $3, $4, 'high', 'pending', 'admin', 'Admin')`,
+                    [
+                        taskLeadId,
+                        agentId,
+                        `Growth Audit Ready: Deliver & Pitch to ${bizName || 'Lead'}`,
+                        `Full Growth Audit is ready (${auditId}). Review the live report and share the PDF report with the business.`
+                    ]
+                );
+            }
+
+            await query(
+                `INSERT INTO lead_activities (lead_id, author_name, activity_type, disposition, note)
+                 VALUES ($1, 'Admin', 'task_event', 'full_audit_assigned', $2)`,
+                [
+                    taskLeadId,
+                    `Admin assigned Full Growth Audit (${auditId}) to sales agent ${agent.name || agent.email} to deliver to client`
+                ]
+            );
+        } catch (taskErr) {
+            console.warn('Could not create/update task for assigned audit:', taskErr);
+        }
+
+        res.json({ success: true, message: `Full audit assigned to ${agent.name || agent.email}` });
+    } catch (err: any) {
+        console.error('Admin assign full audit error:', err);
+        res.status(500).json({ error: err.message || 'Failed to assign audit' });
     }
 });
 

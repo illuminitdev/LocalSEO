@@ -144,6 +144,9 @@ export async function updateSalesTask(
         due_date: updates.dueDate,
         title: updates.title
     });
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('sales:task-updated'));
+    }
     return res.task;
 }
 
@@ -158,6 +161,9 @@ export async function createSalesTask(task: {
     assigned_to_user_id?: string | null;
 }): Promise<SalesLeadTask> {
     const res = await apiPost('/api/sales/tasks', task);
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('sales:task-updated'));
+    }
     return res.task;
 }
 
@@ -171,6 +177,22 @@ export async function updateSalesLeadStatus(
 
 export async function fetchSalesLeadCrm(leadId: string): Promise<SalesLeadCrmDetail> {
     return apiGet(`/api/sales/leads/${encodeURIComponent(leadId)}/crm`);
+}
+
+export async function requestSalesAuditFromAdmin(
+    leadId: string,
+    payload: {
+        notes?: string;
+        title?: string;
+        priority?: string;
+        dueDate?: string | null;
+    }
+): Promise<{ success: boolean; message: string }> {
+    const res = await apiPost(`/api/sales/leads/${encodeURIComponent(leadId)}/request-audit`, payload);
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('sales:task-updated'));
+    }
+    return res;
 }
 
 export async function logSalesLeadActivity(

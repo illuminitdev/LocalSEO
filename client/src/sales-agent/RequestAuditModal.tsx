@@ -5,15 +5,10 @@ import {
     Send,
     Clock,
     AlertCircle,
-    ShieldCheck,
     Globe,
-    Phone,
-    Calendar,
-    Sparkles,
-    CheckCircle2
+    Phone
 } from 'lucide-react';
-import { createSalesTask, type SalesTaskPriority } from './salesApi';
-import { cn } from '../shared/utils';
+import { requestSalesAuditFromAdmin } from './salesApi';
 
 interface RequestAuditModalProps {
     isOpen: boolean;
@@ -22,7 +17,7 @@ interface RequestAuditModalProps {
     leadWebsite?: string;
     leadPhone?: string;
     onClose: () => void;
-    onSuccess?: () => void;
+    onSuccess?: (msg?: string) => void;
 }
 
 export default function RequestAuditModal({
@@ -35,15 +30,9 @@ export default function RequestAuditModal({
     onSuccess
 }: RequestAuditModalProps) {
     const [title, setTitle] = useState(`Full Growth Audit for ${leadName || 'Lead'}`);
-    const [priority, setPriority] = useState<SalesTaskPriority>('high');
-    const [dueDate, setDueDate] = useState(() => {
-        const d = new Date();
-        d.setDate(d.getDate() + 2);
-        d.setHours(17, 0, 0, 0);
-        return d.toISOString().slice(0, 16);
-    });
+    const [priority, setPriority] = useState<string>('');
+    const [dueDate, setDueDate] = useState<string>('');
     const [notes, setNotes] = useState('');
-    const [assignedRole, setAssignedRole] = useState<'developer_seo' | 'seo' | 'developer'>('developer_seo');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
 
@@ -66,19 +55,16 @@ export default function RequestAuditModal({
         setBusy(true);
         setError('');
         try {
-            await createSalesTask({
-                lead_id: leadId,
-                task_type: 'prepare_audit',
+            const res = await requestSalesAuditFromAdmin(leadId, {
                 title: title.trim(),
                 notes: notes.trim() || undefined,
-                priority,
-                due_date: dueDate ? new Date(dueDate).toISOString() : null,
-                assigned_to_role: assignedRole
+                priority: priority || undefined,
+                dueDate: dueDate ? new Date(dueDate).toISOString() : null
             });
-            onSuccess?.();
+            onSuccess?.(res.message);
             onClose();
         } catch (err: any) {
-            setError(err.message || 'Failed to submit audit request to Admin');
+            setError(err.message || 'Failed to submit audit request');
         } finally {
             setBusy(false);
         }
@@ -166,54 +152,21 @@ export default function RequestAuditModal({
                         />
                     </div>
 
-                    {/* Assign To Role */}
-                    <div>
-                        <label className="block text-[11px] font-bold uppercase text-[#94A3B8] mb-1.5">
-                            Assign Technical Team
-                        </label>
-                        <div className="grid grid-cols-3 gap-2">
-                            {[
-                                { role: 'developer_seo' as const, label: 'Admin & SEO Team', icon: ShieldCheck, badge: 'Recommended' },
-                                { role: 'seo' as const, label: 'SEO Specialist', icon: BarChart3 },
-                                { role: 'developer' as const, label: 'Technical / Dev', icon: Clock }
-                            ].map((item) => (
-                                <button
-                                    key={item.role}
-                                    type="button"
-                                    onClick={() => setAssignedRole(item.role)}
-                                    className={cn(
-                                        'px-2.5 py-2 rounded-xl text-xs font-bold border transition-all text-center flex flex-col items-center gap-1 cursor-pointer',
-                                        assignedRole === item.role
-                                            ? 'bg-indigo-50 border-indigo-300 text-indigo-950 ring-2 ring-indigo-500/20 shadow-2xs'
-                                            : 'bg-white border-[#E2E8F0] text-[#64748B] hover:bg-[#F8FAFC]'
-                                    )}
-                                >
-                                    <item.icon className="w-3.5 h-3.5 text-indigo-600" />
-                                    <span className="text-[11px] leading-tight font-extrabold">{item.label}</span>
-                                    {item.badge && (
-                                        <span className="text-[9px] font-bold text-indigo-600 bg-indigo-100/60 px-1.5 py-0.2 rounded-md">
-                                            {item.badge}
-                                        </span>
-                                    )}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
                     {/* Priority & Target Delivery Date */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                             <label className="block text-[11px] font-bold uppercase text-[#94A3B8] mb-1">
-                                Priority Level
+                                Priority Level <span className="text-[10px] font-normal lowercase text-slate-400">(optional)</span>
                             </label>
                             <select
                                 value={priority}
-                                onChange={(e) => setPriority(e.target.value as SalesTaskPriority)}
-                                className="w-full text-xs px-3 py-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] font-bold focus:outline-none focus:border-indigo-500"
+                                onChange={(e) => setPriority(e.target.value)}
+                                className="w-full text-xs px-3 py-2.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] font-bold focus:outline-none focus:border-indigo-500"
                             >
+                                <option value="">Standard / Default (Optional)</option>
                                 <option value="urgent">🔥 Urgent (Same Day / Today)</option>
                                 <option value="high">⚡ High Priority (1-2 Days)</option>
-                                <option value="medium">Standard Priority</option>
+                                <option value="medium">Medium Priority</option>
                                 <option value="low">Low Priority</option>
                             </select>
                         </div>
@@ -221,13 +174,14 @@ export default function RequestAuditModal({
                         <div>
                             <div className="flex items-center justify-between mb-1">
                                 <label className="block text-[11px] font-bold uppercase text-[#94A3B8]">
-                                    Target Due Date
+                                    Target Due Date <span className="text-[10px] font-normal lowercase text-slate-400">(optional)</span>
                                 </label>
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1.5">
                                     <button
                                         type="button"
                                         onClick={() => setQuickDueDate(1)}
-                                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800"
+                                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                                        title="Set due date to tomorrow"
                                     >
                                         +1d
                                     </button>
@@ -235,10 +189,24 @@ export default function RequestAuditModal({
                                     <button
                                         type="button"
                                         onClick={() => setQuickDueDate(2)}
-                                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800"
+                                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                                        title="Set due date to 2 days from now"
                                     >
                                         +2d
                                     </button>
+                                    {dueDate && (
+                                        <>
+                                            <span className="text-slate-300">·</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setDueDate('')}
+                                                className="text-[10px] font-bold text-rose-500 hover:text-rose-700 cursor-pointer"
+                                                title="Clear due date"
+                                            >
+                                                Clear
+                                            </button>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                             <input

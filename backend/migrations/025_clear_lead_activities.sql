@@ -1,3 +1,3 @@
 -- 025_clear_lead_activities.sql
--- Reset call logs & activity history table for clean testing
-TRUNCATE TABLE lead_activities CASCADE;
+-- Deprecated: This migration was originally used for testing reset but is disabled to preserve real CRM call logs and activities.
+SELECT 1;

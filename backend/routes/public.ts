@@ -935,98 +935,64 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         return res.status(200).send(ZAPP_EMAIL_LOGO_PNG);
     });
 
+    async function resolveLeadAuditRequestDetails(token: string) {
+        const send = await getLeadObservationEmailSendByToken(token);
+        if (!send) return null;
+        const leadId = String(send.lead_id || '').trim();
+        let businessName = '';
+        let assignedAgentId = send.sent_by_user_id || null;
+
+        try {
+            const { rows } = await query(
+                `SELECT name, assigned_to FROM sales_leads WHERE id::text = $1 LIMIT 1`,
+                [leadId]
+            );
+            if (rows[0]) {
+                businessName = String(rows[0]?.name || '').trim();
+                if (rows[0]?.assigned_to) assignedAgentId = rows[0].assigned_to;
+            }
+        } catch {
+            /* ignore */
+        }
+        if (!businessName) {
+            try {
+                const { rows } = await query(
+                    `SELECT COALESCE(payload->>'businessName', payload->>'name', '') AS name
+                     FROM submissions WHERE id::text = $1 LIMIT 1`,
+                    [leadId]
+                );
+                businessName = String(rows[0]?.name || '').trim();
+            } catch {
+                /* ignore */
+            }
+        }
+
+        const existing = await query(
+            `SELECT id FROM lead_tasks
+             WHERE lead_id = $1 AND task_type = 'follow_up_call' AND created_by_role = 'customer' AND status = 'pending'
+             ORDER BY created_at DESC LIMIT 1`,
+            [leadId]
+        ).catch(() => ({ rows: [] as any[] }));
+
+        return {
+            leadId,
+            businessName: businessName || 'your business',
+            assignedAgentId,
+            alreadyRequested: Boolean(existing.rows[0])
+        };
+    }
+
     router.get('/lead-full-audit-request/:token', async (req: Request, res: Response) => {
         const token = String(req.params.token || '').trim();
-        let okPage = false;
-        let alreadyRequested = false;
-        let businessLabel = 'your business';
+        let details: Awaited<ReturnType<typeof resolveLeadAuditRequestDetails>> = null;
         try {
             await ensureCrmTables();
             if (token) {
                 await markLeadObservationEmailOpened(token).catch(() => false);
-                const send = await getLeadObservationEmailSendByToken(token);
-                if (send) {
-                    const leadId = String(send.lead_id || '').trim();
-                    const toEmail = String(send.to_email || '').trim().toLowerCase();
-                    let businessName = '';
-                    let assignedAgentId = send.sent_by_user_id || null;
-
-                    try {
-                        const { rows } = await query(
-                            `SELECT name, assigned_to FROM sales_leads WHERE id::text = $1 LIMIT 1`,
-                            [leadId]
-                        );
-                        if (rows[0]) {
-                            businessName = String(rows[0]?.name || '').trim();
-                            if (rows[0]?.assigned_to) assignedAgentId = rows[0].assigned_to;
-                        }
-                    } catch {
-                        /* ignore */
-                    }
-                    if (!businessName) {
-                        try {
-                            const { rows } = await query(
-                                `SELECT COALESCE(payload->>'businessName', payload->>'name', '') AS name
-                                 FROM submissions WHERE id::text = $1 LIMIT 1`,
-                                [leadId]
-                            );
-                            businessName = String(rows[0]?.name || '').trim();
-                        } catch {
-                            /* ignore */
-                        }
-                    }
-                    if (businessName) businessLabel = businessName;
-
-                    const existing = await query(
-                        `SELECT id FROM full_audit_requests
-                         WHERE lead_id = $1 AND status IN ('pending', 'in_progress')
-                         ORDER BY requested_at DESC LIMIT 1`,
-                        [leadId]
-                    ).catch(() => ({ rows: [] as any[] }));
-
-                    if (existing.rows[0]) {
-                        alreadyRequested = true;
-                    } else {
-                        await query(
-                            `INSERT INTO full_audit_requests
-                             (lead_id, observation_email_token, business_name, to_email, status, source, assigned_to_user_id)
-                             VALUES ($1, $2, $3, $4, 'pending', 'email_cta', $5)`,
-                            [leadId, token, businessName || 'Lead', toEmail, assignedAgentId]
-                        );
-
-                        // 1. Update lead status to interested
-                        await query(
-                            `UPDATE sales_leads SET status = 'interested', updated_at = NOW() WHERE id::text = $1`,
-                            [leadId]
-                        ).catch(() => {});
-
-                        // 2. Log customer audit request activity
-                        await query(
-                            `INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note)
-                             VALUES ($1, $2, 'Customer', 'status_change', 'audit_requested', $3)`,
-                            [leadId, assignedAgentId, `Customer clicked "Request Full Growth Audit" from email CTA`]
-                        ).catch(() => {});
-
-                        // 3. Create urgent task for assigned Sales Agent
-                        if (assignedAgentId) {
-                            await query(
-                                `INSERT INTO lead_tasks (
-                                    lead_id, task_type, title, notes, priority, status, assigned_to_user_id, created_by_role, created_by_name
-                                 ) VALUES ($1, 'follow_up_call', $2, $3, 'urgent', 'pending', $4, 'customer', 'Customer')`,
-                                [
-                                    leadId,
-                                    `Customer Requested Full Audit - Follow up with ${businessName || 'Lead'}`,
-                                    `Customer clicked Request Full Audit in the observation email. Call customer to qualify and gather specific requirements before submitting to Admin.`,
-                                    assignedAgentId
-                                ]
-                            ).catch(() => {});
-                        }
-                    }
-                    okPage = true;
-                }
+                details = await resolveLeadAuditRequestDetails(token);
             }
         } catch (err) {
-            console.warn('[lead-full-audit-request] failed:', err);
+            console.warn('[lead-full-audit-request GET] failed:', err);
         }
 
         const wantsJson =
@@ -1035,7 +1001,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
 
         if (wantsJson) {
             res.setHeader('Cache-Control', 'no-store');
-            if (!okPage) {
+            if (!details) {
                 return res.status(404).json({
                     success: false,
                     error: 'This request link is invalid or has expired.'
@@ -1043,28 +1009,33 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             }
             return res.json({
                 success: true,
-                alreadyRequested,
-                businessName: businessLabel,
-                title: 'Request received',
-                message: alreadyRequested
-                    ? `We already have an open full main audit request for ${businessLabel}. Our team will complete it and get back to you.`
-                    : `Thanks — we received your request for a full main audit for ${businessLabel}. Our team will complete it and get back to you.`
+                alreadyRequested: details.alreadyRequested,
+                businessName: details.businessName,
+                title: details.alreadyRequested ? 'Request received' : 'Request Full Audit',
+                message: details.alreadyRequested
+                    ? `We already have an open full main audit request for ${details.businessName}. Our team will complete it and get back to you.`
+                    : `Confirm your request for a full growth audit for ${details.businessName}.`
             });
         }
 
-        const safeBiz = String(businessLabel || 'your business')
+        const okPage = Boolean(details);
+        const safeBiz = String(details?.businessName || 'your business')
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
-        const title = okPage ? 'Request received' : 'Link not found';
+        const title = okPage
+            ? details?.alreadyRequested
+                ? 'Request received'
+                : 'Confirm Full Growth Audit'
+            : 'Link not found';
         const body = okPage
-            ? alreadyRequested
+            ? details?.alreadyRequested
                 ? `We already have an open full main audit request for <strong>${safeBiz}</strong>. Our team will complete it and get back to you.`
-                : `Thanks — we received your request for a full main audit for <strong>${safeBiz}</strong>. Our team will complete it and get back to you.`
+                : `Would you like our team to generate a comprehensive Full Growth Audit for <strong>${safeBiz}</strong>?`
             : 'This request link is invalid or has expired. If you still need a full audit, reply to the email you received from us.';
-        const badge = okPage ? 'Request received' : 'Unable to process';
         const logoSrc = `${apiPublicOrigin()}/api/public/brand/zappsites-logo.png`;
+
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
         return res.status(okPage ? 200 : 404).send(`<!DOCTYPE html>
@@ -1078,7 +1049,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="min-height:100vh;">
     <tr>
       <td align="center" style="padding:48px 16px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;background:#ffffff;border:1px solid #E5E7EB;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;background:#ffffff;border:1px solid #E5E7EB;border-radius:8px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
           <tr>
             <td style="padding:20px 28px;border-bottom:1px solid #E5E7EB;">
               <table role="presentation" cellpadding="0" cellspacing="0" border="0">
@@ -1095,13 +1066,24 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
           </tr>
           <tr>
             <td style="padding:28px 28px 8px;">
-              <div style="display:inline-block;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:${okPage ? '#065F46' : '#991B1B'};background:${okPage ? '#ECFDF5' : '#FEF2F2'};border:1px solid ${okPage ? '#A7F3D0' : '#FECACA'};border-radius:999px;padding:5px 10px;margin-bottom:14px;">${badge}</div>
+              <div style="display:inline-block;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:${okPage ? '#065F46' : '#991B1B'};background:${okPage ? '#ECFDF5' : '#FEF2F2'};border:1px solid ${okPage ? '#A7F3D0' : '#FECACA'};border-radius:999px;padding:5px 10px;margin-bottom:14px;">
+                ${okPage ? (details?.alreadyRequested ? 'Request received' : 'Growth Audit') : 'Unable to process'}
+              </div>
               <h1 style="font-size:22px;line-height:1.3;margin:0 0 12px;font-weight:700;color:#111827;">${title}</h1>
-              <p style="font-size:15px;line-height:1.65;color:#4B5563;margin:0;">${body}</p>
+              <p style="font-size:15px;line-height:1.65;color:#4B5563;margin:0 0 20px;">${body}</p>
+              ${
+                  okPage && !details?.alreadyRequested
+                      ? `<form method="POST" action="${apiPublicOrigin()}/api/public/lead-full-audit-request/${token}">
+                           <button type="submit" style="background:#2563EB;color:#ffffff;border:none;font-size:15px;font-weight:600;padding:12px 24px;border-radius:6px;cursor:pointer;width:100%;">
+                             Request Full Audit
+                           </button>
+                         </form>`
+                      : ''
+              }
             </td>
           </tr>
           ${
-              okPage
+              okPage && details?.alreadyRequested
                   ? `<tr>
             <td style="padding:18px 28px 8px;">
               <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:#111827;">What happens next</p>
@@ -1121,6 +1103,79 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
   </table>
 </body>
 </html>`);
+    });
+
+    router.post('/lead-full-audit-request/:token', async (req: Request, res: Response) => {
+        const token = String(req.params.token || '').trim();
+        let details: Awaited<ReturnType<typeof resolveLeadAuditRequestDetails>> = null;
+        let newlyCreated = false;
+        try {
+            await ensureCrmTables();
+            if (token) {
+                await markLeadObservationEmailOpened(token).catch(() => false);
+                details = await resolveLeadAuditRequestDetails(token);
+                if (details && !details.alreadyRequested) {
+                    const leadId = details.leadId;
+                    const businessName = details.businessName;
+                    const assignedAgentId = details.assignedAgentId;
+
+                    // 1. Update lead status to interested
+                    await query(
+                        `UPDATE sales_leads SET status = 'interested', updated_at = NOW() WHERE id::text = $1`,
+                        [leadId]
+                    ).catch(() => {});
+
+                    // 2. Log customer audit request activity
+                    await query(
+                        `INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note)
+                         VALUES ($1, $2, 'Customer', 'status_change', 'audit_requested', $3)`,
+                        [leadId, assignedAgentId, `Customer confirmed "Request Full Growth Audit" from email CTA`]
+                    ).catch(() => {});
+
+                    // 3. Create urgent follow-up task for assigned Sales Agent
+                    await query(
+                        `INSERT INTO lead_tasks (
+                            lead_id, task_type, title, notes, priority, status, assigned_to_user_id, created_by_role, created_by_name
+                         ) VALUES ($1, 'follow_up_call', $2, $3, 'urgent', 'pending', $4, 'customer', 'Customer')`,
+                        [
+                            leadId,
+                            `Customer Inbound: Requested Full Audit - Follow up with ${businessName || 'Lead'}`,
+                            `Customer requested Full Growth Audit from email CTA.`,
+                            assignedAgentId || null
+                        ]
+                    ).catch(() => {});
+
+                    newlyCreated = true;
+                    details.alreadyRequested = true;
+                }
+            }
+        } catch (err) {
+            console.warn('[lead-full-audit-request POST] failed:', err);
+        }
+
+        const wantsJson =
+            String(req.query.format || '').toLowerCase() === 'json' ||
+            String(req.headers.accept || '').includes('application/json');
+
+        if (wantsJson) {
+            res.setHeader('Cache-Control', 'no-store');
+            if (!details) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'This request link is invalid or has expired.'
+                });
+            }
+            return res.json({
+                success: true,
+                alreadyRequested: true,
+                businessName: details.businessName,
+                title: 'Request received',
+                message: `Thanks — we received your request for a full main audit for ${details.businessName}. Our team will complete it and get back to you.`
+            });
+        }
+
+        // If standard browser form POST, redirect back to GET view so user sees confirmed state
+        return res.redirect(303, `${apiPublicOrigin()}/api/public/lead-full-audit-request/${token}`);
     });
 
     router.post('/:hostSlug/upload-url', async (req: Request, res: Response) => {

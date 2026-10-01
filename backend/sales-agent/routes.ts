@@ -404,7 +404,11 @@ router.get('/tasks', async (req: Request, res: Response) => {
 
         const params: any[] = [agentId];
         const where: string[] = [
-            `(t.assigned_to_user_id = $1 OR (t.created_by_role = 'self' AND t.lead_id IN (SELECT id::text FROM sales_leads WHERE assigned_to = $1)))`
+            `(
+                t.assigned_to_user_id = $1 
+                OR t.lead_id IN (SELECT DISTINCT lt2.lead_id FROM lead_tasks lt2 WHERE lt2.assigned_to_user_id = $1)
+                OR t.lead_id IN (SELECT id::text FROM sales_leads WHERE assigned_to = $1)
+            )`
         ];
 
         if (status && status !== 'all') {
@@ -535,13 +539,83 @@ router.post('/tasks', async (req: Request, res: Response) => {
         const validPriorities = ['low', 'medium', 'high', 'urgent'];
         const sanitizedPriority = validPriorities.includes(priority) ? priority : 'medium';
 
-        const targetRole = String(assigned_to_role || (sanitizedTaskType === 'prepare_audit' ? 'developer_seo' : 'sales_agent')).trim();
+        // If the task type is prepare_audit, it is an audit request sent to Admin/SEO, not a personal sales task
+        if (sanitizedTaskType === 'prepare_audit') {
+            let bName = '';
+            let bEmail = '';
+            const allLeadIds = await resolveAllLeadIds(effectiveLeadId);
+
+            const [salesRes, subRes] = await Promise.all([
+                query(`SELECT id, name, email, phone FROM sales_leads WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] as any[] })),
+                query(`SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email FROM submissions WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] as any[] }))
+            ]);
+
+            bName = String(salesRes.rows[0]?.name || subRes.rows[0]?.bname || subRes.rows[0]?.name || '').trim();
+            bEmail = String(salesRes.rows[0]?.email || subRes.rows[0]?.email || '').trim().toLowerCase();
+
+            if (!bName) {
+                bName = title.replace(/^Full\s+Growth\s+Audit\s+for\s+/i, '').replace(/^Audit\s+for\s+/i, '').trim() || 'Lead';
+            }
+
+            let validAgentUserId = null;
+            if (agentId) {
+                const { rows: uRows } = await query(
+                    `SELECT id FROM users WHERE id::text = $1 LIMIT 1`,
+                    [String(agentId)]
+                ).catch(() => ({ rows: [] as any[] }));
+                if (uRows[0]) validAgentUserId = uRows[0].id;
+            }
+
+            // Remove any legacy prepare_audit from lead_tasks so sales agent does not see a pending task
+            await query(
+                `DELETE FROM lead_tasks WHERE lead_id = ANY($1::text[]) AND task_type = 'prepare_audit'`,
+                [allLeadIds]
+            ).catch(() => {});
+
+            // Insert into full_audit_requests so Admin sees it in Full Audit Requests
+            await query(`
+                INSERT INTO full_audit_requests (
+                    lead_id, business_name, to_email, status, source, assigned_to_user_id, notes, requested_at
+                ) VALUES ($1, $2, $3, 'pending', 'sales_agent_request', $4, $5, NOW())
+            `, [
+                effectiveLeadId,
+                bName,
+                bEmail,
+                validAgentUserId,
+                notes ? String(notes).trim() : null
+            ]);
+
+            // Record in lead activities timeline
+            await query(`
+                INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note, created_at)
+                VALUES ($1, $2, $3, 'status_change', 'Audit Requested', $4, NOW())
+            `, [
+                effectiveLeadId,
+                validAgentUserId,
+                agentName,
+                `Requested Full Growth Audit from Admin / SEO Team${notes ? ` (Note: ${notes})` : ''}`
+            ]);
+
+            await query(
+                `UPDATE sales_leads SET status = 'interested', updated_at = NOW() WHERE id::text = $1`,
+                [effectiveLeadId]
+            ).catch(() => {});
+
+            return res.status(200).json({
+                success: true,
+                message: `Full Growth Audit requested from Admin successfully for ${bName || 'lead'}!`,
+                task: null
+            });
+        }
+
+        const targetRole = String(assigned_to_role || 'sales_agent').trim();
         const targetUserId = targetRole === 'sales_agent' ? (assigned_to_user_id || agentId) : (assigned_to_user_id || null);
+        const createdByRole = 'self';
 
         const { rows } = await query(`
             INSERT INTO lead_tasks (
                 lead_id, task_type, title, notes, priority, status, assigned_to_user_id, assigned_to_role, due_date, created_by_role, created_by_name
-            ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, 'self', $9)
+            ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9, $10)
             RETURNING 
                 id,
                 lead_id AS "leadId",
@@ -567,6 +641,7 @@ router.post('/tasks', async (req: Request, res: Response) => {
             targetUserId,
             targetRole,
             due_date || null,
+            createdByRole,
             agentName
         ]);
 
@@ -575,9 +650,6 @@ router.post('/tasks', async (req: Request, res: Response) => {
         // Record task creation activity on lead timeline
         if (effectiveLeadId !== 'general') {
             try {
-                const roleDesc = targetRole === 'developer_seo' || targetRole === 'developer' || targetRole === 'seo'
-                    ? 'Developer / SEO Team'
-                    : 'Self (Sales Agent)';
                 await query(`
                     INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note)
                     VALUES ($1, $2, $3, 'task_event', $4, $5)
@@ -586,46 +658,99 @@ router.post('/tasks', async (req: Request, res: Response) => {
                     agentId,
                     agentName,
                     sanitizedTaskType,
-                    `Created Task: "${task.title}" (Assigned to: ${roleDesc})${notes ? ` - ${notes}` : ''}`
+                    `Created Task: "${task.title}"${notes ? ` - ${notes}` : ''}`
                 ]);
             } catch {}
-
-            // If task is prepare_audit, also route directly into full_audit_requests for Admin Full Audits section
-            if (sanitizedTaskType === 'prepare_audit') {
-                try {
-                    const { rows: leadRows } = await query(
-                        `SELECT name, email FROM sales_leads WHERE id::text = $1 LIMIT 1`,
-                        [effectiveLeadId]
-                    );
-                    const bName = String(leadRows[0]?.name || title || 'Lead').trim();
-                    const bEmail = String(leadRows[0]?.email || '').trim().toLowerCase();
-
-                    await query(`
-                        INSERT INTO full_audit_requests (
-                            lead_id, business_name, to_email, status, source, assigned_to_user_id, notes, requested_at
-                        ) VALUES ($1, $2, $3, 'pending', 'sales_agent_request', $4, $5, NOW())
-                    `, [
-                        effectiveLeadId,
-                        bName,
-                        bEmail,
-                        agentId,
-                        notes ? String(notes).trim() : null
-                    ]);
-
-                    await query(
-                        `UPDATE sales_leads SET status = 'interested', updated_at = NOW() WHERE id::text = $1`,
-                        [effectiveLeadId]
-                    ).catch(() => {});
-                } catch (auditReqErr) {
-                    console.warn('Could not record into full_audit_requests:', auditReqErr);
-                }
-            }
         }
 
         res.status(201).json({ task });
     } catch (err: any) {
         console.error('Sales create task error:', err);
         res.status(500).json({ error: err.message || 'Failed to create task' });
+    }
+});
+
+router.post('/leads/:id/request-audit', async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = String(req.params.id || '').trim();
+        const agentId = String((req as any).user?.id || '');
+        const agentName = String((req as any).user?.name || (req as any).user?.email || 'Sales Agent').trim();
+        const { notes = '', title = '', priority = '', dueDate = null } = req.body || {};
+
+        const allLeadIds = await resolveAllLeadIds(leadId);
+
+        const [salesRes, subRes] = await Promise.all([
+            query(`SELECT id, name, email, phone FROM sales_leads WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] as any[] })),
+            query(`SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email FROM submissions WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] as any[] }))
+        ]);
+
+        let bName = String(salesRes.rows[0]?.name || subRes.rows[0]?.bname || subRes.rows[0]?.name || '').trim();
+        let bEmail = String(salesRes.rows[0]?.email || subRes.rows[0]?.email || '').trim().toLowerCase();
+
+        if (!bName) {
+            bName = String(title || '').replace(/^Full\s+Growth\s+Audit\s+for\s+/i, '').replace(/^Audit\s+for\s+/i, '').trim() || 'Lead';
+        }
+
+        let validAgentUserId = null;
+        if (agentId && agentId !== 'general') {
+            const { rows: uRows } = await query(`SELECT id FROM users WHERE id::text = $1 LIMIT 1`, [agentId]).catch(() => ({ rows: [] as any[] }));
+            if (uRows[0]?.id) validAgentUserId = uRows[0].id;
+        }
+
+        const noteParts: string[] = [];
+        if (priority) noteParts.push(`Priority: ${priority.toUpperCase()}`);
+        if (dueDate) {
+            try {
+                const dStr = new Date(dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                noteParts.push(`Target Due: ${dStr}`);
+            } catch {}
+        }
+        if (notes && String(notes).trim()) noteParts.push(String(notes).trim());
+        const combinedNotes = noteParts.join(' | ');
+
+        // Clean up any old prepare_audit tasks from lead_tasks so sales agent does not have a lingering pending task
+        await query(
+            `DELETE FROM lead_tasks WHERE lead_id = ANY($1::text[]) AND task_type = 'prepare_audit'`,
+            [allLeadIds]
+        ).catch(() => {});
+
+        // Insert into full_audit_requests so it appears in Admin Full Audits section
+        await query(`
+            INSERT INTO full_audit_requests (
+                lead_id, business_name, to_email, status, source, assigned_to_user_id, notes, requested_at
+            ) VALUES ($1, $2, $3, 'pending', 'sales_agent_request', $4, $5, NOW())
+        `, [
+            leadId,
+            bName,
+            bEmail,
+            validAgentUserId,
+            combinedNotes
+        ]);
+
+        // Insert into lead_activities timeline
+        await query(`
+            INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note, created_at)
+            VALUES ($1, $2, $3, 'status_change', 'Audit Requested', $4, NOW())
+        `, [
+            leadId,
+            validAgentUserId,
+            agentName,
+            `Requested Full Growth Audit from Admin / SEO Team${combinedNotes ? ` (${combinedNotes})` : ''}`
+        ]);
+
+        await query(
+            `UPDATE sales_leads SET status = 'interested', updated_at = NOW() WHERE id::text = $1`,
+            [leadId]
+        ).catch(() => {});
+
+        res.json({
+            success: true,
+            message: `Full Growth Audit requested from Admin successfully for ${bName || 'lead'}!`
+        });
+    } catch (err: any) {
+        console.error('Request full audit error:', err);
+        res.status(500).json({ error: err.message || 'Failed to submit audit request' });
     }
 });
 
@@ -864,7 +989,12 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
                 FROM lead_tasks
                 WHERE lead_id = ANY($1::text[])
                 ORDER BY 
-                    CASE WHEN status = 'pending' THEN 1 WHEN status = 'in_progress' THEN 2 ELSE 3 END,
+                    CASE 
+                        WHEN status = 'in_progress' THEN 1 
+                        WHEN status = 'pending' THEN 2 
+                        WHEN status = 'completed' THEN 3 
+                        ELSE 4 
+                    END,
                     due_date ASC NULLS LAST,
                     created_at DESC
             `,
@@ -872,25 +1002,71 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
             ),
             query(
                 `
-                SELECT DISTINCT
-                    a.id,
-                    a.lead_id AS "leadId",
-                    a.activity_type AS "activityType",
-                    a.disposition,
-                    a.note,
-                    a.author_name AS "authorName",
-                    a.created_at AS "createdAt",
-                    u.name AS "userName",
-                    u.email AS "userEmail"
-                FROM lead_activities a
-                LEFT JOIN users u ON u.id = a.user_id
-                WHERE (
-                    a.lead_id = ANY($1::text[])
-                    OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(email)) = $3)))
-                    OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)))
-                )
-                  AND a.activity_type IN ('call_log', 'status_change', 'note', 'task_event')
-                ORDER BY a.created_at DESC
+                SELECT 
+                    act_item.id,
+                    act_item.lead_id AS "leadId",
+                    act_item.activity_type AS "activityType",
+                    act_item.disposition,
+                    act_item.note,
+                    act_item.author_name AS "authorName",
+                    act_item.created_at AS "createdAt",
+                    act_item.user_name AS "userName",
+                    act_item.user_email AS "userEmail"
+                FROM (
+                    SELECT 
+                        a.id::text AS id,
+                        a.lead_id::text AS lead_id,
+                        COALESCE(NULLIF(a.activity_type, ''), 'note') AS activity_type,
+                        COALESCE(NULLIF(a.disposition, ''), 'Update') AS disposition,
+                        COALESCE(a.note, '') AS note,
+                        COALESCE(NULLIF(a.author_name, ''), u.name, 'Sales Agent') AS author_name,
+                        a.created_at,
+                        u.name AS user_name,
+                        u.email AS user_email
+                    FROM lead_activities a
+                    LEFT JOIN users u ON u.id::text = a.user_id::text
+                    WHERE (
+                        a.lead_id::text = ANY($1::text[])
+                        OR (NULLIF($2, '') IS NOT NULL AND (
+                            a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
+                            OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
+                        ))
+                        OR (NULLIF($3, '') IS NOT NULL AND (
+                            a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
+                            OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
+                        ))
+                    )
+
+                    UNION ALL
+
+                    SELECT 
+                        c.id::text AS id,
+                        c.lead_id::text AS lead_id,
+                        'call_log' AS activity_type,
+                        COALESCE(c.outcome, 'connected') AS disposition,
+                        COALESCE(c.notes, '') AS note,
+                        COALESCE(u.name, 'Sales Agent') AS author_name,
+                        c.created_at,
+                        u.name AS user_name,
+                        u.email AS user_email
+                    FROM sales_call_logs c
+                    LEFT JOIN users u ON u.id::text = c.agent_id::text
+                    WHERE (
+                        c.lead_id::text = ANY($1::text[])
+                        OR (NULLIF($2, '') IS NOT NULL AND (
+                            c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
+                            OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
+                        ))
+                        OR (NULLIF($3, '') IS NOT NULL AND (
+                            c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
+                            OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
+                        ))
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM lead_activities la WHERE la.id::text = c.id::text
+                    )
+                ) act_item
+                ORDER BY act_item.created_at DESC
                 LIMIT 200
             `,
                 [allLeadIds, leadName || null, leadEmail || null]
@@ -1055,25 +1231,71 @@ router.get('/leads/:id/activities', async (req: Request, res: Response) => {
         const leadEmail = (salesRes.rows[0]?.email || subRes.rows[0]?.email || '').trim().toLowerCase();
 
         const { rows } = await query(`
-            SELECT DISTINCT
-                a.id,
-                a.lead_id AS "leadId",
-                a.activity_type AS "activityType",
-                a.disposition,
-                a.note,
-                a.author_name AS "authorName",
-                a.created_at AS "createdAt",
-                u.name AS "userName",
-                u.email AS "userEmail"
-            FROM lead_activities a
-            LEFT JOIN users u ON u.id = a.user_id
-            WHERE (
-                a.lead_id = ANY($1::text[])
-                OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(email)) = $3)))
-                OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)))
-            )
-              AND a.activity_type IN ('call_log', 'status_change', 'note', 'task_event')
-            ORDER BY a.created_at DESC
+            SELECT 
+                act_item.id,
+                act_item.lead_id AS "leadId",
+                act_item.activity_type AS "activityType",
+                act_item.disposition,
+                act_item.note,
+                act_item.author_name AS "authorName",
+                act_item.created_at AS "createdAt",
+                act_item.user_name AS "userName",
+                act_item.user_email AS "userEmail"
+            FROM (
+                SELECT 
+                    a.id::text AS id,
+                    a.lead_id,
+                    COALESCE(NULLIF(a.activity_type, ''), 'note') AS activity_type,
+                    COALESCE(NULLIF(a.disposition, ''), 'Update') AS disposition,
+                    COALESCE(a.note, '') AS note,
+                    COALESCE(NULLIF(a.author_name, ''), u.name, 'Sales Agent') AS author_name,
+                    a.created_at,
+                    u.name AS user_name,
+                    u.email AS user_email
+                FROM lead_activities a
+                LEFT JOIN users u ON u.id::text = a.user_id::text
+                WHERE (
+                    a.lead_id::text = ANY($1::text[])
+                    OR (NULLIF($2, '') IS NOT NULL AND (
+                        a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
+                        OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
+                    ))
+                    OR (NULLIF($3, '') IS NOT NULL AND (
+                        a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
+                        OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
+                    ))
+                )
+
+                UNION ALL
+
+                SELECT 
+                    c.id::text AS id,
+                    c.lead_id::text AS lead_id,
+                    'call_log' AS activity_type,
+                    COALESCE(c.outcome, 'connected') AS disposition,
+                    COALESCE(c.notes, '') AS note,
+                    COALESCE(u.name, 'Sales Agent') AS author_name,
+                    c.created_at,
+                    u.name AS user_name,
+                    u.email AS user_email
+                FROM sales_call_logs c
+                LEFT JOIN users u ON u.id::text = c.agent_id::text
+                WHERE (
+                    c.lead_id::text = ANY($1::text[])
+                    OR (NULLIF($2, '') IS NOT NULL AND (
+                        c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
+                        OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
+                    ))
+                    OR (NULLIF($3, '') IS NOT NULL AND (
+                        c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
+                        OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
+                    ))
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM lead_activities la WHERE la.id::text = c.id::text
+                )
+            ) act_item
+            ORDER BY act_item.created_at DESC
             LIMIT 200
         `, [allLeadIds, leadName || null, leadEmail || null]);
 
@@ -1088,9 +1310,9 @@ router.get('/leads/:id/activities', async (req: Request, res: Response) => {
 router.post('/leads/:id/crm/activities', async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
-        const leadId = String(req.params.id);
-        const agentId = (req as any).user.id;
-        const agentName = (req as any).user.name || 'Sales Agent';
+        const rawLeadId = String(req.params.id);
+        const agentId = (req as any).user?.id;
+        const agentName = (req as any).user?.name || 'Sales Agent';
         const {
             disposition = 'connected',
             note = '',
@@ -1099,11 +1321,14 @@ router.post('/leads/:id/crm/activities', async (req: Request, res: Response) => 
 
         const validDispositions = ['connected', 'voicemail', 'callback_requested', 'not_interested', 'converted', 'other'];
         const sanitizedDisposition = validDispositions.includes(disposition) ? disposition : 'connected';
+        const validUserId = (agentId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(agentId))) ? agentId : null;
+
+        const allLeadIds = await resolveAllLeadIds(rawLeadId);
 
         const { rows } = await query(`
             INSERT INTO lead_activities (
-                lead_id, user_id, author_name, activity_type, disposition, note
-            ) VALUES ($1, $2, $3, 'call_log', $4, $5)
+                lead_id, user_id, author_name, activity_type, disposition, note, created_at
+            ) VALUES ($1, $2, $3, 'call_log', $4, $5, NOW())
             RETURNING 
                 id,
                 lead_id AS "leadId",
@@ -1113,14 +1338,30 @@ router.post('/leads/:id/crm/activities', async (req: Request, res: Response) => 
                 author_name AS "authorName",
                 created_at AS "createdAt"
         `, [
-            leadId,
-            agentId,
+            rawLeadId,
+            validUserId,
             agentName,
             sanitizedDisposition,
             String(note || '').trim()
         ]);
 
         const activity = rows[0];
+
+        // Also insert into sales_call_logs if sales_leads record exists
+        try {
+            const { rows: slRows } = await query(
+                `SELECT id FROM sales_leads WHERE id::text = ANY($1::text[]) LIMIT 1`,
+                [allLeadIds]
+            );
+            if (slRows.length > 0 && validUserId) {
+                await query(
+                    `INSERT INTO sales_call_logs (id, lead_id, agent_id, outcome, notes, created_at)
+                     VALUES ($1, $2, $3, $4, $5, NOW())
+                     ON CONFLICT (id) DO NOTHING`,
+                    [activity.id, slRows[0].id, validUserId, sanitizedDisposition, String(note || '').trim()]
+                ).catch(() => {});
+            }
+        } catch {}
 
         // Sync disposition to sales_leads status so Admin & Sales stay 100% in sync
         let mappedLeadStatus: string | null = null;
@@ -1134,15 +1375,23 @@ router.post('/leads/:id/crm/activities', async (req: Request, res: Response) => 
                 await query(
                     `UPDATE sales_leads 
                      SET status = $1, 
-                         notes = COALESCE(NULLIF($2, ''), notes),
                          updated_at = NOW()
                          ${mappedLeadStatus === 'converted' ? ', is_customer = TRUE, converted_at = NOW()' : ''}
-                     WHERE id::text = $3`,
-                    [mappedLeadStatus, String(note || '').trim() || null, leadId]
+                     WHERE id::text = ANY($2::text[])`,
+                    [mappedLeadStatus, allLeadIds]
                 );
             } catch (updateErr) {
                 console.warn('Could not sync status to sales_leads:', updateErr);
             }
+            try {
+                await query(
+                    `UPDATE submissions
+                     SET payload = jsonb_set(COALESCE(payload, '{}'::jsonb), '{status}', to_jsonb($1::text), true),
+                         updated_at = NOW()
+                     WHERE id::text = ANY($2::text[])`,
+                    [mappedLeadStatus, allLeadIds]
+                );
+            } catch {}
         }
 
         if (nextFollowUpAt) {
@@ -1152,10 +1401,10 @@ router.post('/leads/:id/crm/activities', async (req: Request, res: Response) => 
                         lead_id, task_type, title, notes, priority, status, assigned_to_user_id, due_date, created_by_role, created_by_name
                     ) VALUES ($1, 'follow_up_call', $2, $3, 'medium', 'pending', $4, $5, 'self', $6)
                 `, [
-                    leadId,
+                    rawLeadId,
                     `Scheduled Follow-Up Call (${sanitizedDisposition})`,
                     String(note || '').trim(),
-                    agentId,
+                    validUserId,
                     nextFollowUpAt,
                     agentName
                 ]);
@@ -1173,56 +1422,91 @@ router.post('/leads/:id/crm/activities', async (req: Request, res: Response) => 
 router.get('/activities', async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
-        const agentId = (req as any).user.id;
         const disposition = String(req.query.disposition || '').trim();
-        const leadId = String(req.query.leadId || '').trim();
+        const rawLeadId = String(req.query.leadId || '').trim();
 
         const params: any[] = [];
-        const where: string[] = [
-            "(a.activity_type = 'call_log' OR (a.activity_type = 'task_event' AND a.note NOT LIKE 'Created task:%'))"
-        ];
+        let leadConditionActivities = '';
+        let leadConditionCalls = '';
 
-        if (leadId) {
-            params.push(leadId);
-            where.push(`a.lead_id = $${params.length}`);
-        } else {
-            params.push(agentId);
-            where.push(`(a.user_id = $${params.length} OR a.user_id IS NULL OR a.activity_type = 'task_event')`);
+        if (rawLeadId) {
+            const allLeadIds = await resolveAllLeadIds(rawLeadId);
+            params.push(allLeadIds);
+            leadConditionActivities = `AND a.lead_id::text = ANY($${params.length}::text[])`;
+            leadConditionCalls = `AND c.lead_id::text = ANY($${params.length}::text[])`;
         }
 
+        let dispConditionActivities = '';
+        let dispConditionCalls = '';
         if (disposition && disposition !== 'all') {
             params.push(disposition);
-            where.push(`a.disposition = $${params.length}`);
+            dispConditionActivities = `AND a.disposition = $${params.length}`;
+            dispConditionCalls = `AND c.outcome = $${params.length}`;
         }
 
         const { rows: activities } = await query(`
-            SELECT 
-                a.id,
-                a.lead_id AS "leadId",
-                a.activity_type AS "activityType",
-                a.disposition,
-                a.note,
-                a.author_name AS "authorName",
-                a.created_at AS "createdAt",
-                u.name AS "userName",
-                u.email AS "userEmail"
-            FROM lead_activities a
-            LEFT JOIN users u ON u.id = a.user_id
-            WHERE ${where.join(' AND ')}
-            ORDER BY a.created_at DESC
+            SELECT DISTINCT
+                act_item.id,
+                act_item.lead_id AS "leadId",
+                act_item.activity_type AS "activityType",
+                act_item.disposition,
+                act_item.note,
+                act_item.author_name AS "authorName",
+                act_item.created_at AS "createdAt",
+                act_item.user_name AS "userName",
+                act_item.user_email AS "userEmail"
+            FROM (
+                SELECT 
+                    a.id::text AS id,
+                    a.lead_id::text AS lead_id,
+                    COALESCE(NULLIF(a.activity_type, ''), 'note') AS activity_type,
+                    COALESCE(NULLIF(a.disposition, ''), 'Update') AS disposition,
+                    COALESCE(a.note, '') AS note,
+                    COALESCE(NULLIF(a.author_name, ''), u.name, 'Sales Agent') AS author_name,
+                    a.created_at,
+                    u.name AS user_name,
+                    u.email AS user_email
+                FROM lead_activities a
+                LEFT JOIN users u ON u.id::text = a.user_id::text
+                WHERE (a.activity_type IN ('call_log', 'call', 'note', 'status_change', 'status_update') OR a.disposition IS NOT NULL OR a.note IS NOT NULL)
+                ${leadConditionActivities}
+                ${dispConditionActivities}
+
+                UNION ALL
+
+                SELECT 
+                    c.id::text AS id,
+                    c.lead_id::text AS lead_id,
+                    'call_log' AS activity_type,
+                    COALESCE(c.outcome, 'connected') AS disposition,
+                    COALESCE(c.notes, '') AS note,
+                    COALESCE(u.name, 'Sales Agent') AS author_name,
+                    c.created_at,
+                    u.name AS user_name,
+                    u.email AS user_email
+                FROM sales_call_logs c
+                LEFT JOIN users u ON u.id::text = c.agent_id::text
+                WHERE (1=1)
+                ${leadConditionCalls}
+                ${dispConditionCalls}
+                AND NOT EXISTS (
+                    SELECT 1 FROM lead_activities la WHERE la.id::text = c.id::text
+                )
+            ) act_item
+            ORDER BY act_item.created_at DESC
             LIMIT 100
         `, params);
 
-        const leadIds = Array.from(new Set(activities.map((a) => a.leadId)));
+        const leadIds = Array.from(new Set(activities.map((a: any) => a.leadId).filter(Boolean)));
         const leadMetaMap = await fetchLeadMetadataMap(leadIds);
 
-        const enrichedActivities = activities.map((a) => {
-            const meta = leadMetaMap.get(a.leadId);
+        const enrichedActivities = activities.map((a: any) => {
+            const meta = leadMetaMap.get(a.leadId) || {};
             return {
                 ...a,
-                leadBusinessName: meta?.businessName || 'Lead',
-                leadPhone: meta?.phone || '',
-                leadEmail: meta?.email || ''
+                leadBusinessName: meta.businessName || meta.name || 'Lead',
+                leadPhone: meta.phone || '',
+                leadEmail: meta.email || ''
             };
         });
 
