@@ -4,16 +4,40 @@
 
 
 const PROD_API = 'https://dvj0p5k5d0.execute-api.us-east-1.amazonaws.com';
+const PROD_API_HOST = 'dvj0p5k5d0.execute-api.us-east-1.amazonaws.com';
+const DEV_ORIGIN = 'https://staging.zappsites.com';
+
+function cleanUrl(value: string | undefined): string {
+    return String(value || '').trim().replace(/\/$/, '');
+}
+
+function isDevStage(): boolean {
+    const stage = String(process.env.STAGE || '').toLowerCase();
+    return stage === 'dev' || stage === 'development';
+}
 
 export function zappSitesApiBase(): string {
-    const fromEnv = String(process.env.ZAPP_SITES_API_BASE || '').trim().replace(/\/$/, '');
-    if (fromEnv) return fromEnv;
-    
+    const configured = cleanUrl(process.env.ZAPP_SITES_API_BASE);
+    if (isDevStage()) {
+        const dev = cleanUrl(process.env.ZAPP_SITES_API_BASE_DEV) || configured;
+        if (!dev || dev.includes(PROD_API_HOST)) {
+            throw new Error(
+                'STAGE=dev cannot use the production ZappSites API. Set ZAPP_SITES_API_BASE to the dev API (ZAPP_SITES_API_BASE_DEV).'
+            );
+        }
+        return dev;
+    }
+    if (configured) return configured;
     return PROD_API;
 }
 
 export function zappSitesOrigin(): string {
-    const fromEnv = String(process.env.ZAPP_SITES_ORIGIN || '').trim().replace(/\/$/, '');
+    const fromEnv = cleanUrl(process.env.ZAPP_SITES_ORIGIN);
+    if (isDevStage()) {
+        const dev = cleanUrl(process.env.ZAPP_SITES_ORIGIN_DEV) || fromEnv;
+        if (!dev || dev === 'https://www.zappsites.com') return DEV_ORIGIN;
+        return dev;
+    }
     if (fromEnv) return fromEnv;
     return 'https://www.zappsites.com';
 }

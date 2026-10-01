@@ -25,6 +25,27 @@ const NAV_GROUPS = [
     }
 ];
 
+const SALES_CLEARED_NOTIFS_KEY = 'lp.sales.clearedNotifs';
+
+function loadSalesClearedIds(): Set<string> {
+    try {
+        const stored = localStorage.getItem(SALES_CLEARED_NOTIFS_KEY);
+        if (!stored) return new Set();
+        const arr = JSON.parse(stored);
+        return new Set(Array.isArray(arr) ? arr.map(String) : []);
+    } catch {
+        return new Set();
+    }
+}
+
+function saveSalesClearedIds(ids: Set<string>) {
+    try {
+        localStorage.setItem(SALES_CLEARED_NOTIFS_KEY, JSON.stringify(Array.from(ids).slice(-400)));
+    } catch {
+        /* ignore */
+    }
+}
+
 interface SalesNotificationItem {
     id: string;
     title: string;
@@ -68,6 +89,7 @@ export default function SalesLayout() {
                 }
             } catch {  }
 
+            const cleared = loadSalesClearedIds();
             const now = new Date();
             const items: SalesNotificationItem[] = taskList
                 .filter((t: any) => t.status !== 'completed' && t.status !== 'cancelled')
@@ -93,7 +115,8 @@ export default function SalesLayout() {
                         link: t.leadId ? `/sales/leads/${encodeURIComponent(t.leadId)}` : '/sales',
                         read: readSet.has(String(t.id))
                     };
-                });
+                })
+                .filter((item) => !cleared.has(item.id));
 
             setNotifications(items);
         } catch {  }
@@ -120,6 +143,13 @@ export default function SalesLayout() {
             window.removeEventListener('keydown', handleKeyDown);
         };
     }, [notifOpen]);
+
+    const clearAll = () => {
+        const cleared = loadSalesClearedIds();
+        notifications.forEach((n) => cleared.add(n.id));
+        saveSalesClearedIds(cleared);
+        setNotifications([]);
+    };
 
     const markAllRead = () => {
         const readIds = notifications.map((n) => n.id);
@@ -391,15 +421,24 @@ export default function SalesLayout() {
                                             </span>
                                         </div>
                                         {notifications.length > 0 && (
-                                            <button
-                                                type="button"
-                                                onClick={markAllRead}
-                                                className="text-xs font-bold text-orange-600 hover:text-orange-700 hover:bg-orange-50 px-2 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-                                                title="Mark all notifications as read"
-                                            >
-                                                <CheckCheck className="w-3.5 h-3.5" />
-                                                <span>Mark all read</span>
-                                            </button>
+                                            <div className="flex items-center gap-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={markAllRead}
+                                                    className="text-xs font-bold text-orange-600 hover:text-orange-700 hover:bg-orange-50 px-2 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                                                    title="Mark all notifications as read"
+                                                >
+                                                    <CheckCheck className="w-3.5 h-3.5" />
+                                                    <span>Mark all read</span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={clearAll}
+                                                    className="text-xs font-bold text-slate-500 hover:text-slate-900 hover:bg-slate-100 px-2 py-1 rounded-lg transition-colors cursor-pointer"
+                                                >
+                                                    Clear all
+                                                </button>
+                                            </div>
                                         )}
                                     </div>
 
@@ -467,13 +506,13 @@ export default function SalesLayout() {
                                         >
                                             View Reminders & Tasks →
                                         </button>
-                                        {unreadCount > 0 && (
+                                        {notifications.length > 0 && (
                                             <button
                                                 type="button"
-                                                onClick={markAllRead}
+                                                onClick={clearAll}
                                                 className="text-xs font-bold text-orange-600 hover:underline"
                                             >
-                                                Clear All
+                                                Clear all
                                             </button>
                                         )}
                                     </div>

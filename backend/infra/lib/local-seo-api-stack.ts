@@ -241,6 +241,7 @@ export class LocalSeoApiStack extends cdk.Stack {
         FRONTEND_URL: cfg.clientOrigin,
         ZAPP_SITES_ORIGIN: cfg.zappSitesOrigin,
         ZAPP_SITES_API_BASE: zappSitesApiBase,
+        ...(stage === 'dev' ? { ZAPP_SITES_API_BASE_DEV: zappSitesApiBase } : {}),
         PAYMENT_API_URL:
           process.env.PAYMENT_API_URL ||
           (stage === 'prod'

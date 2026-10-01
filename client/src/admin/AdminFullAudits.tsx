@@ -38,6 +38,7 @@ import {
 import { AUDIT_SERVICE_OPTIONS, resolveAuditService } from './auditServices';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { resolveAuditReportUrl } from '../shared/apiConfig';
+import { useToast } from '../shared/Toast';
 import { cn } from '../shared/utils';
 
 const PAGE_SIZE = 10;
@@ -170,6 +171,7 @@ function auditToLeadRef(a: FullAuditListItem): GrowthAuditLeadRef {
 }
 
 export default function AdminFullAudits() {
+    const { show } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
     const activeTab = searchParams.get('tab') === 'requests' ? 'requests' : 'audits';
     const [audits, setAudits] = useState<FullAuditListItem[]>([]);
@@ -178,7 +180,6 @@ export default function AdminFullAudits() {
     const [activeLead, setActiveLead] = useState<GrowthAuditLeadRef | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [message, setMessage] = useState('');
     const [busyId, setBusyId] = useState('');
     const [busyAction, setBusyAction] = useState<'share' | 'delete' | ''>('');
     const [page, setPage] = useState(1);
@@ -302,7 +303,6 @@ export default function AdminFullAudits() {
         setShowForm(true);
         setTab('audits');
         setError('');
-        setMessage('');
         updateFullAuditRequest(req.id, { status: 'in_progress' }).catch(() => {});
     };
 
@@ -317,7 +317,6 @@ export default function AdminFullAudits() {
         setFulfillAgentId(req.assignedToUserId || '');
         setAssignSaving(false);
         setError('');
-        setMessage('');
     };
 
     const closeAssignModal = () => {
@@ -351,7 +350,7 @@ export default function AdminFullAudits() {
                 fulfilledAuditId: auditId,
                 assignedToUserId: fulfillAgentId
             });
-            setMessage('Assigned — sales agent will see this in CRM to email the PDF.');
+            show('Assigned — sales agent will see this in CRM to email the PDF.');
             setAssignModalReq(null);
             setFulfillAuditId('');
             setFulfillAgentId('');
@@ -394,7 +393,6 @@ export default function AdminFullAudits() {
     const openNewForm = () => {
         setShowForm(true);
         setError('');
-        setMessage('');
         setCreateMessage('');
     };
 
@@ -424,7 +422,7 @@ export default function AdminFullAudits() {
         setShowForm(false);
         setCreateMessage('');
         setStepIndex(0);
-        setMessage(
+        show(
             prefillRequestId
                 ? 'Full audit ready — pick a sales agent to assign.'
                 : 'Full audit ready — report opened in a new tab.'
@@ -476,7 +474,6 @@ export default function AdminFullAudits() {
         setCreating(true);
         setStepIndex(0);
         setError('');
-        setMessage('');
         setCreateMessage('Looking up Maps / GBP, then crawling the website…');
 
         try {
@@ -567,7 +564,8 @@ export default function AdminFullAudits() {
 
     const onCopy = async (url: string) => {
         const ok = await copyText(url);
-        setMessage(ok ? 'Shareable link copied.' : url);
+        if (ok) show('Shareable link copied.');
+        else setError('Could not copy the link.');
     };
 
     const onShare = async (a: FullAuditListItem) => {
@@ -593,10 +591,9 @@ export default function AdminFullAudits() {
         setBusyId(a.id);
         setBusyAction('share');
         setError('');
-        setMessage('');
         try {
             const res = await shareFullAuditEmail(a.id, { email });
-            setMessage(
+            show(
                 res.attached === false
                     ? `Report emailed to ${res.to} (link only — PDF was too large to attach).`
                     : `Report emailed to ${res.to}.`
@@ -620,7 +617,7 @@ export default function AdminFullAudits() {
         try {
             await deleteFullAudit(a.id);
             setAudits((prev) => prev.filter((x) => x.id !== a.id));
-            setMessage('Audit deleted.');
+            show('Audit deleted.');
         } catch (err: any) {
             setError(err.message || 'Could not delete audit');
         } finally {
@@ -690,11 +687,6 @@ export default function AdminFullAudits() {
             {error ? (
                 <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
                     {error}
-                </p>
-            ) : null}
-            {message ? (
-                <p className="text-sm text-emerald-900 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5">
-                    {message}
                 </p>
             ) : null}
 
