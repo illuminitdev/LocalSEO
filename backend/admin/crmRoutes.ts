@@ -131,6 +131,7 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
                 leadSource: meta.source || '',
                 leadIndustry: meta.industry || '',
                 leadAuditId: meta.auditId || null,
+                leadStatus: meta.status || (meta.isCustomer ? 'converted' : 'new'),
                 emailShareStatus: share.emailShareStatus,
                 emailShareSentAt: share.emailShareSentAt,
                 emailShareOpenedAt: share.emailShareOpenedAt,
@@ -547,8 +548,14 @@ router.get('/crm/leads/:leadId/crm', requireAdmin, async (req: Request, res: Res
                 FROM lead_tasks t
                 LEFT JOIN users u ON u.id = t.assigned_to_user_id
                 WHERE t.lead_id = ANY($1::text[])
+                  AND (t.created_by_role = 'admin' OR t.created_by_role IS NULL)
                 ORDER BY
-                    CASE WHEN t.status = 'pending' THEN 1 WHEN t.status = 'in_progress' THEN 2 ELSE 3 END,
+                    CASE 
+                        WHEN t.status = 'in_progress' THEN 1 
+                        WHEN t.status = 'pending' THEN 2 
+                        WHEN t.status = 'completed' THEN 3 
+                        ELSE 4 
+                    END,
                     t.due_date ASC NULLS LAST,
                     t.created_at DESC
             `,
@@ -557,24 +564,70 @@ router.get('/crm/leads/:leadId/crm', requireAdmin, async (req: Request, res: Res
             query(
                 `
                 SELECT DISTINCT
-                    a.id,
-                    a.lead_id AS "leadId",
-                    a.activity_type AS "activityType",
-                    a.disposition,
-                    a.note,
-                    a.author_name AS "authorName",
-                    a.created_at AS "createdAt",
-                    u.name AS "userName",
-                    u.email AS "userEmail"
-                FROM lead_activities a
-                LEFT JOIN users u ON u.id = a.user_id
-                WHERE (
-                    a.lead_id = ANY($1::text[])
-                    OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(email)) = $3)))
-                    OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)))
-                )
-                  AND a.activity_type IN ('call_log', 'status_change', 'note', 'task_event')
-                ORDER BY a.created_at DESC
+                    act_item.id,
+                    act_item.lead_id AS "leadId",
+                    act_item.activity_type AS "activityType",
+                    act_item.disposition,
+                    act_item.note,
+                    act_item.author_name AS "authorName",
+                    act_item.created_at AS "createdAt",
+                    act_item.user_name AS "userName",
+                    act_item.user_email AS "userEmail"
+                FROM (
+                    SELECT 
+                        a.id::text AS id,
+                        a.lead_id::text AS lead_id,
+                        COALESCE(NULLIF(a.activity_type, ''), 'note') AS activity_type,
+                        COALESCE(NULLIF(a.disposition, ''), 'Update') AS disposition,
+                        COALESCE(a.note, '') AS note,
+                        COALESCE(NULLIF(a.author_name, ''), u.name, 'Admin / Staff') AS author_name,
+                        a.created_at,
+                        u.name AS user_name,
+                        u.email AS user_email
+                    FROM lead_activities a
+                    LEFT JOIN users u ON u.id::text = a.user_id::text
+                    WHERE (
+                        a.lead_id::text = ANY($1::text[])
+                        OR (NULLIF($2, '') IS NOT NULL AND (
+                            a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
+                            OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
+                        ))
+                        OR (NULLIF($3, '') IS NOT NULL AND (
+                            a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
+                            OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
+                        ))
+                    )
+
+                    UNION ALL
+
+                    SELECT 
+                        c.id::text AS id,
+                        c.lead_id::text AS lead_id,
+                        'call_log' AS activity_type,
+                        COALESCE(c.outcome, 'connected') AS disposition,
+                        COALESCE(c.notes, '') AS note,
+                        COALESCE(u.name, 'Sales Agent') AS author_name,
+                        c.created_at,
+                        u.name AS user_name,
+                        u.email AS user_email
+                    FROM sales_call_logs c
+                    LEFT JOIN users u ON u.id::text = c.agent_id::text
+                    WHERE (
+                        c.lead_id::text = ANY($1::text[])
+                        OR (NULLIF($2, '') IS NOT NULL AND (
+                            c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
+                            OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
+                        ))
+                        OR (NULLIF($3, '') IS NOT NULL AND (
+                            c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
+                            OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
+                        ))
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM lead_activities la WHERE la.id::text = c.id::text
+                    )
+                ) act_item
+                ORDER BY act_item.created_at DESC
                 LIMIT 200
             `,
                 [allLeadIds, leadName || null, leadEmail || null]
@@ -617,24 +670,70 @@ router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, r
 
         const { rows } = await query(`
             SELECT DISTINCT
-                a.id,
-                a.lead_id AS "leadId",
-                a.activity_type AS "activityType",
-                a.disposition,
-                a.note,
-                a.author_name AS "authorName",
-                a.created_at AS "createdAt",
-                u.name AS "userName",
-                u.email AS "userEmail"
-            FROM lead_activities a
-            LEFT JOIN users u ON u.id = a.user_id
-            WHERE (
-                a.lead_id = ANY($1::text[])
-                OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(email)) = $3)))
-                OR (NULLIF($2, '') IS NOT NULL AND a.lead_id IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)))
-            )
-              AND a.activity_type IN ('call_log', 'status_change', 'note', 'task_event')
-            ORDER BY a.created_at DESC
+                act_item.id,
+                act_item.lead_id AS "leadId",
+                act_item.activity_type AS "activityType",
+                act_item.disposition,
+                act_item.note,
+                act_item.author_name AS "authorName",
+                act_item.created_at AS "createdAt",
+                act_item.user_name AS "userName",
+                act_item.user_email AS "userEmail"
+            FROM (
+                SELECT 
+                    a.id::text AS id,
+                    a.lead_id::text AS lead_id,
+                    COALESCE(NULLIF(a.activity_type, ''), 'note') AS activity_type,
+                    COALESCE(NULLIF(a.disposition, ''), 'Update') AS disposition,
+                    COALESCE(a.note, '') AS note,
+                    COALESCE(NULLIF(a.author_name, ''), u.name, 'Admin / Staff') AS author_name,
+                    a.created_at,
+                    u.name AS user_name,
+                    u.email AS user_email
+                FROM lead_activities a
+                LEFT JOIN users u ON u.id::text = a.user_id::text
+                WHERE (
+                    a.lead_id::text = ANY($1::text[])
+                    OR (NULLIF($2, '') IS NOT NULL AND (
+                        a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
+                        OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
+                    ))
+                    OR (NULLIF($3, '') IS NOT NULL AND (
+                        a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
+                        OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
+                    ))
+                )
+
+                UNION ALL
+
+                SELECT 
+                    c.id::text AS id,
+                    c.lead_id::text AS lead_id,
+                    'call_log' AS activity_type,
+                    COALESCE(c.outcome, 'connected') AS disposition,
+                    COALESCE(c.notes, '') AS note,
+                    COALESCE(u.name, 'Sales Agent') AS author_name,
+                    c.created_at,
+                    u.name AS user_name,
+                    u.email AS user_email
+                FROM sales_call_logs c
+                LEFT JOIN users u ON u.id::text = c.agent_id::text
+                WHERE (
+                    c.lead_id::text = ANY($1::text[])
+                    OR (NULLIF($2, '') IS NOT NULL AND (
+                        c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
+                        OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
+                    ))
+                    OR (NULLIF($3, '') IS NOT NULL AND (
+                        c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
+                        OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
+                    ))
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM lead_activities la WHERE la.id::text = c.id::text
+                )
+            ) act_item
+            ORDER BY act_item.created_at DESC
             LIMIT 200
         `, [allLeadIds, leadName || null, leadEmail || null]);
 
@@ -1117,6 +1216,10 @@ router.patch('/crm/leads/:id', requireAdmin, async (req: Request, res: Response)
         if (status !== undefined) {
             params.push(status);
             updates.push(`status = $${params.length}`);
+            if (status === 'converted') {
+                updates.push(`is_customer = TRUE`);
+                updates.push(`converted_at = COALESCE(converted_at, NOW())`);
+            }
         }
         if (notes !== undefined) {
             params.push(String(notes || '').trim());

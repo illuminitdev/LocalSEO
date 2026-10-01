@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import TaskCompletionModal, { type CrmTaskStatus } from '../shared/TaskCompletionModal';
 import LeadStatusHistoryModal from '../admin/LeadStatusHistoryModal';
+import RequestAuditModal from './RequestAuditModal';
+import AddLeadTaskModal from './AddLeadTaskModal';
 import {
     type SalesUnifiedLead,
     type SalesLeadTask,
@@ -29,6 +31,7 @@ import {
     type SalesTaskStatus,
     fetchSalesLeadCrm,
     updateSalesTask,
+    updateSalesLeadStatus,
     convertLeadToCustomer,
     confirmAndShareFullAuditEmail,
     confirmAndShareLeadObservationsEmail,
@@ -38,11 +41,14 @@ import {
 } from './salesApi';
 import { cn } from '../shared/utils';
 import { useToast } from '../shared/Toast';
+import { resolveAuditReportUrl } from '../shared/apiConfig';
 import {
     Lightbulb,
     Bot,
     Store,
-    Award
+    Award,
+    BarChart3,
+    Sparkles
 } from 'lucide-react';
 
 type LeadDetailLocationState = {
@@ -65,12 +71,40 @@ export default function SalesLeadDetail() {
     const [converting, setConverting] = useState(false);
     const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
     const [showLeadHistoryModal, setShowLeadHistoryModal] = useState(false);
+    const [showAuditModal, setShowAuditModal] = useState(false);
+    const [showReminderModal, setShowReminderModal] = useState(false);
+    const [updatingLeadStatus, setUpdatingLeadStatus] = useState(false);
+    const [selectedStatus, setSelectedStatus] = useState<string>('');
     const [sharingAudit, setSharingAudit] = useState(false);
     const [sharingObservations, setSharingObservations] = useState(false);
 
-    const loadLead = useCallback(async () => {
+    const handleUpdateLeadStatus = async (newStatus: string) => {
+        if (!id || updatingLeadStatus) return;
+        setUpdatingLeadStatus(true);
+        setError('');
+        try {
+            await updateSalesLeadStatus(id, { status: newStatus });
+            const statusLabels: Record<string, string> = {
+                new: 'Lead status set to New',
+                contacted: 'Lead status set to Contacted',
+                follow_up: 'Lead status set to Follow-Up',
+                callback: 'Lead status set to Callback',
+                interested: 'Lead status set to Interested',
+                not_interested: 'Lead status set to Not Interested',
+                converted: 'Lead status set to Converted'
+            };
+            show(statusLabels[newStatus] || `Lead status updated to ${newStatus}`);
+            await loadLead();
+        } catch (err: any) {
+            setError(err.message || 'Failed to update lead status');
+        } finally {
+            setUpdatingLeadStatus(false);
+        }
+    };
+
+    const loadLead = useCallback(async (silent = false) => {
         if (!id) return;
-        setLoading(true);
+        if (!silent) setLoading(true);
         setError('');
         try {
             const data = await fetchSalesLeadCrm(id);
@@ -78,9 +112,11 @@ export default function SalesLeadDetail() {
             setTasks(data.tasks || []);
             setActivities(data.activities || []);
         } catch (err: any) {
-            setError(err.message || 'Failed to load lead CRM data');
+            if (!silent) {
+                setError(err.message || 'Failed to load lead CRM data');
+            }
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     }, [id]);
 
@@ -88,13 +124,36 @@ export default function SalesLeadDetail() {
         loadLead();
     }, [loadLead]);
 
+    useEffect(() => {
+        if (lead?.status) {
+            setSelectedStatus(lead.status);
+        } else if (lead) {
+            setSelectedStatus('new');
+        }
+    }, [lead?.status, lead?.id]);
+
+    const hasStatusChanged = Boolean(selectedStatus && lead && selectedStatus !== (lead.status || 'new'));
+
+    // Scroll to tasks section if opened with hash #tasks or state scrollTo: 'tasks'
+    useEffect(() => {
+        if (location.hash === '#tasks' || (location.state as any)?.scrollTo === 'tasks') {
+            const timer = setTimeout(() => {
+                const el = document.getElementById('tasks-section');
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }, 250);
+            return () => clearTimeout(timer);
+        }
+    }, [location.hash, location.state]);
+
     // While waiting for open, poll so badge turns green without manual refresh
     useEffect(() => {
         const waitingAudit = lead?.emailShareStatus === 'sent';
         const waitingObs = lead?.observationEmailShareStatus === 'sent';
         if (!waitingAudit && !waitingObs) return;
         const timer = window.setInterval(() => {
-            loadLead();
+            loadLead(true);
         }, 8000);
         return () => window.clearInterval(timer);
     }, [lead?.emailShareStatus, lead?.observationEmailShareStatus, loadLead]);
@@ -150,7 +209,6 @@ export default function SalesLeadDetail() {
             setConverting(false);
         }
     };
-
     const handleEmailAuditPdf = async () => {
         const auditId = String(lead?.auditId || '').trim();
         if (!auditId) return;
@@ -260,17 +318,21 @@ export default function SalesLeadDetail() {
                         </button>
                     )}
 
-                    {lead.reportUrl && (
-                        <a
-                            href={lead.reportUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 text-xs font-bold rounded-xl transition-colors shadow-2xs"
-                        >
-                            <span>View Live SEO Audit</span>
-                            <ArrowUpRight className="w-3.5 h-3.5" />
-                        </a>
-                    )}
+                    {(() => {
+                        const liveUrl = resolveAuditReportUrl(lead.reportUrl || lead.auditId || '');
+                        if (!liveUrl) return null;
+                        return (
+                            <a
+                                href={liveUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 text-xs font-bold rounded-xl transition-colors shadow-2xs"
+                            >
+                                <span>View Live Growth Audit</span>
+                                <ArrowUpRight className="w-3.5 h-3.5" />
+                            </a>
+                        );
+                    })()}
                     {emailShareStatusLabel(lead.observationEmailShareStatus) ? (
                         <div className="flex flex-col items-end gap-0.5">
                             <span
@@ -411,6 +473,81 @@ export default function SalesLeadDetail() {
                     </div>
                 </div>
 
+                {/* Dedicated Lead Level Status Bar */}
+                <div className="p-4 rounded-2xl bg-slate-900 text-white shadow-xs space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                                Lead Status:
+                            </span>
+                            <span className="px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wider bg-slate-800 text-slate-200 border border-slate-700 shadow-xs">
+                                {(lead.status || 'new').replace(/_/g, ' ')}
+                            </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setShowLeadHistoryModal(true)}
+                                className="inline-flex items-center px-3 py-1 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
+                                title="View status history timeline"
+                            >
+                                Status Timeline
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Select & Save Status Bar */}
+                    <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                            Change Lead Status:
+                        </p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
+                            {[
+                                { status: 'new', label: 'New Lead' },
+                                { status: 'contacted', label: 'Contacted' },
+                                { status: 'follow_up', label: 'Follow Up' },
+                                { status: 'interested', label: 'Interested' },
+                                { status: 'not_interested', label: 'Not Interested' },
+                                { status: 'converted', label: 'Converted' }
+                            ].map((item) => {
+                                const isSelected = (selectedStatus || lead.status || 'new') === item.status;
+                                return (
+                                    <button
+                                        key={item.status}
+                                        type="button"
+                                        onClick={() => setSelectedStatus(item.status)}
+                                        className={cn(
+                                            "px-3 py-2 rounded-lg text-xs font-semibold border transition-all text-center flex items-center justify-center cursor-pointer",
+                                            isSelected
+                                                ? "bg-amber-500 text-slate-950 font-bold border-amber-400 shadow-xs ring-2 ring-amber-400/30"
+                                                : "bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700/80"
+                                        )}
+                                    >
+                                        <span className="truncate">{item.label}</span>
+                                    </button>
+                                );
+                            })}
+
+                            {/* Save Status button placed after Converted */}
+                            <button
+                                type="button"
+                                disabled={!hasStatusChanged || updatingLeadStatus}
+                                onClick={() => handleUpdateLeadStatus(selectedStatus)}
+                                className={cn(
+                                    "px-3 py-2 rounded-lg text-xs font-bold border transition-all text-center flex items-center justify-center gap-1",
+                                    hasStatusChanged
+                                        ? "bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-slate-950 border-amber-400 shadow-md ring-2 ring-amber-400/40 cursor-pointer"
+                                        : "bg-slate-800/40 text-slate-500 border-slate-700/50 cursor-not-allowed opacity-50"
+                                )}
+                                title={hasStatusChanged ? "Save selected status" : "Select a different status to save"}
+                            >
+                                <span className="truncate">{updatingLeadStatus ? 'Saving…' : 'Save Status'}</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 {/* Lead Opportunity & Pitch Angle Banner */}
                 {(lead.leadOpportunity || lead.opportunityLevel) && (
                     <div className={cn(
@@ -454,7 +591,7 @@ export default function SalesLeadDetail() {
                     const hasSheetStatuses = Boolean(status1 || status2 || status3 || combinedSheet);
                     const crmStatus = String((lead as any).status || latestAct?.disposition || '').trim();
                     const showCrmPill = Boolean(crmStatus && crmStatus.toLowerCase() !== 'new');
-                    const activeNote = (lead as any).salesNotes || (lead as any).notes || latestAct?.note || '';
+                    const activeNote = latestAct?.note || (lead as any).salesNotes || (lead as any).notes || '';
                     const activeDate = latestAct?.createdAt || (lead as any).updatedAt || (lead as any).createdAt;
                     const activeAuthor = latestAct?.authorName || (lead as any).assignedAgentName;
 
@@ -691,54 +828,103 @@ export default function SalesLeadDetail() {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 {}
                 <div className="lg:col-span-6 space-y-6">
-                    {}
-                    <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs">
-                        <div className="flex items-center justify-between mb-4">
+                    {/* Tasks for this Lead */}
+                    <div id="tasks-section" className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs scroll-mt-6">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                             <div className="flex items-center gap-2">
                                 <CheckSquare className="w-4 h-4 text-[#F59E0B]" />
                                 <h2 className="text-base font-black text-[#0F172A]">Tasks for this Lead</h2>
-                                <span className="bg-[#F1F5F9] text-[#475569] text-xs font-bold px-2 py-0.5 rounded-full">
-                                    {tasks.length}
-                                </span>
+                                {(() => {
+                                    const activeCount = tasks.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').length;
+                                    if (activeCount > 0) {
+                                        return (
+                                            <span className="bg-amber-100 text-amber-900 border border-amber-300 text-xs font-black px-2 py-0.5 rounded-full shadow-2xs tracking-tight">
+                                                +{activeCount}
+                                            </span>
+                                        );
+                                    }
+                                    if (tasks.length > 0) {
+                                        return (
+                                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-2xs">
+                                                All Done
+                                            </span>
+                                        );
+                                    }
+                                    return null;
+                                })()}
                             </div>
-                            <Link
-                                to={`/sales/reminders?leadId=${encodeURIComponent(id || '')}`}
-                                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0F172A] hover:text-[#D97706] bg-[#F8FAFC] border border-[#E2E8F0] px-3 py-1.5 rounded-xl transition-colors hover:bg-white shadow-2xs"
-                            >
-                                <Bell className="w-3.5 h-3.5 text-[#F59E0B]" />
-                                <span>+ Add Reminder</span>
-                            </Link>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAuditModal(true)}
+                                    className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-xl transition-colors shadow-2xs cursor-pointer"
+                                    title="Request Admin & SEO / Developer team to generate Full Growth Audit"
+                                >
+                                    <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>+ Request Full Audit (Admin)</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowReminderModal(true)}
+                                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0F172A] hover:text-[#D97706] bg-[#F8FAFC] border border-[#E2E8F0] px-3 py-1.5 rounded-xl transition-colors hover:bg-white shadow-2xs cursor-pointer"
+                                    title="Add self reminder or scheduled call"
+                                >
+                                    <Bell className="w-3.5 h-3.5 text-[#F59E0B]" />
+                                    <span>+ Add Reminder</span>
+                                </button>
+                            </div>
                         </div>
 
-                        {}
                         {!tasks.length ? (
-                            <p className="text-xs text-[#94A3B8] text-center py-4">No tasks assigned for this lead yet.</p>
+                            <div className="text-center py-6 text-[#94A3B8] border border-dashed border-slate-200 rounded-xl">
+                                <CheckSquare className="w-6 h-6 mx-auto mb-1 text-slate-300" />
+                                <p className="text-xs font-semibold">No tasks assigned for this lead yet.</p>
+                                <p className="text-[11px] text-slate-400 mt-0.5">Use the buttons above to request an audit or add a follow-up reminder.</p>
+                            </div>
                         ) : (
                             <ul className="space-y-2">
                                 {tasks.map((t) => {
                                     const isDone = t.status === 'completed';
+                                    const isAdminAssigned = t.createdByRole === 'admin';
+                                    const isCustomerRequested = t.createdByRole === 'customer';
+                                    const isAuditRequest = !isAdminAssigned && !isCustomerRequested && (
+                                        t.taskType === 'prepare_audit' || 
+                                        (t as any).assignedToRole === 'developer_seo' || 
+                                        (t as any).assignedToRole === 'developer' || 
+                                        (t as any).assignedToRole === 'seo'
+                                    );
                                     return (
                                         <li
                                             key={t.id}
                                             className={cn(
-                                                'p-3 rounded-xl border flex items-center justify-between gap-3 transition-colors',
+                                                'p-3 sm:p-3.5 rounded-xl border flex items-center justify-between gap-3 transition-colors min-h-[58px]',
                                                 isDone ? 'bg-emerald-50/50 border-emerald-300 shadow-xs' : 'bg-white border-[#E2E8F0]'
                                             )}
                                         >
                                             <div className="min-w-0 flex-1">
                                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                                    <p className={cn('text-xs font-bold', isDone ? 'text-emerald-950 font-bold' : 'text-[#0F172A]')}>
+                                                    <p className={cn('text-xs font-bold leading-snug', isDone ? 'text-emerald-950' : 'text-[#0F172A]')}>
                                                         {t.title}
                                                     </p>
-                                                    {t.createdByRole === 'admin' ? (
-                                                        <span className="inline-flex items-center gap-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider">
+                                                    {isCustomerRequested ? (
+                                                        <span className="inline-flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 text-emerald-800 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                            <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                                                            Customer Inbound
+                                                        </span>
+                                                    ) : isAuditRequest ? (
+                                                        <span className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                            <BarChart3 className="w-2.5 h-2.5 text-indigo-600" />
+                                                            Audit Request (Admin / SEO)
+                                                        </span>
+                                                    ) : isAdminAssigned ? (
+                                                        <span className="inline-flex items-center gap-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
                                                             <Shield className="w-2.5 h-2.5 text-purple-600" />
                                                             Admin Assigned
                                                         </span>
                                                     ) : (
-                                                        <span className="inline-flex items-center gap-0.5 rounded border border-slate-200 bg-slate-100 text-slate-700 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider">
-                                                            <User className="w-2.5 h-2.5 text-slate-500" />
-                                                            Self Created
+                                                        <span className="inline-flex items-center gap-0.5 rounded border border-amber-200 bg-amber-50 text-amber-800 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                            <Bell className="w-2.5 h-2.5 text-amber-600" />
+                                                            Self Reminder
                                                         </span>
                                                     )}
                                                 </div>
@@ -756,7 +942,7 @@ export default function SalesLeadDetail() {
                                                     type="button"
                                                     onClick={() => setSelectedHistoryTask(t)}
                                                     className={cn(
-                                                        "inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md border cursor-pointer hover:shadow-xs hover:scale-105 transition-all group/badge",
+                                                        "inline-flex items-center justify-center gap-1 px-2.5 h-7 text-[11px] font-bold rounded-lg border cursor-pointer hover:shadow-xs transition-all group/badge",
                                                         t.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100" :
                                                         t.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100" :
                                                         t.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100" :
@@ -764,21 +950,23 @@ export default function SalesLeadDetail() {
                                                     )}
                                                     title="Click to view full lead status history timeline"
                                                 >
-                                                    {t.status === 'completed' && <Check className="w-3 h-3 text-emerald-600" />}
-                                                    {t.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600" />}
-                                                    {t.status === 'cancelled' && <X className="w-3 h-3 text-rose-600" />}
-                                                    <span className="capitalize">{t.status.replace('_', ' ')}</span>
-                                                    <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100 shrink-0 ml-0.5" />
+                                                    {t.status === 'completed' && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                                                    {t.status === 'in_progress' && <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
+                                                    {t.status === 'cancelled' && <X className="w-3.5 h-3.5 text-rose-600 shrink-0" />}
+                                                    <span className="capitalize whitespace-nowrap">{t.status.replace('_', ' ')}</span>
+                                                    <History className="w-3 h-3 opacity-40 group-hover/badge:opacity-100 shrink-0 ml-0.5" />
                                                 </button>
 
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleOpenToggleModal(t)}
-                                                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-amber-500 hover:bg-amber-600 text-white transition-all shadow-2xs"
-                                                    title="Update Status"
-                                                >
-                                                    <span>Update Status</span>
-                                                </button>
+                                                {!isAuditRequest && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleOpenToggleModal(t)}
+                                                        className="inline-flex items-center justify-center px-2.5 h-7 text-[11px] font-bold rounded-lg bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-white transition-all shadow-2xs cursor-pointer whitespace-nowrap"
+                                                        title="Update Status"
+                                                    >
+                                                        <span>Update Status</span>
+                                                    </button>
+                                                )}
                                             </div>
                                         </li>
                                     );
@@ -908,6 +1096,36 @@ export default function SalesLeadDetail() {
                     readOnly={true}
                     onClose={() => setSelectedHistoryTask(null)}
                     onStatusUpdated={async () => {
+                        await loadLead();
+                    }}
+                />
+            )}
+
+            {/* Request Growth Audit Modal (Assigned to Developer / SEO) */}
+            {showAuditModal && id && (
+                <RequestAuditModal
+                    isOpen={showAuditModal}
+                    leadId={id}
+                    leadName={lead?.businessName || 'Lead'}
+                    leadWebsite={lead?.website}
+                    leadPhone={lead?.phone}
+                    onClose={() => setShowAuditModal(false)}
+                    onSuccess={async (customMsg) => {
+                        show(customMsg || 'Growth Audit request sent to Admin & SEO Team successfully! 🚀');
+                        await loadLead();
+                    }}
+                />
+            )}
+
+            {/* Add Self Reminder / Task Modal */}
+            {showReminderModal && id && (
+                <AddLeadTaskModal
+                    isOpen={showReminderModal}
+                    leadId={id}
+                    leadName={lead?.businessName || 'Lead'}
+                    onClose={() => setShowReminderModal(false)}
+                    onSuccess={async () => {
+                        show('Follow-up reminder saved successfully! 🔔');
                         await loadLead();
                     }}
                 />

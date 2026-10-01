@@ -122,6 +122,7 @@ export type LeadTask = {
     leadSource?: string | null;
     leadIndustry?: string | null;
     leadAuditId?: string | null;
+    leadStatus?: string | null;
     emailShareStatus?: 'none' | 'sent' | 'opened';
     emailShareSentAt?: string | null;
     emailShareOpenedAt?: string | null;
@@ -347,6 +348,16 @@ export async function updateFullAuditRequest(
 ): Promise<FullAuditRequest> {
     const res = await adminPatch(`/api/admin/full-audit-requests/${encodeURIComponent(id)}`, updates);
     return res.request;
+}
+
+export async function assignFullAuditToAgent(payload: {
+    requestId?: string;
+    auditId: string;
+    agentId: string;
+    businessName?: string;
+    leadId?: string;
+}): Promise<{ success: boolean; message: string }> {
+    return adminPost('/api/admin/full-audit-requests/assign', payload);
 }
 
 

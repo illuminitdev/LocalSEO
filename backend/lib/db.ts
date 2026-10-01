@@ -107,6 +107,19 @@ async function migrate() {
     const skipShared = usesSharedRds();
 
     try {
+        await migrationPool.query(`
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                filename VARCHAR(255) PRIMARY KEY,
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        `);
+
+        const { rows: appliedRows } = await migrationPool.query(
+            `SELECT filename FROM schema_migrations`
+        ).catch(() => ({ rows: [] as { filename: string }[] }));
+
+        const appliedSet = new Set(appliedRows.map((r: { filename: string }) => r.filename));
+
         const files = fs
             .readdirSync(migrationsDir)
             .filter((f) => f.endsWith('.sql'))
@@ -117,8 +130,16 @@ async function migrate() {
                 console.log(`[db] Skipping ${file} (ZappSites owns plans/subscriptions on shared RDS)`);
                 continue;
             }
+            if (appliedSet.has(file)) {
+                continue;
+            }
+            console.log(`[db] Running migration: ${file}`);
             const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
             await migrationPool.query(sql);
+            await migrationPool.query(
+                `INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING`,
+                [file]
+            );
         }
     } finally {
         await migrationPool.end();

@@ -28,17 +28,19 @@ interface BulkAssignTasksModalProps {
 }
 
 const TASK_PRESETS: Array<{
+    id: string;
     type: TaskType;
     label: string;
     icon: ElementType;
     defaultTitle: string;
     defaultPriority: TaskPriority;
 }> = [
-    { type: 'follow_up_call', label: 'Follow-Up Call', icon: Phone, defaultTitle: 'Follow-up Call with Lead', defaultPriority: 'medium' },
-    { type: 'prepare_audit', label: 'Prepare Audit', icon: BarChart3, defaultTitle: 'Prepare & Review Growth Audit', defaultPriority: 'high' },
-    { type: 'send_proposal', label: 'Send Proposal', icon: FileText, defaultTitle: 'Send Service Proposal & Pricing', defaultPriority: 'medium' },
-    { type: 'onboard_customer', label: 'Onboard Customer', icon: UserPlus, defaultTitle: 'Onboard as New Customer', defaultPriority: 'urgent' },
-    { type: 'custom', label: 'Custom Task', icon: Plus, defaultTitle: 'Custom Task', defaultPriority: 'medium' }
+    { id: 'initial_call', type: 'follow_up_call', label: 'Initial Call', icon: Phone, defaultTitle: 'Initial Call with Lead', defaultPriority: 'medium' },
+    { id: 'follow_up_call', type: 'follow_up_call', label: 'Follow-Up Call', icon: Phone, defaultTitle: 'Follow-up Call with Lead', defaultPriority: 'medium' },
+    { id: 'prepare_audit', type: 'prepare_audit', label: 'Prepare Audit', icon: BarChart3, defaultTitle: 'Prepare & Review Growth Audit', defaultPriority: 'high' },
+    { id: 'send_proposal', type: 'send_proposal', label: 'Send Proposal', icon: FileText, defaultTitle: 'Send Service Proposal & Pricing', defaultPriority: 'medium' },
+    { id: 'onboard_customer', type: 'onboard_customer', label: 'Onboard Customer', icon: UserPlus, defaultTitle: 'Onboard as New Customer', defaultPriority: 'urgent' },
+    { id: 'custom', type: 'custom', label: 'Custom Task', icon: Plus, defaultTitle: 'Custom Task', defaultPriority: 'medium' }
 ];
 
 const PRIORITIES: Array<{ value: TaskPriority; label: string }> = [
@@ -57,8 +59,9 @@ export default function BulkAssignTasksModal({
 }: BulkAssignTasksModalProps) {
     const [assignedTo, setAssignedTo] = useState<string>('');
     const [createTask, setCreateTask] = useState<boolean>(true);
+    const [selectedPresetId, setSelectedPresetId] = useState<string>('initial_call');
     const [taskType, setTaskType] = useState<TaskType>('follow_up_call');
-    const [taskTitle, setTaskTitle] = useState('Follow-up Call with Lead');
+    const [taskTitle, setTaskTitle] = useState('Initial Call with Lead');
     const [taskPriority, setTaskPriority] = useState<TaskPriority>('medium');
     const [taskDueDate, setTaskDueDate] = useState<string>('');
     const [taskNotes, setTaskNotes] = useState<string>('');
@@ -78,6 +81,7 @@ export default function BulkAssignTasksModal({
     if (!isOpen || !leadIds.length) return null;
 
     const handleSelectPreset = (preset: typeof TASK_PRESETS[0]) => {
+        setSelectedPresetId(preset.id);
         setTaskType(preset.type);
         if (preset.defaultTitle) {
             setTaskTitle(preset.defaultTitle);
@@ -201,11 +205,11 @@ export default function BulkAssignTasksModal({
                                 </label>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                                     {TASK_PRESETS.map((preset) => {
-                                        const isSelected = taskType === preset.type;
+                                        const isSelected = selectedPresetId === preset.id;
                                         const Icon = preset.icon;
                                         return (
                                             <button
-                                                key={preset.type}
+                                                key={preset.id}
                                                 type="button"
                                                 onClick={() => handleSelectPreset(preset)}
                                                 className={cn(
