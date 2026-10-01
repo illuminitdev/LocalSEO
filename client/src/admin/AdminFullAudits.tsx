@@ -116,7 +116,9 @@ const CRAWL_STEPS = [
 const EMPTY_FORM = {
     businessName: '',
     website: '',
-    emailOrPhone: '',
+    contact: '',
+    extraContact: '',
+    showExtraContact: false,
     address: '',
     city: '',
     serviceId: '',
@@ -124,25 +126,29 @@ const EMPTY_FORM = {
     contactName: ''
 };
 
-/** Split a combined contact value into email and/or phone for the API. */
-function splitEmailOrPhone(raw: string): { email: string; phone: string } {
-    const value = String(raw || '').trim();
-    if (!value) return { email: '', phone: '' };
-    if (value.includes('@')) {
-        return { email: value, phone: '' };
-    }
-    return { email: '', phone: value };
-}
-
 function isValidEmailOrPhone(raw: string): boolean {
     const value = String(raw || '').trim();
     if (!value) return false;
     if (value.includes('@')) {
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
     }
-    // At least 7 digits after stripping formatting
     const digits = value.replace(/\D/g, '');
     return digits.length >= 7;
+}
+
+/** Keep whichever values are a valid email and a valid phone. */
+function contactsFromForm(contact: string, extraContact: string, showExtraContact: boolean) {
+    const values = [contact, showExtraContact ? extraContact : ''].map((v) => String(v || '').trim()).filter(Boolean);
+    let email = '';
+    let phone = '';
+    for (const value of values) {
+        if (value.includes('@')) {
+            if (!email) email = value;
+        } else if (!phone) {
+            phone = value;
+        }
+    }
+    return { email, phone };
 }
 
 async function copyText(text: string) {
@@ -298,7 +304,7 @@ export default function AdminFullAudits() {
         setForm({
             ...EMPTY_FORM,
             businessName: req.businessName || '',
-            emailOrPhone: req.toEmail || ''
+            contact: req.toEmail || ''
         });
         setShowForm(true);
         setTab('audits');
@@ -454,8 +460,12 @@ export default function AdminFullAudits() {
             setError('City is required');
             return;
         }
-        if (!isValidEmailOrPhone(form.emailOrPhone)) {
-            setError('Email or phone is required (enter a valid email or phone number)');
+        if (!isValidEmailOrPhone(form.contact)) {
+            setError('Enter a valid email or phone number');
+            return;
+        }
+        if (form.showExtraContact && form.extraContact.trim() && !isValidEmailOrPhone(form.extraContact)) {
+            setError('The extra contact must be a valid email or phone number');
             return;
         }
 
@@ -469,7 +479,7 @@ export default function AdminFullAudits() {
             return;
         }
 
-        const { email, phone } = splitEmailOrPhone(form.emailOrPhone);
+        const { email, phone } = contactsFromForm(form.contact, form.extraContact, form.showExtraContact);
 
         setCreating(true);
         setStepIndex(0);
@@ -999,16 +1009,50 @@ export default function AdminFullAudits() {
                                     className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
                                 />
                             </label>
-                            <label className="block text-sm font-semibold text-[#0F172A]">
+                            <div className="block text-sm font-semibold text-[#0F172A]">
                                 Email or phone <span className="text-red-500">*</span>
-                                <input
-                                    required
-                                    value={form.emailOrPhone}
-                                    onChange={(e) => setForm({ ...form, emailOrPhone: e.target.value })}
-                                    placeholder="company@example.com or +44…"
-                                    className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
-                                />
-                            </label>
+                                <div className="mt-1.5 flex items-center gap-2">
+                                    <input
+                                        required
+                                        value={form.contact}
+                                        onChange={(e) => setForm({ ...form, contact: e.target.value })}
+                                        placeholder="company@example.com or +44…"
+                                        className="min-w-0 flex-1 px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
+                                    />
+                                    {!form.showExtraContact ? (
+                                        <button
+                                            type="button"
+                                            aria-label="Add email and phone"
+                                            title="Add email and phone"
+                                            onClick={() => setForm({ ...form, showExtraContact: true })}
+                                            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#F59E0B] bg-[#FFFBEB] text-[#F59E0B] hover:bg-[#FEF3C7]"
+                                        >
+                                            <Plus className="h-5 w-5" strokeWidth={3} />
+                                        </button>
+                                    ) : null}
+                                </div>
+                                {form.showExtraContact ? (
+                                    <div className="mt-2 flex items-center gap-2">
+                                        <input
+                                            value={form.extraContact}
+                                            onChange={(e) => setForm({ ...form, extraContact: e.target.value })}
+                                            placeholder="Add the other — email or mobile"
+                                            className="min-w-0 flex-1 px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
+                                        />
+                                        <button
+                                            type="button"
+                                            aria-label="Remove extra contact"
+                                            title="Remove extra contact"
+                                            onClick={() =>
+                                                setForm({ ...form, showExtraContact: false, extraContact: '' })
+                                            }
+                                            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E2E8F0] text-[#64748B] hover:bg-[#F8FAFC]"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                ) : null}
+                            </div>
                             <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
                                 Website
                                 <input

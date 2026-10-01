@@ -2,8 +2,6 @@ import { buildAeoCoreChecklist } from './aeoCoreChecklist.js';
 import {
   auditContext,
   failedChecks,
-  inPackFromAudit,
-  measuredQueryFromAudit,
   toActions
 } from './deckShared.js';
 
@@ -152,6 +150,9 @@ export function buildAeoQueryCards(
     skipped?: boolean;
     reason?: string;
     capturedAt?: string;
+    peopleAlsoAsk?: Array<{ question?: string; answer?: string }>;
+    answerBox?: { title?: string; text?: string; url?: string } | null;
+    businessNamed?: boolean | null;
   }> | null
 ) {
   const shots = Array.isArray(screenshots) ? screenshots : [];
@@ -184,7 +185,9 @@ export function buildAeoQueryCards(
       query: spec.query,
       intent: spec.intent,
       kind: spec.kind,
-      screenshot
+      screenshot,
+      peopleAlsoAsk: Array.isArray(shot?.peopleAlsoAsk) ? shot.peopleAlsoAsk : [],
+      answerBox: shot?.answerBox || null
     };
   });
 }
@@ -198,8 +201,6 @@ export function buildAeoFixes(audit) {
         String(c.id).startsWith('aeo_') || String(c.id).startsWith('ai_') || c.id === 'onpage_10'
     )
     .slice(0, 4);
-  const inPack = inPackFromAudit(audit);
-  const measuredQuery = measuredQueryFromAudit(audit, service, city);
   const priorities = toActions(aeoFails, 'Medium');
 
   return {
@@ -223,8 +224,6 @@ export function buildAeoFixes(audit) {
             }
           ],
     queryCards: buildAeoQueryCards(audit, audit?.aeoSerpScreenshots || null),
-    opportunity: inPack
-      ? `${name} appears in the local pack for “${measuredQuery}” — strengthen FAQ and schema so answer boxes can follow.`
-      : `For “${measuredQuery}”, other local options show first — add FAQ blocks and schema so ${name} can compete in answer results.`
+    opportunity: `For ${service} in ${city}, add FAQ blocks and 40–60 word answers so ${name} can win the measured question searches.`
   };
 }

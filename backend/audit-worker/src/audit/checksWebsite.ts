@@ -287,6 +287,14 @@ export function applyWebsiteChecks(
     setCheck(byId, 'tech_1', 'unknown', 'Lighthouse not available');
   }
   setCheck(byId, 'tech_2', home.viewport ? 'pass' : 'fail', home.viewport || 'No viewport');
+  {
+    const layout = lighthouse?.mobileLayout;
+    const measured = layout && (layout.pass === true || layout.pass === false);
+    const evidence = layout?.evidence || 'Mobile layout requires Lighthouse';
+    const status = measured ? (layout.pass ? 'pass' : 'fail') : 'unknown';
+    setCheck(byId, 'web_basic_3', status, evidence);
+    setCheck(byId, 'tech_2', status, evidence);
+  }
   setCheck(
     byId,
     'tech_3',

@@ -7,6 +7,8 @@ import { captureHomepageScreenshot } from '../audit/homepageScreenshot.js';
 import { fallbackPillarDecks } from '../audit/pillarFixDecks.js';
 import { aeoSpecsFromSearchLines, buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
 import { buildGeoChecklist, applyGeoChecklistToChecks } from '../audit/geoChecklist.js';
+import { buildAeoCoreChecklist } from '../audit/aeoCoreChecklist.js';
+import { buildLocalSeoCoreChecklist } from '../audit/localSeoCoreChecklist.js';
 import { computeScore } from '../audit/score.js';
 import { generateAiReport, generateDeepAiReport, ensureNarrativeSections } from '../audit/geminiReport.js';
 import { deriveTopFixes } from '../audit/store.js';
@@ -843,7 +845,8 @@ async function enrichFromDataForSeo(audit: any) {
             lat: typeof lat === 'number' ? lat : null,
             lng: typeof lng === 'number' ? lng : null,
             locationName: locationLabel || undefined,
-            timeoutMs: 60000
+            timeoutMs: 60000,
+            businessName
           })
         )
       );
@@ -964,6 +967,7 @@ export const main: SQSHandler = async (event: SQSEvent) => {
         llmsTxtFound: !!crawl.llmsTxtFound,
         spaHeuristic: crawl.spaHeuristic || null,
         sitePhones: crawl.sitePhones || [],
+        websiteHours: Array.isArray(crawl.websiteHours) ? crawl.websiteHours : [],
         homepageHasTel: Boolean(
           (crawl.pages?.[0]?.telLinks || []).length ||
             (crawl.pages?.[0]?.phonesInText || []).length
@@ -977,8 +981,18 @@ export const main: SQSHandler = async (event: SQSEvent) => {
         audit.published = true;
         audit.publishedAt = new Date().toISOString();
       }
+      const aeoChecklist = buildAeoCoreChecklist(audit);
+      const localSeoChecklist = buildLocalSeoCoreChecklist(audit);
+      const geoChecklist = audit.gbpLookup?.geoChecklist || null;
       audit.score = computeScore(audit.checklist.checks, {
-        localRank: audit.gbpLookup?.localRank || null
+        localRank: audit.gbpLookup?.localRank || null,
+        aiEngineChecks: Array.isArray(audit.gbpLookup?.aiEngineChecks)
+          ? audit.gbpLookup.aiEngineChecks
+          : [],
+        aeoChecklist,
+        aeoQueries: Array.isArray(audit.aeoSerpScreenshots) ? audit.aeoSerpScreenshots : [],
+        localSeoChecklist,
+        geoChecklist
       });
       audit.topFixes = deriveTopFixes(audit);
 
@@ -1030,15 +1044,18 @@ export const main: SQSHandler = async (event: SQSEvent) => {
               ...deckAeo,
               ...aiAeo,
               visualIntro: deckAeo.visualIntro,
+              opportunity: deckAeo.opportunity,
               aeoChecklist: deckAeo.aeoChecklist || aiAeo.aeoChecklist || null,
               queryCards: measuredAeoCards
             },
             geoFixes: {
               ...deckGeo,
               ...aiGeo,
+              title: deckGeo.title,
               visualIntro: deckGeo.visualIntro,
               verifyHint: deckGeo.verifyHint,
               goalLine: deckGeo.goalLine,
+              opportunity: deckGeo.opportunity,
               geoChecklist: deckGeo.geoChecklist || aiGeo.geoChecklist || null,
               queryCards:
                 Array.isArray(aiGeo.queryCards) &&

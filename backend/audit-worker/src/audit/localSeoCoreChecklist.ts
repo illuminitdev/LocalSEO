@@ -52,6 +52,156 @@ function itemFixed(id: string, label: string, status: CoreCheckStatus, evidence:
   return { id, label, status, evidence };
 }
 
+function mobileLayoutStatus(audit: any): StatusEv {
+  const layout = audit?.lighthouseMeta?.mobileLayout;
+  if (!layout) return { status: 'unknown', evidence: 'Mobile layout requires Lighthouse' };
+  if (layout.pass === true) {
+    return { status: 'yes', evidence: layout.evidence || 'Viewport is set and the page fits the phone width' };
+  }
+  if (layout.pass === false) {
+    return { status: 'no', evidence: layout.evidence || 'The viewport is missing or the page is wider than the phone' };
+  }
+  return { status: 'unknown', evidence: layout.evidence || 'Mobile layout not measured' };
+}
+
+function coreWebVitalsStatus(audit: any): StatusEv {
+  const lighthouse = audit?.lighthouseMeta;
+  if (!lighthouse || lighthouse.skipped || (lighthouse.lcp == null && lighthouse.cls == null)) {
+    return { status: 'unknown', evidence: 'Core Web Vitals require Lighthouse' };
+  }
+  const ok = (lighthouse.lcp == null || lighthouse.lcp <= 4000) && (lighthouse.cls == null || lighthouse.cls <= 0.25);
+  return {
+    status: ok ? 'yes' : 'no',
+    evidence: `LCP=${lighthouse.lcp ?? 'n/a'} CLS=${lighthouse.cls ?? 'n/a'}`
+  };
+}
+
+const HOUR_DAYS: Record<string, number> = {
+  monday: 0,
+  mon: 0,
+  tuesday: 1,
+  tue: 1,
+  tues: 1,
+  wednesday: 2,
+  wed: 2,
+  thursday: 3,
+  thu: 3,
+  thur: 3,
+  thurs: 3,
+  friday: 4,
+  fri: 4,
+  saturday: 5,
+  sat: 5,
+  sunday: 6,
+  sun: 6
+};
+
+function clockToMinutes(token: string): number | null {
+  const match = String(token || '')
+    .toLowerCase()
+    .replace(/\./g, '')
+    .match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] || 0);
+  const suffix = match[3];
+  if (suffix === 'pm' && hour < 12) hour += 12;
+  if (suffix === 'am' && hour === 12) hour = 0;
+  if (hour === 24) hour = 0;
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+function expandDayToken(token: string): number[] {
+  const parts = token
+    .toLowerCase()
+    .split(/\s*(?:-|–|—|to)\s*/)
+    .map((part) => part.trim())
+    .filter((part) => HOUR_DAYS[part] != null);
+  if (!parts.length) return [];
+  if (parts.length === 1) return [HOUR_DAYS[parts[0]]];
+  const start = HOUR_DAYS[parts[0]];
+  const end = HOUR_DAYS[parts[parts.length - 1]];
+  const days = [];
+  for (let day = start; days.length < 7; day = (day + 1) % 7) {
+    days.push(day);
+    if (day === end) break;
+  }
+  return days;
+}
+
+function hourSignature(lines: string[]): string | null {
+  const byDay: Record<number, string[]> = {};
+  const dayName =
+    '(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day)?';
+  const dayRe = new RegExp(`\\b(${dayName}(?:\\s*(?:-|–|—|to)\\s*${dayName})?)\\b`, 'gi');
+  for (const raw of lines) {
+    const line = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (!line) continue;
+    const days = [...line.matchAll(dayRe)].flatMap((match) => expandDayToken(match[1]));
+    if (/\b24\s*hours\b|\b24\s*\/\s*7\b/i.test(line)) {
+      for (const day of days.length ? days : [0, 1, 2, 3, 4, 5, 6]) byDay[day] = ['00:00-23:59'];
+      continue;
+    }
+    if (!days.length) continue;
+    if (/\bclosed\b/i.test(line)) {
+      for (const day of days) byDay[day] = ['closed'];
+      continue;
+    }
+    const times = [
+      ...line.matchAll(/(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)/gi)
+    ];
+    const ranges = times
+      .map((match) => {
+        const open = clockToMinutes(match[1]);
+        const close = clockToMinutes(match[2]);
+        if (open == null || close == null) return '';
+        const pad = (mins: number) =>
+          `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+        return `${pad(open)}-${pad(close)}`;
+      })
+      .filter(Boolean);
+    if (!ranges.length) continue;
+    for (const day of days) byDay[day] = [...new Set(ranges)].sort();
+  }
+  const keys = Object.keys(byDay)
+    .map(Number)
+    .sort((a, b) => a - b);
+  if (!keys.length) return null;
+  return keys.map((day) => `${day}=${byDay[day].join(',')}`).join(';');
+}
+
+function openingHoursMatchStatus(audit: any): StatusEv {
+  const gbp = audit?.gbpLookup || {};
+  const websiteLines = Array.isArray(audit?.crawlMeta?.websiteHours) ? audit.crawlMeta.websiteHours : [];
+  const gbpLines = String(gbp.hoursText || '')
+    .split(';')
+    .map((line: string) => line.trim())
+    .filter(Boolean);
+  const gbpHasHours = gbp.hasHours === true || gbpLines.length > 0;
+  if (!websiteLines.length) {
+    return { status: 'no', evidence: 'Opening hours are not on the website' };
+  }
+  if (!gbpHasHours) {
+    return { status: 'no', evidence: 'Opening hours are not on the Google listing' };
+  }
+  const websiteSig = hourSignature(websiteLines);
+  const gbpSig = hourSignature(gbpLines);
+  if (!websiteSig || !gbpSig) {
+    return {
+      status: 'no',
+      evidence: 'Opening hours are listed, but the website times do not match the Google listing'
+    };
+  }
+  if (websiteSig === gbpSig) {
+    return { status: 'yes', evidence: 'Website opening hours match the Google listing' };
+  }
+  return {
+    status: 'no',
+    evidence: 'Website opening hours do not match the Google listing'
+  };
+}
+
 //Local SEO Core Checklist 
 export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   const checks: CheckRow[] = audit?.checklist?.checks || audit?.presence?.checks || [];
@@ -332,6 +482,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
             )
           ),
           item('core_gbp_hours', 'Opening hours', hoursSe),
+          item('core_hours_match', 'Opening hours match', openingHoursMatchStatus(audit)),
           item('core_gbp_services', 'Services', servicesSe),
           item('core_gbp_products', 'Products', productsSe),
           item('core_gbp_photos', 'Photos', photosSe),
@@ -378,11 +529,8 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
               checkByLabel(checks, /faq|people also ask/i) || checkById(checks, 'aeo_1') || checkById(checks, 'onpage_10')
             )
           ),
-          item(
-            'core_web_mobile',
-            'Mobile usability',
-            fromCheck(checkByLabel(checks, /mobile-friendly|viewport/i) || checkById(checks, 'web_basic_3'))
-          ),
+          item('core_web_mobile', 'Mobile usability', mobileLayoutStatus(audit)),
+          item('core_web_cwv', 'Core Web Vitals', coreWebVitalsStatus(audit)),
           item(
             'core_web_index',
             'Indexability',

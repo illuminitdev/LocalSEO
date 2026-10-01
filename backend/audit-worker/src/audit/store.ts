@@ -4,6 +4,9 @@ import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
 import { buildChecklist } from './checklistSchema.js';
 import { computeScore } from './score.js';
+import { buildAeoCoreChecklist } from './aeoCoreChecklist.js';
+import { buildLocalSeoCoreChecklist } from './localSeoCoreChecklist.js';
+import { scrubVendorDeep } from './geminiReport.js';
 import { isDatabaseEnabled, query } from '../lib/db.js';
 import { resolveSearchArea } from '../lib/searchArea.js';
 import type { AuditCreateInput, AuditRecord, ChecklistCheck } from '../types.js';
@@ -136,11 +139,26 @@ export async function saveAudit(audit: AuditRecord) {
       pillars: audit.presence.pillars
     } as AuditRecord['score'];
   } else {
+    const gbpLookup = audit.gbpLookup as {
+      localRank?: unknown;
+      aiEngineChecks?: unknown;
+      geoChecklist?: unknown;
+    } | null;
+    const aeoChecklist = buildAeoCoreChecklist(audit);
+    const localSeoChecklist = buildLocalSeoCoreChecklist(audit);
     audit.score = computeScore(audit.checklist?.checks || [], {
-      localRank: (audit.gbpLookup as { localRank?: unknown } | null)?.localRank || null
+      localRank: gbpLookup?.localRank || null,
+      aiEngineChecks: Array.isArray(gbpLookup?.aiEngineChecks) ? gbpLookup.aiEngineChecks : [],
+      aeoChecklist,
+      aeoQueries: Array.isArray(audit.aeoSerpScreenshots) ? audit.aeoSerpScreenshots : [],
+      localSeoChecklist,
+      geoChecklist: (gbpLookup?.geoChecklist as { groups?: Array<{ items?: any[] }> } | null) || null
     }) as AuditRecord['score'];
   }
   audit.topFixes = deriveTopFixes(audit);
+  if (audit.aiReport) {
+    audit.aiReport = scrubVendorDeep(audit.aiReport) as AuditRecord['aiReport'];
+  }
 
   if (isDatabaseEnabled()) {
     await saveAuditToDb(audit);
@@ -265,7 +283,7 @@ export function deriveTopFixes(audit: AuditRecord) {
 
 export function publicReportView(audit: AuditRecord | null) {
   if (!audit || !audit.published) return null;
-  return {
+  return scrubVendorDeep({
     id: audit.id,
     auditKind: audit.auditKind || null,
     publishedAt: audit.publishedAt,
@@ -530,5 +548,5 @@ export function publicReportView(audit: AuditRecord | null) {
           })()
         }
       : null
-  };
+  });
 }

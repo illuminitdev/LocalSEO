@@ -71,7 +71,6 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
     String(business.serviceLabel || business.service || '').trim() || 'local services';
   const city =
     String(business.searchAreaLabel || business.city || '').trim() || 'the local area';
-  const inPack = typeof localRank.position === 'number';
   const measuredQuery = String(localRank.query || '').trim();
 
   const aeo1 = fromCheck(checkById(checks, 'aeo_1'), 'FAQPage schema found', 'No FAQPage schema');
@@ -167,21 +166,8 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
         ? { status: 'no', evidence: 'No Google reviews recorded' }
         : prefer(testimonials, reviewsMention);
 
-  const nearMeSe: StatusEv = measuredQuery
-    ? inPack
-      ? { status: 'yes', evidence: `In measured local results for “${measuredQuery}” (#${localRank.position})` }
-      : { status: 'no', evidence: `Not in measured local results for “${measuredQuery}”` }
-    : prefer(aeo4, fromCheck(checkById(checks, 'geo_5')));
-
-  const bestSe: StatusEv = prefer(
-    aeo4,
-    fromBool(
-      inPack ? true : measuredQuery ? false : null,
-      `Visible for measured local query “${measuredQuery || `best ${service} near ${city}`}”`,
-      `Not visible for measured “best / near” style local query`,
-      'Best / near query not confirmed'
-    )
-  );
+  const nearMeSe: StatusEv = prefer(aeo4, aeo3);
+  const bestSe: StatusEv = prefer(aeo3, aeo4);
 
   const bookingSe = prefer(contactForm, telLinks, phoneVis, quoteCta);
 
@@ -196,6 +182,32 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
           evidence: `Competitors captured for “${measuredQuery || 'local query'}” — question-level answer winner was not confirmed for this business`
         }
       : noAnswerSurface;
+
+  const shots = Array.isArray((audit as { aeoSerpScreenshots?: unknown[] }).aeoSerpScreenshots)
+    ? ((audit as { aeoSerpScreenshots?: Array<{ serpMeasured?: boolean; businessInAnswerBox?: boolean; businessInPaa?: boolean }> })
+        .aeoSerpScreenshots as Array<{
+        serpMeasured?: boolean;
+        businessInAnswerBox?: boolean;
+        businessInPaa?: boolean;
+      }>)
+    : [];
+  const measuredShots = shots.filter((shot) => shot && shot.serpMeasured === true);
+  const snippetSe: StatusEv = !measuredShots.length
+    ? { status: 'unknown', evidence: 'Not measured on this run' }
+    : measuredShots.some((shot) => shot.businessInAnswerBox === true)
+      ? { status: 'yes', evidence: 'The business name appears in a Google answer box for these searches.' }
+      : {
+          status: 'no',
+          evidence: 'These searches were measured, and the business name is not in the answer box.'
+        };
+  const paaSe: StatusEv = !measuredShots.length
+    ? { status: 'unknown', evidence: 'Not measured on this run' }
+    : measuredShots.some((shot) => shot.businessInPaa === true)
+      ? { status: 'yes', evidence: 'The business name appears in People Also Ask for these searches.' }
+      : {
+          status: 'no',
+          evidence: 'These searches were measured, and the business name is not in People Also Ask.'
+        };
 
   const faqCoverage = prefer(aeo2, onpageFaq, aeo1);
   const servicePlusLocMeasured =
@@ -259,17 +271,11 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
         title: 'AEO Visibility',
         items: [
           item('aeo_vis_ai', 'Google AI/search answer visibility', {
-            status: 'no',
-            evidence: 'Google AI answer was not confirmed for this business'
+            status: 'unknown',
+            evidence: 'Not measured on this run'
           }),
-          item('aeo_vis_snippet', 'Featured snippet visibility', {
-            status: 'no',
-            evidence: 'Featured snippet was not confirmed for this business'
-          }),
-          item('aeo_vis_paa', 'People Also Ask visibility', {
-            status: 'no',
-            evidence: 'People Also Ask was not confirmed for this business'
-          }),
+          item('aeo_vis_snippet', 'Featured snippet visibility', snippetSe),
+          item('aeo_vis_paa', 'People Also Ask visibility', paaSe),
           item('aeo_vis_local_q', 'Local question visibility', nearMeSe),
           item('aeo_vis_competitor', 'Question-level competitor comparison', competitorCompareSe)
         ]
