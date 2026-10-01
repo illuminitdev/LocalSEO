@@ -192,6 +192,7 @@ export default function AdminFullAudits() {
     const [busyId, setBusyId] = useState('');
     const [busyAction, setBusyAction] = useState<'share' | 'delete' | ''>('');
     const [page, setPage] = useState(1);
+    const [requestPage, setRequestPage] = useState(1);
     const [fulfillAuditId, setFulfillAuditId] = useState('');
     const [fulfillAgentId, setFulfillAgentId] = useState('');
     const [assignModalReq, setAssignModalReq] = useState<FullAuditRequest | null>(null);
@@ -220,6 +221,7 @@ export default function AdminFullAudits() {
                 setSalesAgents(agents);
                 setRequests(reqs);
                 setPage(1);
+                setRequestPage(1);
                 const pending = pendingAssignRef.current;
                 if (pending) {
                     pendingAssignRef.current = null;
@@ -429,6 +431,20 @@ export default function AdminFullAudits() {
 
     const rangeStart = audits.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
     const rangeEnd = Math.min(safePage * PAGE_SIZE, audits.length);
+
+    const totalRequestPages = Math.max(1, Math.ceil(filteredRequests.length / PAGE_SIZE));
+    const safeRequestPage = Math.min(requestPage, totalRequestPages);
+    const pageRequests = useMemo(() => {
+        const start = (safeRequestPage - 1) * PAGE_SIZE;
+        return filteredRequests.slice(start, start + PAGE_SIZE);
+    }, [filteredRequests, safeRequestPage]);
+
+    useEffect(() => {
+        if (requestPage !== safeRequestPage) setRequestPage(safeRequestPage);
+    }, [requestPage, safeRequestPage]);
+
+    const requestRangeStart = filteredRequests.length === 0 ? 0 : (safeRequestPage - 1) * PAGE_SIZE + 1;
+    const requestRangeEnd = Math.min(safeRequestPage * PAGE_SIZE, filteredRequests.length);
     const showOther = form.serviceId === 'other';
     const progressPct = Math.round(((stepIndex + 1) / CRAWL_STEPS.length) * 100);
 
@@ -779,7 +795,10 @@ export default function AdminFullAudits() {
                                 <button
                                     key={f.id}
                                     type="button"
-                                    onClick={() => setRequestFilter(f.id)}
+                                    onClick={() => {
+                                        setRequestFilter(f.id);
+                                        setRequestPage(1);
+                                    }}
                                     className={cn(
                                         'px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors',
                                         requestFilter === f.id
@@ -807,12 +826,12 @@ export default function AdminFullAudits() {
                                         <th className="px-4 py-3 font-bold">Sales Agent</th>
                                         <th className="px-4 py-3 font-bold">Contact</th>
                                         <th className="px-4 py-3 font-bold">Requested</th>
-                                        <th className="px-4 py-3 font-bold">Status</th>
+                                        <th className="px-4 py-3 font-bold whitespace-nowrap">Status</th>
                                         <th className="px-4 py-3 font-bold text-right whitespace-nowrap">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#E2E8F0]">
-                                    {filteredRequests.map((req) => {
+                                    {pageRequests.map((req) => {
                                         const readyAudits = auditsReadyForRequest(req, audits);
                                         const hasReadyAudit = readyAudits.length > 0;
                                         const isAssigned =
@@ -847,8 +866,8 @@ export default function AdminFullAudits() {
                                                     <span className="text-xs text-[#94A3B8] italic">Unassigned</span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3.5 text-xs text-[#334155]">{req.toEmail || '—'}</td>
-                                            <td className="px-4 py-3.5 text-xs text-[#64748B]">
+                                            <td className="px-4 py-3.5 text-xs text-[#334155] whitespace-nowrap">{req.toEmail || '—'}</td>
+                                            <td className="px-4 py-3.5 text-xs text-[#64748B] whitespace-nowrap">
                                                 {req.requestedAt
                                                     ? new Date(req.requestedAt).toLocaleString(undefined, {
                                                           month: 'short',
@@ -858,17 +877,17 @@ export default function AdminFullAudits() {
                                                       })
                                                     : '—'}
                                             </td>
-                                            <td className="px-4 py-3.5">
+                                            <td className="px-4 py-3.5 whitespace-nowrap">
                                                 {isAssigned ? (
                                                     <div>
-                                                        <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-emerald-50 text-emerald-800 border-emerald-200">
+                                                        <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-emerald-50 text-emerald-800 border-emerald-200 whitespace-nowrap">
                                                             Assigned
                                                         </span>
                                                     </div>
                                                 ) : (
                                                     <span
                                                         className={cn(
-                                                            'inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border',
+                                                            'inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap',
                                                             req.status === 'pending'
                                                                 ? 'bg-amber-50 text-amber-800 border-amber-200'
                                                                 : req.status === 'in_progress'
@@ -958,6 +977,37 @@ export default function AdminFullAudits() {
                             </table>
                         </div>
                     )}
+
+                    {!loading && filteredRequests.length > 0 ? (
+                        <div className="px-4 sm:px-5 py-3 border-t border-[#E2E8F0] bg-[#FCFDFE] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <p className="text-xs text-[#64748B]">
+                                Showing {requestRangeStart}–{requestRangeEnd} of {filteredRequests.length}
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    disabled={safeRequestPage <= 1}
+                                    onClick={() => setRequestPage((p) => Math.max(1, p - 1))}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
+                                >
+                                    <ChevronLeft className="w-3.5 h-3.5" />
+                                    Previous
+                                </button>
+                                <span className="text-xs font-bold text-[#475569] tabular-nums px-1">
+                                    {safeRequestPage} / {totalRequestPages}
+                                </span>
+                                <button
+                                    type="button"
+                                    disabled={safeRequestPage >= totalRequestPages}
+                                    onClick={() => setRequestPage((p) => Math.min(totalRequestPages, p + 1))}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
+                                >
+                                    Next
+                                    <ChevronRight className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
 
