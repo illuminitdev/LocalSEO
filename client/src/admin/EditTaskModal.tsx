@@ -33,17 +33,19 @@ interface EditTaskModalProps {
 }
 
 const TASK_TYPES: Array<{
+    id: string;
     type: TaskType;
     label: string;
     icon: ElementType;
     defaultTitle: string;
     defaultPriority: TaskPriority;
 }> = [
-    { type: 'prepare_audit', label: 'Prepare Audit', icon: BarChart3, defaultTitle: 'Prepare & Review Growth Audit', defaultPriority: 'high' },
-    { type: 'follow_up_call', label: 'Follow-Up Call', icon: Phone, defaultTitle: 'Follow-up Call with Lead', defaultPriority: 'medium' },
-    { type: 'send_proposal', label: 'Send Proposal', icon: FileText, defaultTitle: 'Send Service Proposal & Pricing', defaultPriority: 'high' },
-    { type: 'onboard_customer', label: 'Onboard Customer', icon: UserPlus, defaultTitle: 'Onboard as New Customer', defaultPriority: 'urgent' },
-    { type: 'custom', label: 'Custom Task', icon: Plus, defaultTitle: 'Custom Task', defaultPriority: 'medium' },
+    { id: 'initial_call', type: 'follow_up_call', label: 'Initial Call', icon: Phone, defaultTitle: 'Initial Call with Lead', defaultPriority: 'medium' },
+    { id: 'follow_up_call', type: 'follow_up_call', label: 'Follow-Up Call', icon: Phone, defaultTitle: 'Follow-up Call with Lead', defaultPriority: 'medium' },
+    { id: 'prepare_audit', type: 'prepare_audit', label: 'Prepare Audit', icon: BarChart3, defaultTitle: 'Prepare & Review Growth Audit', defaultPriority: 'high' },
+    { id: 'send_proposal', type: 'send_proposal', label: 'Send Proposal', icon: FileText, defaultTitle: 'Send Service Proposal & Pricing', defaultPriority: 'high' },
+    { id: 'onboard_customer', type: 'onboard_customer', label: 'Onboard Customer', icon: UserPlus, defaultTitle: 'Onboard as New Customer', defaultPriority: 'urgent' },
+    { id: 'custom', type: 'custom', label: 'Custom Task', icon: Plus, defaultTitle: 'Custom Task', defaultPriority: 'medium' },
 ];
 
 function normalizeTaskType(type?: string): TaskType {
@@ -81,6 +83,7 @@ export default function EditTaskModal({
     onDeleted
 }: EditTaskModalProps) {
     const [title, setTitle] = useState('');
+    const [selectedTypeId, setSelectedTypeId] = useState<string>('initial_call');
     const [taskType, setTaskType] = useState<TaskType>('follow_up_call');
     const [priority, setPriority] = useState<TaskPriority>('medium');
     const [status, setStatus] = useState<TaskStatus>('pending');
@@ -94,7 +97,15 @@ export default function EditTaskModal({
     useEffect(() => {
         if (task && isOpen) {
             setTitle(task.title || '');
-            setTaskType(normalizeTaskType(task.taskType));
+            const normalized = normalizeTaskType(task.taskType);
+            setTaskType(normalized);
+            // Match preset by task title or taskType
+            const matched = TASK_TYPES.find(
+                (t) =>
+                    (task.title && task.title.toLowerCase().includes(t.label.toLowerCase())) ||
+                    t.type === normalized
+            );
+            setSelectedTypeId(matched?.id || normalized);
             setPriority(task.priority || 'medium');
             setStatus(task.status || 'pending');
             setAssignedTo(task.assignedToUserId || '');
@@ -155,6 +166,7 @@ export default function EditTaskModal({
     };
 
     const handleSelectTaskType = (preset: typeof TASK_TYPES[0]) => {
+        setSelectedTypeId(preset.id);
         setTaskType(preset.type);
         if (preset.defaultTitle) {
             setTitle(preset.defaultTitle);
@@ -221,14 +233,15 @@ export default function EditTaskModal({
                         <div className="flex flex-wrap gap-1.5">
                             {TASK_TYPES.map((t) => {
                                 const Icon = t.icon;
+                                const isSelected = selectedTypeId === t.id;
                                 return (
                                 <button
-                                    key={t.type}
+                                    key={t.id}
                                     type="button"
                                     onClick={() => handleSelectTaskType(t)}
                                     className={cn(
                                         "px-2.5 py-1.5 rounded-lg border font-medium transition-all flex items-center gap-1.5 text-xs",
-                                        taskType === t.type
+                                        isSelected
                                             ? "bg-amber-500 text-white border-amber-600 shadow-2xs font-semibold"
                                             : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                                     )}

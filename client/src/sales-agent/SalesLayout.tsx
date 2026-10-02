@@ -74,6 +74,7 @@ export default function SalesLayout() {
 
     // Notifications State & Dropdown
     const [notifications, setNotifications] = useState<SalesNotificationItem[]>([]);
+    const [assignedTasksCount, setAssignedTasksCount] = useState(0);
     const [notifOpen, setNotifOpen] = useState(false);
     const notifRef = useRef<HTMLDivElement | null>(null);
 
@@ -81,6 +82,9 @@ export default function SalesLayout() {
         try {
             const data = await apiGet('/api/sales/tasks');
             const taskList = Array.isArray(data?.tasks) ? data.tasks : [];
+            const activeList = taskList.filter((t: any) => t.status !== 'completed' && t.status !== 'cancelled');
+            setAssignedTasksCount(activeList.length);
+
             const readSet = new Set<string>();
             try {
                 const stored = localStorage.getItem('lp.sales.readNotifs');
@@ -91,8 +95,7 @@ export default function SalesLayout() {
 
             const cleared = loadSalesClearedIds();
             const now = new Date();
-            const items: SalesNotificationItem[] = taskList
-                .filter((t: any) => t.status !== 'completed' && t.status !== 'cancelled')
+            const items: SalesNotificationItem[] = activeList
                 .slice(0, 15)
                 .map((t: any) => {
                     const isDueToday = t.dueDate && new Date(t.dueDate).toDateString() === now.toDateString();
@@ -124,6 +127,13 @@ export default function SalesLayout() {
 
     useEffect(() => {
         loadNotifications();
+        const handler = () => {
+            loadNotifications();
+        };
+        window.addEventListener('sales:task-updated', handler);
+        return () => {
+            window.removeEventListener('sales:task-updated', handler);
+        };
     }, [loadNotifications, location.pathname]);
 
     useEffect(() => {
@@ -283,27 +293,54 @@ export default function SalesLayout() {
                         <p className="px-3 text-[10px] font-extrabold uppercase tracking-wider text-[#94A3B8]">
                             {grp.section}
                         </p>
-                        {grp.items.map((item) => (
-                            <NavLink
-                                key={item.to}
-                                to={item.to}
-                                end={item.end}
-                                className={() => {
-                                    const active = item.end
-                                        ? location.pathname === item.to
-                                        : location.pathname.startsWith(item.to);
-                                    return cn(
-                                        'flex items-center gap-3 px-3 py-2.5 min-h-[44px] rounded-xl text-sm transition-colors',
-                                        active
-                                            ? 'bg-[#F59E0B] text-[#0F172A] font-semibold'
-                                            : 'text-[#64748B] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
-                                    );
-                                }}
-                            >
-                                <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
-                                <span>{item.name}</span>
-                            </NavLink>
-                        ))}
+                        {grp.items.map((item) => {
+                            const isTaskItem = item.to === '/sales/tasks';
+                            return (
+                                <NavLink
+                                    key={item.to}
+                                    to={item.to}
+                                    end={item.end}
+                                    className={() => {
+                                        const active = item.end
+                                            ? location.pathname === item.to
+                                            : location.pathname.startsWith(item.to);
+                                        return cn(
+                                            'flex items-center justify-between gap-2 px-3 py-2.5 min-h-[44px] rounded-xl text-sm transition-colors group/navitem',
+                                            active
+                                                ? 'bg-[#F59E0B] text-[#0F172A] font-semibold'
+                                                : 'text-[#64748B] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
+                                        );
+                                    }}
+                                >
+                                    {() => {
+                                        const active = item.end
+                                            ? location.pathname === item.to
+                                            : location.pathname.startsWith(item.to);
+                                        return (
+                                            <>
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
+                                                    <span className="truncate">{item.name}</span>
+                                                </div>
+                                                {isTaskItem && assignedTasksCount > 0 && (
+                                                    <span
+                                                        className={cn(
+                                                            'text-[10px] font-black px-2 py-0.5 rounded-full tabular-nums shadow-2xs shrink-0 tracking-tight',
+                                                            active
+                                                                ? 'bg-[#0F172A] text-[#F59E0B]'
+                                                                : 'bg-[#F59E0B] text-[#0F172A]'
+                                                        )}
+                                                        title={`${assignedTasksCount} assigned task${assignedTasksCount > 1 ? 's' : ''}`}
+                                                    >
+                                                        +{assignedTasksCount}
+                                                    </span>
+                                                )}
+                                            </>
+                                        );
+                                    }}
+                                </NavLink>
+                            );
+                        })}
                     </div>
                 ))}
             </nav>

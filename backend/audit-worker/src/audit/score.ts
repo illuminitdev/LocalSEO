@@ -74,7 +74,139 @@ function collectBySection(checks: any[] = []): Record<string, any[]> {
 }
 
 
-export function computeTriadScore(checks = [], context: { localRank?: any } = {}) {
+const GEO_MENTION_ROLLUP_IDS = new Set(['geo_ai_1', 'geo_ai_2', 'geo_ai_3', 'geo_ai_4', 'geo_ai_5']);
+const AEO_VISIBILITY_IDS = new Set(['aeo_vis_snippet', 'aeo_vis_paa']);
+const LOCAL_GBP_DETAIL_IDS = new Set([
+  'core_gbp_name',
+  'core_gbp_address',
+  'core_gbp_phone',
+  'core_gbp_website',
+  'core_gbp_hours',
+  'core_hours_match',
+  'core_web_nap'
+]);
+const LOCAL_MAP_ROW_IDS = new Set(['maps_vis_1', 'geo_5', 'core_vis_maps', 'core_vis_pack']);
+
+type ScoreContext = {
+  localRank?: any;
+  aiEngineChecks?: any[];
+  aeoChecklist?: { groups?: Array<{ items?: any[] }> } | null;
+  aeoQueries?: any[] | null;
+  localSeoChecklist?: { groups?: Array<{ items?: any[] }> } | null;
+  geoChecklist?: { groups?: Array<{ items?: any[] }> } | null;
+};
+
+const MAP_POSITION_POINTS = [0, 100, 90, 80, 70, 60, 50, 40, 30, 20, 10];
+
+function aeoRowsFromChecklist(checklist: ScoreContext['aeoChecklist']) {
+  const groups = Array.isArray(checklist?.groups) ? checklist.groups : [];
+  const out: Array<{ id: string; status: string; label: string; evidence: string }> = [];
+  for (const group of groups) {
+    const items = Array.isArray(group?.items) ? group.items : [];
+    for (const item of items) {
+      const status = String(item?.status || '');
+      if (status !== 'yes' && status !== 'no') continue;
+      out.push({
+        id: String(item?.id || `aeo_chk_${out.length + 1}`),
+        status: status === 'yes' ? 'pass' : 'fail',
+        label: String(item?.label || 'AEO check'),
+        evidence: String(item?.evidence || '')
+      });
+    }
+  }
+  return out;
+}
+
+function aeoRowsFromQueries(queries: any[] = []) {
+  const out: Array<{ id: string; status: string; label: string; evidence: string }> = [];
+  for (const row of queries) {
+    if (!row || row.serpMeasured !== true) continue;
+    if (typeof row.dataUrl !== 'string' || !row.dataUrl.startsWith('data:image/')) continue;
+    if (row.businessNamed !== true && row.businessNamed !== false) continue;
+    const query = String(row.query || '').trim();
+    const named = row.businessNamed === true;
+    out.push({
+      id: `aeo_query_${out.length + 1}`,
+      status: named ? 'pass' : 'fail',
+      label: query ? `Google result for “${query}”` : 'Google result',
+      evidence: named
+        ? 'The business name appears in the answer box, People Also Ask, or the organic results.'
+        : 'This search was measured, and the business name is not in the answer box, People Also Ask, or the organic results.'
+    });
+  }
+  return out;
+}
+
+function weightedCheckScore(rows: Array<{ status?: string }> = [], failWeight = 1) {
+  let earned = 0;
+  let slots = 0;
+  let assessed = 0;
+  for (const row of rows) {
+    if (row?.status === 'pass') {
+      earned += 1;
+      slots += 1;
+      assessed += 1;
+    } else if (row?.status === 'fail') {
+      slots += failWeight;
+      assessed += 1;
+    }
+  }
+  if (!assessed) return { score: 0, assessed: 0, max: 100, incomplete: true };
+  return {
+    score: Math.round((earned / slots) * 100),
+    assessed,
+    max: 100,
+    incomplete: false
+  };
+}
+
+function blendWeighted(
+  parts: Array<{ score: number; weight: number; assessed: number; incomplete?: boolean }>
+) {
+  const active = parts.filter((part) => part.assessed > 0);
+  if (!active.length) return { score: 0, assessed: 0, max: 100, incomplete: true };
+  const weight = active.reduce((sum, part) => sum + part.weight, 0);
+  const score = Math.round(active.reduce((sum, part) => sum + (part.score * part.weight) / weight, 0));
+  return {
+    score,
+    assessed: active.reduce((sum, part) => sum + part.assessed, 0),
+    max: 100,
+    incomplete: false
+  };
+}
+
+function mapRankSlice(rank: any) {
+  const measured = Boolean(
+    rank && (rank.measured === true || rank.query || (Array.isArray(rank.topResults) && rank.topResults.length))
+  );
+  if (!measured) return { score: 0, assessed: 0, max: 100, incomplete: true };
+  const pos = typeof rank.position === 'number' ? Math.round(rank.position) : null;
+  const score = pos != null && pos >= 1 && pos <= 10 ? MAP_POSITION_POINTS[pos] : 0;
+  return { score, assessed: 1, max: 100, incomplete: false };
+}
+
+function mentionChecksFromEngines(rows: any[] = []) {
+  const out: Array<{ id: string; status: string; label: string; evidence: string }> = [];
+  for (const row of rows) {
+    if (!row || row.skipped === true) continue;
+    if (row.mentioned !== true && row.mentioned !== false) continue;
+    const engine = String(row.label || row.engine || 'AI').trim() || 'AI';
+    const prompt = String(row.prompt || '').trim();
+    const quoted = prompt ? ` for “${prompt}”` : '';
+    const mentioned = row.mentioned === true;
+    out.push({
+      id: `llm_mention_${out.length + 1}`,
+      status: mentioned ? 'pass' : 'fail',
+      label: `${engine} mentioned${quoted}`,
+      evidence: mentioned
+        ? `${engine} named the business${quoted}.`
+        : `${engine} did not name the business${quoted}.`
+    });
+  }
+  return out;
+}
+
+export function computeTriadScore(checks = [], context: ScoreContext = {}) {
   const bySection = collectBySection(checks);
   const id = (prefix) => checks.filter((c) => String(c.id).startsWith(prefix));
 
@@ -93,7 +225,8 @@ export function computeTriadScore(checks = [], context: { localRank?: any } = {}
     ...(bySection.maps_competitors || []),
     ...(bySection.competitor_gap || []),
     ...(bySection.conversion || []),
-    ...id('nap_')
+    ...id('nap_'),
+    ...checks.filter((c) => c.id === 'geo_5')
   ];
 
   const aeoChecks = [
@@ -108,35 +241,53 @@ export function computeTriadScore(checks = [], context: { localRank?: any } = {}
     ...(bySection.technical_seo || []).filter((c) =>
       ['tech_12', 'tech_13', 'tech_14', 'tech_15'].includes(c.id)
     ),
-    ...(bySection.ai_seo || []).filter((c) => String(c.id).startsWith('geo_')),
-    ...id('geo_').filter((c) => c.section !== 'ai_seo')
+    ...(bySection.ai_seo || []).filter((c) => String(c.id).startsWith('geo_') && c.id !== 'geo_5'),
+    ...id('geo_').filter((c) => c.section !== 'ai_seo' && c.id !== 'geo_5')
   ];
 
-  const local = scoreChecks100(localChecks);
-  let aeo = scoreChecks100(aeoChecks);
-  let geo = scoreChecks100(geoChecks);
+  const mentionChecks = mentionChecksFromEngines(
+    Array.isArray(context.aiEngineChecks) ? context.aiEngineChecks : []
+  );
+
+  const checklistRows = aeoRowsFromChecklist(context.aeoChecklist);
+  const queryRows = aeoRowsFromQueries(Array.isArray(context.aeoQueries) ? context.aeoQueries : []);
+  const checklistForScore = queryRows.length
+    ? checklistRows.filter((row) => !AEO_VISIBILITY_IDS.has(row.id))
+    : checklistRows;
+  const aeo = context.aeoChecklist
+    ? blendWeighted([
+        { ...weightedCheckScore(checklistForScore, 2), weight: 80 },
+        { ...scoreChecks100(queryRows), weight: 20 }
+      ])
+    : scoreChecks100(aeoChecks);
+
+  const localChecklistRows = aeoRowsFromChecklist(context.localSeoChecklist);
+  const gbpDetailRows = localChecklistRows.filter((row) => LOCAL_GBP_DETAIL_IDS.has(row.id));
+  const localChecklistOnly = localChecklistRows.filter(
+    (row) => !LOCAL_GBP_DETAIL_IDS.has(row.id) && !LOCAL_MAP_ROW_IDS.has(row.id)
+  );
+  const local = context.localSeoChecklist
+    ? blendWeighted([
+        { ...weightedCheckScore(localChecklistOnly, 2), weight: 65 },
+        { ...weightedCheckScore(gbpDetailRows, 3), weight: 20 },
+        { ...mapRankSlice(context.localRank), weight: 15 }
+      ])
+    : scoreChecks100(localChecks);
+
+  const geoChecklistRows = aeoRowsFromChecklist(context.geoChecklist);
+  const geoChecklistForScore = mentionChecks.length
+    ? geoChecklistRows.filter((row) => !GEO_MENTION_ROLLUP_IDS.has(row.id))
+    : geoChecklistRows;
+  const geoCrawl = mentionChecks.length
+    ? geoChecks.filter((c) => !GEO_MENTION_ROLLUP_IDS.has(c.id))
+    : geoChecks;
+  const geo = context.geoChecklist
+    ? scoreChecks100([...geoChecklistForScore, ...mentionChecks])
+    : scoreChecks100([...geoCrawl, ...mentionChecks]);
 
   const rank = context.localRank || null;
   const inPack = rank && typeof rank.position === 'number';
   const position = inPack ? Number(rank.position) : null;
-  let visibilityNote = '';
-
-  if (rank) {
-    if (!inPack) {
-      
-      geo = { ...geo, score: Math.min(geo.score, 42) };
-      aeo = { ...aeo, score: Math.min(aeo.score, 52) };
-      visibilityNote =
-        ' Maps pack: not listed in the top results for the measured local query — GEO/AEO capped.';
-    } else if (position > 7) {
-      geo = { ...geo, score: Math.min(geo.score, 55) };
-      aeo = { ...aeo, score: Math.min(aeo.score, 62) };
-      visibilityNote = ` Maps pack: #${position} — GEO/AEO tempered for weak local pack presence.`;
-    } else if (position > 3) {
-      geo = { ...geo, score: Math.min(geo.score, 68) };
-      visibilityNote = ` Maps pack: #${position} — GEO tempered for mid-pack presence.`;
-    }
-  }
 
   const total = Math.round(local.score * 0.4 + aeo.score * 0.3 + geo.score * 0.3);
 
@@ -183,8 +334,7 @@ export function computeTriadScore(checks = [], context: { localRank?: any } = {}
     pillars: [triad.local_seo, triad.aeo, triad.geo],
     triad,
     note:
-      'Overall = Local SEO 40% + AEO 30% + GEO 30% (on-site checks).' +
-      (visibilityNote || ' Unknown/N/A checks are excluded.'),
+      'Overall = Local SEO 40% + AEO 30% + GEO 30% (on-site checks). Unknown/N/A checks are excluded.',
     localPack: inPack
       ? { listed: true, position }
       : rank
@@ -197,7 +347,7 @@ export function computeTriadScore(checks = [], context: { localRank?: any } = {}
 
 
 
-export function computeScore(checks = [], context: { localRank?: any } = {}) {
+export function computeScore(checks = [], context: ScoreContext = {}) {
   const bySection = collectBySection(checks);
 
   const pillars: Record<string, ReturnType<typeof scoreChecks>> = {};

@@ -101,6 +101,63 @@ function absolutize(base, href) {
   }
 }
 
+function dayLabel(value) {
+  const raw = String(value || '');
+  const name = raw.split('/').pop() || raw;
+  return name.replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+}
+
+function pushHourLine(lines, value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text || lines.includes(text)) return;
+  lines.push(text);
+}
+
+function walkOpeningHours(node, lines, seen = new Set()) {
+  if (!node || seen.has(node)) return;
+  if (typeof node !== 'object') return;
+  seen.add(node);
+  if (Array.isArray(node)) {
+    node.forEach((item) => walkOpeningHours(item, lines, seen));
+    return;
+  }
+  if (node.openingHours) {
+    const value = node.openingHours;
+    if (Array.isArray(value)) value.forEach((item) => pushHourLine(lines, item));
+    else pushHourLine(lines, value);
+  }
+  if (node.openingHoursSpecification) {
+    const specs = Array.isArray(node.openingHoursSpecification)
+      ? node.openingHoursSpecification
+      : [node.openingHoursSpecification];
+    for (const spec of specs) {
+      if (!spec || typeof spec !== 'object') continue;
+      const days = Array.isArray(spec.dayOfWeek) ? spec.dayOfWeek : [spec.dayOfWeek];
+      const dayText = days.map(dayLabel).filter(Boolean).join(', ');
+      const opens = String(spec.opens || '').trim();
+      const closes = String(spec.closes || '').trim();
+      if (dayText && (opens || closes)) pushHourLine(lines, `${dayText} ${opens}-${closes}`);
+    }
+  }
+  for (const value of Object.values(node)) {
+    if (value && typeof value === 'object') walkOpeningHours(value, lines, seen);
+  }
+}
+
+function visibleHourLines(bodyText) {
+  const text = String(bodyText || '');
+  const lines = [];
+  const ranged =
+    /\b((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day)?(?:\s*(?:-|–|—|to)\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day)?)?)\b[^.\n]{0,80}?(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)\s*(?:-|–|—|to)\s*(\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)/gi;
+  let match;
+  while ((match = ranged.exec(text))) {
+    pushHourLine(lines, match[0]);
+    if (lines.length >= 14) break;
+  }
+  if (/\bopen\s+24\s*hours\b|\b24\s*\/\s*7\b/i.test(text)) pushHourLine(lines, 'Open 24 hours');
+  return lines;
+}
+
 function extractJsonLdBlocks(html) {
   const $ = cheerio.load(html);
   const blocks = [];
@@ -176,6 +233,9 @@ function extractPage(html, pageUrl) {
   const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
   const htmlLower = html.toLowerCase();
   const jsonLd = extractJsonLdBlocks(html);
+  const openingHourLines = [];
+  walkOpeningHours(jsonLd, openingHourLines);
+  for (const line of visibleHourLines(bodyText)) pushHourLine(openingHourLines, line);
   const schemaTypes = [...flattenSchemaTypes(jsonLd)];
   const hasFaqSchema = schemaTypes.some((t) => /FAQPage/i.test(t));
   const hasLocalBusinessSchema = schemaTypes.some((t) =>
@@ -228,6 +288,7 @@ function extractPage(html, pageUrl) {
     hasForm,
     hasSchema,
     schemaTypes,
+    openingHourLines: openingHourLines.slice(0, 21),
     hasFaqSchema,
     hasLocalBusinessSchema,
     hasPersonSchema,
@@ -342,6 +403,9 @@ export async function crawlWebsite(websiteUrl, { maxPages = 12 } = {}) {
   }
 
   const schemaTypes = [...new Set(pages.flatMap((p) => p.schemaTypes || []))];
+  const websiteHours = [
+    ...new Set(pages.flatMap((p) => (Array.isArray(p.openingHourLines) ? p.openingHourLines : [])))
+  ].slice(0, 21);
   const hasFaqSchema = pages.some((p) => p.hasFaqSchema);
   const hasLocalBusinessSchema = pages.some((p) => p.hasLocalBusinessSchema);
   const hasPersonSchema = pages.some((p) => p.hasPersonSchema);
@@ -371,6 +435,7 @@ export async function crawlWebsite(websiteUrl, { maxPages = 12 } = {}) {
     llmsTxtFound,
     llmsTxtSnippet,
     schemaTypes,
+    websiteHours,
     hasFaqSchema,
     hasLocalBusinessSchema,
     hasPersonSchema,

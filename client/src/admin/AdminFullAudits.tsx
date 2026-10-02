@@ -8,6 +8,7 @@ import {
     Circle,
     ClipboardCheck,
     Copy,
+    Edit2,
     ExternalLink,
     Globe2,
     Inbox,
@@ -18,10 +19,12 @@ import {
     Search,
     Share2,
     Trash2,
+    UserCheck,
     Wand2,
     X
 } from 'lucide-react';
 import {
+    assignFullAuditToAgent,
     deleteFullAudit,
     fetchFullAudit,
     fetchFullAuditRequests,
@@ -116,7 +119,9 @@ const CRAWL_STEPS = [
 const EMPTY_FORM = {
     businessName: '',
     website: '',
-    emailOrPhone: '',
+    contact: '',
+    extraContact: '',
+    showExtraContact: false,
     address: '',
     city: '',
     serviceId: '',
@@ -124,25 +129,29 @@ const EMPTY_FORM = {
     contactName: ''
 };
 
-/** Split a combined contact value into email and/or phone for the API. */
-function splitEmailOrPhone(raw: string): { email: string; phone: string } {
-    const value = String(raw || '').trim();
-    if (!value) return { email: '', phone: '' };
-    if (value.includes('@')) {
-        return { email: value, phone: '' };
-    }
-    return { email: '', phone: value };
-}
-
 function isValidEmailOrPhone(raw: string): boolean {
     const value = String(raw || '').trim();
     if (!value) return false;
     if (value.includes('@')) {
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
     }
-    // At least 7 digits after stripping formatting
     const digits = value.replace(/\D/g, '');
     return digits.length >= 7;
+}
+
+/** Keep whichever values are a valid email and a valid phone. */
+function contactsFromForm(contact: string, extraContact: string, showExtraContact: boolean) {
+    const values = [contact, showExtraContact ? extraContact : ''].map((v) => String(v || '').trim()).filter(Boolean);
+    let email = '';
+    let phone = '';
+    for (const value of values) {
+        if (value.includes('@')) {
+            if (!email) email = value;
+        } else if (!phone) {
+            phone = value;
+        }
+    }
+    return { email, phone };
 }
 
 async function copyText(text: string) {
@@ -183,6 +192,7 @@ export default function AdminFullAudits() {
     const [busyId, setBusyId] = useState('');
     const [busyAction, setBusyAction] = useState<'share' | 'delete' | ''>('');
     const [page, setPage] = useState(1);
+    const [requestPage, setRequestPage] = useState(1);
     const [fulfillAuditId, setFulfillAuditId] = useState('');
     const [fulfillAgentId, setFulfillAgentId] = useState('');
     const [assignModalReq, setAssignModalReq] = useState<FullAuditRequest | null>(null);
@@ -211,6 +221,7 @@ export default function AdminFullAudits() {
                 setSalesAgents(agents);
                 setRequests(reqs);
                 setPage(1);
+                setRequestPage(1);
                 const pending = pendingAssignRef.current;
                 if (pending) {
                     pendingAssignRef.current = null;
@@ -298,7 +309,7 @@ export default function AdminFullAudits() {
         setForm({
             ...EMPTY_FORM,
             businessName: req.businessName || '',
-            emailOrPhone: req.toEmail || ''
+            contact: req.toEmail || ''
         });
         setShowForm(true);
         setTab('audits');
@@ -308,7 +319,7 @@ export default function AdminFullAudits() {
 
     const openAssignModal = (req: FullAuditRequest) => {
         const ready = auditsReadyForRequest(req, audits);
-        if (!ready.length) {
+        if (!ready.length && !req.fulfilledAuditId) {
             setError('Run and publish a full audit for this business first, then assign.');
             return;
         }
@@ -317,6 +328,37 @@ export default function AdminFullAudits() {
         setFulfillAgentId(req.assignedToUserId || '');
         setAssignSaving(false);
         setError('');
+    };
+
+    const openAssignModalForAudit = (audit: FullAuditListItem) => {
+        const existingReq = requests.find(
+            (r) => r.fulfilledAuditId === audit.id || (r.businessName && r.businessName.toLowerCase() === (audit.businessName || '').toLowerCase())
+        );
+        if (existingReq) {
+            openAssignModal(existingReq);
+        } else {
+            const virtualReq: FullAuditRequest = {
+                id: `audit-${audit.id}`,
+                leadId: audit.id,
+                businessName: audit.businessName || 'Business',
+                toEmail: audit.email || '',
+                status: 'completed',
+                source: 'admin_audit',
+                requestedAt: audit.createdAt || new Date().toISOString(),
+                fulfilledAuditId: audit.id,
+                assignedToUserId: null,
+                assignedAgentName: null,
+                assignedAgentEmail: null,
+                completedAt: new Date().toISOString(),
+                notes: '',
+                reportUrl: audit.reportUrl || audit.shareUrl || null
+            };
+            setAssignModalReq(virtualReq);
+            setFulfillAuditId(audit.id);
+            setFulfillAgentId('');
+            setAssignSaving(false);
+            setError('');
+        }
     };
 
     const closeAssignModal = () => {
@@ -333,7 +375,7 @@ export default function AdminFullAudits() {
         const selected = audits.find((a) => a.id === auditId);
         const allowed =
             Boolean(auditId) &&
-            (ready.some((a) => a.id === auditId) || Boolean(selected && isReadyAudit(selected)));
+            (ready.some((a) => a.id === auditId) || Boolean(selected && isReadyAudit(selected)) || Boolean(req.fulfilledAuditId === auditId));
         if (!allowed) {
             setError('Select a published full audit for this business before assigning.');
             return;
@@ -345,12 +387,14 @@ export default function AdminFullAudits() {
         setAssignSaving(true);
         setError('');
         try {
-            await updateFullAuditRequest(req.id, {
-                status: 'completed',
-                fulfilledAuditId: auditId,
-                assignedToUserId: fulfillAgentId
+            await assignFullAuditToAgent({
+                requestId: req.id.startsWith('audit-') ? undefined : req.id,
+                auditId,
+                agentId: fulfillAgentId,
+                businessName: req.businessName || selected?.businessName,
+                leadId: req.leadId
             });
-            show('Assigned — sales agent will see this in CRM to email the PDF.');
+            show('Assigned — sales agent will see this in CRM to deliver the PDF.');
             setAssignModalReq(null);
             setFulfillAuditId('');
             setFulfillAgentId('');
@@ -387,6 +431,20 @@ export default function AdminFullAudits() {
 
     const rangeStart = audits.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
     const rangeEnd = Math.min(safePage * PAGE_SIZE, audits.length);
+
+    const totalRequestPages = Math.max(1, Math.ceil(filteredRequests.length / PAGE_SIZE));
+    const safeRequestPage = Math.min(requestPage, totalRequestPages);
+    const pageRequests = useMemo(() => {
+        const start = (safeRequestPage - 1) * PAGE_SIZE;
+        return filteredRequests.slice(start, start + PAGE_SIZE);
+    }, [filteredRequests, safeRequestPage]);
+
+    useEffect(() => {
+        if (requestPage !== safeRequestPage) setRequestPage(safeRequestPage);
+    }, [requestPage, safeRequestPage]);
+
+    const requestRangeStart = filteredRequests.length === 0 ? 0 : (safeRequestPage - 1) * PAGE_SIZE + 1;
+    const requestRangeEnd = Math.min(safeRequestPage * PAGE_SIZE, filteredRequests.length);
     const showOther = form.serviceId === 'other';
     const progressPct = Math.round(((stepIndex + 1) / CRAWL_STEPS.length) * 100);
 
@@ -428,10 +486,32 @@ export default function AdminFullAudits() {
                 : 'Full audit ready — report opened in a new tab.'
         );
         if (prefillRequestId) {
-            pendingAssignRef.current = { reqId: prefillRequestId, auditId };
+            const req = requests.find((r) => r.id === prefillRequestId);
+            const agentId = req?.assignedToUserId;
+            if (agentId) {
+                try {
+                    await updateFullAuditRequest(prefillRequestId, {
+                        status: 'completed',
+                        fulfilledAuditId: auditId,
+                        assignedToUserId: agentId
+                    });
+                    show(
+                        `🎉 Full Growth Audit ready and automatically assigned back to ${req.assignedAgentName || 'the requesting sales agent'}!`
+                    );
+                } catch {
+                    pendingAssignRef.current = { reqId: prefillRequestId, auditId };
+                    setFulfillAuditId(auditId);
+                    show('Full audit ready — please confirm assignment.');
+                }
+            } else {
+                pendingAssignRef.current = { reqId: prefillRequestId, auditId };
+                setFulfillAuditId(auditId);
+                show('Full audit ready — pick a sales agent to assign.');
+            }
             setPrefillRequestId(null);
-            setFulfillAuditId(auditId);
             setTab('requests');
+        } else {
+            show('Full audit ready — report opened in a new tab.');
         }
         load();
     };
@@ -454,8 +534,12 @@ export default function AdminFullAudits() {
             setError('City is required');
             return;
         }
-        if (!isValidEmailOrPhone(form.emailOrPhone)) {
-            setError('Email or phone is required (enter a valid email or phone number)');
+        if (!isValidEmailOrPhone(form.contact)) {
+            setError('Enter a valid email or phone number');
+            return;
+        }
+        if (form.showExtraContact && form.extraContact.trim() && !isValidEmailOrPhone(form.extraContact)) {
+            setError('The extra contact must be a valid email or phone number');
             return;
         }
 
@@ -469,7 +553,7 @@ export default function AdminFullAudits() {
             return;
         }
 
-        const { email, phone } = splitEmailOrPhone(form.emailOrPhone);
+        const { email, phone } = contactsFromForm(form.contact, form.extraContact, form.showExtraContact);
 
         setCreating(true);
         setStepIndex(0);
@@ -711,7 +795,10 @@ export default function AdminFullAudits() {
                                 <button
                                     key={f.id}
                                     type="button"
-                                    onClick={() => setRequestFilter(f.id)}
+                                    onClick={() => {
+                                        setRequestFilter(f.id);
+                                        setRequestPage(1);
+                                    }}
                                     className={cn(
                                         'px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors',
                                         requestFilter === f.id
@@ -735,15 +822,16 @@ export default function AdminFullAudits() {
                             <table className="w-full text-left text-sm">
                                 <thead className="bg-[#F8FAFC] text-[11px] uppercase tracking-wider text-[#64748B]">
                                     <tr>
-                                        <th className="px-4 py-2.5 font-bold">Business</th>
-                                        <th className="px-4 py-2.5 font-bold">Email</th>
-                                        <th className="px-4 py-2.5 font-bold">Requested</th>
-                                        <th className="px-4 py-2.5 font-bold">Status</th>
-                                        <th className="px-4 py-2.5 font-bold text-right">Actions</th>
+                                        <th className="px-5 py-3 font-bold">Business</th>
+                                        <th className="px-4 py-3 font-bold">Sales Agent</th>
+                                        <th className="px-4 py-3 font-bold">Contact</th>
+                                        <th className="px-4 py-3 font-bold">Requested</th>
+                                        <th className="px-4 py-3 font-bold whitespace-nowrap">Status</th>
+                                        <th className="px-4 py-3 font-bold text-right whitespace-nowrap">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#E2E8F0]">
-                                    {filteredRequests.map((req) => {
+                                    {pageRequests.map((req) => {
                                         const readyAudits = auditsReadyForRequest(req, audits);
                                         const hasReadyAudit = readyAudits.length > 0;
                                         const isAssigned =
@@ -753,8 +841,8 @@ export default function AdminFullAudits() {
                                             req.status === 'pending' || req.status === 'in_progress';
 
                                         return (
-                                        <tr key={req.id} className="align-top">
-                                            <td className="px-4 py-3">
+                                        <tr key={req.id} className="align-middle hover:bg-[#F8FAFC]/70 transition-colors">
+                                            <td className="px-5 py-3.5">
                                                 <div className="font-bold text-[#0F172A]">{req.businessName || '—'}</div>
                                                 {req.fulfilledAuditId ? (
                                                     <div className="text-[11px] text-emerald-700 mt-0.5 font-mono">
@@ -762,28 +850,44 @@ export default function AdminFullAudits() {
                                                     </div>
                                                 ) : null}
                                             </td>
-                                            <td className="px-4 py-3 text-xs text-[#334155]">{req.toEmail || '—'}</td>
-                                            <td className="px-4 py-3 text-xs text-[#64748B]">
+                                            <td className="px-4 py-3.5">
+                                                {req.assignedAgentName || req.assignedAgentEmail ? (
+                                                    <div>
+                                                        <div className="text-xs font-bold text-[#0F172A]">
+                                                            {req.assignedAgentName || 'Assigned Agent'}
+                                                        </div>
+                                                        {req.assignedAgentEmail ? (
+                                                            <div className="text-[10px] text-[#64748B]">
+                                                                {req.assignedAgentEmail}
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-xs text-[#94A3B8] italic">Unassigned</span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3.5 text-xs text-[#334155] whitespace-nowrap">{req.toEmail || '—'}</td>
+                                            <td className="px-4 py-3.5 text-xs text-[#64748B] whitespace-nowrap">
                                                 {req.requestedAt
-                                                    ? new Date(req.requestedAt).toLocaleString()
+                                                    ? new Date(req.requestedAt).toLocaleString(undefined, {
+                                                          month: 'short',
+                                                          day: 'numeric',
+                                                          hour: '2-digit',
+                                                          minute: '2-digit'
+                                                      })
                                                     : '—'}
                                             </td>
-                                            <td className="px-4 py-3">
+                                            <td className="px-4 py-3.5 whitespace-nowrap">
                                                 {isAssigned ? (
                                                     <div>
-                                                        <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-emerald-50 text-emerald-800 border-emerald-200">
+                                                        <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-emerald-50 text-emerald-800 border-emerald-200 whitespace-nowrap">
                                                             Assigned
                                                         </span>
-                                                        <div className="text-[11px] font-semibold text-[#334155] mt-1">
-                                                            {req.assignedAgentName ||
-                                                                req.assignedAgentEmail ||
-                                                                'Sales agent'}
-                                                        </div>
                                                     </div>
                                                 ) : (
                                                     <span
                                                         className={cn(
-                                                            'inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border',
+                                                            'inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap',
                                                             req.status === 'pending'
                                                                 ? 'bg-amber-50 text-amber-800 border-amber-200'
                                                                 : req.status === 'in_progress'
@@ -797,62 +901,73 @@ export default function AdminFullAudits() {
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3">
-                                                <div className="flex flex-col items-end gap-2">
+                                            <td className="px-4 py-3 text-right">
+                                                <div className="inline-flex items-center justify-end gap-2.5 whitespace-nowrap">
                                                     {isOpen ? (
                                                         <>
                                                             {hasReadyAudit ? (
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => openAssignModal(req)}
-                                                                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-[#0F172A] text-white hover:bg-[#1E293B] transition-colors"
+                                                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-[#0F172A] text-white hover:bg-[#1E293B] transition-all shadow-2xs cursor-pointer whitespace-nowrap"
                                                                 >
-                                                                    <Check className="w-3.5 h-3.5" />
-                                                                    Assign
+                                                                    <Check className="w-3 h-3" />
+                                                                    <span>Assign</span>
                                                                 </button>
                                                             ) : (
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => openNewFormFromRequest(req)}
-                                                                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-[#F59E0B] text-[#0F172A] hover:bg-[#FBBF24] transition-colors"
+                                                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-[#F59E0B] text-[#0F172A] hover:bg-[#FBBF24] transition-all shadow-2xs cursor-pointer whitespace-nowrap"
                                                                     title="Publish a full audit PDF before assigning"
                                                                 >
-                                                                    <Plus className="w-3.5 h-3.5" />
-                                                                    Run full audit
+                                                                    <Plus className="w-3 h-3" />
+                                                                    <span>Run audit</span>
                                                                 </button>
                                                             )}
-                                                            <div className="flex items-center gap-3">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() =>
-                                                                        updateFullAuditRequest(req.id, {
-                                                                            status: 'dismissed'
-                                                                        }).then(load)
-                                                                    }
-                                                                    className="text-[11px] font-semibold text-[#94A3B8] hover:text-rose-600 transition-colors"
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    updateFullAuditRequest(req.id, {
+                                                                        status: 'dismissed'
+                                                                    }).then(load)
+                                                                }
+                                                                className="text-xs font-medium text-[#94A3B8] hover:text-rose-600 transition-colors cursor-pointer whitespace-nowrap"
+                                                            >
+                                                                Dismiss
+                                                            </button>
+                                                            {req.leadId ? (
+                                                                <a
+                                                                    href={`/admin/leads/${encodeURIComponent(req.leadId)}`}
+                                                                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-[#0F172A] transition-colors whitespace-nowrap"
                                                                 >
-                                                                    Dismiss
-                                                                </button>
-                                                                {req.leadId ? (
-                                                                    <a
-                                                                        href={`/admin/leads/${encodeURIComponent(req.leadId)}`}
-                                                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#475569] hover:text-[#0F172A] transition-colors"
-                                                                    >
-                                                                        Open lead
-                                                                        <ExternalLink className="w-3 h-3" />
-                                                                    </a>
-                                                                ) : null}
-                                                            </div>
+                                                                    <span>Open lead</span>
+                                                                    <ExternalLink className="w-3 h-3" />
+                                                                </a>
+                                                            ) : null}
                                                         </>
-                                                    ) : req.leadId ? (
-                                                        <a
-                                                            href={`/admin/leads/${encodeURIComponent(req.leadId)}`}
-                                                            className="inline-flex items-center gap-1 text-xs font-bold text-[#475569] hover:text-[#0F172A] transition-colors"
-                                                        >
-                                                            Open lead
-                                                            <ExternalLink className="w-3.5 h-3.5" />
-                                                        </a>
-                                                    ) : null}
+                                                    ) : (
+                                                        <div className="inline-flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openAssignModal(req)}
+                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg border border-[#CBD5E1] bg-white text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:border-[#94A3B8] transition-all shadow-2xs cursor-pointer whitespace-nowrap"
+                                                                title="Edit assigned sales agent or audit report"
+                                                            >
+                                                                <Edit2 className="w-3 h-3 text-[#F59E0B]" />
+                                                                <span>Edit Assignment</span>
+                                                            </button>
+                                                            {req.leadId ? (
+                                                                <a
+                                                                    href={`/admin/leads/${encodeURIComponent(req.leadId)}`}
+                                                                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-[#0F172A] transition-colors whitespace-nowrap"
+                                                                >
+                                                                    <span>Open lead</span>
+                                                                    <ExternalLink className="w-3 h-3" />
+                                                                </a>
+                                                            ) : null}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
@@ -862,6 +977,37 @@ export default function AdminFullAudits() {
                             </table>
                         </div>
                     )}
+
+                    {!loading && filteredRequests.length > 0 ? (
+                        <div className="px-4 sm:px-5 py-3 border-t border-[#E2E8F0] bg-[#FCFDFE] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <p className="text-xs text-[#64748B]">
+                                Showing {requestRangeStart}–{requestRangeEnd} of {filteredRequests.length}
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    disabled={safeRequestPage <= 1}
+                                    onClick={() => setRequestPage((p) => Math.max(1, p - 1))}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
+                                >
+                                    <ChevronLeft className="w-3.5 h-3.5" />
+                                    Previous
+                                </button>
+                                <span className="text-xs font-bold text-[#475569] tabular-nums px-1">
+                                    {safeRequestPage} / {totalRequestPages}
+                                </span>
+                                <button
+                                    type="button"
+                                    disabled={safeRequestPage >= totalRequestPages}
+                                    onClick={() => setRequestPage((p) => Math.min(totalRequestPages, p + 1))}
+                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E2E8F0] bg-white text-[#0F172A] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F8FAFC]"
+                                >
+                                    Next
+                                    <ChevronRight className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
 
@@ -999,16 +1145,50 @@ export default function AdminFullAudits() {
                                     className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
                                 />
                             </label>
-                            <label className="block text-sm font-semibold text-[#0F172A]">
+                            <div className="block text-sm font-semibold text-[#0F172A]">
                                 Email or phone <span className="text-red-500">*</span>
-                                <input
-                                    required
-                                    value={form.emailOrPhone}
-                                    onChange={(e) => setForm({ ...form, emailOrPhone: e.target.value })}
-                                    placeholder="company@example.com or +44…"
-                                    className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
-                                />
-                            </label>
+                                <div className="mt-1.5 flex items-center gap-2">
+                                    <input
+                                        required
+                                        value={form.contact}
+                                        onChange={(e) => setForm({ ...form, contact: e.target.value })}
+                                        placeholder="company@example.com or +44…"
+                                        className="min-w-0 flex-1 px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
+                                    />
+                                    {!form.showExtraContact ? (
+                                        <button
+                                            type="button"
+                                            aria-label="Add email and phone"
+                                            title="Add email and phone"
+                                            onClick={() => setForm({ ...form, showExtraContact: true })}
+                                            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 border-[#F59E0B] bg-[#FFFBEB] text-[#F59E0B] hover:bg-[#FEF3C7]"
+                                        >
+                                            <Plus className="h-5 w-5" strokeWidth={3} />
+                                        </button>
+                                    ) : null}
+                                </div>
+                                {form.showExtraContact ? (
+                                    <div className="mt-2 flex items-center gap-2">
+                                        <input
+                                            value={form.extraContact}
+                                            onChange={(e) => setForm({ ...form, extraContact: e.target.value })}
+                                            placeholder="Add the other — email or mobile"
+                                            className="min-w-0 flex-1 px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
+                                        />
+                                        <button
+                                            type="button"
+                                            aria-label="Remove extra contact"
+                                            title="Remove extra contact"
+                                            onClick={() =>
+                                                setForm({ ...form, showExtraContact: false, extraContact: '' })
+                                            }
+                                            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#E2E8F0] text-[#64748B] hover:bg-[#F8FAFC]"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                ) : null}
+                            </div>
                             <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
                                 Website
                                 <input
@@ -1213,8 +1393,17 @@ export default function AdminFullAudits() {
                                         </button>
                                         <button
                                             type="button"
+                                            onClick={() => openAssignModalForAudit(a)}
+                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white hover:bg-[#F8FAFC] text-[#0F172A] border border-[#CBD5E1] text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                                            title="Assign or edit sales agent assignment for this audit"
+                                        >
+                                            <UserCheck className="w-3.5 h-3.5 text-[#F59E0B]" />
+                                            <span>Assign / Edit</span>
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={() => setActiveLead(auditToLeadRef(a))}
-                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-xs font-bold shadow-xs transition-colors"
+                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#FFFBEB] hover:bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] text-xs font-bold shadow-xs transition-colors cursor-pointer"
                                         >
                                             <CheckSquare className="w-3.5 h-3.5 text-[#D97706]" />
                                             Manage Task

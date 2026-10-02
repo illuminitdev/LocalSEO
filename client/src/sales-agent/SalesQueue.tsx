@@ -645,7 +645,7 @@ export default function SalesQueue() {
                                 return (
                                     <Link
                                         key={task.id}
-                                        to={`/sales/leads/${encodeURIComponent(task.leadId)}`}
+                                        to={`/sales/leads/${encodeURIComponent(task.leadId)}#tasks`}
                                         className="flex items-start gap-3 px-4 py-3 hover:bg-[#F8FAFC] transition-colors"
                                     >
                                         <span

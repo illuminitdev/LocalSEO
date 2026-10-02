@@ -323,11 +323,7 @@ export function buildGeoChecklist(opts: {
   const nearSlice = enginesForPromptKey(engines, 'near');
   const bestSlice = enginesForPromptKey(engines, 'best');
   const nearMeSlice = enginesForPromptKey(engines, 'near_me');
-  const nearStats = promptSliceStats(nearSlice.length ? nearSlice : engines);
   const bestStats = promptSliceStats(bestSlice);
-  const nearMeStats = promptSliceStats(nearMeSlice.length ? nearMeSlice : nearSlice.length ? nearSlice : engines);
-  const query = String(opts.localRank?.query || nearSlice[0]?.prompt || measured[0]?.prompt || '').trim();
-  const inPack = typeof opts.localRank?.position === 'number';
   const competitors = (opts.localRank?.topResults || [])
     .filter((r) => r?.name && !r.isProspect)
     .map((r) => String(r.name));
@@ -387,15 +383,15 @@ export function buildGeoChecklist(opts: {
       return item('geo_ai_2', 'Business recommended for local searches', s.status, s.evidence);
     })(),
     (() => {
-      const hasServiceLoc = Boolean(service && city && (nearStats.anyMentioned || inPack));
+      const slice = nearSlice;
+      const stats = promptSliceStats(slice);
+      const prompt = slice[0]?.prompt || (service && city ? `${service} near ${city}` : 'service near location');
       const s = statusFromBool(
-        service && city ? (nearStats.anyMeasured || inPack ? hasServiceLoc : null) : null,
-        inPack || nearStats.anyMentioned
-          ? `Service/location signals present for “${nearSlice[0]?.prompt || query || `${service} near ${city}`}”`
-          : 'Service + location not visible in measured AI / Maps',
-        'Not visible for service + location in measured AI / Maps',
+        stats.anyMeasured ? stats.anyMentioned : null,
+        `Mentioned for “${prompt}”`,
+        `Not mentioned for “${prompt}”`,
         service && city
-          ? 'Service + location visibility was not confirmed for this business'
+          ? 'Service + location visibility was not confirmed in ChatGPT, Claude, or Gemini'
           : 'Service or location not provided'
       );
       return item('geo_ai_3', 'Service + location visibility', s.status, s.evidence);
@@ -420,25 +416,23 @@ export function buildGeoChecklist(opts: {
       return item('geo_ai_4', '"Best" query visibility', s.status, s.evidence);
     })(),
     (() => {
-      const slice = nearMeSlice.length ? nearMeSlice : nearSlice;
-      const stats = nearMeSlice.length ? nearMeStats : nearStats;
-      if (!slice.length && !stats.anyMeasured && !inPack) {
+      const slice = nearMeSlice;
+      const stats = promptSliceStats(slice);
+      if (!slice.length && !stats.anyMeasured) {
         return item(
           'geo_ai_5',
           '"Near me" query visibility',
           'no',
-          'Near-me visibility was not confirmed for this business'
+          'Near-me visibility was not confirmed in ChatGPT, Claude, or Gemini'
         );
       }
       const s = statusFromBool(
-        inPack || stats.anyMeasured ? Boolean(inPack || stats.anyMentioned) : null,
-        inPack
-          ? `In Local Pack for “${query}”`
-          : stats.anyMentioned
-            ? `Mentioned for “${slice[0]?.prompt || 'near me'}”`
-            : 'Mentioned for near-me style prompt',
+        stats.anyMeasured ? stats.anyMentioned : null,
+        stats.anyMentioned
+          ? `Mentioned for “${slice[0]?.prompt || 'near me'}”`
+          : 'Mentioned for near-me style prompt',
         `Not mentioned for “${slice[0]?.prompt || 'near me'}”`,
-        'Near-me visibility was not confirmed for this business'
+        'Near-me visibility was not confirmed in ChatGPT, Claude, or Gemini'
       );
       return item('geo_ai_5', '"Near me" query visibility', s.status, s.evidence);
     })(),
@@ -619,12 +613,10 @@ export function buildGeoChecklist(opts: {
     item(
       'geo_cite_3',
       'GBP / business data referenced',
-      gbpReferenced || inPack ? 'yes' : 'no',
+      gbpReferenced ? 'yes' : 'no',
       gbpReferenced
         ? 'AI answer references Google Maps / Business Profile style data'
-        : inPack
-          ? 'Business appears in measured Local Pack (GBP/Maps signal)'
-          : 'No GBP/Maps reference detected in AI answers'
+        : 'No GBP/Maps reference detected in AI answers'
     ),
     item(
       'geo_cite_4',

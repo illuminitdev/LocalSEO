@@ -140,7 +140,15 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                         `SELECT DISTINCT ON (COALESCE(LOWER(sl.email), LOWER(sub.email), a.lead_id))
                             a.lead_id, a.activity_type, a.disposition, a.note, a.author_name, a.created_at,
                             COALESCE(LOWER(sl.email), LOWER(sub.email)) AS lead_email
-                         FROM lead_activities a
+                         FROM (
+                             SELECT lead_id::text AS lead_id, COALESCE(NULLIF(activity_type, ''), 'note') AS activity_type, disposition, note, author_name, created_at
+                             FROM lead_activities
+                             UNION ALL
+                             SELECT c.lead_id::text AS lead_id, 'call_log' AS activity_type, COALESCE(c.outcome, 'connected') AS disposition, COALESCE(c.notes, '') AS note, COALESCE(u.name, 'Sales Agent') AS author_name, c.created_at
+                             FROM sales_call_logs c
+                             LEFT JOIN users u ON u.id::text = c.agent_id::text
+                             WHERE NOT EXISTS (SELECT 1 FROM lead_activities la WHERE la.id::text = c.id::text)
+                         ) a
                          LEFT JOIN sales_leads sl ON sl.id::text = a.lead_id
                          LEFT JOIN submissions sub ON sub.id::text = a.lead_id
                          WHERE a.lead_id = ANY($1::text[]) 
@@ -165,8 +173,8 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                          LEFT JOIN users u ON u.id = t.assigned_to_user_id
                          LEFT JOIN sales_leads sl ON sl.id::text = t.lead_id
                          LEFT JOIN submissions sub ON sub.id::text = t.lead_id
-                         WHERE t.lead_id = ANY($1::text[])
-                            OR (COALESCE(LOWER(sl.email), LOWER(sub.email)) = ANY($2::text[]) AND COALESCE(sl.email, sub.email, '') <> '')
+                         WHERE (t.created_by_role = 'admin' OR t.created_by_role IS NULL)
+                           AND (t.lead_id = ANY($1::text[]) OR (COALESCE(LOWER(sl.email), LOWER(sub.email)) = ANY($2::text[]) AND COALESCE(sl.email, sub.email, '') <> ''))
                          ORDER BY COALESCE(LOWER(sl.email), LOWER(sub.email), t.lead_id), t.updated_at DESC`,
                         [leadIds, emails]
                     ).catch(() => ({ rows: [] }))

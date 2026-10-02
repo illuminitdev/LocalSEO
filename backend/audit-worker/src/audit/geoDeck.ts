@@ -39,10 +39,10 @@ export function buildGeoFixes(audit) {
   const geoActions = toActions(geoFails, 'Medium');
 
   return {
-    title: 'GEO: Google + AI visibility',
-    visualIntro: 'What ChatGPT, Claude, and Gemini say when someone asks about this business and its services.',
-    goalLine: `Win Local Pack for “${measuredQuery}” and get cited in ChatGPT, Claude, and Gemini for ${geoPromptSummary}.`,
-    verifyHint: `Search Google for “${measuredQuery}”, then ask ChatGPT, Claude, and Gemini: ${geoPromptSummary}.`,
+    title: 'GEO: AI mentions and citations',
+    visualIntro: `Whether ChatGPT, Claude, and Gemini name ${name} for the measured prompts: ${geoPromptSummary}.`,
+    goalLine: `Get ${name} named and cited in ChatGPT, Claude, and Gemini for ${geoPromptSummary}.`,
+    verifyHint: `Ask ChatGPT, Claude, and Gemini: ${geoPromptSummary}.`,
     queryCards: [
       {
         query: measuredQuery,
@@ -73,17 +73,19 @@ export function buildGeoFixes(audit) {
             .filter(Boolean)
         )
       ];
-      const googleBit = inPack
-        ? `${name} is in the Google Local Pack / Maps results for “${measuredQuery}”.`
-        : mapsResults.length
-          ? `${name} is not in the Google Maps results for “${measuredQuery}” (showing ${mapsResults.length} other listings).`
-          : `${name} is not in the Google Maps results for “${measuredQuery}”.`;
       const aiBit = mentioned.length
-        ? ` Mentioned in ${mentioned.join(' / ')} across measured GEO prompts.`
+        ? `${name} is mentioned in ${mentioned.join(' / ')} across measured GEO prompts.`
         : missed.length
-          ? ` Not mentioned in ${missed.join(' / ')} across measured GEO prompts.`
-          : ' AI engine checks were unavailable for this run.';
-      return `${googleBit}${aiBit}`;
+          ? `${name} is not mentioned in ${missed.join(' / ')} across measured GEO prompts.`
+          : 'AI engine checks were unavailable for this run.';
+      const mapsBit = inPack
+        ? ` Local SEO note: ${name} is in the Google Maps results for “${measuredQuery}”.`
+        : mapsResults.length
+          ? ` Local SEO note: ${name} is not in the Google Maps results for “${measuredQuery}”.`
+          : measuredQuery
+            ? ` Local SEO note: ${name} is not in the Google Maps results for “${measuredQuery}”.`
+            : '';
+      return `${aiBit}${mapsBit}`;
     })(),
     actions:
       geoActions.length > 0

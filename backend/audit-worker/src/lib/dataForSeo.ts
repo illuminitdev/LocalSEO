@@ -17,12 +17,23 @@ export type DataForSeoMapsItem = {
 };
 
 
+export type AeoPeopleAlsoAsk = { question: string; answer: string };
+export type AeoAnswerBox = { title: string; text: string; url: string };
+export type AeoOrganicHit = { title: string; domain: string };
+
 export type SerpScreenshotResult = {
   dataUrl?: string;
   query: string;
   skipped?: boolean;
   reason?: string;
   capturedAt?: string;
+  serpMeasured?: boolean;
+  peopleAlsoAsk?: AeoPeopleAlsoAsk[];
+  answerBox?: AeoAnswerBox | null;
+  organic?: AeoOrganicHit[];
+  businessNamed?: boolean | null;
+  businessInAnswerBox?: boolean;
+  businessInPaa?: boolean;
 };
 
 export type MapsLocalPackResult = {
@@ -481,6 +492,66 @@ export async function captureOrganicLocalPackScreenshot(opts: {
 }
 
 
+function textOf(value: unknown): string {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+export function extractAeoSerpFacts(items: any[], businessName: string) {
+  const peopleAlsoAsk: AeoPeopleAlsoAsk[] = [];
+  let answerBox: AeoAnswerBox | null = null;
+  const organic: AeoOrganicHit[] = [];
+  const paaChunks: string[] = [];
+  const boxChunks: string[] = [];
+  const namedChunks: string[] = [];
+
+  for (const item of Array.isArray(items) ? items : []) {
+    const type = String(item?.type || '');
+    if (type === 'people_also_ask') {
+      const questions = Array.isArray(item?.items) ? item.items : [];
+      for (const q of questions) {
+        const question = textOf(q?.title || q?.question);
+        const expanded = Array.isArray(q?.expanded_element) ? q.expanded_element : [];
+        const answer = expanded
+          .map((el: any) => textOf(el?.description || el?.text || el?.featured_title))
+          .filter(Boolean)
+          .join(' ');
+        if (!question && !answer) continue;
+        peopleAlsoAsk.push({ question, answer });
+        if (question) paaChunks.push(question);
+        if (answer) paaChunks.push(answer);
+      }
+    } else if ((type === 'featured_snippet' || type === 'answer_box') && !answerBox) {
+      answerBox = {
+        title: textOf(item?.title || item?.featured_title),
+        text: textOf(item?.description || item?.text),
+        url: textOf(item?.url)
+      };
+      boxChunks.push(answerBox.title, answerBox.text, textOf(item?.domain));
+    } else if (type === 'organic') {
+      const title = textOf(item?.title);
+      const domain = textOf(item?.domain);
+      if (!title && !domain) continue;
+      organic.push({ title, domain });
+      namedChunks.push(title, domain, textOf(item?.description));
+    }
+  }
+
+  const name = String(businessName || '').trim();
+  const canMatch = name.length >= 3;
+  const businessInPaa = canMatch && brandMentionedInText(paaChunks.join('\n'), name);
+  const businessInAnswerBox = canMatch && brandMentionedInText(boxChunks.join('\n'), name);
+  const businessInOrganic = canMatch && brandMentionedInText(namedChunks.join('\n'), name);
+  return {
+    serpMeasured: true,
+    peopleAlsoAsk: peopleAlsoAsk.slice(0, 8),
+    answerBox,
+    organic: organic.slice(0, 10),
+    businessNamed: canMatch ? businessInPaa || businessInAnswerBox || businessInOrganic : null,
+    businessInAnswerBox,
+    businessInPaa
+  };
+}
+
 export async function captureAeoSerpScreenshot(opts: {
   keyword: string;
   lat?: number | null;
@@ -488,6 +559,7 @@ export async function captureAeoSerpScreenshot(opts: {
   locationName?: string;
   languageCode?: string;
   timeoutMs?: number;
+  businessName?: string;
 }): Promise<SerpScreenshotResult> {
   const keyword = String(opts.keyword || '').trim();
   const query = keyword;
@@ -514,6 +586,7 @@ export async function captureAeoSerpScreenshot(opts: {
   };
   applyLocalLocation(task, opts);
 
+  let measured: ReturnType<typeof extractAeoSerpFacts> | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await sleepMs(2500);
     const controller = new AbortController();
@@ -542,6 +615,9 @@ export async function captureAeoSerpScreenshot(opts: {
         continue;
       }
 
+      const items = Array.isArray(taskResult?.result?.[0]?.items) ? taskResult.result[0].items : [];
+      measured = extractAeoSerpFacts(items, String(opts.businessName || ''));
+
       let dataUrl = await captureSerpScreenshotDataUrl(taskId, { timeoutMs: 50000 });
       if (!dataUrl) {
         console.warn('[dataForSeo] AEO screenshot attempt', attempt + 1, 'no image');
@@ -554,7 +630,7 @@ export async function captureAeoSerpScreenshot(opts: {
         maxBase64Len: 1_200_000
       });
       if (dataUrl.startsWith('data:image/')) {
-        return { dataUrl, query, capturedAt: new Date().toISOString() };
+        return { dataUrl, query, capturedAt: new Date().toISOString(), ...measured };
       }
     } catch (err: any) {
       const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
@@ -562,6 +638,16 @@ export async function captureAeoSerpScreenshot(opts: {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  if (measured) {
+    return {
+      query,
+      skipped: true,
+      reason: 'Google results were read, but the screenshot could not be captured',
+      capturedAt: new Date().toISOString(),
+      ...measured
+    };
   }
 
   return {
