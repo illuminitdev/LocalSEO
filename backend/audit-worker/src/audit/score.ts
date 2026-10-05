@@ -94,6 +94,11 @@ type ScoreContext = {
   aeoQueries?: any[] | null;
   localSeoChecklist?: { groups?: Array<{ items?: any[] }> } | null;
   geoChecklist?: { groups?: Array<{ items?: any[] }> } | null;
+  priorityActions?: {
+    local?: any[] | null;
+    aeo?: any[] | null;
+    geo?: any[] | null;
+  } | null;
 };
 
 const MAP_POSITION_POINTS = [0, 100, 90, 80, 70, 60, 50, 40, 30, 20, 10];
@@ -175,6 +180,39 @@ function blendWeighted(
   };
 }
 
+function actionFailSlots(priority: string): number {
+  const label = String(priority || '').trim().toLowerCase();
+  if (label === 'critical') return 3;
+  if (label === 'high') return 2;
+  if (label === 'medium') return 1;
+  return 0;
+}
+
+/** Critical, High, and Medium actions are gaps. The slice scores 0 when any of them exist. */
+function actionGapSlice(actions: any[] | null | undefined) {
+  const rows = Array.isArray(actions) ? actions : [];
+  let slots = 0;
+  let assessed = 0;
+  for (const action of rows) {
+    const failSlots = actionFailSlots(action?.priority);
+    if (!failSlots) continue;
+    slots += failSlots;
+    assessed += 1;
+  }
+  if (!assessed || !slots) return { score: 0, assessed: 0, max: 100, incomplete: true };
+  return { score: 0, assessed, max: 100, incomplete: false };
+}
+
+function checklistNoCount(rows: Array<{ status?: string }> = []) {
+  return rows.filter((row) => row?.status === 'fail').length;
+}
+
+function applyNoPenalty(score: number, noCount: number) {
+  if (noCount <= 10) return score;
+  const drop = Math.min(20, (noCount - 10) * 2);
+  return Math.max(0, score - drop);
+}
+
 function mapRankSlice(rank: any) {
   const measured = Boolean(
     rank && (rank.measured === true || rank.query || (Array.isArray(rank.topResults) && rank.topResults.length))
@@ -254,25 +292,37 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
   const checklistForScore = queryRows.length
     ? checklistRows.filter((row) => !AEO_VISIBILITY_IDS.has(row.id))
     : checklistRows;
-  const aeo = context.aeoChecklist
+  const aeoBlended = context.aeoChecklist
     ? blendWeighted([
-        { ...weightedCheckScore(checklistForScore, 2), weight: 80 },
-        { ...scoreChecks100(queryRows), weight: 20 }
+        { ...weightedCheckScore(checklistForScore, 2), weight: 92 },
+        { ...actionGapSlice(context.priorityActions?.aeo), weight: 4 },
+        { ...scoreChecks100(queryRows), weight: 4 }
       ])
     : scoreChecks100(aeoChecks);
+  const aeo = {
+    ...aeoBlended,
+    score: context.aeoChecklist ? applyNoPenalty(aeoBlended.score, checklistNoCount(checklistRows)) : aeoBlended.score
+  };
 
   const localChecklistRows = aeoRowsFromChecklist(context.localSeoChecklist);
   const gbpDetailRows = localChecklistRows.filter((row) => LOCAL_GBP_DETAIL_IDS.has(row.id));
   const localChecklistOnly = localChecklistRows.filter(
     (row) => !LOCAL_GBP_DETAIL_IDS.has(row.id) && !LOCAL_MAP_ROW_IDS.has(row.id)
   );
-  const local = context.localSeoChecklist
+  const localBlended = context.localSeoChecklist
     ? blendWeighted([
         { ...weightedCheckScore(localChecklistOnly, 2), weight: 94 },
-        { ...weightedCheckScore(gbpDetailRows, 3), weight: 3 },
-        { ...mapRankSlice(context.localRank), weight: 3 }
+        { ...actionGapSlice(context.priorityActions?.local), weight: 4 },
+        { ...weightedCheckScore(gbpDetailRows, 3), weight: 1 },
+        { ...mapRankSlice(context.localRank), weight: 1 }
       ])
     : scoreChecks100(localChecks);
+  const local = {
+    ...localBlended,
+    score: context.localSeoChecklist
+      ? applyNoPenalty(localBlended.score, checklistNoCount(localChecklistRows))
+      : localBlended.score
+  };
 
   const geoChecklistRows = aeoRowsFromChecklist(context.geoChecklist);
   const geoChecklistForScore = mentionChecks.length
@@ -281,9 +331,19 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
   const geoCrawl = mentionChecks.length
     ? geoChecks.filter((c) => !GEO_MENTION_ROLLUP_IDS.has(c.id))
     : geoChecks;
-  const geo = context.geoChecklist
-    ? scoreChecks100([...geoChecklistForScore, ...mentionChecks])
-    : scoreChecks100([...geoCrawl, ...mentionChecks]);
+  const geoBase = context.geoChecklist ? geoChecklistForScore : geoCrawl;
+  const geoBlended = blendWeighted([
+    { ...scoreChecks100(geoBase), weight: 92 },
+    { ...actionGapSlice(context.priorityActions?.geo), weight: 4 },
+    { ...scoreChecks100(mentionChecks), weight: 4 }
+  ]);
+  const geoNos = context.geoChecklist
+    ? checklistNoCount(geoChecklistRows)
+    : geoCrawl.filter((row) => row?.status === 'fail').length;
+  const geo = {
+    ...geoBlended,
+    score: applyNoPenalty(geoBlended.score, geoNos)
+  };
 
   const rank = context.localRank || null;
   const inPack = rank && typeof rank.position === 'number';
