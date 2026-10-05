@@ -6,9 +6,15 @@ import { createSalesLead, bulkImportSalesLeads, convertLeadToCustomer, ensureCrm
 import { fetchAdminLeadMetadataMap } from './leadHelpers';
 import { fetchLatestAuditEmailShareMap, shareInfoForAudit } from '../lib/auditEmailSends';
 import {
+    newLeadObservationEmailToken,
+    leadEmailOpenTrackingUrl,
+    leadEmailLogoTrackingUrl,
+    leadFullAuditRequestUrl,
+    recordLeadObservationEmailSend,
     fetchLatestLeadObservationEmailShareMap,
     shareInfoForLeadObservation
 } from '../lib/leadObservationEmailSends';
+import { sendLeadObservationsEmail } from '../lib/bookingEmail';
 import { reportShareUrl } from '../lib/zappSitesAuditProxy';
 
 const router = Router();
@@ -1184,7 +1190,12 @@ router.post('/crm/leads/bulk-assign', requireAdmin, async (req: Request, res: Re
 router.patch('/crm/leads/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
-        const leadId = String(req.params.id);
+        const leadId = String(req.params.id || '').trim();
+        if (!leadId) {
+            return res.status(400).json({ error: 'Lead ID is required.' });
+        }
+        const allLeadIds = await resolveAllLeadIds(leadId);
+
         const {
             assignedTo,
             status,
@@ -1207,7 +1218,7 @@ router.patch('/crm/leads/:id', requireAdmin, async (req: Request, res: Response)
         } = req.body || {};
 
         const updates: string[] = ['updated_at = NOW()'];
-        const params: any[] = [leadId];
+        const params: any[] = [allLeadIds];
 
         if (assignedTo !== undefined) {
             params.push(assignedTo || null);
@@ -1289,7 +1300,7 @@ router.patch('/crm/leads/:id', requireAdmin, async (req: Request, res: Response)
         const { rows } = await query(`
             UPDATE sales_leads
             SET ${updates.join(', ')}
-            WHERE id::text = $1
+            WHERE id::text = ANY($1::text[])
             RETURNING *
         `, params);
 
@@ -1297,8 +1308,8 @@ router.patch('/crm/leads/:id', requireAdmin, async (req: Request, res: Response)
         if (!rows.length) {
             // Check if it's a submission ID
             const { rows: subRows } = await query(`
-                SELECT id, type, email, payload FROM submissions WHERE id::text = $1 LIMIT 1
-            `, [leadId]);
+                SELECT id, type, email, payload FROM submissions WHERE id::text = ANY($1::text[]) LIMIT 1
+            `, [allLeadIds]);
             if (subRows[0]) {
                 const sub = subRows[0];
                 const p = sub.payload || {};
@@ -1319,6 +1330,62 @@ router.patch('/crm/leads/:id', requireAdmin, async (req: Request, res: Response)
             } else {
                 return res.status(404).json({ error: 'Lead not found' });
             }
+        }
+
+        // Keep submissions table in sync if any linked submission exists
+        try {
+            const cleanEmail = email !== undefined ? String(email).trim().toLowerCase() : '';
+            const cleanName = name !== undefined ? String(name).trim() : '';
+            const cleanPhone = phone !== undefined ? String(phone).trim() : '';
+            const cleanWeb = website !== undefined ? String(website).trim() : '';
+            const cleanAddr = address !== undefined ? String(address).trim() : '';
+
+            if (cleanEmail) {
+                await query(
+                    `UPDATE submissions 
+                     SET email = $1, 
+                         payload = jsonb_set(COALESCE(payload, '{}'::jsonb), '{email}', to_jsonb($1::text))
+                     WHERE id::text = ANY($2::text[])`,
+                    [cleanEmail, allLeadIds]
+                );
+            }
+            if (cleanName) {
+                await query(
+                    `UPDATE submissions 
+                     SET payload = jsonb_set(
+                         jsonb_set(COALESCE(payload, '{}'::jsonb), '{businessName}', to_jsonb($1::text)),
+                         '{name}', to_jsonb($1::text)
+                     )
+                     WHERE id::text = ANY($2::text[])`,
+                    [cleanName, allLeadIds]
+                );
+            }
+            if (cleanPhone) {
+                await query(
+                    `UPDATE submissions 
+                     SET payload = jsonb_set(COALESCE(payload, '{}'::jsonb), '{phone}', to_jsonb($1::text))
+                     WHERE id::text = ANY($2::text[])`,
+                    [cleanPhone, allLeadIds]
+                );
+            }
+            if (cleanWeb) {
+                await query(
+                    `UPDATE submissions 
+                     SET payload = jsonb_set(COALESCE(payload, '{}'::jsonb), '{website}', to_jsonb($1::text))
+                     WHERE id::text = ANY($2::text[])`,
+                    [cleanWeb, allLeadIds]
+                );
+            }
+            if (cleanAddr) {
+                await query(
+                    `UPDATE submissions 
+                     SET payload = jsonb_set(COALESCE(payload, '{}'::jsonb), '{address}', to_jsonb($1::text))
+                     WHERE id::text = ANY($2::text[])`,
+                    [cleanAddr, allLeadIds]
+                );
+            }
+        } catch (subSyncErr) {
+            console.warn('Could not sync update to submissions table:', subSyncErr);
         }
 
         if (status !== undefined || (notes !== undefined && String(notes).trim())) {
@@ -1658,6 +1725,131 @@ router.delete('/crm/leads/:id', requireAdmin, async (req: Request, res: Response
     } catch (err: any) {
         console.error('Admin delete lead error:', err);
         res.status(500).json({ error: err.message || 'Failed to delete lead' });
+    }
+});
+
+/** Admin: Send lead observations email (GBP & AI visibility) to customer */
+router.post('/crm/leads/:id/share-observations-email', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const leadId = String(req.params.id || '').trim();
+        const adminUser = (req as any).user;
+        const adminId = adminUser?.id ? String(adminUser.id) : null;
+        if (!leadId) {
+            return res.status(400).json({ success: false, error: 'Missing lead id' });
+        }
+
+        const allLeadIds = await resolveAllLeadIds(leadId);
+        const { rows: salesRows } = await query(
+            `SELECT id, name, email, gbp_observation, ai_visibility_observation
+             FROM sales_leads WHERE id::text = ANY($1::text[]) LIMIT 1`,
+            [allLeadIds]
+        );
+        let businessName = String(salesRows[0]?.name || '').trim();
+        let email = String(salesRows[0]?.email || '').trim().toLowerCase();
+        let gbp = String(salesRows[0]?.gbp_observation || '').trim();
+        let ai = String(salesRows[0]?.ai_visibility_observation || '').trim();
+        const canonicalLeadId = String(salesRows[0]?.id || leadId);
+
+        if (!email || (!gbp && !ai)) {
+            const metaMap = await fetchAdminLeadMetadataMap([leadId]);
+            const meta = metaMap.get(leadId) || {};
+            businessName = businessName || String(meta.businessName || '').trim();
+            email = email || String(meta.email || '').trim().toLowerCase();
+            gbp = gbp || String(meta.gbpObservation || '').trim();
+            ai = ai || String(meta.aiVisibilityObservation || '').trim();
+        }
+
+        const bodyEmail = String((req.body as { email?: string } | undefined)?.email || '')
+            .trim()
+            .toLowerCase();
+        if (bodyEmail) email = bodyEmail;
+
+        if (!email || !email.includes('@')) {
+            return res.status(400).json({
+                success: false,
+                error: 'A valid business email is required to send observations.'
+            });
+        }
+        if (!gbp && !ai) {
+            return res.status(400).json({
+                success: false,
+                error: 'Add GBP or AI visibility observations before emailing.'
+            });
+        }
+
+        // Persist prompted / override email so the lead profile shows the real recipient
+        if (bodyEmail || !String(salesRows[0]?.email || '').trim()) {
+            try {
+                await query(`UPDATE sales_leads SET email = $1, updated_at = NOW() WHERE id::text = $2`, [
+                    email,
+                    canonicalLeadId
+                ]);
+            } catch (emailSaveErr) {
+                console.warn('Could not persist observation recipient email on lead:', emailSaveErr);
+            }
+        }
+
+        const openToken = newLeadObservationEmailToken();
+        const openTrackingUrl = leadEmailOpenTrackingUrl(openToken);
+        const logoTrackingUrl = leadEmailLogoTrackingUrl(openToken);
+        const requestFullAuditUrl = leadFullAuditRequestUrl(openToken);
+
+        const result = await sendLeadObservationsEmail({
+            to: email,
+            businessName: businessName || 'there',
+            gbpObservation: gbp || null,
+            aiVisibilityObservation: ai || null,
+            openTrackingUrl,
+            logoTrackingUrl,
+            requestFullAuditUrl
+        });
+
+        if (!result.sent) {
+            return res.status(502).json({
+                success: false,
+                error:
+                    (result as { error?: string }).error ||
+                    'Email could not be delivered via SES. Check sender identity and try again.'
+            });
+        }
+
+        await recordLeadObservationEmailSend({
+            token: openToken,
+            leadId: canonicalLeadId,
+            toEmail: email,
+            sentByUserId: adminId
+        });
+
+        try {
+            const authorName = adminUser?.name || 'Admin';
+            await query(
+                `INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note)
+                 VALUES ($1, $2, $3, 'note', 'observation_email', $4)`,
+                [
+                    canonicalLeadId,
+                    adminId,
+                    authorName,
+                    `Sent observation email (GBP / AI visibility) to ${email}`
+                ]
+            );
+        } catch (actErr) {
+            console.warn('Could not record observation email activity:', actErr);
+        }
+
+        return res.json({
+            success: true,
+            to: email,
+            emailShareStatus: 'sent',
+            observationEmailShareStatus: 'sent',
+            messageId: (result as { messageId?: string | null }).messageId || null
+        });
+    } catch (err: any) {
+        console.error('Admin share-observations-email error:', err);
+        res.status(500).json({
+            success: false,
+            error: err.message || 'Failed to email observations'
+        });
     }
 });
 

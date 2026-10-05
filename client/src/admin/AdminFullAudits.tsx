@@ -13,6 +13,7 @@ import {
     Globe2,
     Inbox,
     Loader2,
+    Mail,
     MapPinned,
     Plus,
     RefreshCw,
@@ -79,16 +80,22 @@ function isReadyAudit(a: FullAuditListItem) {
 }
 
 function auditsReadyForRequest(req: FullAuditRequest, audits: FullAuditListItem[]) {
+    const linked = String(req.fulfilledAuditId || '').trim();
+    if (linked) {
+        const found = audits.find((a) => a.id === linked && isReadyAudit(a));
+        if (found) return [found];
+    }
     const email = normalizeMatch(req.toEmail);
     const name = normalizeMatch(req.businessName);
-    const linked = String(req.fulfilledAuditId || '').trim();
+    if (!name && !email) return [];
+
     return audits.filter((a) => {
         if (!isReadyAudit(a)) return false;
         if (linked && a.id === linked) return true;
         const aEmail = normalizeMatch(a.email);
         const aName = normalizeMatch(a.businessName);
-        if (email && aEmail && email === aEmail) return true;
-        if (name && aName && (aName === name || aName.includes(name) || name.includes(aName))) return true;
+        if (name && aName && name === aName) return true;
+        if (email && aEmail && email === aEmail && (!name || !aName || name === aName)) return true;
         return false;
     });
 }
@@ -888,6 +895,7 @@ export default function AdminFullAudits() {
                                 <thead className="bg-[#F8FAFC] text-[11px] uppercase tracking-wider text-[#64748B]">
                                     <tr>
                                         <th className="px-5 py-3 font-bold">Business</th>
+                                        <th className="px-4 py-3 font-bold whitespace-nowrap">Source</th>
                                         <th className="px-4 py-3 font-bold">Sales Agent</th>
                                         <th className="px-4 py-3 font-bold">Contact</th>
                                         <th className="px-4 py-3 font-bold">Requested</th>
@@ -904,18 +912,40 @@ export default function AdminFullAudits() {
                                             Boolean(req.assignedToUserId || req.assignedAgentName);
                                         const isOpen =
                                             req.status === 'pending' || req.status === 'in_progress';
+                                        const isCustomerEmail =
+                                            String(req.source || '').toLowerCase().includes('email') ||
+                                            Boolean(req.observationEmailToken);
+                                        const isSalesRequest =
+                                            String(req.source || '').toLowerCase().includes('sales');
 
                                         return (
                                         <tr key={req.id} className="align-middle hover:bg-[#F8FAFC]/70 transition-colors">
-                                            <td className="px-5 py-3.5">
-                                                <div className="font-bold text-[#0F172A]">{req.businessName || '—'}</div>
+                                            <td className="px-4 py-3">
+                                                <div className="font-bold text-[#0F172A] leading-snug">{req.businessName || '—'}</div>
                                                 {req.fulfilledAuditId ? (
-                                                    <div className="text-[11px] text-emerald-700 mt-0.5 font-mono">
+                                                    <div className="text-[10px] text-emerald-700 mt-0.5 font-mono">
                                                         Audit: {req.fulfilledAuditId.slice(0, 8)}…
                                                     </div>
                                                 ) : null}
                                             </td>
-                                            <td className="px-4 py-3.5">
+                                            <td className="px-3 py-3 whitespace-nowrap">
+                                                {isCustomerEmail ? (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200/80">
+                                                        <Mail className="w-2.5 h-2.5 text-sky-600" />
+                                                        <span>Customer Email</span>
+                                                    </span>
+                                                ) : isSalesRequest ? (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-violet-50 text-violet-700 border border-violet-200/80">
+                                                        <UserCheck className="w-2.5 h-2.5 text-violet-600" />
+                                                        <span>Sales Request</span>
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-50 text-slate-600 border border-slate-200">
+                                                        <span>Direct</span>
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3">
                                                 {req.assignedAgentName || req.assignedAgentEmail ? (
                                                     <div>
                                                         <div className="text-xs font-bold text-[#0F172A]">
@@ -931,8 +961,8 @@ export default function AdminFullAudits() {
                                                     <span className="text-xs text-[#94A3B8] italic">Unassigned</span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3.5 text-xs text-[#334155] whitespace-nowrap">{req.toEmail || '—'}</td>
-                                            <td className="px-4 py-3.5 text-xs text-[#64748B] whitespace-nowrap">
+                                            <td className="px-4 py-3 text-xs text-[#334155] whitespace-nowrap">{req.toEmail || '—'}</td>
+                                            <td className="px-4 py-3 text-xs text-[#64748B] whitespace-nowrap">
                                                 {req.requestedAt
                                                     ? new Date(req.requestedAt).toLocaleString(undefined, {
                                                           month: 'short',
@@ -970,26 +1000,26 @@ export default function AdminFullAudits() {
                                                 <div className="inline-flex items-center justify-end gap-2.5 whitespace-nowrap">
                                                     {isOpen ? (
                                                         <>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openNewFormFromRequest(req)}
+                                                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-[#F59E0B] text-[#0F172A] hover:bg-[#FBBF24] transition-all shadow-2xs cursor-pointer whitespace-nowrap"
+                                                                title="Run and generate a full audit PDF for this request"
+                                                            >
+                                                                <Plus className="w-3 h-3" />
+                                                                <span>Run audit</span>
+                                                            </button>
                                                             {hasReadyAudit ? (
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => openAssignModal(req)}
                                                                     className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-[#0F172A] text-white hover:bg-[#1E293B] transition-all shadow-2xs cursor-pointer whitespace-nowrap"
+                                                                    title="Assign existing ready audit to sales agent"
                                                                 >
                                                                     <Check className="w-3 h-3" />
                                                                     <span>Assign</span>
                                                                 </button>
-                                                            ) : (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => openNewFormFromRequest(req)}
-                                                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-[#F59E0B] text-[#0F172A] hover:bg-[#FBBF24] transition-all shadow-2xs cursor-pointer whitespace-nowrap"
-                                                                    title="Publish a full audit PDF before assigning"
-                                                                >
-                                                                    <Plus className="w-3 h-3" />
-                                                                    <span>Run audit</span>
-                                                                </button>
-                                                            )}
+                                                            ) : null}
                                                             <button
                                                                 type="button"
                                                                 onClick={() =>

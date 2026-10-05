@@ -232,47 +232,50 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
     } catch {}
 
     
-    const missing = leadIds.filter((id) => !map.has(id));
-    if (missing.length) {
-        try {
-            const { rows: salesRows } = await query(
-                `SELECT * FROM sales_leads WHERE id::text = ANY($1::text[])`,
-                [missing]
-            );
-            for (const row of salesRows) {
-                const auditId = String(row.audit_id || '').trim() || null;
-                map.set(String(row.id), {
-                    id: String(row.id),
-                    businessName: row.name || 'Lead',
-                    phone: row.phone || '',
-                    email: row.email || '',
-                    website: row.website || '',
-                    address: row.address || '',
-                    city: '',
-                    scoreTotal: null,
-                    reportUrl: auditId ? `${zappSitesOrigin()}/audit-report/${auditId}` : null,
-                    source: row.source || 'sales_lead',
-                    auditId,
-                    industry: cleanBusinessCategory(row.industry),
-                    status: row.status || 'new',
-                    notes: row.notes || null,
-                    gbpObservation: row.gbp_observation || null,
-                    aiVisibilityObservation: row.ai_visibility_observation || null,
-                    leadOpportunity: row.lead_opportunity || null,
-                    opportunityLevel: row.opportunity_level || null,
-                    isCustomer: Boolean(row.is_customer),
-                    convertedAt: row.converted_at || null,
-                    assignedTo: row.assigned_to || null,
-                    assignedAgentName: row.assigned_agent_name || null,
-                    spreadsheetStatus: row.spreadsheet_status || '',
-                    spreadsheetStatus1: row.spreadsheet_status_1 || '',
-                    spreadsheetStatus2: row.spreadsheet_status_2 || '',
-                    spreadsheetStatus3: row.spreadsheet_status_3 || '',
-                    updatedAt: row.updated_at || row.created_at || null
-                });
-            }
-        } catch {}
-    }
+    // 2. Query sales_leads for all IDs to overlay/merge CRM edits (email, phone, name, notes, etc.)
+    try {
+        const { rows: salesRows } = await query(
+            `SELECT l.*, u.name AS assigned_agent_name, u.email AS assigned_agent_email
+             FROM sales_leads l
+             LEFT JOIN users u ON u.id = l.assigned_to
+             WHERE l.id::text = ANY($1::text[])`,
+            [leadIds]
+        );
+        for (const row of salesRows) {
+            const auditId = String(row.audit_id || '').trim() || null;
+            const idKey = String(row.id);
+            const existing = map.get(idKey);
+            map.set(idKey, {
+                id: idKey,
+                businessName: row.name || existing?.businessName || 'Lead',
+                phone: row.phone || existing?.phone || '',
+                email: (row.email || existing?.email || '').trim().toLowerCase(),
+                website: row.website || existing?.website || '',
+                address: row.address || existing?.address || '',
+                city: existing?.city || '',
+                scoreTotal: existing?.scoreTotal ?? null,
+                reportUrl: existing?.reportUrl || (auditId ? `${zappSitesOrigin()}/audit-report/${auditId}` : null),
+                source: row.source || existing?.source || 'sales_lead',
+                auditId: auditId || existing?.auditId || null,
+                industry: cleanBusinessCategory(row.industry) || existing?.industry || '',
+                status: row.status || existing?.status || 'new',
+                notes: row.notes || existing?.notes || null,
+                gbpObservation: row.gbp_observation || existing?.gbpObservation || null,
+                aiVisibilityObservation: row.ai_visibility_observation || existing?.aiVisibilityObservation || null,
+                leadOpportunity: row.lead_opportunity || existing?.leadOpportunity || null,
+                opportunityLevel: row.opportunity_level || existing?.opportunityLevel || null,
+                isCustomer: Boolean(row.is_customer ?? existing?.isCustomer),
+                convertedAt: row.converted_at || existing?.convertedAt || null,
+                assignedTo: row.assigned_to || existing?.assignedTo || null,
+                assignedAgentName: row.assigned_agent_name || existing?.assignedAgentName || null,
+                spreadsheetStatus: row.spreadsheet_status || existing?.spreadsheetStatus || '',
+                spreadsheetStatus1: row.spreadsheet_status_1 || existing?.spreadsheetStatus1 || '',
+                spreadsheetStatus2: row.spreadsheet_status_2 || existing?.spreadsheetStatus2 || '',
+                spreadsheetStatus3: row.spreadsheet_status_3 || existing?.spreadsheetStatus3 || '',
+                updatedAt: row.updated_at || row.created_at || existing?.updatedAt || null
+            });
+        }
+    } catch {}
 
     return map;
 }

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, type ElementType } from 'react';
 import {
     X,
-    CheckCircle2,
     Check,
     Calendar,
     User,
@@ -112,7 +111,6 @@ export default function LeadCrmDrawer({
     onViewDetails
 }: LeadCrmDrawerProps) {
     const { show } = useToast();
-    const [activeTab, setActiveTab] = useState<'tasks' | 'activities'>('tasks');
     const [tasks, setTasks] = useState<LeadTask[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -337,33 +335,6 @@ export default function LeadCrmDrawer({
                         aria-label="Close"
                     >
                         <X className="w-5 h-5" />
-                    </button>
-                </div>
-
-                <div className="flex border-b border-slate-200 bg-white px-6 shrink-0">
-                    <button
-                        onClick={() => setActiveTab('tasks')}
-                        className={cn(
-                            'py-3 px-1 mr-6 text-sm font-semibold border-b-2 flex items-center gap-2 transition-colors',
-                            activeTab === 'tasks'
-                                ? 'border-amber-500 text-amber-600'
-                                : 'border-transparent text-slate-500 hover:text-slate-700'
-                        )}
-                    >
-                        <CheckCircle2 className="w-4 h-4" />
-                        Tasks & Assignment
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('activities')}
-                        className={cn(
-                            'py-3 px-1 text-sm font-semibold border-b-2 flex items-center gap-2 transition-colors',
-                            activeTab === 'activities'
-                                ? 'border-amber-500 text-amber-600'
-                                : 'border-transparent text-slate-500 hover:text-slate-700'
-                        )}
-                    >
-                        <Clock className="w-4 h-4" />
-                        Call Logs & History
                     </button>
                 </div>
 

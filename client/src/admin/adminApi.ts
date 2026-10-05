@@ -314,6 +314,47 @@ export async function shareFullAuditEmail(
     return adminPost(`/api/admin/full-audits/${encodeURIComponent(id)}/share-email`, body);
 }
 
+export async function shareLeadObservationsEmail(
+    leadId: string,
+    opts?: { email?: string }
+): Promise<{
+    success: boolean;
+    to: string;
+    emailShareStatus?: string;
+    observationEmailShareStatus?: string;
+}> {
+    const body: { email?: string } = {};
+    if (opts?.email) body.email = opts.email;
+    return adminPost(`/api/admin/crm/leads/${encodeURIComponent(leadId)}/share-observations-email`, body);
+}
+
+export async function confirmAndShareLeadObservationsEmail(opts: {
+    leadId: string;
+    businessName?: string | null;
+    email?: string | null;
+}): Promise<{ to: string } | null> {
+    let email = String(opts.email || '').trim();
+    if (!email || !email.includes('@')) {
+        const entered = window.prompt(
+            'This lead has no company email. Enter the email address to send observations to:'
+        );
+        email = String(entered || '').trim();
+        if (!email || !email.includes('@')) {
+            throw new Error('A valid company email is required to send observations.');
+        }
+    }
+    const biz = opts.businessName || 'this business';
+    if (
+        !window.confirm(
+            `Email GBP & AI visibility observations to ${email} for “${biz}”?`
+        )
+    ) {
+        return null;
+    }
+    const res = await shareLeadObservationsEmail(opts.leadId, { email });
+    return { to: res.to };
+}
+
 export type FullAuditRequest = {
     id: string;
     leadId: string;
@@ -321,6 +362,7 @@ export type FullAuditRequest = {
     toEmail: string;
     status: 'pending' | 'in_progress' | 'completed' | 'dismissed' | string;
     source?: string;
+    observationEmailToken?: string | null;
     requestedAt?: string | null;
     fulfilledAuditId?: string | null;
     assignedToUserId?: string | null;
