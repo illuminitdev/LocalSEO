@@ -250,6 +250,27 @@ router.post('/full-audits/:id/share-email', requireAdmin, async (req: Request, r
             });
         }
 
+        try {
+            const authorName = (req as any).admin?.name || (req as any).user?.name || 'Admin';
+            const { rows: matchedLeads } = await query(
+                `SELECT id FROM sales_leads WHERE audit_id = $1 OR id::text = $1 LIMIT 1`,
+                [id]
+            );
+            const leadIdToRecord = matchedLeads[0]?.id ? String(matchedLeads[0].id) : id;
+            await query(
+                `INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note)
+                 VALUES ($1, $2, $3, 'note', 'audit_email', $4)`,
+                [
+                    leadIdToRecord,
+                    adminId,
+                    authorName,
+                    `Sent full audit PDF report to ${email}`
+                ]
+            );
+        } catch (actErr) {
+            console.warn('Could not record audit share email activity:', actErr);
+        }
+
         return res.json({
             success: true,
             to: email,

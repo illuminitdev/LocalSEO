@@ -32,6 +32,7 @@ import {
     fetchSalesAgents,
     convertAdminCrmLead,
     shareFullAuditEmail,
+    confirmAndShareLeadObservationsEmail,
     updateCrmTask
 } from './adminApi';
 import { cn } from '../shared/utils';
@@ -55,6 +56,7 @@ export default function AdminLeadDetail() {
     const [error, setError] = useState('');
     const [converting, setConverting] = useState(false);
     const [sharingAudit, setSharingAudit] = useState(false);
+    const [sharingObservations, setSharingObservations] = useState(false);
     const [editingTask, setEditingTask] = useState<LeadTask | null>(null);
     const [selectedHistoryTask, setSelectedHistoryTask] = useState<LeadTask | null>(null);
     const [showLeadHistoryModal, setShowLeadHistoryModal] = useState(false);
@@ -173,6 +175,26 @@ export default function AdminLeadDetail() {
         }
     };
 
+    const handleEmailObservations = async () => {
+        if (!id) return;
+        setSharingObservations(true);
+        setError('');
+        try {
+            const res = await confirmAndShareLeadObservationsEmail({
+                leadId: id,
+                businessName: lead?.businessName,
+                email: lead?.email
+            });
+            if (!res) return;
+            show(`Observations emailed to ${res.to}.`);
+            await loadLead();
+        } catch (err: any) {
+            setError(err.message || 'Could not email observations');
+        } finally {
+            setSharingObservations(false);
+        }
+    };
+
     if (loading && !lead) {
         return (
             <div className="p-12 text-center text-slate-500">
@@ -271,39 +293,6 @@ export default function AdminLeadDetail() {
                         </a>
                     )}
 
-                    {lead.auditId ? (
-                        <>
-                            {shareLabel ? (
-                                <div className="flex flex-col items-end gap-0.5">
-                                    <span
-                                        className={cn(
-                                            'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
-                                            lead.emailShareStatus === 'opened'
-                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                                : 'bg-slate-50 text-slate-600 border-slate-200'
-                                        )}
-                                        title={emailShareStatusHint(lead.emailShareStatus, auditTimes)}
-                                    >
-                                        Audit email: {shareLabel}
-                                    </span>
-                                    {auditTimeLines.map((line) => (
-                                        <span key={line} className="text-[10px] font-medium text-slate-500 whitespace-nowrap">
-                                            {line}
-                                        </span>
-                                    ))}
-                                </div>
-                            ) : null}
-                            <button
-                                type="button"
-                                onClick={handleEmailAuditPdf}
-                                disabled={sharingAudit}
-                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-900 hover:bg-amber-100 text-xs font-bold rounded-xl transition-colors shadow-2xs disabled:opacity-50"
-                            >
-                                <Mail className={cn('w-3.5 h-3.5', sharingAudit && 'animate-pulse')} />
-                                <span>{sharingAudit ? 'Sending…' : 'Email PDF'}</span>
-                            </button>
-                        </>
-                    ) : null}
                     {emailShareStatusLabel(lead.observationEmailShareStatus) ? (
                         <div className="flex flex-col items-end gap-0.5">
                             <span
@@ -323,6 +312,65 @@ export default function AdminLeadDetail() {
                                 </span>
                             ))}
                         </div>
+                    ) : null}
+                    <button
+                        type="button"
+                        onClick={handleEmailObservations}
+                        disabled={
+                            sharingObservations ||
+                            !(
+                                String(lead.gbpObservation || '').trim() ||
+                                String(lead.aiVisibilityObservation || '').trim()
+                            )
+                        }
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-800 hover:bg-indigo-100 text-xs font-bold rounded-xl transition-colors shadow-2xs disabled:opacity-50"
+                        title={
+                            !(
+                                String(lead.gbpObservation || '').trim() ||
+                                String(lead.aiVisibilityObservation || '').trim()
+                            )
+                                ? 'Add GBP or AI visibility observations before emailing'
+                                : lead.email
+                                  ? `Email observations to ${lead.email}`
+                                  : 'Email GBP & AI visibility observations'
+                        }
+                    >
+                        <Mail className={cn('w-3.5 h-3.5', sharingObservations && 'animate-pulse')} />
+                        <span>{sharingObservations ? 'Sending…' : 'Email'}</span>
+                    </button>
+
+                    {lead.auditId ? (
+                        <>
+                            {shareLabel ? (
+                                <div className="flex flex-col items-end gap-0.5">
+                                    <span
+                                        className={cn(
+                                            'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
+                                            lead.emailShareStatus === 'opened'
+                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                : 'bg-slate-50 text-slate-600 border-slate-200'
+                                        )}
+                                        title={emailShareStatusHint(lead.emailShareStatus, auditTimes)}
+                                    >
+                                        PDF: {shareLabel}
+                                    </span>
+                                    {auditTimeLines.map((line) => (
+                                        <span key={line} className="text-[10px] font-medium text-slate-500 whitespace-nowrap">
+                                            {line}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : null}
+                            <button
+                                type="button"
+                                onClick={handleEmailAuditPdf}
+                                disabled={sharingAudit}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-900 hover:bg-amber-100 text-xs font-bold rounded-xl transition-colors shadow-2xs disabled:opacity-50"
+                            >
+                                <Mail className={cn('w-3.5 h-3.5', sharingAudit && 'animate-pulse')} />
+                                <span>{sharingAudit ? 'Sending…' : 'Email PDF'}</span>
+                            </button>
+                        </>
                     ) : null}
                 </div>
             </div>
