@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, type ElementType } from 'react';
 import {
     X,
-    CheckCircle2,
     Check,
     Calendar,
     User,
