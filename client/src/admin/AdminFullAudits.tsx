@@ -598,6 +598,10 @@ export default function AdminFullAudits() {
             setError('City is required');
             return;
         }
+        if (!form.website.trim()) {
+            setError('Website URL is required');
+            return;
+        }
         if (!isValidEmailOrPhone(form.contact)) {
             setError('Enter a valid email or phone number');
             return;
@@ -1249,9 +1253,10 @@ export default function AdminFullAudits() {
                                 ) : null}
                             </div>
                             <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
-                                Website
+                                Website <span className="text-red-500">*</span>
                                 <input
-                                    placeholder="https:// (optional)"
+                                    required
+                                    placeholder="https://"
                                     value={form.website}
                                     onChange={(e) => setForm({ ...form, website: e.target.value })}
                                     className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"

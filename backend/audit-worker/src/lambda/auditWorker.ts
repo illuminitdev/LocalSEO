@@ -811,7 +811,7 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  // AEO Visual: ChatGPT writes 4 searches for this service, then Google screenshots those searches.
+  // AEO Visual: one "{service}s in {city}" search, plus three ChatGPT searches, then Google screenshots all four.
   let aeoSpecs = buildAeoQuerySpecs(audit);
   try {
     const lines = await suggestAeoGoogleSearches({
