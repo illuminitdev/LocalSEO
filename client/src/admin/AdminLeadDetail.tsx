@@ -19,7 +19,9 @@ import {
     X,
     History,
     Pencil,
-    Award
+    Award,
+    ChevronLeft,
+    ChevronRight
 } from 'lucide-react';
 import LeadStatusHistoryModal from './LeadStatusHistoryModal';
 import EditTaskModal from './EditTaskModal';
@@ -62,6 +64,20 @@ export default function AdminLeadDetail() {
     const [showLeadHistoryModal, setShowLeadHistoryModal] = useState(false);
     const [confirmModalTask, setConfirmModalTask] = useState<{ task: LeadTask } | null>(null);
     const [modalLoading, setModalLoading] = useState(false);
+    const [taskPage, setTaskPage] = useState(1);
+    const [activityPage, setActivityPage] = useState(1);
+
+    const TASKS_PER_PAGE = 5;
+    const ACTIVITIES_PER_PAGE = 5;
+
+    const totalTaskPages = Math.max(1, Math.ceil(tasks.length / TASKS_PER_PAGE));
+    const totalActivityPages = Math.max(1, Math.ceil(activities.length / ACTIVITIES_PER_PAGE));
+
+    const currentTaskPage = Math.min(taskPage, totalTaskPages);
+    const currentActivityPage = Math.min(activityPage, totalActivityPages);
+
+    const paginatedTasks = tasks.slice((currentTaskPage - 1) * TASKS_PER_PAGE, currentTaskPage * TASKS_PER_PAGE);
+    const paginatedActivities = activities.slice((currentActivityPage - 1) * ACTIVITIES_PER_PAGE, currentActivityPage * ACTIVITIES_PER_PAGE);
 
     const loadLead = useCallback(async (silent = false) => {
         if (!id) return;
@@ -607,92 +623,126 @@ export default function AdminLeadDetail() {
                         {!tasks.length ? (
                             <p className="text-xs text-slate-400 text-center py-4">No tasks assigned for this lead yet.</p>
                         ) : (
-                            <ul className="space-y-2">
-                                {tasks.map((t) => {
-                                    const isDone = t.status === 'completed';
-                                    return (
-                                        <li
-                                            key={t.id}
-                                            className={cn(
-                                                'p-3 rounded-xl border space-y-2',
-                                                isDone ? 'bg-emerald-50/50 border-emerald-300' : 'bg-white border-slate-200'
-                                            )}
-                                        >
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                                        <p className={cn('text-xs font-bold', isDone ? 'text-emerald-950' : 'text-slate-900')}>
-                                                            {t.title}
-                                                        </p>
-                                                        {t.createdByRole === 'admin' ? (
-                                                            <span className="inline-flex items-center gap-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
-                                                                <Shield className="w-2.5 h-2.5" />
-                                                                Admin
-                                                            </span>
-                                                        ) : (
-                                                            <span className="inline-flex items-center gap-0.5 rounded border border-slate-200 bg-slate-100 text-slate-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
-                                                                <User className="w-2.5 h-2.5" />
-                                                                Agent
-                                                            </span>
+                            <>
+                                <ul className="space-y-2">
+                                    {paginatedTasks.map((t) => {
+                                        const isDone = t.status === 'completed';
+                                        return (
+                                            <li
+                                                key={t.id}
+                                                className={cn(
+                                                    'p-3 rounded-xl border space-y-2',
+                                                    isDone ? 'bg-emerald-50/50 border-emerald-300' : 'bg-white border-slate-200'
+                                                )}
+                                            >
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <p className={cn('text-xs font-bold', isDone ? 'text-emerald-950' : 'text-slate-900')}>
+                                                                {t.title}
+                                                            </p>
+                                                            {t.createdByRole === 'admin' ? (
+                                                                <span className="inline-flex items-center gap-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                                    <Shield className="w-2.5 h-2.5" />
+                                                                    Admin
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-flex items-center gap-0.5 rounded border border-slate-200 bg-slate-100 text-slate-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                                    <User className="w-2.5 h-2.5" />
+                                                                    Agent
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        {t.dueDate && (
+                                                            <p className="text-[10px] mt-1 flex items-center gap-1 text-slate-400">
+                                                                <Calendar className="w-3 h-3" />
+                                                                Due: {new Date(t.dueDate).toLocaleString(undefined, { month: 'short', day: 'numeric' })}
+                                                            </p>
+                                                        )}
+                                                        {t.notes && (
+                                                            <p className="text-[11px] text-slate-600 mt-1.5 whitespace-pre-wrap flex items-start gap-1.5">
+                                                                <MessageSquare className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
+                                                                <span>{t.notes}</span>
+                                                            </p>
                                                         )}
                                                     </div>
-                                                    {t.dueDate && (
-                                                        <p className="text-[10px] mt-1 flex items-center gap-1 text-slate-400">
-                                                            <Calendar className="w-3 h-3" />
-                                                            Due: {new Date(t.dueDate).toLocaleString(undefined, { month: 'short', day: 'numeric' })}
-                                                        </p>
-                                                    )}
-                                                    {t.notes && (
-                                                        <p className="text-[11px] text-slate-600 mt-1.5 whitespace-pre-wrap flex items-start gap-1.5">
-                                                            <MessageSquare className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
-                                                            <span>{t.notes}</span>
-                                                        </p>
-                                                    )}
-                                                </div>
-                                                <div className="shrink-0 flex flex-col items-end gap-1.5">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setSelectedHistoryTask(t)}
-                                                        className={cn(
-                                                            'inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md border cursor-pointer',
-                                                            t.status === 'completed'
-                                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                                                : t.status === 'in_progress'
-                                                                  ? 'bg-amber-50 text-amber-900 border-amber-300'
-                                                                  : t.status === 'cancelled'
-                                                                    ? 'bg-rose-50 text-rose-800 border-rose-200'
-                                                                    : 'bg-slate-50 text-slate-700 border-slate-200'
-                                                        )}
-                                                    >
-                                                        {t.status === 'completed' && <Check className="w-3 h-3" />}
-                                                        {t.status === 'in_progress' && <Clock className="w-3 h-3" />}
-                                                        {t.status === 'cancelled' && <X className="w-3 h-3" />}
-                                                        <span className="capitalize">{t.status.replace('_', ' ')}</span>
-                                                        <History className="w-2.5 h-2.5 opacity-50" />
-                                                    </button>
-                                                    <div className="flex items-center gap-1">
+                                                    <div className="shrink-0 flex flex-col items-end gap-1.5">
                                                         <button
                                                             type="button"
-                                                            onClick={() => setEditingTask(t)}
-                                                            className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-white border border-slate-200 text-slate-700 hover:bg-amber-50"
+                                                            onClick={() => setSelectedHistoryTask(t)}
+                                                            className={cn(
+                                                                'inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-md border cursor-pointer',
+                                                                t.status === 'completed'
+                                                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                                                    : t.status === 'in_progress'
+                                                                      ? 'bg-amber-50 text-amber-900 border-amber-300'
+                                                                      : t.status === 'cancelled'
+                                                                        ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                                                        : 'bg-slate-50 text-slate-700 border-slate-200'
+                                                            )}
                                                         >
-                                                            <Pencil className="w-3 h-3 text-amber-600" />
-                                                            Edit
+                                                            {t.status === 'completed' && <Check className="w-3 h-3" />}
+                                                            {t.status === 'in_progress' && <Clock className="w-3 h-3" />}
+                                                            {t.status === 'cancelled' && <X className="w-3 h-3" />}
+                                                            <span className="capitalize">{t.status.replace('_', ' ')}</span>
+                                                            <History className="w-2.5 h-2.5 opacity-50" />
                                                         </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setConfirmModalTask({ task: t })}
-                                                            className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-amber-500 hover:bg-amber-600 text-white"
-                                                        >
-                                                            Update
-                                                        </button>
+                                                        <div className="flex items-center gap-1">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setEditingTask(t)}
+                                                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-white border border-slate-200 text-slate-700 hover:bg-amber-50"
+                                                            >
+                                                                <Pencil className="w-3 h-3 text-amber-600" />
+                                                                Edit
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setConfirmModalTask({ task: t })}
+                                                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-amber-500 hover:bg-amber-600 text-white"
+                                                            >
+                                                                Update
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        </li>
-                                    );
-                                })}
-                            </ul>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                                {totalTaskPages > 1 && (
+                                    <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 text-xs text-slate-500">
+                                        <span className="text-[11px] font-medium text-slate-500">
+                                            Showing <span className="font-bold text-slate-700">{(currentTaskPage - 1) * TASKS_PER_PAGE + 1}</span>-
+                                            <span className="font-bold text-slate-700">{Math.min(currentTaskPage * TASKS_PER_PAGE, tasks.length)}</span> of{' '}
+                                            <span className="font-bold text-slate-700">{tasks.length}</span>
+                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                disabled={currentTaskPage <= 1}
+                                                onClick={() => setTaskPage((p) => Math.max(1, p - 1))}
+                                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                aria-label="Previous page of tasks"
+                                            >
+                                                <ChevronLeft className="w-3.5 h-3.5" />
+                                            </button>
+                                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                                                {currentTaskPage} / {totalTaskPages}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                disabled={currentTaskPage >= totalTaskPages}
+                                                onClick={() => setTaskPage((p) => Math.min(totalTaskPages, p + 1))}
+                                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                aria-label="Next page of tasks"
+                                            >
+                                                <ChevronRight className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 </div>
@@ -710,65 +760,99 @@ export default function AdminLeadDetail() {
                                 <p className="text-xs font-semibold">No activity logs recorded yet.</p>
                             </div>
                         ) : (
-                            <div className="relative pl-4 space-y-4 before:absolute before:left-1.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-                                {activities.map((act) => {
-                                    const isCall = act.activityType === 'call_log';
-                                    const isTask = act.activityType === 'task_event';
-                                    const isDeleted = isTask && act.note?.toLowerCase().includes('deleted');
-                                    return (
-                                        <div key={act.id} className="relative pl-4">
-                                            <span
-                                                className={cn(
-                                                    'absolute -left-4 top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white',
-                                                    isCall
-                                                        ? 'bg-amber-500'
-                                                        : isDeleted
-                                                          ? 'bg-rose-500'
-                                                          : isTask
-                                                            ? 'bg-indigo-500'
-                                                            : 'bg-slate-400'
-                                                )}
-                                            />
-                                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-1">
-                                                <div className="flex items-center justify-between gap-1 flex-wrap">
-                                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                                        <span
-                                                            className={cn(
-                                                                'font-black uppercase tracking-wider text-[10px] px-1.5 py-0.5 rounded',
-                                                                isCall
-                                                                    ? 'bg-amber-100 text-amber-800'
-                                                                    : isDeleted
-                                                                      ? 'bg-rose-100 text-rose-800'
-                                                                      : isTask
-                                                                        ? 'bg-indigo-100 text-indigo-800'
-                                                                        : 'bg-slate-200 text-slate-700'
-                                                            )}
-                                                        >
-                                                            {act.disposition?.replace('_', ' ') || act.activityType}
-                                                        </span>
-                                                        <span className="font-bold text-slate-800 text-[11px]">
-                                                            {act.authorName || act.userName || 'Agent'}
+                            <>
+                                <div className="relative pl-4 space-y-4 before:absolute before:left-1.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+                                    {paginatedActivities.map((act) => {
+                                        const isCall = act.activityType === 'call_log';
+                                        const isTask = act.activityType === 'task_event';
+                                        const isDeleted = isTask && act.note?.toLowerCase().includes('deleted');
+                                        return (
+                                            <div key={act.id} className="relative pl-4">
+                                                <span
+                                                    className={cn(
+                                                        'absolute -left-4 top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white',
+                                                        isCall
+                                                            ? 'bg-amber-500'
+                                                            : isDeleted
+                                                              ? 'bg-rose-500'
+                                                              : isTask
+                                                                ? 'bg-indigo-500'
+                                                                : 'bg-slate-400'
+                                                    )}
+                                                />
+                                                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-1">
+                                                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <span
+                                                                className={cn(
+                                                                    'font-black uppercase tracking-wider text-[10px] px-1.5 py-0.5 rounded',
+                                                                    isCall
+                                                                        ? 'bg-amber-100 text-amber-800'
+                                                                        : isDeleted
+                                                                          ? 'bg-rose-100 text-rose-800'
+                                                                          : isTask
+                                                                            ? 'bg-indigo-100 text-indigo-800'
+                                                                            : 'bg-slate-200 text-slate-700'
+                                                                )}
+                                                            >
+                                                                {act.disposition?.replace('_', ' ') || act.activityType}
+                                                            </span>
+                                                            <span className="font-bold text-slate-800 text-[11px]">
+                                                                {act.authorName || act.userName || 'Agent'}
+                                                            </span>
+                                                        </div>
+                                                        <span className="text-[10px] text-slate-400 font-medium">
+                                                            {new Date(act.createdAt).toLocaleString(undefined, {
+                                                                month: 'short',
+                                                                day: 'numeric',
+                                                                hour: '2-digit',
+                                                                minute: '2-digit'
+                                                            })}
                                                         </span>
                                                     </div>
-                                                    <span className="text-[10px] text-slate-400 font-medium">
-                                                        {new Date(act.createdAt).toLocaleString(undefined, {
-                                                            month: 'short',
-                                                            day: 'numeric',
-                                                            hour: '2-digit',
-                                                            minute: '2-digit'
-                                                        })}
-                                                    </span>
+                                                    {act.note && (
+                                                        <p className="text-slate-600 font-medium whitespace-pre-wrap text-[11px] mt-1">
+                                                            {act.note}
+                                                        </p>
+                                                    )}
                                                 </div>
-                                                {act.note && (
-                                                    <p className="text-slate-600 font-medium whitespace-pre-wrap text-[11px] mt-1">
-                                                        {act.note}
-                                                    </p>
-                                                )}
                                             </div>
+                                        );
+                                    })}
+                                </div>
+                                {totalActivityPages > 1 && (
+                                    <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 text-xs text-slate-500">
+                                        <span className="text-[11px] font-medium text-slate-500">
+                                            Showing <span className="font-bold text-slate-700">{(currentActivityPage - 1) * ACTIVITIES_PER_PAGE + 1}</span>-
+                                            <span className="font-bold text-slate-700">{Math.min(currentActivityPage * ACTIVITIES_PER_PAGE, activities.length)}</span> of{' '}
+                                            <span className="font-bold text-slate-700">{activities.length}</span>
+                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                disabled={currentActivityPage <= 1}
+                                                onClick={() => setActivityPage((p) => Math.max(1, p - 1))}
+                                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                aria-label="Previous page of activities"
+                                            >
+                                                <ChevronLeft className="w-3.5 h-3.5" />
+                                            </button>
+                                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                                                {currentActivityPage} / {totalActivityPages}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                disabled={currentActivityPage >= totalActivityPages}
+                                                onClick={() => setActivityPage((p) => Math.min(totalActivityPages, p + 1))}
+                                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                aria-label="Next page of activities"
+                                            >
+                                                <ChevronRight className="w-3.5 h-3.5" />
+                                            </button>
                                         </div>
-                                    );
-                                })}
-                            </div>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 </div>

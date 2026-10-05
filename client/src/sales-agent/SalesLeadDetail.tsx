@@ -18,7 +18,9 @@ import {
     User,
     Bell,
     X,
-    History
+    History,
+    ChevronLeft,
+    ChevronRight
 } from 'lucide-react';
 import TaskCompletionModal, { type CrmTaskStatus } from '../shared/TaskCompletionModal';
 import LeadStatusHistoryModal from '../admin/LeadStatusHistoryModal';
@@ -77,6 +79,20 @@ export default function SalesLeadDetail() {
     const [selectedStatus, setSelectedStatus] = useState<string>('');
     const [sharingAudit, setSharingAudit] = useState(false);
     const [sharingObservations, setSharingObservations] = useState(false);
+    const [taskPage, setTaskPage] = useState(1);
+    const [activityPage, setActivityPage] = useState(1);
+
+    const TASKS_PER_PAGE = 5;
+    const ACTIVITIES_PER_PAGE = 5;
+
+    const totalTaskPages = Math.max(1, Math.ceil(tasks.length / TASKS_PER_PAGE));
+    const totalActivityPages = Math.max(1, Math.ceil(activities.length / ACTIVITIES_PER_PAGE));
+
+    const currentTaskPage = Math.min(taskPage, totalTaskPages);
+    const currentActivityPage = Math.min(activityPage, totalActivityPages);
+
+    const paginatedTasks = tasks.slice((currentTaskPage - 1) * TASKS_PER_PAGE, currentTaskPage * TASKS_PER_PAGE);
+    const paginatedActivities = activities.slice((currentActivityPage - 1) * ACTIVITIES_PER_PAGE, currentActivityPage * ACTIVITIES_PER_PAGE);
 
     const handleUpdateLeadStatus = async (newStatus: string) => {
         if (!id || updatingLeadStatus) return;
@@ -882,96 +898,130 @@ export default function SalesLeadDetail() {
                                 <p className="text-[11px] text-slate-400 mt-0.5">Use the buttons above to request an audit or add a follow-up reminder.</p>
                             </div>
                         ) : (
-                            <ul className="space-y-2">
-                                {tasks.map((t) => {
-                                    const isDone = t.status === 'completed';
-                                    const isAdminAssigned = t.createdByRole === 'admin';
-                                    const isCustomerRequested = t.createdByRole === 'customer';
-                                    const isAuditRequest = !isAdminAssigned && !isCustomerRequested && (
-                                        t.taskType === 'prepare_audit' || 
-                                        (t as any).assignedToRole === 'developer_seo' || 
-                                        (t as any).assignedToRole === 'developer' || 
-                                        (t as any).assignedToRole === 'seo'
-                                    );
-                                    return (
-                                        <li
-                                            key={t.id}
-                                            className={cn(
-                                                'p-3 sm:p-3.5 rounded-xl border flex items-center justify-between gap-3 transition-colors min-h-[58px]',
-                                                isDone ? 'bg-emerald-50/50 border-emerald-300 shadow-xs' : 'bg-white border-[#E2E8F0]'
-                                            )}
-                                        >
-                                            <div className="min-w-0 flex-1">
-                                                <div className="flex items-center gap-1.5 flex-wrap">
-                                                    <p className={cn('text-xs font-bold leading-snug', isDone ? 'text-emerald-950' : 'text-[#0F172A]')}>
-                                                        {t.title}
-                                                    </p>
-                                                    {isCustomerRequested ? (
-                                                        <span className="inline-flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 text-emerald-800 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
-                                                            <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
-                                                            Customer Inbound
-                                                        </span>
-                                                    ) : isAuditRequest ? (
-                                                        <span className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
-                                                            <BarChart3 className="w-2.5 h-2.5 text-indigo-600" />
-                                                            Audit Request (Admin / SEO)
-                                                        </span>
-                                                    ) : isAdminAssigned ? (
-                                                        <span className="inline-flex items-center gap-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
-                                                            <Shield className="w-2.5 h-2.5 text-purple-600" />
-                                                            Admin Assigned
-                                                        </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center gap-0.5 rounded border border-amber-200 bg-amber-50 text-amber-800 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
-                                                            <Bell className="w-2.5 h-2.5 text-amber-600" />
-                                                            Self Reminder
-                                                        </span>
+                            <>
+                                <ul className="space-y-2">
+                                    {paginatedTasks.map((t) => {
+                                        const isDone = t.status === 'completed';
+                                        const isAdminAssigned = t.createdByRole === 'admin';
+                                        const isCustomerRequested = t.createdByRole === 'customer';
+                                        const isAuditRequest = !isAdminAssigned && !isCustomerRequested && (
+                                            t.taskType === 'prepare_audit' || 
+                                            (t as any).assignedToRole === 'developer_seo' || 
+                                            (t as any).assignedToRole === 'developer' || 
+                                            (t as any).assignedToRole === 'seo'
+                                        );
+                                        return (
+                                            <li
+                                                key={t.id}
+                                                className={cn(
+                                                    'p-3 sm:p-3.5 rounded-xl border flex items-center justify-between gap-3 transition-colors min-h-[58px]',
+                                                    isDone ? 'bg-emerald-50/50 border-emerald-300 shadow-xs' : 'bg-white border-[#E2E8F0]'
+                                                )}
+                                            >
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <p className={cn('text-xs font-bold leading-snug', isDone ? 'text-emerald-950' : 'text-[#0F172A]')}>
+                                                            {t.title}
+                                                        </p>
+                                                        {isCustomerRequested ? (
+                                                            <span className="inline-flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 text-emerald-800 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                                <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                                                                Customer Inbound
+                                                            </span>
+                                                        ) : isAuditRequest ? (
+                                                            <span className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                                <BarChart3 className="w-2.5 h-2.5 text-indigo-600" />
+                                                                Audit Request (Admin / SEO)
+                                                            </span>
+                                                        ) : isAdminAssigned ? (
+                                                            <span className="inline-flex items-center gap-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                                <Shield className="w-2.5 h-2.5 text-purple-600" />
+                                                                Admin Assigned
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-0.5 rounded border border-amber-200 bg-amber-50 text-amber-800 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                                <Bell className="w-2.5 h-2.5 text-amber-600" />
+                                                                Self Reminder
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {t.dueDate && (
+                                                        <p className={cn("text-[10px] mt-1 flex items-center gap-1", isDone ? "text-emerald-700" : "text-[#94A3B8]")}>
+                                                            <Calendar className="w-3 h-3" />
+                                                            Due: {new Date(t.dueDate).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                        </p>
                                                     )}
                                                 </div>
-                                                {t.dueDate && (
-                                                    <p className={cn("text-[10px] mt-1 flex items-center gap-1", isDone ? "text-emerald-700" : "text-[#94A3B8]")}>
-                                                        <Calendar className="w-3 h-3" />
-                                                        Due: {new Date(t.dueDate).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                                                    </p>
-                                                )}
-                                            </div>
 
-                                                                         {/* Status Badge & Actions */}
-                                            <div className="shrink-0 flex items-center gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setSelectedHistoryTask(t)}
-                                                    className={cn(
-                                                        "inline-flex items-center justify-center gap-1 px-2.5 h-7 text-[11px] font-bold rounded-lg border cursor-pointer hover:shadow-xs transition-all group/badge",
-                                                        t.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100" :
-                                                        t.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100" :
-                                                        t.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100" :
-                                                        "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                                                    )}
-                                                    title="Click to view full lead status history timeline"
-                                                >
-                                                    {t.status === 'completed' && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
-                                                    {t.status === 'in_progress' && <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
-                                                    {t.status === 'cancelled' && <X className="w-3.5 h-3.5 text-rose-600 shrink-0" />}
-                                                    <span className="capitalize whitespace-nowrap">{t.status.replace('_', ' ')}</span>
-                                                    <History className="w-3 h-3 opacity-40 group-hover/badge:opacity-100 shrink-0 ml-0.5" />
-                                                </button>
-
-                                                {!isAuditRequest && (
+                                                {/* Status Badge & Actions */}
+                                                <div className="shrink-0 flex items-center gap-2">
                                                     <button
                                                         type="button"
-                                                        onClick={() => handleOpenToggleModal(t)}
-                                                        className="inline-flex items-center justify-center px-2.5 h-7 text-[11px] font-bold rounded-lg bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-white transition-all shadow-2xs cursor-pointer whitespace-nowrap"
-                                                        title="Update Status"
+                                                        onClick={() => setSelectedHistoryTask(t)}
+                                                        className={cn(
+                                                            "inline-flex items-center justify-center gap-1 px-2.5 h-7 text-[11px] font-bold rounded-lg border cursor-pointer hover:shadow-xs transition-all group/badge",
+                                                            t.status === 'completed' ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100" :
+                                                            t.status === 'in_progress' ? "bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100" :
+                                                            t.status === 'cancelled' ? "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100" :
+                                                            "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                                                        )}
+                                                        title="Click to view full lead status history timeline"
                                                     >
-                                                        <span>Update Status</span>
+                                                        {t.status === 'completed' && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                                                        {t.status === 'in_progress' && <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
+                                                        {t.status === 'cancelled' && <X className="w-3.5 h-3.5 text-rose-600 shrink-0" />}
+                                                        <span className="capitalize whitespace-nowrap">{t.status.replace('_', ' ')}</span>
+                                                        <History className="w-3 h-3 opacity-40 group-hover/badge:opacity-100 shrink-0 ml-0.5" />
                                                     </button>
-                                                )}
-                                            </div>
-                                        </li>
-                                    );
-                                })}
-                            </ul>
+
+                                                    {!isAuditRequest && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleOpenToggleModal(t)}
+                                                            className="inline-flex items-center justify-center px-2.5 h-7 text-[11px] font-bold rounded-lg bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-white transition-all shadow-2xs cursor-pointer whitespace-nowrap"
+                                                            title="Update Status"
+                                                        >
+                                                            <span>Update Status</span>
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                                {totalTaskPages > 1 && (
+                                    <div className="flex items-center justify-between pt-3 mt-3 border-t border-[#E2E8F0] text-xs text-slate-500">
+                                        <span className="text-[11px] font-medium text-slate-500">
+                                            Showing <span className="font-bold text-slate-700">{(currentTaskPage - 1) * TASKS_PER_PAGE + 1}</span>-
+                                            <span className="font-bold text-slate-700">{Math.min(currentTaskPage * TASKS_PER_PAGE, tasks.length)}</span> of{' '}
+                                            <span className="font-bold text-slate-700">{tasks.length}</span>
+                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                disabled={currentTaskPage <= 1}
+                                                onClick={() => setTaskPage((p) => Math.max(1, p - 1))}
+                                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                aria-label="Previous page of tasks"
+                                            >
+                                                <ChevronLeft className="w-3.5 h-3.5" />
+                                            </button>
+                                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                                                {currentTaskPage} / {totalTaskPages}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                disabled={currentTaskPage >= totalTaskPages}
+                                                onClick={() => setTaskPage((p) => Math.min(totalTaskPages, p + 1))}
+                                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                aria-label="Next page of tasks"
+                                            >
+                                                <ChevronRight className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 </div>
@@ -999,53 +1049,87 @@ export default function SalesLeadDetail() {
                                 <p className="text-xs font-semibold">No activity logs recorded yet.</p>
                             </div>
                         ) : (
-                            <div className="relative pl-4 space-y-4 before:absolute before:left-1.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-[#E2E8F0]">
-                                {activities.map((act) => {
-                                    const isCall = act.activityType === 'call_log';
-                                    const isTask = act.activityType === 'task_event';
-                                    const isDeleted = isTask && act.note?.toLowerCase().includes('deleted');
+                            <>
+                                <div className="relative pl-4 space-y-4 before:absolute before:left-1.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-[#E2E8F0]">
+                                    {paginatedActivities.map((act) => {
+                                        const isCall = act.activityType === 'call_log';
+                                        const isTask = act.activityType === 'task_event';
+                                        const isDeleted = isTask && act.note?.toLowerCase().includes('deleted');
 
-                                    return (
-                                        <div key={act.id} className="relative pl-4">
-                                            {}
-                                            <span
-                                                className={cn(
-                                                    'absolute -left-4 top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white',
-                                                    isCall ? 'bg-[#F59E0B]' : isDeleted ? 'bg-rose-500' : isTask ? 'bg-indigo-500' : 'bg-slate-400'
-                                                )}
-                                            />
-                                            <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-3 text-xs space-y-1">
-                                                <div className="flex items-center justify-between gap-1 flex-wrap">
-                                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                                        <span className={cn(
-                                                            'font-black uppercase tracking-wider text-[10px] px-1.5 py-0.5 rounded',
-                                                            isCall ? 'bg-amber-100 text-amber-800' : isDeleted ? 'bg-rose-100 text-rose-800' : isTask ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200 text-slate-700'
-                                                        )}>
-                                                            {act.disposition?.replace('_', ' ') || act.activityType}
-                                                        </span>
-                                                        <span className="font-bold text-slate-800 text-[11px]">
-                                                            {act.authorName || act.userName || 'Sales Agent'}
+                                        return (
+                                            <div key={act.id} className="relative pl-4">
+                                                {}
+                                                <span
+                                                    className={cn(
+                                                        'absolute -left-4 top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-white',
+                                                        isCall ? 'bg-[#F59E0B]' : isDeleted ? 'bg-rose-500' : isTask ? 'bg-indigo-500' : 'bg-slate-400'
+                                                    )}
+                                                />
+                                                <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-3 text-xs space-y-1">
+                                                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <span className={cn(
+                                                                'font-black uppercase tracking-wider text-[10px] px-1.5 py-0.5 rounded',
+                                                                isCall ? 'bg-amber-100 text-amber-800' : isDeleted ? 'bg-rose-100 text-rose-800' : isTask ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200 text-slate-700'
+                                                            )}>
+                                                                {act.disposition?.replace('_', ' ') || act.activityType}
+                                                            </span>
+                                                            <span className="font-bold text-slate-800 text-[11px]">
+                                                                {act.authorName || act.userName || 'Sales Agent'}
+                                                            </span>
+                                                        </div>
+                                                        <span className="text-[10px] text-slate-400 font-medium">
+                                                            {new Date(act.createdAt).toLocaleString(undefined, {
+                                                                month: 'short',
+                                                                day: 'numeric',
+                                                                hour: '2-digit',
+                                                                minute: '2-digit'
+                                                            })}
                                                         </span>
                                                     </div>
-                                                    <span className="text-[10px] text-slate-400 font-medium">
-                                                        {new Date(act.createdAt).toLocaleString(undefined, {
-                                                            month: 'short',
-                                                            day: 'numeric',
-                                                            hour: '2-digit',
-                                                            minute: '2-digit'
-                                                        })}
-                                                    </span>
+                                                    {act.note && (
+                                                        <p className="text-slate-600 font-medium whitespace-pre-wrap text-[11px] mt-1">
+                                                            {act.note}
+                                                        </p>
+                                                    )}
                                                 </div>
-                                                {act.note && (
-                                                    <p className="text-slate-600 font-medium whitespace-pre-wrap text-[11px] mt-1">
-                                                        {act.note}
-                                                    </p>
-                                                )}
                                             </div>
+                                        );
+                                    })}
+                                </div>
+                                {totalActivityPages > 1 && (
+                                    <div className="flex items-center justify-between pt-3 mt-3 border-t border-[#E2E8F0] text-xs text-slate-500">
+                                        <span className="text-[11px] font-medium text-slate-500">
+                                            Showing <span className="font-bold text-slate-700">{(currentActivityPage - 1) * ACTIVITIES_PER_PAGE + 1}</span>-
+                                            <span className="font-bold text-slate-700">{Math.min(currentActivityPage * ACTIVITIES_PER_PAGE, activities.length)}</span> of{' '}
+                                            <span className="font-bold text-slate-700">{activities.length}</span>
+                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                disabled={currentActivityPage <= 1}
+                                                onClick={() => setActivityPage((p) => Math.max(1, p - 1))}
+                                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                aria-label="Previous page of activities"
+                                            >
+                                                <ChevronLeft className="w-3.5 h-3.5" />
+                                            </button>
+                                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                                                {currentActivityPage} / {totalActivityPages}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                disabled={currentActivityPage >= totalActivityPages}
+                                                onClick={() => setActivityPage((p) => Math.min(totalActivityPages, p + 1))}
+                                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                aria-label="Next page of activities"
+                                            >
+                                                <ChevronRight className="w-3.5 h-3.5" />
+                                            </button>
                                         </div>
-                                    );
-                                })}
-                            </div>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 </div>

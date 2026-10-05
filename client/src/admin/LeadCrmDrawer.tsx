@@ -16,7 +16,9 @@ import {
     Pencil,
     CheckSquare,
     BarChart3,
-    UserPlus
+    UserPlus,
+    ChevronLeft,
+    ChevronRight
 } from 'lucide-react';
 import {
     type LeadTask,
@@ -133,6 +135,12 @@ export default function LeadCrmDrawer({
 
     const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
     const [editingTask, setEditingTask] = useState<LeadTask | null>(null);
+    const [taskPage, setTaskPage] = useState(1);
+
+    const TASKS_PER_PAGE = 5;
+    const totalTaskPages = Math.max(1, Math.ceil(tasks.length / TASKS_PER_PAGE));
+    const currentTaskPage = Math.min(taskPage, totalTaskPages);
+    const paginatedTasks = tasks.slice((currentTaskPage - 1) * TASKS_PER_PAGE, currentTaskPage * TASKS_PER_PAGE);
 
     useEffect(() => {
         setCurrentAssignedTo(lead.assignedTo || null);
@@ -562,7 +570,7 @@ export default function LeadCrmDrawer({
                                     </div>
                                 ) : (
                                     <div className="space-y-2">
-                                        {tasks.map((task) => {
+                                        {paginatedTasks.map((task) => {
                                             const isDone = task.status === 'completed';
                                             const isOverdue = task.dueDate && !isDone && new Date(task.dueDate) < new Date();
 
@@ -661,6 +669,38 @@ export default function LeadCrmDrawer({
                                                 </div>
                                             );
                                         })}
+                                        {totalTaskPages > 1 && (
+                                            <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-200 text-xs text-slate-500">
+                                                <span className="text-[11px] font-medium text-slate-500">
+                                                    Showing <span className="font-bold text-slate-700">{(currentTaskPage - 1) * TASKS_PER_PAGE + 1}</span>-
+                                                    <span className="font-bold text-slate-700">{Math.min(currentTaskPage * TASKS_PER_PAGE, tasks.length)}</span> of{' '}
+                                                    <span className="font-bold text-slate-700">{tasks.length}</span>
+                                                </span>
+                                                <div className="flex items-center gap-1.5">
+                                                    <button
+                                                        type="button"
+                                                        disabled={currentTaskPage <= 1}
+                                                        onClick={() => setTaskPage((p) => Math.max(1, p - 1))}
+                                                        className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                        aria-label="Previous page of tasks"
+                                                    >
+                                                        <ChevronLeft className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                                                        {currentTaskPage} / {totalTaskPages}
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        disabled={currentTaskPage >= totalTaskPages}
+                                                        onClick={() => setTaskPage((p) => Math.min(totalTaskPages, p + 1))}
+                                                        className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                        aria-label="Next page of tasks"
+                                                    >
+                                                        <ChevronRight className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                             )}
                         </div>

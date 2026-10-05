@@ -12,7 +12,9 @@ import {
     Check,
     Calendar,
     AlertCircle,
-    X
+    X,
+    ChevronLeft,
+    ChevronRight
 } from 'lucide-react';
 import {
     type SalesLeadActivity,
@@ -143,6 +145,9 @@ export default function SalesActivityLogs() {
         }
     };
 
+    const [activityPage, setActivityPage] = useState(1);
+    const ACTIVITIES_PER_PAGE = 5;
+
     const filteredActivities = useMemo(() => {
         return activities.filter((a) => {
             if (!searchQuery.trim()) return true;
@@ -155,6 +160,17 @@ export default function SalesActivityLogs() {
             );
         });
     }, [activities, searchQuery]);
+
+    useEffect(() => {
+        setActivityPage(1);
+    }, [searchQuery, selectedDispositionFilter]);
+
+    const totalActivityPages = Math.max(1, Math.ceil(filteredActivities.length / ACTIVITIES_PER_PAGE));
+    const currentActivityPage = Math.min(activityPage, totalActivityPages);
+    const paginatedActivities = filteredActivities.slice(
+        (currentActivityPage - 1) * ACTIVITIES_PER_PAGE,
+        currentActivityPage * ACTIVITIES_PER_PAGE
+    );
 
     return (
         <div className="space-y-5 max-w-7xl mx-auto pb-16 animate-in fade-in duration-300">
@@ -414,62 +430,97 @@ export default function SalesActivityLogs() {
                             </div>
                         ) : (
                             /* Feed of Logged Calls */
-                            <div className="divide-y divide-slate-100 -mx-2 sm:-mx-3">
-                                {filteredActivities.map((act) => {
-                                    const dispConf = act.disposition
-                                        ? DISPOSITION_CONFIG[act.disposition] || { label: act.disposition, bg: 'bg-slate-50', text: 'text-slate-800', border: 'border-slate-200' }
-                                        : null;
+                            <>
+                                <div className="divide-y divide-slate-100 -mx-2 sm:-mx-3">
+                                    {paginatedActivities.map((act) => {
+                                        const dispConf = act.disposition
+                                            ? DISPOSITION_CONFIG[act.disposition] || { label: act.disposition, bg: 'bg-slate-50', text: 'text-slate-800', border: 'border-slate-200' }
+                                            : null;
 
-                                    return (
-                                        <div key={act.id} className="p-3 sm:p-4 hover:bg-[#F8FAFC] rounded-xl transition-colors">
-                                            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                                                <div className="flex items-center gap-2 flex-wrap">
-                                                    {act.leadBusinessName && (
-                                                        <Link
-                                                            to={`/sales/leads/${encodeURIComponent(act.leadId)}`}
-                                                            className="inline-flex items-center gap-1 font-bold text-xs text-[#F97316] hover:text-[#EA580C] hover:underline"
-                                                        >
-                                                            <Building2 className="w-3.5 h-3.5 text-[#F97316]" />
-                                                            <span>{act.leadBusinessName}</span>
-                                                            <ArrowUpRight className="w-3 h-3 text-[#F97316]" />
-                                                        </Link>
-                                                    )}
+                                        return (
+                                            <div key={act.id} className="p-3 sm:p-4 hover:bg-[#F8FAFC] rounded-xl transition-colors">
+                                                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        {act.leadBusinessName && (
+                                                            <Link
+                                                                to={`/sales/leads/${encodeURIComponent(act.leadId)}`}
+                                                                className="inline-flex items-center gap-1 font-bold text-xs text-[#F97316] hover:text-[#EA580C] hover:underline"
+                                                            >
+                                                                <Building2 className="w-3.5 h-3.5 text-[#F97316]" />
+                                                                <span>{act.leadBusinessName}</span>
+                                                                <ArrowUpRight className="w-3 h-3 text-[#F97316]" />
+                                                            </Link>
+                                                        )}
 
-                                                    {dispConf && (
-                                                        <span className={cn('text-[11px] font-bold px-2 py-0.5 rounded-lg border', dispConf.bg, dispConf.text, dispConf.border)}>
-                                                            {dispConf.label}
-                                                        </span>
-                                                    )}
+                                                        {dispConf && (
+                                                            <span className={cn('text-[11px] font-bold px-2 py-0.5 rounded-lg border', dispConf.bg, dispConf.text, dispConf.border)}>
+                                                                {dispConf.label}
+                                                            </span>
+                                                        )}
 
-                                                    {act.leadPhone && (
-                                                        <a
-                                                            href={`tel:${act.leadPhone}`}
-                                                            className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900 font-medium bg-slate-100 px-2 py-0.5 rounded-md text-[11px]"
-                                                        >
-                                                            <Phone className="w-3 h-3" />
-                                                            {act.leadPhone}
-                                                        </a>
-                                                    )}
+                                                        {act.leadPhone && (
+                                                            <a
+                                                                href={`tel:${act.leadPhone}`}
+                                                                className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900 font-medium bg-slate-100 px-2 py-0.5 rounded-md text-[11px]"
+                                                            >
+                                                                <Phone className="w-3 h-3" />
+                                                                {act.leadPhone}
+                                                            </a>
+                                                        )}
+                                                    </div>
+
+                                                    <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                                                        <Clock className="w-3 h-3" />
+                                                        {new Date(act.createdAt).toLocaleString(undefined, {
+                                                            month: 'short',
+                                                            day: 'numeric',
+                                                            hour: '2-digit',
+                                                            minute: '2-digit'
+                                                        })}
+                                                    </span>
                                                 </div>
 
-                                                <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
-                                                    <Clock className="w-3 h-3" />
-                                                    {new Date(act.createdAt).toLocaleString(undefined, {
-                                                        month: 'short',
-                                                        day: 'numeric',
-                                                        hour: '2-digit',
-                                                        minute: '2-digit'
-                                                    })}
-                                                </span>
+                                                <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap pl-1">
+                                                    {act.note}
+                                                </p>
                                             </div>
+                                        );
+                                    })}
+                                </div>
 
-                                            <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap pl-1">
-                                                {act.note}
-                                            </p>
+                                {totalActivityPages > 1 && (
+                                    <div className="flex items-center justify-between pt-4 mt-2 border-t border-slate-100 text-xs text-slate-500">
+                                        <span className="text-[11px] font-medium text-slate-500">
+                                            Showing <span className="font-bold text-slate-700">{(currentActivityPage - 1) * ACTIVITIES_PER_PAGE + 1}</span>-
+                                            <span className="font-bold text-slate-700">{Math.min(currentActivityPage * ACTIVITIES_PER_PAGE, filteredActivities.length)}</span> of{' '}
+                                            <span className="font-bold text-slate-700">{filteredActivities.length}</span>
+                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                            <button
+                                                type="button"
+                                                disabled={currentActivityPage <= 1}
+                                                onClick={() => setActivityPage((p) => Math.max(1, p - 1))}
+                                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                aria-label="Previous page"
+                                            >
+                                                <ChevronLeft className="w-3.5 h-3.5" />
+                                            </button>
+                                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                                                {currentActivityPage} / {totalActivityPages}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                disabled={currentActivityPage >= totalActivityPages}
+                                                onClick={() => setActivityPage((p) => Math.min(totalActivityPages, p + 1))}
+                                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                aria-label="Next page"
+                                            >
+                                                <ChevronRight className="w-3.5 h-3.5" />
+                                            </button>
                                         </div>
-                                    );
-                                })}
-                            </div>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 </div>
