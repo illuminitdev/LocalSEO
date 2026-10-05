@@ -2368,7 +2368,7 @@ async function fetchChatGptPlain(opts: {
   }
 }
 
-/** Three extra Google search lines for AEO Visual. The plain "service in city" search is added separately. */
+/** Four Google search lines for AEO Visual. */
 export async function suggestAeoGoogleSearches(opts: {
   service: string;
   city: string;
@@ -2380,11 +2380,10 @@ export async function suggestAeoGoogleSearches(opts: {
   if (!service || !city || !businessName || !requireDataForSeoConfigured()) return [];
 
   const systemMessage =
-    'Return exactly 3 Google search lines and nothing else. No numbering or commentary. ' +
-    'These are the best local searches a customer would type to find this service in this city. ' +
-    'Do not return a plain "service in city" line such as "plumbers in London" — that search is already measured. ' +
-    'Make them specific, such as cost, how to choose, repair, install, or whether this company is a good choice. ' +
-    'Include the city. At least one line must include the business name. ' +
+    'Return exactly 4 Google search lines and nothing else. No numbering or commentary. ' +
+    'Lines 1 and 2 are questions a local customer would type about this service in this city. Do not put the business name in lines 1 or 2. ' +
+    'Lines 3 and 4 include the business name, the service, and the city. ' +
+    'Make the questions specific to this service, such as cost, how to choose, repair, install, or whether this company is a good choice. ' +
     'Each line under 90 characters.';
   const userPrompt = `Service: ${service.slice(0, 80)}. City: ${city.slice(0, 60)}. Business: ${businessName.slice(0, 80)}.`;
   const models = ['gpt-4.1-mini', 'gpt-4o-mini'];
@@ -2410,7 +2409,7 @@ export async function suggestAeoGoogleSearches(opts: {
       .split(/\r?\n/)
       .map((line) => line.replace(/^(\d+[\).\]]\s*|[-*•]\s*)/, '').replace(/^["']|["']$/g, '').trim())
       .filter((line) => line && !/^(here|these|sure|google searches)\b/i.test(line));
-    if (lines.length >= 3) return lines.slice(0, 3);
+    if (lines.length >= 4) return lines.slice(0, 4);
     if (!first.retryModel && text) break;
   }
   return [];

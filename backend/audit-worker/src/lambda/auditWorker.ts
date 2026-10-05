@@ -811,7 +811,7 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  // AEO Visual: one "{service}s in {city}" search, plus three ChatGPT searches, then Google screenshots all four.
+  // AEO Visual: ChatGPT writes 4 searches for this service, then Google screenshots those searches.
   let aeoSpecs = buildAeoQuerySpecs(audit);
   try {
     const lines = await suggestAeoGoogleSearches({
@@ -1068,6 +1068,33 @@ export const main: SQSHandler = async (event: SQSEvent) => {
           
         }
       }
+
+      const decksForScore = fallbackPillarDecks(audit);
+      const reportLocal = audit.aiReport?.localSeoFixes?.actions;
+      const reportAeo = audit.aiReport?.aeoFixes?.priorities;
+      const reportGeo = audit.aiReport?.geoFixes?.actions;
+      audit.score = computeScore(audit.checklist.checks, {
+        localRank: audit.gbpLookup?.localRank || null,
+        aiEngineChecks: Array.isArray(audit.gbpLookup?.aiEngineChecks)
+          ? audit.gbpLookup.aiEngineChecks
+          : [],
+        aeoChecklist,
+        aeoQueries: Array.isArray(audit.aeoSerpScreenshots) ? audit.aeoSerpScreenshots : [],
+        localSeoChecklist,
+        geoChecklist,
+        priorityActions: {
+          local:
+            Array.isArray(reportLocal) && reportLocal.length
+              ? reportLocal
+              : decksForScore.localSeoFixes?.actions,
+          aeo:
+            Array.isArray(reportAeo) && reportAeo.length
+              ? reportAeo
+              : decksForScore.aeoFixes?.priorities,
+          geo:
+            Array.isArray(reportGeo) && reportGeo.length ? reportGeo : decksForScore.geoFixes?.actions
+        }
+      });
 
       await saveAudit(audit);
       await updateAuditJob(jobId, 'complete');
