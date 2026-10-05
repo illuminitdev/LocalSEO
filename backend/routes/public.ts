@@ -967,18 +967,29 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             }
         }
 
-        const existing = await query(
-            `SELECT id FROM lead_tasks
-             WHERE lead_id = $1 AND task_type = 'follow_up_call' AND created_by_role = 'customer' AND status = 'pending'
-             ORDER BY created_at DESC LIMIT 1`,
-            [leadId]
-        ).catch(() => ({ rows: [] as any[] }));
+        const [existingTask, existingAuditReq] = await Promise.all([
+            query(
+                `SELECT id FROM lead_tasks
+                 WHERE lead_id = $1 AND task_type = 'follow_up_call' AND created_by_role = 'customer' AND status = 'pending'
+                 ORDER BY created_at DESC LIMIT 1`,
+                [leadId]
+            ).catch(() => ({ rows: [] as any[] })),
+            query(
+                `SELECT id FROM full_audit_requests
+                 WHERE (lead_id = $1 OR observation_email_token = $2)
+                   AND source = 'email_cta'
+                   AND status IN ('pending', 'in_progress')
+                 ORDER BY requested_at DESC LIMIT 1`,
+                [leadId, token]
+            ).catch(() => ({ rows: [] as any[] }))
+        ]);
 
         return {
             leadId,
+            toEmail: String(send.to_email || '').trim().toLowerCase(),
             businessName: businessName || 'your business',
             assignedAgentId,
-            alreadyRequested: Boolean(existing.rows[0])
+            alreadyRequested: Boolean(existingTask.rows[0] || existingAuditReq.rows[0])
         };
     }
 
@@ -1114,10 +1125,11 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             if (token) {
                 await markLeadObservationEmailOpened(token).catch(() => false);
                 details = await resolveLeadAuditRequestDetails(token);
-                if (details && !details.alreadyRequested) {
+                if (details) {
                     const leadId = details.leadId;
                     const businessName = details.businessName;
                     const assignedAgentId = details.assignedAgentId;
+                    const toEmail = details.toEmail || '';
 
                     // 1. Update lead status to interested
                     await query(
@@ -1132,18 +1144,57 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                         [leadId, assignedAgentId, `Customer confirmed "Request Full Growth Audit" from email CTA`]
                     ).catch(() => {});
 
-                    // 3. Create urgent follow-up task for assigned Sales Agent
-                    await query(
-                        `INSERT INTO lead_tasks (
-                            lead_id, task_type, title, notes, priority, status, assigned_to_user_id, created_by_role, created_by_name
-                         ) VALUES ($1, 'follow_up_call', $2, $3, 'urgent', 'pending', $4, 'customer', 'Customer')`,
-                        [
-                            leadId,
-                            `Customer Inbound: Requested Full Audit - Follow up with ${businessName || 'Lead'}`,
-                            `Customer requested Full Growth Audit from email CTA.`,
-                            assignedAgentId || null
-                        ]
-                    ).catch(() => {});
+                    // 3. Create or update urgent follow-up task for assigned Sales Agent
+                    const { rows: existingUrgentTask } = await query(
+                        `SELECT id FROM lead_tasks
+                         WHERE lead_id = $1 AND task_type = 'follow_up_call' AND created_by_role = 'customer' AND status = 'pending'
+                         LIMIT 1`,
+                        [leadId]
+                    ).catch(() => ({ rows: [] as any[] }));
+
+                    if (!existingUrgentTask[0]) {
+                        await query(
+                            `INSERT INTO lead_tasks (
+                                lead_id, task_type, title, notes, priority, status, assigned_to_user_id, created_by_role, created_by_name
+                             ) VALUES ($1, 'follow_up_call', $2, $3, 'urgent', 'pending', $4, 'customer', 'Customer')`,
+                            [
+                                leadId,
+                                `Customer Inbound: Requested Full Audit - Follow up with ${businessName || 'Lead'}`,
+                                `Customer requested Full Growth Audit from email CTA.`,
+                                assignedAgentId || null
+                            ]
+                        ).catch(() => {});
+                    }
+
+                    // 4. Update existing pending request in full_audit_requests to email_cta or insert new
+                    const { rowCount } = await query(
+                        `UPDATE full_audit_requests
+                         SET source = 'email_cta',
+                             observation_email_token = $1,
+                             notes = 'Customer requested Full Growth Audit from observation email CTA.',
+                             requested_at = NOW()
+                         WHERE (lead_id = $2 OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(business_name)) = LOWER(TRIM($3))))
+                           AND status IN ('pending', 'in_progress')`,
+                        [token, leadId, businessName]
+                    ).catch(() => ({ rowCount: 0 }));
+
+                    if (!rowCount) {
+                        await query(
+                            `INSERT INTO full_audit_requests (
+                                lead_id, observation_email_token, business_name, to_email, status, source, assigned_to_user_id, notes, requested_at
+                             ) VALUES ($1, $2, $3, $4, 'pending', 'email_cta', $5, $6, NOW())`,
+                            [
+                                leadId,
+                                token,
+                                businessName || 'Lead',
+                                toEmail,
+                                assignedAgentId || null,
+                                'Customer requested Full Growth Audit from observation email CTA.'
+                            ]
+                        ).catch((err) => {
+                            console.warn('[lead-full-audit-request POST] failed to insert full_audit_requests:', err);
+                        });
+                    }
 
                     newlyCreated = true;
                     details.alreadyRequested = true;

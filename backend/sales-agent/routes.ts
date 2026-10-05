@@ -158,45 +158,45 @@ async function fetchLeadMetadataMap(leadIds: string[]) {
     } catch {}
 
     
-    const missing = leadIds.filter((id) => !map.has(id));
-    if (missing.length) {
-        try {
-            const { rows: salesRows } = await query(
-                `SELECT * FROM sales_leads WHERE id::text = ANY($1::text[])`,
-                [missing]
-            );
-            for (const row of salesRows) {
-                const auditId = String(row.audit_id || '').trim() || null;
-                map.set(String(row.id), {
-                    id: String(row.id),
-                    businessName: row.name || 'Lead',
-                    name: row.name || 'Lead',
-                    phone: row.phone || '',
-                    email: row.email || '',
-                    website: row.website || '',
-                    address: row.address || '',
-                    city: '',
-                    industry: row.industry || '',
-                    gbpObservation: row.gbp_observation || '',
-                    aiVisibilityObservation: row.ai_visibility_observation || '',
-                    leadOpportunity: row.lead_opportunity || '',
-                    opportunityLevel: row.opportunity_level || 'medium',
-                    isCustomer: Boolean(row.is_customer),
-                    convertedAt: row.converted_at || null,
-                    notes: row.notes || '',
-                    status: row.status || 'new',
-                    scoreTotal: null,
-                    auditId,
-                    reportUrl: auditId ? reportShareUrl(auditId) : null,
-                    source: row.source || 'sales_lead',
-                    spreadsheetStatus: row.spreadsheet_status || '',
-                    spreadsheetStatus1: row.spreadsheet_status_1 || '',
-                    spreadsheetStatus2: row.spreadsheet_status_2 || '',
-                    spreadsheetStatus3: row.spreadsheet_status_3 || ''
-                });
-            }
-        } catch {}
-    }
+    // 2. Query sales_leads for all IDs to overlay/merge CRM edits (email, phone, name, notes, etc.)
+    try {
+        const { rows: salesRows } = await query(
+            `SELECT * FROM sales_leads WHERE id::text = ANY($1::text[])`,
+            [leadIds]
+        );
+        for (const row of salesRows) {
+            const auditId = String(row.audit_id || '').trim() || null;
+            const idKey = String(row.id);
+            const existing = map.get(idKey);
+            map.set(idKey, {
+                id: idKey,
+                businessName: row.name || existing?.businessName || 'Lead',
+                name: row.name || existing?.name || 'Lead',
+                phone: row.phone || existing?.phone || '',
+                email: (row.email || existing?.email || '').trim().toLowerCase(),
+                website: row.website || existing?.website || '',
+                address: row.address || existing?.address || '',
+                city: existing?.city || '',
+                industry: row.industry || existing?.industry || '',
+                gbpObservation: row.gbp_observation || existing?.gbpObservation || '',
+                aiVisibilityObservation: row.ai_visibility_observation || existing?.aiVisibilityObservation || '',
+                leadOpportunity: row.lead_opportunity || existing?.leadOpportunity || '',
+                opportunityLevel: row.opportunity_level || existing?.opportunityLevel || 'medium',
+                isCustomer: Boolean(row.is_customer ?? existing?.isCustomer),
+                convertedAt: row.converted_at || existing?.convertedAt || null,
+                notes: row.notes || existing?.notes || '',
+                status: row.status || existing?.status || 'new',
+                scoreTotal: existing?.scoreTotal ?? null,
+                auditId: auditId || existing?.auditId || null,
+                reportUrl: existing?.reportUrl || (auditId ? reportShareUrl(auditId) : null),
+                source: row.source || existing?.source || 'sales_lead',
+                spreadsheetStatus: row.spreadsheet_status || existing?.spreadsheetStatus || '',
+                spreadsheetStatus1: row.spreadsheet_status_1 || existing?.spreadsheetStatus1 || '',
+                spreadsheetStatus2: row.spreadsheet_status_2 || existing?.spreadsheetStatus2 || '',
+                spreadsheetStatus3: row.spreadsheet_status_3 || existing?.spreadsheetStatus3 || ''
+            });
+        }
+    } catch {}
 
     // Full-audit CRM leads: lead_id is the ZappSites audit UUID (not a submission / sales_lead)
     const stillMissing = leadIds.filter((id) => !map.has(id));
@@ -1979,6 +1979,27 @@ router.post('/full-audits/:auditId/share-email', async (req: Request, res: Respo
                 success: false,
                 error: 'Email could not be delivered via SES. Check sender identity and try again.'
             });
+        }
+
+        try {
+            const agentName = (req as any).user?.name || 'Sales Agent';
+            const { rows: matchedLeads } = await query(
+                `SELECT id FROM sales_leads WHERE audit_id = $1 OR id::text = $1 LIMIT 1`,
+                [auditId]
+            );
+            const leadIdToRecord = matchedLeads[0]?.id ? String(matchedLeads[0].id) : auditId;
+            await query(
+                `INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note)
+                 VALUES ($1, $2, $3, 'note', 'audit_email', $4)`,
+                [
+                    leadIdToRecord,
+                    agentId,
+                    agentName,
+                    `Sent full audit PDF report to ${email}`
+                ]
+            );
+        } catch (actErr) {
+            console.warn('Could not record audit share email activity:', actErr);
         }
 
         return res.json({

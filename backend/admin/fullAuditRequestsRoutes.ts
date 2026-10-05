@@ -307,6 +307,34 @@ router.patch('/full-audit-requests/:id', requireAdmin, async (req: Request, res:
                 } else {
                     console.warn('[full-audit-request] no lead_id to create CRM task for', id);
                 }
+
+                // Complete all other open requests for this same lead/business so all sources stay in sync
+                if (nextStatus === 'completed' && nextAuditId) {
+                    const bizName = String(rows[0].business_name || '').trim();
+                    await query(
+                        `UPDATE full_audit_requests
+                         SET status = 'completed',
+                             fulfilled_audit_id = $1,
+                             assigned_to_user_id = COALESCE($2, assigned_to_user_id),
+                             completed_at = NOW()
+                         WHERE id != $3
+                           AND (
+                               (NULLIF($4, '') IS NOT NULL AND lead_id = $4)
+                               OR (NULLIF($5, '') IS NOT NULL AND LOWER(TRIM(business_name)) = LOWER(TRIM($5)))
+                           )
+                           AND status IN ('pending', 'in_progress')`,
+                        [nextAuditId, nextAssigned, id, leadId, bizName]
+                    ).catch(() => {});
+
+                    if (leadId) {
+                        await query(
+                            `UPDATE lead_tasks
+                             SET status = 'completed', updated_at = NOW()
+                             WHERE lead_id = $1 AND task_type = 'prepare_audit' AND status != 'completed'`,
+                            [leadId]
+                        ).catch(() => {});
+                    }
+                }
             } catch (taskErr) {
                 console.warn('Could not create fulfill task:', taskErr);
             }
@@ -393,8 +421,34 @@ router.post('/full-audit-requests/assign', requireAdmin, async (req: Request, re
             }
         }
 
-        // Link audit_id and assigned_to on sales_leads
         const bizName = String(businessName || '').trim();
+
+        // Complete all related pending requests and audit prep tasks for this lead/business
+        await query(
+            `UPDATE full_audit_requests
+             SET status = 'completed',
+                 fulfilled_audit_id = $1,
+                 assigned_to_user_id = $2,
+                 completed_at = NOW()
+             WHERE (
+                 fulfilled_audit_id = $1
+                 OR (NULLIF($3, '') IS NOT NULL AND lead_id = $3)
+                 OR (NULLIF($4, '') IS NOT NULL AND LOWER(TRIM(business_name)) = LOWER(TRIM($4)))
+             )
+             AND status IN ('pending', 'in_progress')`,
+            [auditId, agentId, finalLeadId, bizName]
+        ).catch(() => {});
+
+        if (finalLeadId) {
+            await query(
+                `UPDATE lead_tasks
+                 SET status = 'completed', updated_at = NOW()
+                 WHERE lead_id = $1 AND task_type = 'prepare_audit' AND status != 'completed'`,
+                [finalLeadId]
+            ).catch(() => {});
+        }
+
+        // Link audit_id and assigned_to on sales_leads
         try {
             if (finalLeadId) {
                 await query(
