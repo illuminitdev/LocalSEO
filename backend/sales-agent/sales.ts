@@ -329,86 +329,43 @@ export async function resolveAllLeadIds(leadId: string): Promise<string[]> {
     if (!leadId) return [];
     try {
         const trimmedLeadId = String(leadId).trim();
-        // Step 1: Find lead info from sales_leads, submissions, lead_tasks, and lead_activities
-        const [salesRes, subRes, taskRes, actRes] = await Promise.all([
-            query(`SELECT id, name, email, phone, audit_id FROM sales_leads WHERE id::text = $1 OR LOWER(TRIM(name)) = LOWER(TRIM($1)) OR audit_id = $1`, [trimmedLeadId]).catch(() => ({ rows: [] })),
-            query(`SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email, payload->>'phone' AS phone, payload->>'auditId' AS audit_id FROM submissions WHERE id::text = $1 OR LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = LOWER(TRIM($1)) OR payload->>'auditId' = $1`, [trimmedLeadId]).catch(() => ({ rows: [] })),
-            query(`SELECT id, lead_id FROM lead_tasks WHERE id::text = $1 OR lead_id = $1`, [trimmedLeadId]).catch(() => ({ rows: [] })),
-            query(`SELECT id, lead_id FROM lead_activities WHERE id::text = $1 OR lead_id = $1 LIMIT 50`, [trimmedLeadId]).catch(() => ({ rows: [] }))
+        const idSet = new Set<string>([trimmedLeadId]);
+
+        // 1. Look up the exact lead record by ID or audit_id
+        const [salesRes, subRes] = await Promise.all([
+            query(`SELECT id, audit_id FROM sales_leads WHERE id::text = $1 OR audit_id = $1`, [trimmedLeadId]).catch(() => ({ rows: [] as any[] })),
+            query(`SELECT id, payload->>'auditId' AS audit_id FROM submissions WHERE id::text = $1 OR payload->>'auditId' = $1`, [trimmedLeadId]).catch(() => ({ rows: [] as any[] }))
         ]);
 
-        const idSet = new Set<string>([trimmedLeadId]);
-        for (const t of taskRes.rows) {
-            if (t.lead_id) idSet.add(String(t.lead_id));
-        }
-        for (const a of actRes.rows) {
-            if (a.lead_id) idSet.add(String(a.lead_id));
-        }
+        let leadAuditId = '';
+
         for (const s of salesRes.rows) {
             if (s.id) idSet.add(String(s.id));
-            if (s.audit_id) idSet.add(String(s.audit_id));
+            if (s.audit_id) {
+                idSet.add(String(s.audit_id));
+                leadAuditId = String(s.audit_id).trim();
+            }
         }
+
         for (const s of subRes.rows) {
             if (s.id) idSet.add(String(s.id));
-            if (s.audit_id) idSet.add(String(s.audit_id));
+            if (s.audit_id) {
+                idSet.add(String(s.audit_id));
+                leadAuditId = String(s.audit_id).trim();
+            }
         }
 
-        // If we found a task or activity linked to another lead_id, also lookup that lead
-        let extraName = '';
-        let extraEmail = '';
-        let extraPhone = '';
-        const secondaryLeadId = taskRes.rows[0]?.lead_id || actRes.rows[0]?.lead_id;
-        if (secondaryLeadId && secondaryLeadId !== trimmedLeadId) {
-            const [extraSales, extraSub] = await Promise.all([
-                query(`SELECT id, name, email, phone FROM sales_leads WHERE id::text = $1`, [secondaryLeadId]).catch(() => ({ rows: [] })),
-                query(`SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email, payload->>'phone' AS phone FROM submissions WHERE id::text = $1`, [secondaryLeadId]).catch(() => ({ rows: [] }))
-            ]);
-            extraName = (extraSales.rows[0]?.name || extraSub.rows[0]?.bname || extraSub.rows[0]?.name || '').trim().toLowerCase();
-            extraEmail = (extraSales.rows[0]?.email || extraSub.rows[0]?.email || '').trim().toLowerCase();
-            extraPhone = (extraSales.rows[0]?.phone || extraSub.rows[0]?.phone || '').replace(/[^0-9]/g, '');
-        }
+        // 2. If valid audit ID exists, find linked rows matching that exact auditId (e.g. sales_leads and submissions for this exact audit)
+        if (leadAuditId) {
+            const matches = await query(`
+                SELECT id::text AS id FROM sales_leads 
+                WHERE audit_id = $1
+                UNION
+                SELECT id::text AS id FROM submissions
+                WHERE payload->>'auditId' = $1
+            `, [leadAuditId]).catch(() => ({ rows: [] as any[] }));
 
-        const leadName = (salesRes.rows[0]?.name || subRes.rows[0]?.bname || subRes.rows[0]?.name || extraName || '').trim().toLowerCase();
-        const leadEmail = (salesRes.rows[0]?.email || subRes.rows[0]?.email || extraEmail || '').trim().toLowerCase();
-        const rawPhone = (salesRes.rows[0]?.phone || subRes.rows[0]?.phone || extraPhone || '').replace(/[^0-9]/g, '');
-
-        // Step 2: Gather all matching IDs from sales_leads, submissions, lead_tasks, and lead_activities
-        const matches = await query(`
-            SELECT DISTINCT id::text AS id FROM sales_leads 
-            WHERE id::text = $1
-               OR (NULLIF($2, '') IS NOT NULL AND LOWER(TRIM(email)) = $2)
-               OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(name)) = $3)
-               OR (NULLIF($4, '') IS NOT NULL AND REGEXP_REPLACE(phone, '[^0-9]', '', 'g') = $4 AND length($4) >= 7)
-            UNION
-            SELECT DISTINCT id::text AS id FROM submissions
-            WHERE id::text = $1
-               OR (NULLIF($2, '') IS NOT NULL AND LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $2)
-               OR (NULLIF($3, '') IS NOT NULL AND LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $3)
-               OR (NULLIF($4, '') IS NOT NULL AND REGEXP_REPLACE(COALESCE(payload->>'phone', ''), '[^0-9]', '', 'g') = $4 AND length($4) >= 7)
-            UNION
-            SELECT DISTINCT lead_id::text AS id FROM lead_tasks
-            WHERE lead_id = $1 OR id::text = $1
-            UNION
-            SELECT DISTINCT lead_id::text AS id FROM lead_activities
-            WHERE lead_id = $1 OR id::text = $1
-            UNION
-            SELECT DISTINCT lead_id::text AS id FROM sales_call_logs
-            WHERE lead_id::text = $1 OR id::text = $1
-        `, [trimmedLeadId, leadEmail || null, leadName || null, rawPhone || null]);
-
-        for (const row of matches.rows) {
-            if (row.id) idSet.add(String(row.id));
-        }
-
-        const allIdsList = Array.from(idSet);
-        if (allIdsList.length > 0) {
-            const extraActs = await query(
-                `SELECT DISTINCT lead_id::text AS id FROM lead_activities WHERE lead_id = ANY($1::text[])
-                 UNION
-                 SELECT DISTINCT lead_id::text AS id FROM sales_call_logs WHERE lead_id::text = ANY($1::text[])`,
-                [allIdsList]
-            ).catch(() => ({ rows: [] as { id: string }[] }));
-            for (const row of extraActs.rows) {
+            for (const row of matches.rows) {
                 if (row.id) idSet.add(String(row.id));
             }
         }

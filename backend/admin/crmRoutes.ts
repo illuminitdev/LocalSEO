@@ -54,8 +54,12 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
             where.push(`t.lead_id = $${params.length}`);
         }
         if (assignedTo) {
-            params.push(assignedTo);
-            where.push(`t.assigned_to_user_id = $${params.length}`);
+            if (assignedTo === 'unassigned') {
+                where.push(`t.assigned_to_user_id IS NULL`);
+            } else {
+                params.push(assignedTo);
+                where.push(`t.assigned_to_user_id = $${params.length}`);
+            }
         }
         if (status) {
             params.push(status);
@@ -486,8 +490,11 @@ router.get('/crm/leads/:leadId/crm', requireAdmin, async (req: Request, res: Res
             ).catch(() => ({ rows: [] as any[] }))
         ]);
 
-        if (salesRes.rows[0]) {
-            const s = salesRes.rows[0];
+        const matchedSales = salesRes.rows.find((r) => String(r.id) === leadId) || salesRes.rows[0];
+        const matchedSub = subRes.rows.find((r) => String(r.id) === leadId) || subRes.rows[0];
+
+        if (matchedSales) {
+            const s = matchedSales;
             lead.businessName = s.name || lead.businessName;
             lead.phone = s.phone || lead.phone;
             lead.email = s.email || lead.email;
@@ -514,14 +521,14 @@ router.get('/crm/leads/:leadId/crm', requireAdmin, async (req: Request, res: Res
                 const auditShareMap = await fetchLatestAuditEmailShareMap([String(s.audit_id)]);
                 Object.assign(lead, shareInfoForAudit(auditShareMap, String(s.audit_id)));
             }
-        } else if (subRes.rows[0]) {
+        } else if (matchedSub) {
             const payload =
-                subRes.rows[0].payload && typeof subRes.rows[0].payload === 'object'
-                    ? subRes.rows[0].payload
+                matchedSub.payload && typeof matchedSub.payload === 'object'
+                    ? matchedSub.payload
                     : {};
             lead.businessName =
-                subRes.rows[0].bname || subRes.rows[0].name || lead.businessName;
-            lead.email = subRes.rows[0].email || payload.email || lead.email;
+                matchedSub.bname || matchedSub.name || lead.businessName;
+            lead.email = matchedSub.email || payload.email || lead.email;
             lead.phone = payload.phone || lead.phone;
             lead.website = payload.website || lead.website;
             lead.address = payload.address || lead.address;
@@ -592,17 +599,7 @@ router.get('/crm/leads/:leadId/crm', requireAdmin, async (req: Request, res: Res
                         u.email AS user_email
                     FROM lead_activities a
                     LEFT JOIN users u ON u.id::text = a.user_id::text
-                    WHERE (
-                        a.lead_id::text = ANY($1::text[])
-                        OR (NULLIF($2, '') IS NOT NULL AND (
-                            a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
-                            OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
-                        ))
-                        OR (NULLIF($3, '') IS NOT NULL AND (
-                            a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
-                            OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
-                        ))
-                    )
+                    WHERE a.lead_id::text = ANY($1::text[])
 
                     UNION ALL
 
@@ -618,17 +615,7 @@ router.get('/crm/leads/:leadId/crm', requireAdmin, async (req: Request, res: Res
                         u.email AS user_email
                     FROM sales_call_logs c
                     LEFT JOIN users u ON u.id::text = c.agent_id::text
-                    WHERE (
-                        c.lead_id::text = ANY($1::text[])
-                        OR (NULLIF($2, '') IS NOT NULL AND (
-                            c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
-                            OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
-                        ))
-                        OR (NULLIF($3, '') IS NOT NULL AND (
-                            c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
-                            OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
-                        ))
-                    )
+                    WHERE c.lead_id::text = ANY($1::text[])
                     AND NOT EXISTS (
                         SELECT 1 FROM lead_activities la WHERE la.id::text = c.id::text
                     )
@@ -636,7 +623,7 @@ router.get('/crm/leads/:leadId/crm', requireAdmin, async (req: Request, res: Res
                 ORDER BY act_item.created_at DESC
                 LIMIT 200
             `,
-                [allLeadIds, leadName || null, leadEmail || null]
+                [allLeadIds]
             ),
             lead.assignedTo
                 ? query(`SELECT name, email FROM users WHERE id = $1`, [lead.assignedTo]).catch(
@@ -671,9 +658,6 @@ router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, r
             query(`SELECT id, payload->>'businessName' AS bname, payload->>'name' AS name, payload->>'email' AS email FROM submissions WHERE id::text = ANY($1::text[])`, [allLeadIds]).catch(() => ({ rows: [] }))
         ]);
 
-        const leadName = (salesRes.rows[0]?.name || subRes.rows[0]?.bname || subRes.rows[0]?.name || '').trim().toLowerCase();
-        const leadEmail = (salesRes.rows[0]?.email || subRes.rows[0]?.email || '').trim().toLowerCase();
-
         const { rows } = await query(`
             SELECT DISTINCT
                 act_item.id,
@@ -698,17 +682,7 @@ router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, r
                     u.email AS user_email
                 FROM lead_activities a
                 LEFT JOIN users u ON u.id::text = a.user_id::text
-                WHERE (
-                    a.lead_id::text = ANY($1::text[])
-                    OR (NULLIF($2, '') IS NOT NULL AND (
-                        a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
-                        OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
-                    ))
-                    OR (NULLIF($3, '') IS NOT NULL AND (
-                        a.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
-                        OR a.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
-                    ))
-                )
+                WHERE a.lead_id::text = ANY($1::text[])
 
                 UNION ALL
 
@@ -724,24 +698,14 @@ router.get('/crm/leads/:leadId/activities', requireAdmin, async (req: Request, r
                     u.email AS user_email
                 FROM sales_call_logs c
                 LEFT JOIN users u ON u.id::text = c.agent_id::text
-                WHERE (
-                    c.lead_id::text = ANY($1::text[])
-                    OR (NULLIF($2, '') IS NOT NULL AND (
-                        c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(name)) = $2)
-                        OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(payload->>'businessName', payload->>'name', ''))) = $2)
-                    ))
-                    OR (NULLIF($3, '') IS NOT NULL AND (
-                        c.lead_id::text IN (SELECT id::text FROM sales_leads WHERE LOWER(TRIM(email)) = $3)
-                        OR c.lead_id::text IN (SELECT id::text FROM submissions WHERE LOWER(TRIM(COALESCE(email, payload->>'email', ''))) = $3)
-                    ))
-                )
+                WHERE c.lead_id::text = ANY($1::text[])
                 AND NOT EXISTS (
                     SELECT 1 FROM lead_activities la WHERE la.id::text = c.id::text
                 )
             ) act_item
             ORDER BY act_item.created_at DESC
             LIMIT 200
-        `, [allLeadIds, leadName || null, leadEmail || null]);
+        `, [allLeadIds]);
 
         res.json({ activities: rows });
     } catch (err: any) {

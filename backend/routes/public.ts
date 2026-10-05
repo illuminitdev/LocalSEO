@@ -940,7 +940,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         if (!send) return null;
         const leadId = String(send.lead_id || '').trim();
         let businessName = '';
-        let assignedAgentId = send.sent_by_user_id || null;
+        let assignedAgentId: string | null = null;
 
         try {
             const { rows } = await query(

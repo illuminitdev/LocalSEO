@@ -239,14 +239,11 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                         }
                     }
 
-                    // 3. Lead tasks data — fallback/complement for notes & agent name
+                    // 3. Lead tasks data — fallback/complement for notes
                     const taskData = taskMap.get(leadIdStr) || (emailStr ? taskMap.get(emailStr) : null);
                     if (taskData) {
                         if (!(lead as any).salesNotes && taskData.notes) {
                             (lead as any).salesNotes = taskData.notes;
-                        }
-                        if (!(lead as any).assignedAgentName && taskData.agentName) {
-                            (lead as any).assignedAgentName = taskData.agentName;
                         }
                     }
                 }

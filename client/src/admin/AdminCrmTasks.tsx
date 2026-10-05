@@ -405,6 +405,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                         >
                             <option value="all">All Agents</option>
+                            <option value="unassigned">Unassigned</option>
                             {salesAgents.map((agent) => (
                                 <option key={agent.id} value={agent.id}>
                                     {agent.name || agent.email}

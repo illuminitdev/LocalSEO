@@ -158,26 +158,13 @@ export default function LeadCrmDrawer({
             const tasksData = await fetchCrmTasks({ leadId: lead.id, createdBy: 'admin' });
             setTasks(tasksData);
 
-            // Infer assignee from open tasks if lead metadata missing
-            if (!lead.assignedTo && !lead.assignedAgentName) {
-                const openAssigned = tasksData.find(
-                    (t) =>
-                        t.assignedToUserId &&
-                        (t.status === 'pending' || t.status === 'in_progress')
-                );
-                if (openAssigned?.assignedToUserId) {
-                    setCurrentAssignedTo(openAssigned.assignedToUserId);
-                    setCurrentAssignedName(openAssigned.assignedToName || null);
-                    setTaskAssignee(openAssigned.assignedToUserId);
-                    setReassignTo(openAssigned.assignedToUserId);
-                }
-            }
+            // Tasks loaded for drawer
         } catch (err: any) {
             setError(err.message || 'Failed to load CRM data');
         } finally {
             setLoading(false);
         }
-    }, [lead?.id, lead.assignedTo, lead.assignedAgentName]);
+    }, [lead?.id]);
 
     useEffect(() => {
         loadLeadData();
