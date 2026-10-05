@@ -915,7 +915,7 @@ export function buildDeepLocalRank(opts: {
 export type GeoAiPromptKey = 'near' | 'best' | 'near_me';
 
 export type AiEngineCheckResult = {
-  engine: 'chatgpt' | 'claude' | 'gemini';
+  engine: 'chatgpt' | 'claude' | 'perplexity';
   label: string;
   prompt: string;
   promptKey?: GeoAiPromptKey;
@@ -1254,7 +1254,19 @@ async function pollBusinessDataTaskGet(
 function parseDfsTimestamp(raw: unknown): Date | null {
   const s = String(raw || '').trim();
   if (!s) return null;
-  
+
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}):(\d{2}))?/);
+  if (us) {
+    const d = new Date(Date.UTC(+us[3], +us[1] - 1, +us[2], +(us[4] || 0), +(us[5] || 0), +(us[6] || 0)));
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+
+  const iso = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2})[-:](\d{2})[-:](\d{2})/);
+  if (iso) {
+    const d = new Date(`${iso[1]}T${iso[2]}:${iso[3]}:${iso[4]}Z`);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+
   const normalized = s.replace(' ', 'T').replace(' +00:00', 'Z').replace(/ ([+-]\d{2}:\d{2})$/, '$1');
   const d = new Date(normalized);
   return Number.isFinite(d.getTime()) ? d : null;
@@ -1264,15 +1276,17 @@ async function postAndPollBusinessData(
   postPath: string,
   getPath: string,
   task: Record<string, unknown>,
-  timeoutMs: number
+  timeoutMs: number,
+  attempts = 3
 ): Promise<any | null> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const tries = Math.max(1, attempts);
+  for (let attempt = 0; attempt < tries; attempt++) {
     const taskId = await postBusinessDataTask(postPath, task);
     const ready = taskId
       ? await pollBusinessDataTaskGet(getPath, taskId, { timeoutMs })
       : null;
     if (ready) return ready;
-    if (attempt < 2) await sleepMs(2000);
+    if (attempt < tries - 1) await sleepMs(2000);
   }
   return null;
 }
@@ -1315,47 +1329,58 @@ export async function fetchGbpUpdates(opts: {
     const task: Record<string, unknown> = {
       language_code: opts.languageCode || 'en',
       keyword,
-      depth: opts.depth ?? 10
+      depth: opts.depth ?? 10,
+      // Standard queue can take 45 minutes. Priority finishes in about a minute, inside this audit.
+      priority: 2,
+      location_code: 2826
     };
-    applyBusinessDataLocation(task, opts);
     const loadUpdates = (taskKeyword: string) => {
       const nextTask: Record<string, unknown> = { ...task, keyword: taskKeyword };
       return postAndPollBusinessData(
         'business_data/google/my_business_updates/task_post',
         'business_data/google/my_business_updates/task_get',
         nextTask,
-        opts.timeoutMs ?? 75000
+        opts.timeoutMs ?? 70000,
+        2
       );
     };
+    const readPosts = (ready: any) => {
+      const result = Array.isArray(ready?.result) ? ready.result[0] : ready?.result;
+      const rawItems = Array.isArray(result?.items) ? result.items : [];
+      const items = rawItems.filter((it: any) => {
+        const t = String(it?.type || '').toLowerCase();
+        if (!t) return true;
+        return /update|post/.test(t);
+      });
+      const recentDays = opts.recentDays ?? 60;
+      const cutoff = Date.now() - recentDays * 24 * 60 * 60 * 1000;
+      let recentPosts = 0;
+      let newest: Date | null = null;
+      for (const it of items) {
+        const ts =
+          parseDfsTimestamp(it?.timestamp) ||
+          parseDfsTimestamp(it?.post_date) ||
+          parseDfsTimestamp(it?.datetime) ||
+          parseDfsTimestamp(it?.time);
+        if (ts && (!newest || ts > newest)) newest = ts;
+        if (ts && ts.getTime() >= cutoff) recentPosts += 1;
+      }
+      const totalPosts = Math.max(items.length, Number(result?.items_count) || 0);
+      return { totalPosts, recentPosts, newest, recentDays };
+    };
     let ready = await loadUpdates(keyword);
+    let parsed = ready ? readPosts(ready) : null;
     const fallbackKeyword = String(opts.fallbackKeyword || '').trim();
-    if (!ready && fallbackKeyword && fallbackKeyword !== keyword) {
-      ready = await loadUpdates(fallbackKeyword);
+    if ((!parsed || parsed.totalPosts === 0) && fallbackKeyword && fallbackKeyword !== keyword) {
+      const alt = await loadUpdates(fallbackKeyword);
+      const altParsed = alt ? readPosts(alt) : null;
+      if (altParsed && (altParsed.totalPosts > 0 || !parsed)) {
+        parsed = altParsed;
+      }
     }
-    if (!ready) return unknown('Google Posts fetch failed or timed out — not measured');
+    if (!parsed) return unknown('Google Posts fetch failed or timed out — not measured');
 
-    const result = Array.isArray(ready.result) ? ready.result[0] : ready.result;
-    const rawItems = Array.isArray(result?.items) ? result.items : [];
-    const items = rawItems.filter((it: any) => {
-      const t = String(it?.type || '').toLowerCase();
-      if (!t) return true;
-      return /update|post/.test(t);
-    });
-    const recentDays = opts.recentDays ?? 60;
-    const cutoff = Date.now() - recentDays * 24 * 60 * 60 * 1000;
-    let recentPosts = 0;
-    let newest: Date | null = null;
-    for (const it of items) {
-      const ts =
-        parseDfsTimestamp(it?.timestamp) ||
-        parseDfsTimestamp(it?.post_date) ||
-        parseDfsTimestamp(it?.datetime) ||
-        parseDfsTimestamp(it?.time);
-      if (ts && (!newest || ts > newest)) newest = ts;
-      if (ts && ts.getTime() >= cutoff) recentPosts += 1;
-    }
-    const totalPosts = items.length;
-    const hasRecentPosts = recentPosts > 0;
+    const { totalPosts, recentPosts, newest, recentDays } = parsed;
     const recentPostAt = newest ? newest.toISOString() : null;
     const newestBit = recentPostAt ? ` (newest ${recentPostAt.slice(0, 10)})` : '';
     return {
@@ -1363,7 +1388,7 @@ export async function fetchGbpUpdates(opts: {
       totalPosts,
       recentPosts,
       recentPostAt,
-      hasRecentPosts,
+      hasRecentPosts: recentPosts > 0,
       evidence: totalPosts
         ? `${totalPosts} Google Post(s) found, ${recentPosts} in last ${recentDays} days${newestBit}`
         : 'No Google Posts found on listing'
@@ -2004,7 +2029,7 @@ export async function detectDuplicateListings(opts: {
 }
 
 async function fetchLlmResponseLive(opts: {
-  platform: 'chat_gpt' | 'claude' | 'gemini';
+  platform: 'chat_gpt' | 'claude' | 'perplexity';
   modelName: string;
   prompt: string;
   city?: string;
@@ -2021,14 +2046,18 @@ async function fetchLlmResponseLive(opts: {
     user_prompt: geoLlmUserPrompt(prompt, place),
     model_name: opts.modelName,
     max_output_tokens: opts.platform === 'claude' ? 560 : 480,
-    web_search: true,
     system_message: geoLlmSystemMessage(place)
   };
+  if (opts.platform !== 'perplexity') {
+    task.web_search = true;
+  }
   if (opts.withTemperature !== false && opts.platform !== 'claude') {
     task.temperature = 0.2;
   }
 
-  if (opts.platform !== 'gemini') {
+  if (opts.platform === 'perplexity') {
+    task.web_search_country_iso_code = 'GB';
+  } else {
     task.web_search_country_iso_code = 'GB';
     task.force_web_search = true;
     if (place) task.web_search_city = place.slice(0, 48);
@@ -2037,8 +2066,8 @@ async function fetchLlmResponseLive(opts: {
   const path =
     opts.platform === 'claude'
       ? 'https://api.dataforseo.com/v3/ai_optimization/claude/llm_responses/live'
-      : opts.platform === 'gemini'
-        ? 'https://api.dataforseo.com/v3/ai_optimization/gemini/llm_responses/live'
+      : opts.platform === 'perplexity'
+        ? 'https://api.dataforseo.com/v3/ai_optimization/perplexity/llm_responses/live'
         : 'https://api.dataforseo.com/v3/ai_optimization/chat_gpt/llm_responses/live';
 
   const controller = new AbortController();
@@ -2078,7 +2107,7 @@ async function fetchLlmResponseLive(opts: {
 }
 
 async function fetchLlmWithModelFallback(opts: {
-  platform: 'chat_gpt' | 'claude' | 'gemini';
+  platform: 'chat_gpt' | 'claude' | 'perplexity';
   models: string[];
   prompt: string;
   city?: string;
@@ -2339,7 +2368,7 @@ async function fetchChatGptPlain(opts: {
   }
 }
 
-/** Four Google search lines for AEO Visual. */
+/** Three extra Google search lines for AEO Visual. The plain "service in city" search is added separately. */
 export async function suggestAeoGoogleSearches(opts: {
   service: string;
   city: string;
@@ -2351,10 +2380,11 @@ export async function suggestAeoGoogleSearches(opts: {
   if (!service || !city || !businessName || !requireDataForSeoConfigured()) return [];
 
   const systemMessage =
-    'Return exactly 4 Google search lines and nothing else. No numbering or commentary. ' +
-    'Lines 1 and 2 are questions a local customer would type about this service in this city. Do not put the business name in lines 1 or 2. ' +
-    'Lines 3 and 4 include the business name, the service, and the city. ' +
-    'Make the questions specific to this service, such as cost, how to choose, repair, install, or whether this company is a good choice. ' +
+    'Return exactly 3 Google search lines and nothing else. No numbering or commentary. ' +
+    'These are the best local searches a customer would type to find this service in this city. ' +
+    'Do not return a plain "service in city" line such as "plumbers in London" — that search is already measured. ' +
+    'Make them specific, such as cost, how to choose, repair, install, or whether this company is a good choice. ' +
+    'Include the city. At least one line must include the business name. ' +
     'Each line under 90 characters.';
   const userPrompt = `Service: ${service.slice(0, 80)}. City: ${city.slice(0, 60)}. Business: ${businessName.slice(0, 80)}.`;
   const models = ['gpt-4.1-mini', 'gpt-4o-mini'];
@@ -2380,7 +2410,7 @@ export async function suggestAeoGoogleSearches(opts: {
       .split(/\r?\n/)
       .map((line) => line.replace(/^(\d+[\).\]]\s*|[-*•]\s*)/, '').replace(/^["']|["']$/g, '').trim())
       .filter((line) => line && !/^(here|these|sure|google searches)\b/i.test(line));
-    if (lines.length >= 4) return lines.slice(0, 4);
+    if (lines.length >= 3) return lines.slice(0, 3);
     if (!first.retryModel && text) break;
   }
   return [];
@@ -2422,11 +2452,11 @@ export async function checkAiEngineMentions(opts: {
     return [
       skippedRow('chatgpt', 'ChatGPT', 'Missing prompt or business name'),
       skippedRow('claude', 'Claude', 'Missing prompt or business name'),
-      skippedRow('gemini', 'Gemini', 'Missing prompt or business name')
+      skippedRow('perplexity', 'Perplexity', 'Missing prompt or business name')
     ];
   }
 
-  const [gpt, claude, gemini] = await Promise.all([
+  const [gpt, claude, perplexity] = await Promise.all([
     fetchLlmWithModelFallback({
       platform: 'chat_gpt',
       models: ['gpt-4.1-mini', 'gpt-4o-mini'],
@@ -2444,8 +2474,8 @@ export async function checkAiEngineMentions(opts: {
       timeoutMs: 60000
     }),
     fetchLlmWithModelFallback({
-      platform: 'gemini',
-      models: ['gemini-2.5-flash', 'gemini-2.0-flash'],
+      platform: 'perplexity',
+      models: ['sonar', 'sonar-pro'],
       prompt,
       city,
       address,
@@ -2503,7 +2533,7 @@ export async function checkAiEngineMentions(opts: {
   return [
     toApiRow('chatgpt', 'ChatGPT', gpt),
     toApiRow('claude', 'Claude', claude),
-    toApiRow('gemini', 'Gemini', gemini)
+    toApiRow('perplexity', 'Perplexity', perplexity)
   ];
 }
 

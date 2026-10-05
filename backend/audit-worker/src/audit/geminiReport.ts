@@ -126,9 +126,9 @@ function buildMeasuredRoadmap(audit) {
       title: 'AI visibility',
       items: pick(isGeoRoadmapCheck, [
         `Use the same trading name for ${name} on the website, Google listing, and citations in ${city}`,
-        `Add sameAs links for ${name} so ChatGPT, Claude, and Gemini can connect the ${service} entity in ${city}`,
+        `Add sameAs links for ${name} so ChatGPT, Claude, and Perplexity can connect the ${service} entity in ${city}`,
         `Publish ${name} on the directories those AI answers already cite for ${service} in ${city}`,
-        `Recheck the measured prompts and record whether ChatGPT, Claude, and Gemini name ${name}`
+        `Recheck the measured prompts and record whether ChatGPT, Claude, and Perplexity name ${name}`
       ])
     }
   ];
@@ -645,9 +645,9 @@ Use only the measured JSON. Structure the narrative like a client deck: overall 
 For every issue use Issue → Evidence → Impact → Recommendation → Priority (fill evidence/recommendation/priority fields; keep title/detail/impact too).
 
 PILLAR CONTENT RULES (must follow):
-- Local SEO is the Google Business Profile, NAP, citations, website local pages, and the measured Google Maps query. Do not mention FAQ schema, ChatGPT, Claude, Gemini, or AI visibility in local_seo comments, localSeoFixes, or Local SEO issues.
+- Local SEO is the Google Business Profile, NAP, citations, website local pages, and the measured Google Maps query. Do not mention FAQ schema, ChatGPT, Claude, Perplexity, or AI visibility in local_seo comments, localSeoFixes, or Local SEO issues.
 - AEO is whether the website answers the measured Google question searches with FAQ blocks, 40–60 word direct answers, and FAQPage schema. Do not explain an AEO gap as a Maps or Local Pack position.
-- GEO is whether ChatGPT, Claude, and Gemini name, recommend, or cite this business on the measured prompts. Write GEO from those AI excerpts. Do not describe the Local Pack as the GEO result, and do not invent an AI Overview block. Maps may appear only as a one-sentence Local SEO cross-reference.
+- GEO is whether ChatGPT, Claude, and Perplexity name, recommend, or cite this business on the measured prompts. Write GEO from those AI excerpts. Do not describe the Local Pack as the GEO result, and do not invent an AI Overview block. Maps may appear only as a one-sentence Local SEO cross-reference.
 - executiveSummary is exactly three sentences, in this order: Local SEO, then AEO, then GEO.
 - pillarComments.local_seo, pillarComments.aeo, and pillarComments.geo are each one sentence and stay inside that pillar.
 
@@ -665,13 +665,13 @@ EMOJI RULE (must follow):
 
 SOURCE RULE (must follow):
 - Never name DataForSEO, scrapers, consumer UI, Top 5, LLM Responses, scraped UI, or any API used to measure results.
-- Say ChatGPT, Claude, and Gemini only. Do not say how the answers were collected.
+- Say ChatGPT, Claude, and Perplexity only. Do not say how the answers were collected.
 
 ROADMAP RULES (must follow):
 - Exactly 3 months, and each month has 4 concrete tasks for this business.
 - Month 1 is Google Business Profile, NAP, and the measured Maps query. No FAQ tasks and no AI tasks.
 - Month 2 is FAQ blocks and on-page answers for the failed AEO checks only.
-- Month 3 is the GEO prompts where the brand was not mentioned: the same trading name, sameAs links, and the third-party sources those ChatGPT, Claude, and Gemini answers already cited.
+- Month 3 is the GEO prompts where the brand was not mentioned: the same trading name, sameAs links, and the third-party sources those ChatGPT, Claude, and Perplexity answers already cited.
 - Name the business, the service, and the city in the tasks. Do not write generic tasks such as "monitor rankings" or "improve SEO".
 
 CRITICAL PHONE RULES (must follow):
@@ -721,7 +721,7 @@ Return ONLY JSON:
   "pillarComments": {
     "local_seo": "one sentence on GBP, NAP, citations, and the measured Maps query only",
     "aeo": "one sentence on FAQ and direct answers for the measured question searches only",
-    "geo": "one sentence on whether ChatGPT, Claude, and Gemini name or cite this business only"
+    "geo": "one sentence on whether ChatGPT, Claude, and Perplexity name or cite this business only"
   },
   "strengths": ["up to 4 strengths"],
   "criticalIssues": [
@@ -758,8 +758,8 @@ Return ONLY JSON:
   },
   "geoFixes": {
     "title": "GEO: AI mentions and citations",
-    "visualIntro": "one sentence on whether ChatGPT, Claude, and Gemini name this business for the measured prompts — do not describe the Local Pack",
-    "verifyHint": "Ask ChatGPT, Claude, and Gemini the measured prompts and record whether this business is named.",
+    "visualIntro": "one sentence on whether ChatGPT, Claude, and Perplexity name this business for the measured prompts — do not describe the Local Pack",
+    "verifyHint": "Ask ChatGPT, Claude, and Perplexity the measured prompts and record whether this business is named.",
     "queryCards": [
       {
         "query": "MUST equal gbpLookup.localRank.query exactly",
@@ -773,7 +773,7 @@ Return ONLY JSON:
         "measured": true
       }
     ],
-    "goalLine": "get named and cited by ChatGPT, Claude, and Gemini for the measured prompts",
+    "goalLine": "get named and cited by ChatGPT, Claude, and Perplexity for the measured prompts",
     "opportunity": "one sentence leading with which engines mentioned or missed this business — Maps only as a short Local SEO cross-reference — never invent AI Overview",
     "actions": [
       { "title": "", "detail": "", "howTo": "concrete how-to steps", "priority": "High|Medium", "issue": "", "evidence": "", "impact": "", "recommendation": "" }

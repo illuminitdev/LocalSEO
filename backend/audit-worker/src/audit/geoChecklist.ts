@@ -110,7 +110,7 @@ export const GEO_CHECKLIST_DEFS: Array<{
       {
         id: 'geo_ai_1',
         label: 'Business mentioned in AI answers',
-        definition: 'Whether ChatGPT, Claude, or Gemini name this business in their replies.'
+        definition: 'Whether ChatGPT, Claude, or Perplexity name this business in their replies.'
       },
       {
         id: 'geo_ai_2',
@@ -368,8 +368,8 @@ export function buildGeoChecklist(opts: {
       const s = statusFromBool(
         anyMeasured ? anyMentioned : null,
         `Mentioned in ${engines.filter((e) => e.mentioned).map((e) => e.label || e.engine).join(' / ') || 'AI'}`,
-        'Not mentioned in measured ChatGPT / Claude / Gemini answers',
-        'ChatGPT, Claude, and Gemini answers were not confirmed for this business'
+        'Not mentioned in measured ChatGPT / Claude / Perplexity answers',
+        'ChatGPT, Claude, and Perplexity answers were not confirmed for this business'
       );
       return item('geo_ai_1', 'Business mentioned in AI answers', s.status, s.evidence);
     })(),
@@ -378,7 +378,7 @@ export function buildGeoChecklist(opts: {
         anyMeasured ? recommended : null,
         'AI answer uses recommendation language with the brand',
         'No clear recommendation language with the brand in measured answers',
-        'ChatGPT, Claude, and Gemini answers were not confirmed for this business'
+        'ChatGPT, Claude, and Perplexity answers were not confirmed for this business'
       );
       return item('geo_ai_2', 'Business recommended for local searches', s.status, s.evidence);
     })(),
@@ -391,7 +391,7 @@ export function buildGeoChecklist(opts: {
         `Mentioned for “${prompt}”`,
         `Not mentioned for “${prompt}”`,
         service && city
-          ? 'Service + location visibility was not confirmed in ChatGPT, Claude, or Gemini'
+          ? 'Service + location visibility was not confirmed in ChatGPT, Claude, or Perplexity'
           : 'Service or location not provided'
       );
       return item('geo_ai_3', 'Service + location visibility', s.status, s.evidence);
@@ -423,7 +423,7 @@ export function buildGeoChecklist(opts: {
           'geo_ai_5',
           '"Near me" query visibility',
           'no',
-          'Near-me visibility was not confirmed in ChatGPT, Claude, or Gemini'
+          'Near-me visibility was not confirmed in ChatGPT, Claude, or Perplexity'
         );
       }
       const s = statusFromBool(
@@ -432,7 +432,7 @@ export function buildGeoChecklist(opts: {
           ? `Mentioned for “${slice[0]?.prompt || 'near me'}”`
           : 'Mentioned for near-me style prompt',
         `Not mentioned for “${slice[0]?.prompt || 'near me'}”`,
-        'Near-me visibility was not confirmed in ChatGPT, Claude, or Gemini'
+        'Near-me visibility was not confirmed in ChatGPT, Claude, or Perplexity'
       );
       return item('geo_ai_5', '"Near me" query visibility', s.status, s.evidence);
     })(),
@@ -456,7 +456,7 @@ export function buildGeoChecklist(opts: {
         'Competitors from Local Pack also appear in AI answers',
         'Local Pack competitors not detected in AI answer text',
         competitors.length
-          ? 'ChatGPT, Claude, and Gemini answers were not confirmed for this business'
+          ? 'ChatGPT, Claude, and Perplexity answers were not confirmed for this business'
           : 'No Local Pack competitors to compare'
       );
       return item('geo_ai_7', 'Competitor mentions in AI answers', s.status, s.evidence);

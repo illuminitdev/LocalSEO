@@ -268,9 +268,9 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
   );
   const local = context.localSeoChecklist
     ? blendWeighted([
-        { ...weightedCheckScore(localChecklistOnly, 2), weight: 65 },
-        { ...weightedCheckScore(gbpDetailRows, 3), weight: 20 },
-        { ...mapRankSlice(context.localRank), weight: 15 }
+        { ...weightedCheckScore(localChecklistOnly, 2), weight: 94 },
+        { ...weightedCheckScore(gbpDetailRows, 3), weight: 3 },
+        { ...mapRankSlice(context.localRank), weight: 3 }
       ])
     : scoreChecks100(localChecks);
 

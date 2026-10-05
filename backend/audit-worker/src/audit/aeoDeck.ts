@@ -18,7 +18,7 @@ export type AeoQuerySpec = {
 };
 
 
-export function buildAeoQuerySpecs(audit: {
+export type AeoQueryAudit = {
   business?: {
     businessName?: string;
     searchAreaLabel?: string;
@@ -31,10 +31,32 @@ export function buildAeoQuerySpecs(audit: {
       topResults?: Array<{ name?: string; isProspect?: boolean }>;
     };
   };
-} | null): AeoQuerySpec[] {
+} | null;
+
+/** "plumber" -> "plumbers". Phrases of more than one word stay as written. */
+export function serviceInCityQuery(service: string, city: string): string {
+  const phrase = String(service || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const place = String(city || '').replace(/\s+/g, ' ').trim() || 'the local area';
+  const words = phrase ? phrase.split(' ') : ['local services'];
+  let lead = words.join(' ');
+  if (words.length === 1) {
+    const word = words[0];
+    if (!/s$/i.test(word)) {
+      lead = /[^aeiou]y$/i.test(word) ? `${word.slice(0, -1)}ies` : `${word}s`;
+    }
+  }
+  return `${lead} in ${place}`;
+}
+
+export function buildAeoQuerySpecs(audit: AeoQueryAudit): AeoQuerySpec[] {
   const { name, city, service } = auditContext(audit);
 
   return [
+    {
+      query: serviceInCityQuery(service, city),
+      intent: 'service_best',
+      kind: 'service'
+    },
     {
       query: `How much does ${service} cost in ${city}?`,
       intent: 'service_cost',
@@ -44,11 +66,6 @@ export function buildAeoQuerySpecs(audit: {
       query: `How do I choose ${service} in ${city}?`,
       intent: 'service_howto',
       kind: 'service'
-    },
-    {
-      query: `${name} reviews ${city}`,
-      intent: 'brand_trust',
-      kind: 'brand'
     },
     {
       query: `Is ${name} good for ${service} in ${city}?`,
@@ -83,13 +100,33 @@ function cleanSearchLine(line: string): string {
     .trim();
 }
 
-/** Turn ChatGPT's four lines into AEO cards. Returns null when the lines are not usable. */
-export function aeoSpecsFromSearchLines(
-  lines: string[],
-  audit: Parameters<typeof buildAeoQuerySpecs>[0]
-): AeoQuerySpec[] | null {
-  const { service } = auditContext(audit);
+function sameQuery(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function specFromChatLine(line: string, nameWords: string[]): AeoQuerySpec {
+  if (mentionsAny(line, nameWords)) {
+    return { query: line, intent: 'brand_trust', kind: 'brand' };
+  }
+  if (/\b(cost|price|prices|how much)\b/i.test(line)) {
+    return { query: line, intent: 'service_cost', kind: 'service' };
+  }
+  if (/\b(how|choose|choosing)\b/i.test(line)) {
+    return { query: line, intent: 'service_howto', kind: 'service' };
+  }
+  return { query: line, intent: 'service_best', kind: 'service' };
+}
+
+/** First search is always "{service}s in {city}". The next three come from ChatGPT, padded from the fallback questions. */
+export function aeoSpecsFromSearchLines(lines: string[], audit: AeoQueryAudit): AeoQuerySpec[] {
+  const fallback = buildAeoQuerySpecs(audit);
+  const cityQuery = fallback[0].query;
   const businessName = String(audit?.business?.businessName || '').trim();
+  const { service } = auditContext(audit);
+  const serviceWords = termWords(service);
+  const nameWords = termWords(businessName).filter(
+    (w) => !serviceWords.some((s) => s.includes(w) || w.includes(s) || (w.length >= 5 && s.startsWith(w.slice(0, 5))))
+  );
   const cleaned = (Array.isArray(lines) ? lines : [])
     .map(cleanSearchLine)
     .filter(
@@ -97,30 +134,22 @@ export function aeoSpecsFromSearchLines(
         line.length >= 8 &&
         line.length <= 120 &&
         !/https?:\/\//i.test(line) &&
-        !/\b(chatgpt|gemini|claude|dataforseo|api)\b/i.test(line)
+        !/\b(chatgpt|gemini|claude|dataforseo|api)\b/i.test(line) &&
+        !sameQuery(line, cityQuery)
     );
   const unique: string[] = [];
   for (const line of cleaned) {
-    if (unique.some((u) => u.toLowerCase() === line.toLowerCase())) continue;
+    if (unique.some((u) => sameQuery(u, line))) continue;
     unique.push(line);
   }
-  if (unique.length < 4 || !businessName) return null;
 
-  const serviceWords = termWords(service);
-  const nameWords = termWords(businessName).filter(
-    (w) => !serviceWords.some((s) => s.includes(w) || w.includes(s) || (w.length >= 5 && s.startsWith(w.slice(0, 5))))
-  );
-  const serviceLines = unique.filter((line) => mentionsAny(line, serviceWords) && !mentionsAny(line, nameWords));
-  const brandLines = unique.filter((line) => mentionsAny(line, nameWords) && mentionsAny(line, serviceWords));
-  if (serviceLines.length < 2 || brandLines.length < 2) return null;
-
-  const picked = [...serviceLines.slice(0, 2), ...brandLines.slice(0, 2)];
-  const intents: AeoQueryIntent[] = ['service_cost', 'service_howto', 'brand_trust', 'brand_trust'];
-  return picked.map((query, i) => ({
-    query,
-    intent: intents[i],
-    kind: i < 2 ? 'service' : 'brand'
-  }));
+  const specs: AeoQuerySpec[] = [fallback[0], ...unique.slice(0, 3).map((line) => specFromChatLine(line, nameWords))];
+  for (const row of fallback.slice(1)) {
+    if (specs.length >= 4) break;
+    if (specs.some((s) => sameQuery(s.query, row.query))) continue;
+    specs.push(row);
+  }
+  return specs.length === 4 ? specs : fallback;
 }
 
 function storedAeoQuerySpecs(audit: { aeoQuerySpecs?: unknown } | null): AeoQuerySpec[] | null {
@@ -206,7 +235,7 @@ export function buildAeoFixes(audit) {
   return {
     title: 'AEO: Answer Engine Optimisation',
     visualIntro:
-      'Real Google results for four local question searches (2 service + 2 brand) — use these to see where FAQ and schema can win answer boxes.',
+      'Real Google results for one “service in city” search plus three local question searches — use these to see where FAQ and schema can win answer boxes.',
     aeoChecklist: buildAeoCoreChecklist(audit),
     priorities:
       priorities.length > 0
