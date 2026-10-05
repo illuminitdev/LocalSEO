@@ -915,7 +915,7 @@ export function buildDeepLocalRank(opts: {
 export type GeoAiPromptKey = 'near' | 'best' | 'near_me';
 
 export type AiEngineCheckResult = {
-  engine: 'chatgpt' | 'claude' | 'gemini';
+  engine: 'chatgpt' | 'claude' | 'perplexity';
   label: string;
   prompt: string;
   promptKey?: GeoAiPromptKey;
@@ -2004,7 +2004,7 @@ export async function detectDuplicateListings(opts: {
 }
 
 async function fetchLlmResponseLive(opts: {
-  platform: 'chat_gpt' | 'claude' | 'gemini';
+  platform: 'chat_gpt' | 'claude' | 'perplexity';
   modelName: string;
   prompt: string;
   city?: string;
@@ -2021,14 +2021,18 @@ async function fetchLlmResponseLive(opts: {
     user_prompt: geoLlmUserPrompt(prompt, place),
     model_name: opts.modelName,
     max_output_tokens: opts.platform === 'claude' ? 560 : 480,
-    web_search: true,
     system_message: geoLlmSystemMessage(place)
   };
+  if (opts.platform !== 'perplexity') {
+    task.web_search = true;
+  }
   if (opts.withTemperature !== false && opts.platform !== 'claude') {
     task.temperature = 0.2;
   }
 
-  if (opts.platform !== 'gemini') {
+  if (opts.platform === 'perplexity') {
+    task.web_search_country_iso_code = 'GB';
+  } else {
     task.web_search_country_iso_code = 'GB';
     task.force_web_search = true;
     if (place) task.web_search_city = place.slice(0, 48);
@@ -2037,8 +2041,8 @@ async function fetchLlmResponseLive(opts: {
   const path =
     opts.platform === 'claude'
       ? 'https://api.dataforseo.com/v3/ai_optimization/claude/llm_responses/live'
-      : opts.platform === 'gemini'
-        ? 'https://api.dataforseo.com/v3/ai_optimization/gemini/llm_responses/live'
+      : opts.platform === 'perplexity'
+        ? 'https://api.dataforseo.com/v3/ai_optimization/perplexity/llm_responses/live'
         : 'https://api.dataforseo.com/v3/ai_optimization/chat_gpt/llm_responses/live';
 
   const controller = new AbortController();
@@ -2078,7 +2082,7 @@ async function fetchLlmResponseLive(opts: {
 }
 
 async function fetchLlmWithModelFallback(opts: {
-  platform: 'chat_gpt' | 'claude' | 'gemini';
+  platform: 'chat_gpt' | 'claude' | 'perplexity';
   models: string[];
   prompt: string;
   city?: string;
@@ -2422,11 +2426,11 @@ export async function checkAiEngineMentions(opts: {
     return [
       skippedRow('chatgpt', 'ChatGPT', 'Missing prompt or business name'),
       skippedRow('claude', 'Claude', 'Missing prompt or business name'),
-      skippedRow('gemini', 'Gemini', 'Missing prompt or business name')
+      skippedRow('perplexity', 'Perplexity', 'Missing prompt or business name')
     ];
   }
 
-  const [gpt, claude, gemini] = await Promise.all([
+  const [gpt, claude, perplexity] = await Promise.all([
     fetchLlmWithModelFallback({
       platform: 'chat_gpt',
       models: ['gpt-4.1-mini', 'gpt-4o-mini'],
@@ -2444,8 +2448,8 @@ export async function checkAiEngineMentions(opts: {
       timeoutMs: 60000
     }),
     fetchLlmWithModelFallback({
-      platform: 'gemini',
-      models: ['gemini-2.5-flash', 'gemini-2.0-flash'],
+      platform: 'perplexity',
+      models: ['sonar', 'sonar-pro'],
       prompt,
       city,
       address,
@@ -2503,7 +2507,7 @@ export async function checkAiEngineMentions(opts: {
   return [
     toApiRow('chatgpt', 'ChatGPT', gpt),
     toApiRow('claude', 'Claude', claude),
-    toApiRow('gemini', 'Gemini', gemini)
+    toApiRow('perplexity', 'Perplexity', perplexity)
   ];
 }
 

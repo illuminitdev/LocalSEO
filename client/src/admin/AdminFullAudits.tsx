@@ -93,6 +93,52 @@ function auditsReadyForRequest(req: FullAuditRequest, audits: FullAuditListItem[
     });
 }
 
+
+const CRAWL_EXPECTED_MS = 8 * 60 * 1000;
+
+function CrawlProgressRing({ percent }: { percent: number }) {
+    const size = 56;
+    const stroke = 5;
+    const radius = (size - stroke) / 2;
+    const circumference = 2 * Math.PI * radius;
+    const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+    const dashOffset = circumference - (clamped / 100) * circumference;
+    return (
+        <div
+            className="relative shrink-0"
+            style={{ width: size, height: size }}
+            role="img"
+            aria-label={`${clamped} percent complete`}
+        >
+            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+                <circle
+                    cx={size / 2}
+                    cy={size / 2}
+                    r={radius}
+                    fill="#FFFBEB"
+                    stroke="#FDE68A"
+                    strokeWidth={stroke}
+                />
+                <circle
+                    cx={size / 2}
+                    cy={size / 2}
+                    r={radius}
+                    fill="none"
+                    stroke="#F59E0B"
+                    strokeWidth={stroke}
+                    strokeLinecap="round"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={dashOffset}
+                    className="transition-[stroke-dashoffset] duration-500 ease-linear"
+                />
+            </svg>
+            <span className="absolute inset-0 flex items-center justify-center text-[11px] font-black tabular-nums text-[#0F172A]">
+                {clamped}%
+            </span>
+        </div>
+    );
+}
+
 const CRAWL_STEPS = [
     {
         id: 'gbp',
@@ -205,7 +251,8 @@ export default function AdminFullAudits() {
     const [showForm, setShowForm] = useState(false);
     const [form, setForm] = useState(EMPTY_FORM);
     const [creating, setCreating] = useState(false);
-    const [stepIndex, setStepIndex] = useState(0);
+    const [ringPct, setRingPct] = useState(0);
+    const crawlCompleteRef = useRef(false);
     const [createMessage, setCreateMessage] = useState('');
 
     const load = useCallback(() => {
@@ -408,13 +455,21 @@ export default function AdminFullAudits() {
     };
 
     useEffect(() => {
-        if (!creating) return undefined;
+        if (!creating) {
+            crawlCompleteRef.current = false;
+            setRingPct(0);
+            return undefined;
+        }
+        const started = Date.now();
+        setRingPct(0);
         const timer = setInterval(() => {
-            setStepIndex((i) => {
-                if (i < 1) return i;
-                return i < CRAWL_STEPS.length - 1 ? i + 1 : i;
-            });
-        }, 20000);
+            if (crawlCompleteRef.current) {
+                setRingPct(100);
+                return;
+            }
+            const elapsed = Date.now() - started;
+            setRingPct(Math.min(95, Math.round((elapsed / CRAWL_EXPECTED_MS) * 95)));
+        }, 500);
         return () => clearInterval(timer);
     }, [creating]);
 
@@ -446,7 +501,18 @@ export default function AdminFullAudits() {
     const requestRangeStart = filteredRequests.length === 0 ? 0 : (safeRequestPage - 1) * PAGE_SIZE + 1;
     const requestRangeEnd = Math.min(safeRequestPage * PAGE_SIZE, filteredRequests.length);
     const showOther = form.serviceId === 'other';
-    const progressPct = Math.round(((stepIndex + 1) / CRAWL_STEPS.length) * 100);
+    const progressPct = ringPct;
+    const activeStepIndex =
+        progressPct >= 100
+            ? CRAWL_STEPS.length
+            : Math.min(CRAWL_STEPS.length - 1, Math.floor((progressPct / 100) * CRAWL_STEPS.length));
+    const detailStep = CRAWL_STEPS[Math.min(CRAWL_STEPS.length - 1, activeStepIndex)];
+
+    const showCrawlComplete = async () => {
+        crawlCompleteRef.current = true;
+        setRingPct(100);
+        await new Promise((r) => setTimeout(r, 500));
+    };
 
     const openNewForm = () => {
         setShowForm(true);
@@ -459,7 +525,6 @@ export default function AdminFullAudits() {
         setShowForm(false);
         setForm(EMPTY_FORM);
         setCreateMessage('');
-        setStepIndex(0);
     };
 
     const finishAndOpenReport = async (auditId: string) => {
@@ -479,7 +544,6 @@ export default function AdminFullAudits() {
         setForm(EMPTY_FORM);
         setShowForm(false);
         setCreateMessage('');
-        setStepIndex(0);
         show(
             prefillRequestId
                 ? 'Full audit ready — pick a sales agent to assign.'
@@ -556,7 +620,6 @@ export default function AdminFullAudits() {
         const { email, phone } = contactsFromForm(form.contact, form.extraContact, form.showExtraContact);
 
         setCreating(true);
-        setStepIndex(0);
         setError('');
         setCreateMessage('Looking up Maps / GBP, then crawling the website…');
 
@@ -582,6 +645,7 @@ export default function AdminFullAudits() {
             const jobId = res.data?.jobId;
 
             if (res.data?.status === 'complete' && auditIdOut) {
+                await showCrawlComplete();
                 await finishAndOpenReport(auditIdOut);
                 return;
             }
@@ -589,7 +653,6 @@ export default function AdminFullAudits() {
                 throw new Error('Full crawl did not return a job id');
             }
 
-            setStepIndex(0);
             setCreateMessage('Waiting for crawl worker…');
             const started = Date.now();
             let sawRunning = false;
@@ -600,7 +663,6 @@ export default function AdminFullAudits() {
                 const st = job.data?.status;
 
                 if (st === 'queued') {
-                    setStepIndex(0);
                     const waitedSec = Math.round((Date.now() - started) / 1000);
                     setCreateMessage(
                         waitedSec > 90
@@ -610,13 +672,12 @@ export default function AdminFullAudits() {
                 }
                 if (st === 'running') {
                     sawRunning = true;
-                    setStepIndex((i) => Math.max(i, 1));
                     setCreateMessage(
                         'Crawl status: running… (website + AI report can take several minutes)'
                     );
                 }
                 if (st === 'complete') {
-                    setStepIndex(CRAWL_STEPS.length - 1);
+                    await showCrawlComplete();
                     await finishAndOpenReport(auditIdOut);
                     return;
                 }
@@ -628,7 +689,7 @@ export default function AdminFullAudits() {
                     try {
                         const auditRes = await fetchFullAudit(auditIdOut);
                         if (auditRes.data?.published) {
-                            setStepIndex(CRAWL_STEPS.length - 1);
+                            await showCrawlComplete();
                             await finishAndOpenReport(auditIdOut);
                             return;
                         }
@@ -1036,9 +1097,7 @@ export default function AdminFullAudits() {
                     {creating ? (
                         <div className="space-y-5" aria-live="polite">
                             <div className="flex gap-4 items-start">
-                                <div className="w-12 h-12 rounded-xl bg-[#FFFBEB] text-[#F59E0B] flex items-center justify-center shrink-0">
-                                    <Loader2 className="w-6 h-6 animate-spin" />
-                                </div>
+                                <CrawlProgressRing percent={progressPct} />
                                 <div>
                                     <p className="text-xs font-bold uppercase tracking-wide text-[#F59E0B] flex items-center gap-1.5">
                                         <Wand2 className="w-3.5 h-3.5" /> Building full crawl report
@@ -1047,7 +1106,7 @@ export default function AdminFullAudits() {
                                         Please wait — this usually takes 3–8 minutes
                                     </h3>
                                     <p className="text-sm text-[#64748B] mt-1">
-                                        {CRAWL_STEPS[stepIndex].detail}
+                                        {detailStep.detail}
                                     </p>
                                     {createMessage ? (
                                         <p className="text-sm text-[#64748B] mt-1">{createMessage}</p>
@@ -1067,12 +1126,12 @@ export default function AdminFullAudits() {
                                 />
                             </div>
                             <p className="text-xs font-semibold text-[#94A3B8]">
-                                Step {stepIndex + 1} of {CRAWL_STEPS.length}
+                                Step {Math.min(CRAWL_STEPS.length, activeStepIndex + 1)} of {CRAWL_STEPS.length}
                             </p>
                             <ol className="space-y-2">
                                 {CRAWL_STEPS.map((step, i) => {
-                                    const done = i < stepIndex;
-                                    const active = i === stepIndex;
+                                    const done = i < activeStepIndex;
+                                    const active = i === activeStepIndex;
                                     const Icon =
                                         i === 0 ? MapPinned : i === 1 ? Globe2 : i === 2 ? Search : Wand2;
                                     return (

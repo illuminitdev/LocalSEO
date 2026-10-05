@@ -788,7 +788,7 @@ async function enrichFromDataForSeo(audit: any) {
       const engines = [
         ['chatgpt', 'ChatGPT'],
         ['claude', 'Claude'],
-        ['gemini', 'Gemini']
+        ['perplexity', 'Perplexity']
       ] as const;
       audit.gbpLookup = {
         ...(audit.gbpLookup || {}),
