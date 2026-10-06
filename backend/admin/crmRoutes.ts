@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { query } from '../lib/db';
 import { requireAdmin } from './adminAuth';
 import { createSalesLead, bulkImportSalesLeads, convertLeadToCustomer, ensureCrmTables, resolveAllLeadIds } from '../sales-agent/sales';
-import { fetchAdminLeadMetadataMap } from './leadHelpers';
+import { fetchAdminLeadMetadataMap, ADMIN_LEAD_TYPES } from './leadHelpers';
 import { fetchLatestAuditEmailShareMap, shareInfoForAudit } from '../lib/auditEmailSends';
 import {
     newLeadObservationEmailToken,
@@ -56,9 +56,10 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
         if (assignedTo) {
             if (assignedTo === 'unassigned') {
                 where.push(`t.assigned_to_user_id IS NULL`);
+                where.push(`NOT EXISTS (SELECT 1 FROM sales_leads sl WHERE sl.id::text = t.lead_id AND sl.assigned_to IS NOT NULL)`);
             } else {
                 params.push(assignedTo);
-                where.push(`t.assigned_to_user_id = $${params.length}`);
+                where.push(`(t.assigned_to_user_id = $${params.length} OR (t.assigned_to_user_id IS NULL AND EXISTS (SELECT 1 FROM sales_leads sl WHERE sl.id::text = t.lead_id AND sl.assigned_to = $${params.length})))`);
             }
         }
         if (status) {
@@ -76,7 +77,7 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
         
         where.push(`(t.created_by_role = 'admin' OR t.created_by_role IS NULL)`);
 
-        const { rows } = await query(`
+        const { rows: taskRows } = await query(`
             SELECT 
                 t.id,
                 t.lead_id AS "leadId",
@@ -110,6 +111,122 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
             LIMIT 500
         `, params);
 
+        let rows = [...taskRows];
+
+        // Also surface unassigned leads and leads without explicit task records so that all leads are visible in CRM
+        const statusAllowsPending = !status || status === 'all' || status === 'pending';
+        const typeAllowsOutreach = !taskType || taskType === 'all' || taskType === 'follow_up_call' || taskType === 'call';
+
+        if (statusAllowsPending && typeAllowsOutreach) {
+            const allTaskLeadIds = new Set(
+                (await query(`SELECT lead_id FROM lead_tasks WHERE lead_id IS NOT NULL`).then(r => r.rows.map((x: any) => String(x.lead_id))).catch(() => []))
+            );
+
+            // 1. Fetch sales_leads that don't have task records yet
+            const sParams: any[] = [];
+            const sWhere: string[] = ['1=1'];
+            if (leadId) {
+                sParams.push(leadId);
+                sWhere.push(`l.id::text = $${sParams.length}`);
+            }
+            if (assignedTo === 'unassigned') {
+                sWhere.push(`l.assigned_to IS NULL`);
+                sWhere.push(`NOT EXISTS (SELECT 1 FROM lead_tasks lt WHERE lt.lead_id = l.id::text AND lt.assigned_to_user_id IS NOT NULL)`);
+            } else if (assignedTo && assignedTo !== 'all') {
+                sParams.push(assignedTo);
+                sWhere.push(`l.assigned_to = $${sParams.length}`);
+            }
+            if (priority && priority !== 'all') {
+                sParams.push(priority);
+                sWhere.push(`LOWER(COALESCE(l.opportunity_level, 'medium')) = $${sParams.length}`);
+            }
+
+            const { rows: salesLeadRows } = await query(`
+                SELECT 
+                    l.id::text AS "leadId",
+                    'follow_up_call' AS "taskType",
+                    'Outreach & Follow-Up' AS title,
+                    COALESCE(l.notes, '') AS notes,
+                    COALESCE(l.opportunity_level, 'medium') AS priority,
+                    'pending' AS status,
+                    NULL::timestamptz AS "dueDate",
+                    NULL::timestamptz AS "completedAt",
+                    l.created_at AS "createdAt",
+                    COALESCE(l.updated_at, l.created_at) AS "updatedAt",
+                    l.assigned_to AS "assignedToUserId",
+                    'admin' AS "createdByRole",
+                    'Admin' AS "createdByName",
+                    u.name AS "assignedToName",
+                    u.email AS "assignedToEmail",
+                    u.avatar_url AS "assignedToAvatarUrl"
+                FROM sales_leads l
+                LEFT JOIN users u ON u.id = l.assigned_to
+                WHERE ${sWhere.join(' AND ')}
+                ORDER BY l.created_at DESC
+                LIMIT 500
+            `, sParams).catch(() => ({ rows: [] }));
+
+            for (const sl of salesLeadRows) {
+                if (!allTaskLeadIds.has(String(sl.leadId))) {
+                    rows.push({
+                        ...sl,
+                        id: `virtual-${sl.leadId}`
+                    });
+                    allTaskLeadIds.add(String(sl.leadId));
+                }
+            }
+
+            // 2. Fetch submissions (unassigned leads from growth audits with valid contact details and matching ADMIN_LEAD_TYPES)
+            if (assignedTo === 'unassigned' || !assignedTo || assignedTo === 'all') {
+                const subParams: any[] = [ADMIN_LEAD_TYPES];
+                const subWhere: string[] = [
+                    's.type = ANY($1::text[])',
+                    `(
+                        NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', s.payload->'customer'->>'email', '')), '') IS NOT NULL
+                        OR NULLIF(TRIM(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', s.payload->'customer'->>'phone', '')), '') IS NOT NULL
+                    )`
+                ];
+                if (leadId) {
+                    subParams.push(leadId);
+                    subWhere.push(`s.id::text = $${subParams.length}`);
+                }
+                const { rows: subRows } = await query(`
+                    SELECT 
+                        s.id::text AS "leadId",
+                        'follow_up_call' AS "taskType",
+                        'Growth Audit Outreach' AS title,
+                        '' AS notes,
+                        'medium' AS priority,
+                        'pending' AS status,
+                        NULL::timestamptz AS "dueDate",
+                        NULL::timestamptz AS "completedAt",
+                        s.created_at AS "createdAt",
+                        s.created_at AS "updatedAt",
+                        NULL::uuid AS "assignedToUserId",
+                        'admin' AS "createdByRole",
+                        'Admin' AS "createdByName",
+                        NULL::text AS "assignedToName",
+                        NULL::text AS "assignedToEmail",
+                        NULL::text AS "assignedToAvatarUrl"
+                    FROM submissions s
+                    LEFT JOIN audits a ON a.id::text = s.payload->>'auditId'
+                    WHERE ${subWhere.join(' AND ')}
+                    ORDER BY s.created_at DESC
+                    LIMIT 500
+                `, subParams).catch(() => ({ rows: [] }));
+
+                for (const sub of subRows) {
+                    if (!allTaskLeadIds.has(String(sub.leadId))) {
+                        rows.push({
+                            ...sub,
+                            id: `virtual-${sub.leadId}`
+                        });
+                        allTaskLeadIds.add(String(sub.leadId));
+                    }
+                }
+            }
+        }
+
         const leadIds = Array.from(new Set(rows.map((t: any) => t.leadId).filter(Boolean))) as string[];
         const leadMetaMap = await fetchAdminLeadMetadataMap(leadIds);
         const auditIds = Array.from(
@@ -142,6 +259,8 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
                 leadIndustry: meta.industry || '',
                 leadAuditId: meta.auditId || null,
                 leadStatus: meta.status || (meta.isCustomer ? 'converted' : 'new'),
+                leadImportBatchId: meta.importBatchId || null,
+                leadImportFileName: meta.importFileName || null,
                 emailShareStatus: share.emailShareStatus,
                 emailShareSentAt: share.emailShareSentAt,
                 emailShareOpenedAt: share.emailShareOpenedAt,
@@ -264,8 +383,68 @@ router.post('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
 router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
-        const taskId = req.params.id;
+        const taskId = String(req.params.id || '');
         const { status, priority, notes, assigned_to_user_id, due_date, title, task_type } = req.body || {};
+
+        if (taskId.startsWith('virtual-') || taskId.startsWith('lead-task-')) {
+            const actualLeadId = taskId.replace(/^virtual-|^lead-task-/, '');
+            const validTaskTypes = ['prepare_audit', 'onboard_customer', 'follow_up_call', 'send_proposal', 'custom', 'call', 'follow_up', 'audit_review', 'proposal', 'meeting', 'email', 'other'];
+            const TASK_TYPE_MAP: Record<string, string> = {
+                call: 'follow_up_call',
+                follow_up: 'follow_up_call',
+                audit_review: 'prepare_audit',
+                proposal: 'send_proposal',
+                meeting: 'custom',
+                email: 'custom',
+                other: 'custom'
+            };
+            const sanitizedTaskType = validTaskTypes.includes(task_type)
+                ? (TASK_TYPE_MAP[task_type] || task_type)
+                : 'follow_up_call';
+            const sanitizedPriority = ['low', 'medium', 'high', 'urgent'].includes(priority) ? priority : 'medium';
+            const sanitizedStatus = ['pending', 'in_progress', 'completed', 'cancelled'].includes(status) ? status : 'pending';
+
+            const { rows: createdRows } = await query(`
+                INSERT INTO lead_tasks (
+                    lead_id, task_type, title, notes, priority, status, assigned_to_user_id, due_date, created_by_role, created_by_name, completed_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'admin', 'Admin', $9)
+                RETURNING 
+                    id,
+                    lead_id AS "leadId",
+                    task_type AS "taskType",
+                    title,
+                    notes,
+                    priority,
+                    status,
+                    due_date AS "dueDate",
+                    completed_at AS "completedAt",
+                    created_at AS "createdAt",
+                    updated_at AS "updatedAt",
+                    assigned_to_user_id AS "assignedToUserId",
+                    COALESCE(created_by_role, 'admin') AS "createdByRole",
+                    COALESCE(created_by_name, 'Admin') AS "createdByName"
+            `, [
+                actualLeadId,
+                sanitizedTaskType,
+                title ? String(title).trim() : 'Outreach & Follow-Up',
+                notes ? String(notes).trim() : '',
+                sanitizedPriority,
+                sanitizedStatus,
+                assigned_to_user_id || null,
+                due_date || null,
+                sanitizedStatus === 'completed' ? new Date() : null
+            ]);
+
+            const task = createdRows[0];
+            if (assigned_to_user_id !== undefined) {
+                await query(`
+                    UPDATE sales_leads 
+                    SET assigned_to = $1, updated_at = NOW() 
+                    WHERE id::text = $2 OR email = (SELECT email FROM submissions WHERE id::text = $2 LIMIT 1)
+                `, [assigned_to_user_id || null, actualLeadId]).catch(() => {});
+            }
+            return res.json({ task });
+        }
 
         const updates: string[] = ['updated_at = NOW()'];
         const params: any[] = [taskId];
@@ -389,7 +568,11 @@ router.patch('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response)
 router.delete('/crm/tasks/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables();
-        const taskId = req.params.id;
+        const taskId = String(req.params.id || '');
+
+        if (taskId.startsWith('virtual-') || taskId.startsWith('lead-task-')) {
+            return res.json({ success: true, message: 'Task deleted' });
+        }
 
         const { rows: taskRows } = await query(
             `SELECT title, lead_id FROM lead_tasks WHERE id = $1`,

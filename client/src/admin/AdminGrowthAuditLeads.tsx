@@ -43,10 +43,12 @@ import BulkAssignTasksModal from './BulkAssignTasksModal';
 import LeadStatusHistoryModal from './LeadStatusHistoryModal';
 import ExcelLeadUploadModal, { downloadLeadsExcelTemplate } from '../sales-agent/ExcelLeadUploadModal';
 import AddLeadModal from '../sales-agent/AddLeadModal';
+import { emailShareStatusLabel, emailShareStatusHint } from '../shared/emailShareStatus';
 import { cn } from '../shared/utils';
 
 type ContactFilter = 'any' | 'email' | 'phone' | 'both';
 type SourceCategoryFilter = 'all' | 'growth_audit' | 'added';
+type EmailOpenFilter = 'all' | 'opened' | 'not_opened' | 'not_sent';
 
 type AdminLead = GrowthAuditLeadRef & {
     type?: string | null;
@@ -68,6 +70,12 @@ type AdminLead = GrowthAuditLeadRef & {
     spreadsheetStatus1?: string | null;
     spreadsheetStatus2?: string | null;
     spreadsheetStatus3?: string | null;
+    emailShareStatus?: 'none' | 'sent' | 'opened' | null;
+    emailShareSentAt?: string | null;
+    emailShareOpenedAt?: string | null;
+    observationEmailShareStatus?: 'none' | 'sent' | 'opened' | null;
+    observationEmailSentAt?: string | null;
+    observationEmailOpenedAt?: string | null;
     latestActivity?: {
         type?: string;
         disposition?: string | null;
@@ -350,6 +358,7 @@ export default function AdminGrowthAuditLeads() {
     const [selectedPriority, setSelectedPriority] = useState<string>('all');
     const [statusDateFilter, setStatusDateFilter] = useState<StatusDateFilter>('all');
     const [statusCustomDate, setStatusCustomDate] = useState<string>('');
+    const [emailFilter, setEmailFilter] = useState<EmailOpenFilter>('all');
 
     const handleSetSourceCategory = (cat: SourceCategoryFilter) => {
         setSourceCategory(cat);
@@ -443,10 +452,9 @@ export default function AdminGrowthAuditLeads() {
     const filteredLeads = useMemo(() => {
         return leads.filter((lead) => {
             const added = isLeadAdded(lead);
-            if (sourceCategory === 'growth_audit') return !added;
-            if (sourceCategory === 'added') {
-                if (!added) return false;
-            }
+            if (sourceCategory === 'growth_audit' && added) return false;
+            if (sourceCategory === 'added' && !added) return false;
+
             if (excelBatchFilter !== 'all') {
                 if (!leadMatchesExcelBatch(lead, excelBatchFilter)) return false;
             }
@@ -457,16 +465,20 @@ export default function AdminGrowthAuditLeads() {
                 }
             }
             if (selectedAgent !== 'all') {
+                const rawName = String(lead.assignedAgentName || (lead as any).assignedToName || '').trim().toLowerCase();
+                const rawId = String((lead as any).assignedToUserId || lead.assignedTo || '').trim().toLowerCase();
+                const isAssigned = Boolean((rawId && rawId !== 'unassigned') || (rawName && rawName !== 'unassigned'));
+
                 if (selectedAgent === 'unassigned') {
-                    if (lead.assignedAgentName || (lead as any).assignedToUserId) return false;
+                    if (isAssigned) return false;
                 } else {
                     const agent = salesAgents.find((a) => a.id === selectedAgent);
-                    const agentName = agent?.name || agent?.email || '';
-                    const leadAgentName = lead.assignedAgentName || (lead as any).assignedToName || '';
-                    const leadAgentId = (lead as any).assignedToUserId || '';
+                    const agentName = (agent?.name || agent?.email || '').toLowerCase().trim();
+                    const leadAgentName = rawName;
+                    const leadAgentId = String((lead as any).assignedToUserId || lead.assignedTo || '').trim();
                     if (
                         leadAgentId !== selectedAgent &&
-                        (!agentName || !leadAgentName.toLowerCase().includes(agentName.toLowerCase()))
+                        (!agentName || !leadAgentName.includes(agentName))
                     ) {
                         return false;
                     }
@@ -477,6 +489,12 @@ export default function AdminGrowthAuditLeads() {
                 const target = selectedStatus.toLowerCase().trim().replace(/[-\s]/g, '_');
                 if (target === 'new') {
                     if (leadStat && leadStat !== 'new' && leadStat !== 'submitted') return false;
+                } else if (target === 'not_interested') {
+                    if (!leadStat.includes('not_interested') && !leadStat.includes('not interested')) return false;
+                } else if (target === 'interested') {
+                    if (leadStat.includes('not_interested') || leadStat.includes('not interested') || !leadStat.includes('interested')) return false;
+                } else if (target === 'follow_up' || target === 'callback') {
+                    if (!leadStat.includes('follow') && !leadStat.includes('callback')) return false;
                 } else if (!leadStat.includes(target) && leadStat !== target) {
                     return false;
                 }
@@ -484,6 +502,25 @@ export default function AdminGrowthAuditLeads() {
             if (selectedPriority !== 'all') {
                 const prio = ((lead as any).priority || '').toLowerCase().trim();
                 if (prio && prio !== selectedPriority) return false;
+            }
+            if (emailFilter !== 'all') {
+                const isObsOpened = lead.observationEmailShareStatus === 'opened';
+                const isAuditOpened = lead.emailShareStatus === 'opened';
+                const isObsSent =
+                    lead.observationEmailShareStatus === 'sent' ||
+                    isObsOpened ||
+                    lead.latestActivity?.disposition === 'observation_email';
+                const isAuditSent = lead.emailShareStatus === 'sent' || isAuditOpened;
+                const isAnySent = isObsSent || isAuditSent;
+                const isAnyOpened = isObsOpened || isAuditOpened;
+
+                if (emailFilter === 'opened') {
+                    if (!isAnyOpened) return false;
+                } else if (emailFilter === 'not_opened') {
+                    if (!isAnySent || isAnyOpened) return false;
+                } else if (emailFilter === 'not_sent') {
+                    if (isAnySent) return false;
+                }
             }
             const statusDate = lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt;
             if (!matchesStatusDateFilter(statusDate, statusDateFilter, statusCustomDate)) {
@@ -499,6 +536,7 @@ export default function AdminGrowthAuditLeads() {
         selectedAgent,
         selectedStatus,
         selectedPriority,
+        emailFilter,
         statusDateFilter,
         statusCustomDate,
         salesAgents
@@ -669,7 +707,7 @@ export default function AdminGrowthAuditLeads() {
                             <input
                                 value={draftQuery}
                                 onChange={(e) => setDraftQuery(e.target.value)}
-                                placeholder="Search tasks, notes, or telecaller..."
+                                placeholder="Search leads by business, name, email, phone, city..."
                                 className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-[#E2E8F0] text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 bg-slate-50 focus:bg-white"
                             />
                         </div>
@@ -722,7 +760,7 @@ export default function AdminGrowthAuditLeads() {
                             <button
                                 type="button"
                                 onClick={() => setIsAddLeadModalOpen(true)}
-                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#F59E0B] text-white hover:bg-[#D97706] transition-colors shadow-2xs"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[#F59E0B] text-white hover:bg-[#D97706] transition-colors shadow-2xs"
                             >
                                 <Plus className="w-3.5 h-3.5" />
                                 <span>Add Lead</span>
@@ -740,11 +778,11 @@ export default function AdminGrowthAuditLeads() {
                         </div>
                     </div>
 
-                    {/* Filter Grid (Matches Admin CRM filters: Business, Sales Agent, Task Type/Source, Status, Status Date, Priority) */}
-                    <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 pt-2.5 border-t border-slate-100">
+                    {/* Filter Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 pt-2.5 border-t border-slate-100">
                         <div>
                             <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                                Business
+                                Business Category
                             </label>
                             <select
                                 value={businessFilter}
@@ -794,7 +832,7 @@ export default function AdminGrowthAuditLeads() {
 
                         <div>
                             <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                                Task Type
+                                Lead Source / Batch
                             </label>
                             <select
                                 value={excelBatchFilter !== 'all' ? excelBatchFilter : sourceCategory}
@@ -811,21 +849,28 @@ export default function AdminGrowthAuditLeads() {
                                     setSelectedLeadIds(new Set());
                                 }}
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                                title="Filter by source or Excel import batch"
                             >
-                                <option value="all">All Task Types</option>
-                                <option value="added">Added / Uploaded Leads ({addedCount})</option>
+                                <option value="all">All Sources</option>
+                                <option value="added">Uploaded / Added Leads ({addedCount})</option>
                                 <option value="growth_audit">Growth Audit & Funnels ({growthAuditCount})</option>
-                                {excelBatches.map((b) => (
-                                    <option key={b.batchId} value={b.batchId}>
-                                        Excel: {b.fileName} ({b.leadCount})
-                                    </option>
-                                ))}
+                                {excelBatches.map((b) => {
+                                    let cleanName = b.fileName;
+                                    try {
+                                        cleanName = decodeURIComponent(cleanName).replace(/%20/g, ' ').replace(/_/g, ' ');
+                                    } catch {}
+                                    return (
+                                        <option key={b.batchId} value={b.batchId}>
+                                            Excel: {cleanName} ({b.leadCount})
+                                        </option>
+                                    );
+                                })}
                             </select>
                         </div>
 
                         <div>
                             <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                                Status
+                                Lead Status
                             </label>
                             <select
                                 value={selectedStatus}
@@ -846,6 +891,27 @@ export default function AdminGrowthAuditLeads() {
                                 <option value="completed">Completed</option>
                                 <option value="voicemail">Voicemail</option>
                                 <option value="cancelled">Cancelled</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-1">
+                                <Mail className="w-3 h-3 text-slate-400 shrink-0" />
+                                Email Status
+                            </label>
+                            <select
+                                value={emailFilter}
+                                onChange={(e) => {
+                                    setEmailFilter(e.target.value as EmailOpenFilter);
+                                    setPage(1);
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                                title="Filter by email open status"
+                            >
+                                <option value="all">All</option>
+                                <option value="opened">Email Opened</option>
+                                <option value="not_opened">Not Opened</option>
+                                <option value="not_sent">Not Sent</option>
                             </select>
                         </div>
 
@@ -885,7 +951,7 @@ export default function AdminGrowthAuditLeads() {
 
                         <div>
                             <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                                Priority
+                                Priority / Contact
                             </label>
                             <select
                                 value={selectedPriority !== 'all' ? selectedPriority : hasContact !== 'any' ? `contact_${hasContact}` : 'all'}
@@ -1103,6 +1169,35 @@ export default function AdminGrowthAuditLeads() {
                                                                      <span className="truncate">{lead.email}</span>
                                                                  </a>
                                                              ) : null}
+                                                             {(() => {
+                                                                 const obsLabel = emailShareStatusLabel(lead.observationEmailShareStatus);
+                                                                 const auditLabel = emailShareStatusLabel(lead.emailShareStatus);
+                                                                 const label = obsLabel || auditLabel;
+                                                                 const isOpened = lead.observationEmailShareStatus === 'opened' || lead.emailShareStatus === 'opened';
+                                                                 if (!label) return null;
+                                                                 return (
+                                                                     <div className="pt-0.5">
+                                                                         <span
+                                                                             className={cn(
+                                                                                 'inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md border shrink-0',
+                                                                                 isOpened
+                                                                                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                                                     : 'bg-slate-50 text-slate-600 border-slate-200'
+                                                                             )}
+                                                                             title={emailShareStatusHint(
+                                                                                 lead.observationEmailShareStatus || lead.emailShareStatus,
+                                                                                 {
+                                                                                     sentAt: lead.observationEmailSentAt || lead.emailShareSentAt,
+                                                                                     openedAt: lead.observationEmailOpenedAt || lead.emailShareOpenedAt
+                                                                                 }
+                                                                             )}
+                                                                         >
+                                                                             <Mail className="w-2.5 h-2.5" />
+                                                                             Email: {label}
+                                                                         </span>
+                                                                     </div>
+                                                                 );
+                                                             })()}
                                                              {lead.website ? (
                                                                  <a
                                                                      href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
@@ -1295,6 +1390,35 @@ export default function AdminGrowthAuditLeads() {
                                                                     <span className="truncate">{lead.email}</span>
                                                                 </a>
                                                             ) : null}
+                                                            {(() => {
+                                                                const obsLabel = emailShareStatusLabel(lead.observationEmailShareStatus);
+                                                                const auditLabel = emailShareStatusLabel(lead.emailShareStatus);
+                                                                const label = obsLabel || auditLabel;
+                                                                const isOpened = lead.observationEmailShareStatus === 'opened' || lead.emailShareStatus === 'opened';
+                                                                if (!label) return null;
+                                                                return (
+                                                                    <div className="pt-0.5">
+                                                                        <span
+                                                                            className={cn(
+                                                                                'inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md border shrink-0',
+                                                                                isOpened
+                                                                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                                                    : 'bg-slate-50 text-slate-600 border-slate-200'
+                                                                            )}
+                                                                            title={emailShareStatusHint(
+                                                                                lead.observationEmailShareStatus || lead.emailShareStatus,
+                                                                                {
+                                                                                    sentAt: lead.observationEmailSentAt || lead.emailShareSentAt,
+                                                                                    openedAt: lead.observationEmailOpenedAt || lead.emailShareOpenedAt
+                                                                                }
+                                                                            )}
+                                                                        >
+                                                                            <Mail className="w-2.5 h-2.5" />
+                                                                            Email: {label}
+                                                                        </span>
+                                                                    </div>
+                                                                );
+                                                            })()}
                                                             {lead.website ? (
                                                                 <a
                                                                     href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
@@ -1566,6 +1690,31 @@ export default function AdminGrowthAuditLeads() {
                     onClose={() => setSelectedStatusLead(null)}
                     onStatusUpdated={async () => {
                         await load();
+                    }}
+                />
+            )}
+
+            {/* Lead CRM Drawer (Task Assignment & CRM history) */}
+            {activeLead && (
+                <LeadCrmDrawer
+                    lead={activeLead}
+                    salesAgents={salesAgents}
+                    onClose={() => setActiveLead(null)}
+                    onTaskUpdated={async () => {
+                        await load();
+                    }}
+                />
+            )}
+
+            {/* Lead Details Modal */}
+            {viewingLeadDetails && (
+                <LeadDetailsModal
+                    isOpen={Boolean(viewingLeadDetails)}
+                    lead={viewingLeadDetails}
+                    onClose={() => setViewingLeadDetails(null)}
+                    onOpenManageTasks={(l: GrowthAuditLeadRef) => {
+                        setViewingLeadDetails(null);
+                        setActiveLead(l);
                     }}
                 />
             )}
