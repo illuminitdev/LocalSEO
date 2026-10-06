@@ -89,7 +89,7 @@ function fmtDate(value?: string | null) {
 
 const PAGE_SIZE = 10;
 
-type EmailOpenFilter = 'all' | 'opened' | 'not_opened' | 'not_sent';
+type EmailOpenFilter = 'all' | 'sent' | 'opened' | 'not_opened' | 'not_sent';
 
 export default function AdminCrmTasks() {
     const navigate = useNavigate();
@@ -122,10 +122,6 @@ export default function AdminCrmTasks() {
         try {
             const [tasksData, agentsData, leadsData, batchesData] = await Promise.all([
                 fetchCrmTasks({
-                    assignedTo: selectedAgent !== 'all' ? selectedAgent : undefined,
-                    taskType: selectedType !== 'all' ? selectedType : undefined,
-                    status: selectedStatus !== 'all' ? selectedStatus : undefined,
-                    priority: selectedPriority !== 'all' ? selectedPriority : undefined,
                     createdBy: 'admin'
                 }),
                 fetchSalesAgents().catch(() => []),
@@ -142,7 +138,7 @@ export default function AdminCrmTasks() {
         } finally {
             setLoading(false);
         }
-    }, [selectedAgent, selectedType, selectedStatus, selectedPriority]);
+    }, []);
 
     useEffect(() => {
         loadData();
@@ -177,6 +173,27 @@ export default function AdminCrmTasks() {
         return normalizeBusinessCategory(raw);
     }, [leads]);
 
+function isLeadAdded(lead: any) {
+    return (
+        lead.sourceCategory === 'added' ||
+        lead.type === 'added_lead' ||
+        lead.type === 'excel_import' ||
+        lead.type === 'manual' ||
+        lead.source === 'sales_lead' ||
+        String(lead.source || '').toLowerCase().includes('excel') ||
+        String(lead.source || '').toLowerCase().includes('manual')
+    );
+}
+
+    const growthAuditCount = useMemo(
+        () => leads.filter((l) => !isLeadAdded(l)).length,
+        [leads]
+    );
+    const addedCount = useMemo(
+        () => leads.filter((l) => isLeadAdded(l)).length,
+        [leads]
+    );
+
     const businessFilterOptions = useMemo(() => {
         const set = new Set<string>();
         tasks.forEach((t) => {
@@ -192,16 +209,21 @@ export default function AdminCrmTasks() {
 
     const filteredTasks = useMemo(() => {
         return tasks.filter((t) => {
+            // 1. Search Query
             if (searchQuery.trim()) {
-                const q = searchQuery.toLowerCase();
+                const q = searchQuery.toLowerCase().trim();
                 const matchesQuery =
-                    t.title.toLowerCase().includes(q) ||
+                    (t.title || '').toLowerCase().includes(q) ||
                     (t.notes || '').toLowerCase().includes(q) ||
                     (t.leadBusinessName && t.leadBusinessName.toLowerCase().includes(q)) ||
+                    (t.leadPhone && t.leadPhone.toLowerCase().includes(q)) ||
+                    (t.leadEmail && t.leadEmail.toLowerCase().includes(q)) ||
+                    (t.leadCity && t.leadCity.toLowerCase().includes(q)) ||
                     (t.assignedToName && t.assignedToName.toLowerCase().includes(q));
                 if (!matchesQuery) return false;
             }
 
+            // 2. Business Category
             if (selectedBusiness !== 'all') {
                 const cat = getTaskBusinessCategory(t);
                 if (!cat || cat.toLowerCase().trim() !== selectedBusiness.toLowerCase().trim()) {
@@ -209,25 +231,65 @@ export default function AdminCrmTasks() {
                 }
             }
 
+            // 3. Sales Agent
+            if (selectedAgent !== 'all') {
+                const rawName = String(t.assignedToName || '').trim().toLowerCase();
+                const rawId = String(t.assignedToUserId || '').trim().toLowerCase();
+                const isAssigned = Boolean((rawId && rawId !== 'unassigned') || (rawName && rawName !== 'unassigned'));
+
+                if (selectedAgent === 'unassigned') {
+                    if (isAssigned) return false;
+                } else {
+                    const agent = salesAgents.find((a) => a.id === selectedAgent);
+                    const agentName = (agent?.name || agent?.email || '').toLowerCase().trim();
+                    if (
+                        rawId !== selectedAgent &&
+                        (!agentName || !rawName.includes(agentName))
+                    ) {
+                        return false;
+                    }
+                }
+            }
+
+            // 4. Lead Source / Batch
             if (excelBatchFilter !== 'all') {
+                const matchedLead = leads.find((l) => l.id === t.leadId);
+                const added = matchedLead
+                    ? isLeadAdded(matchedLead)
+                    : (
+                        t.leadSource === 'sales_lead' ||
+                        t.leadSource === 'added' ||
+                        t.leadSource === 'excel_import' ||
+                        Boolean((t as any).leadImportBatchId) ||
+                        String(t.leadSource || '').toLowerCase().includes('excel') ||
+                        String(t.leadSource || '').toLowerCase().includes('manual')
+                    );
+
                 if (excelBatchFilter === 'growth_audit') {
-                    const src = String(t.leadSource || '').toLowerCase();
-                    const isAudit = src.includes('growth_audit') || src.includes('contact') || src.includes('funnel');
-                    if (!isAudit) return false;
+                    if (added) return false;
                 } else if (excelBatchFilter === 'added') {
-                    const src = String(t.leadSource || '').toLowerCase();
-                    const isAudit = src.includes('growth_audit') || src.includes('contact') || src.includes('funnel');
-                    if (isAudit) return false;
+                    if (!added) return false;
                 } else if (excelBatchFilter === 'legacy') {
-                    const src = String(t.leadSource || '').toLowerCase();
-                    const isLegacy = src.includes('excel') && !(t as any).leadImportBatchId;
+                    const src = String(matchedLead?.source || t.leadSource || '').toLowerCase();
+                    const isLegacy = src.includes('excel') && !((matchedLead as any)?.importBatchId || (t as any).leadImportBatchId);
                     if (!isLegacy) return false;
                 } else {
-                    const batchId = (t as any).leadImportBatchId;
+                    const batchId = (matchedLead as any)?.importBatchId || (t as any).leadImportBatchId;
                     if (String(batchId || '') !== excelBatchFilter) return false;
                 }
             }
 
+            // 5. Task Type
+            if (selectedType !== 'all') {
+                if (t.taskType !== selectedType) return false;
+            }
+
+            // 6. Task Status
+            if (selectedStatus !== 'all') {
+                if (t.status !== selectedStatus) return false;
+            }
+
+            // 7. Email Status
             if (emailFilter !== 'all') {
                 const isObsOpened = t.observationEmailShareStatus === 'opened';
                 const isAuditOpened = t.emailShareStatus === 'opened';
@@ -236,7 +298,9 @@ export default function AdminCrmTasks() {
                 const isAnySent = isObsSent || isAuditSent;
                 const isAnyOpened = isObsOpened || isAuditOpened;
 
-                if (emailFilter === 'opened') {
+                if (emailFilter === 'sent') {
+                    if (!isAnySent) return false;
+                } else if (emailFilter === 'opened') {
                     if (!isAnyOpened) return false;
                 } else if (emailFilter === 'not_opened') {
                     if (!isAnySent || isAnyOpened) return false;
@@ -245,14 +309,35 @@ export default function AdminCrmTasks() {
                 }
             }
 
+            // 8. Status Date
             const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
             if (!matchesStatusDateFilter(taskStatusDate, statusDateFilter, statusCustomDate)) {
                 return false;
             }
 
+            // 9. Priority
+            if (selectedPriority !== 'all') {
+                const prio = String(t.priority || 'medium').toLowerCase().trim();
+                if (prio !== selectedPriority.toLowerCase().trim()) return false;
+            }
+
             return true;
         });
-    }, [tasks, searchQuery, selectedBusiness, emailFilter, statusDateFilter, statusCustomDate, getTaskBusinessCategory]);
+    }, [
+        tasks,
+        searchQuery,
+        selectedBusiness,
+        selectedAgent,
+        excelBatchFilter,
+        selectedType,
+        selectedStatus,
+        emailFilter,
+        statusDateFilter,
+        statusCustomDate,
+        selectedPriority,
+        salesAgents,
+        getTaskBusinessCategory
+    ]);
 
 interface GroupedAdminTask {
     leadId: string;
@@ -311,13 +396,14 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
         const result: GroupedAdminTask[] = [];
         for (const [key, list] of groups.entries()) {
             list.sort(compareTasksForPrimary);
-            const pendingCount = list.filter(
+            const realTasks = list.filter((t) => !String(t.id || '').startsWith('virtual-'));
+            const pendingCount = realTasks.filter(
                 (t) => t.status !== 'completed' && t.status !== 'cancelled'
             ).length;
             result.push({
                 leadId: key,
                 primaryTask: list[0],
-                totalTasks: list.length,
+                totalTasks: realTasks.length,
                 pendingTasks: pendingCount,
                 tasks: list
             });
@@ -461,7 +547,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
 
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                            Lead Source / Batch
+                            Lead Source
                         </label>
                         <select
                             value={excelBatchFilter}
@@ -473,8 +559,8 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             title="Filter by source or Excel import batch"
                         >
                             <option value="all">All Sources</option>
-                            <option value="added">Uploaded Leads</option>
-                            <option value="growth_audit">Growth Audit & Funnels</option>
+                            <option value="added">Uploaded / Added Leads ({addedCount})</option>
+                            <option value="growth_audit">Growth Audit & Funnels ({growthAuditCount})</option>
                             {excelBatches.map((b) => {
                                 let cleanName = b.fileName;
                                 try {
@@ -567,6 +653,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             title="Filter tasks by email open status"
                         >
                             <option value="all">All</option>
+                            <option value="sent">Email Sent</option>
                             <option value="opened">Email Opened</option>
                             <option value="not_opened">Not Opened</option>
                             <option value="not_sent">Not Sent</option>
@@ -660,11 +747,12 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {pageGroups.map(({ primaryTask: task, pendingTasks }) => {
-                                    const isDone = pendingTasks === 0;
+                                    const isVirtual = String(task.id || '').startsWith('virtual-');
+                                    const isDone = !isVirtual && pendingTasks === 0;
                                     const leadName = task.leadBusinessName || getLeadName(task.leadId, task);
                                     const shareLabel = emailShareStatusLabel(task.emailShareStatus);
                                     const notesShareLabel = emailShareStatusLabel(
-                                        task.observationEmailShareStatus
+                                         task.observationEmailShareStatus
                                     );
 
                                     return (
@@ -686,26 +774,28 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                                                         >
                                                             {leadName}
                                                         </button>
-                                                        {pendingTasks > 0 ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openLeadPage(task, 'tasks')}
-                                                                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-2xs tracking-tight transition-all hover:scale-105 cursor-pointer"
-                                                                title={`${pendingTasks} active task${pendingTasks > 1 ? 's' : ''} remaining — Click to view tasks`}
-                                                            >
-                                                                <ListTodo className="w-3 h-3 text-amber-700 shrink-0" />
-                                                                +{pendingTasks}
-                                                            </button>
-                                                        ) : (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openLeadPage(task, 'tasks')}
-                                                                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs transition-all hover:scale-105 cursor-pointer"
-                                                                title="All assigned tasks completed for this lead — Click to view"
-                                                            >
-                                                                <CheckSquare className="w-3 h-3 text-emerald-600 shrink-0" />
-                                                                Done
-                                                            </button>
+                                                        {!isVirtual && (
+                                                            pendingTasks > 0 ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openLeadPage(task, 'tasks')}
+                                                                    className="shrink-0 inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-2xs tracking-tight transition-all hover:scale-105 cursor-pointer"
+                                                                    title={`${pendingTasks} active task${pendingTasks > 1 ? 's' : ''} remaining — Click to view tasks`}
+                                                                >
+                                                                    <ListTodo className="w-3 h-3 text-amber-700 shrink-0" />
+                                                                    +{pendingTasks}
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openLeadPage(task, 'tasks')}
+                                                                    className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs transition-all hover:scale-105 cursor-pointer"
+                                                                    title="All assigned tasks completed for this lead — Click to view"
+                                                                >
+                                                                    <CheckSquare className="w-3 h-3 text-emerald-600 shrink-0" />
+                                                                    Done
+                                                                </button>
+                                                            )
                                                         )}
                                                     </div>
                                                     <div className="mt-1 flex flex-wrap items-center gap-1.5">

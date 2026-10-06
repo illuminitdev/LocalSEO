@@ -131,11 +131,7 @@ export default function SalesTasks() {
         setError('');
         try {
             const [taskList, industryList] = await Promise.all([
-                fetchSalesTasks({
-                    priority: priorityFilter !== 'all' ? priorityFilter : undefined,
-                    taskType: typeFilter !== 'all' ? typeFilter : undefined,
-                    dueToday: dueTodayOnly
-                }),
+                fetchSalesTasks({}),
                 fetchSalesIndustries().catch(() => [] as Array<{ name: string; count: number }>)
             ]);
 
@@ -146,7 +142,7 @@ export default function SalesTasks() {
         } finally {
             setLoading(false);
         }
-    }, [priorityFilter, typeFilter, dueTodayOnly]);
+    }, []);
 
     useEffect(() => {
         loadData();
@@ -239,33 +235,87 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
         return tasks.filter((t) => industryKey(normalizeTaskIndustry(t)) === selected);
     }, [tasks, industryFilter]);
 
-    const filteredTasks = industryScopedTasks.filter((t) => {
-        if (statusFilter !== 'all') {
-            const stat = String(t.leadStatus || 'new').toLowerCase().trim();
-            if (statusFilter === 'follow_up') {
-                if (stat !== 'follow_up' && stat !== 'callback') return false;
-            } else if (stat !== statusFilter.toLowerCase().trim()) {
+    const filteredTasks = useMemo(() => {
+        return industryScopedTasks.filter((t) => {
+            // 1. Lead Status
+            if (statusFilter !== 'all') {
+                const stat = String(t.leadStatus || 'new').toLowerCase().trim().replace(/[-\s]/g, '_');
+                const target = statusFilter.toLowerCase().trim().replace(/[-\s]/g, '_');
+                if (target === 'new') {
+                    const isNew = stat === 'new' || stat === 'pending' || stat === 'submitted' || !stat;
+                    if (!isNew) return false;
+                } else if (target === 'follow_up' || target === 'callback') {
+                    if (!stat.includes('follow') && !stat.includes('callback')) return false;
+                } else if (target === 'interested') {
+                    if (!stat.includes('interested') || stat.includes('not_interested')) return false;
+                } else if (target === 'not_interested') {
+                    if (!stat.includes('not_interested') && !stat.includes('rejected') && !stat.includes('declined')) return false;
+                } else if (target === 'contacted') {
+                    if (!stat.includes('contacted') && !stat.includes('called') && !stat.includes('connected')) return false;
+                } else if (target === 'converted') {
+                    if (!stat.includes('converted') && !stat.includes('won')) return false;
+                } else if (target === 'completed') {
+                    if (!stat.includes('complete') && !stat.includes('done')) return false;
+                } else if (stat !== target && !stat.includes(target)) {
+                    return false;
+                }
+            }
+
+            // 2. Priority
+            if (priorityFilter !== 'all') {
+                const prio = String(t.priority || 'medium').toLowerCase().trim();
+                if (prio !== priorityFilter.toLowerCase().trim()) return false;
+            }
+
+            // 3. Task Type
+            if (typeFilter !== 'all') {
+                if (t.taskType !== typeFilter) return false;
+            }
+
+            // 4. Lead Kind
+            if (leadKindFilter === 'full_audit' && !isFullAuditTask(t)) return false;
+            if (leadKindFilter === 'leads' && isFullAuditTask(t)) return false;
+
+            // 5. Due Today Only
+            if (dueTodayOnly) {
+                const todayStr = new Date().toISOString().slice(0, 10);
+                const isDueToday = Boolean(t.dueDate && t.status !== 'completed' && t.dueDate.startsWith(todayStr));
+                if (!isDueToday) return false;
+            }
+
+            // 6. Status Date
+            const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
+            if (!matchesStatusDateFilter(taskStatusDate, statusDateFilter, statusCustomDate)) {
                 return false;
             }
-        }
-        if (leadKindFilter === 'full_audit' && !isFullAuditTask(t)) return false;
-        if (leadKindFilter === 'leads' && isFullAuditTask(t)) return false;
-        const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
-        if (!matchesStatusDateFilter(taskStatusDate, statusDateFilter, statusCustomDate)) {
-            return false;
-        }
-        if (!searchQuery.trim()) return true;
-        const q = searchQuery.toLowerCase();
-        return (
-            t.title.toLowerCase().includes(q) ||
-            (t.notes && t.notes.toLowerCase().includes(q)) ||
-            (t.leadBusinessName && t.leadBusinessName.toLowerCase().includes(q)) ||
-            (t.leadPhone && t.leadPhone.includes(q)) ||
-            (t.leadEmail && t.leadEmail.toLowerCase().includes(q)) ||
-            (t.leadStatus && t.leadStatus.toLowerCase().includes(q)) ||
-            normalizeTaskIndustry(t).toLowerCase().includes(q)
-        );
-    });
+
+            // 7. Search Query
+            if (searchQuery.trim()) {
+                const q = searchQuery.toLowerCase().trim();
+                const matches =
+                    (t.title || '').toLowerCase().includes(q) ||
+                    (t.notes && t.notes.toLowerCase().includes(q)) ||
+                    (t.leadBusinessName && t.leadBusinessName.toLowerCase().includes(q)) ||
+                    (t.leadPhone && t.leadPhone.includes(q)) ||
+                    (t.leadEmail && t.leadEmail.toLowerCase().includes(q)) ||
+                    (t.leadStatus && t.leadStatus.toLowerCase().includes(q)) ||
+                    normalizeTaskIndustry(t).toLowerCase().includes(q);
+                if (!matches) return false;
+            }
+
+            return true;
+        });
+    }, [
+        industryScopedTasks,
+        statusFilter,
+        priorityFilter,
+        typeFilter,
+        leadKindFilter,
+        dueTodayOnly,
+        statusDateFilter,
+        statusCustomDate,
+        searchQuery
+    ]);
 
     const dedupedTasks = useMemo(() => {
         const groups = new Map<string, SalesLeadTask[]>();
@@ -282,11 +332,12 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
         const result: GroupedSalesTask[] = [];
         for (const [key, list] of groups.entries()) {
             list.sort(compareTasksForPrimary);
-            const pendingCount = list.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').length;
+            const realTasks = list.filter((t) => !String(t.id || '').startsWith('virtual-'));
+            const pendingCount = realTasks.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').length;
             result.push({
                 leadId: key,
                 primaryTask: list[0],
-                totalTasks: list.length,
+                totalTasks: realTasks.length,
                 pendingTasks: pendingCount,
                 tasks: list
             });
@@ -652,7 +703,8 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                             </thead>
                             <tbody className="divide-y divide-[#F1F5F9]">
                                 {pagedGroups.map(({ primaryTask: task, pendingTasks }) => {
-                                    const isDone = pendingTasks === 0;
+                                    const isVirtual = String(task.id || '').startsWith('virtual-');
+                                    const isDone = !isVirtual && pendingTasks === 0;
                                     const prioConf = PRIORITY_BADGES[task.priority] || PRIORITY_BADGES.medium;
                                     const businessName = task.leadBusinessName || 'Lead';
                                     const industry = normalizeTaskIndustry(task);
@@ -677,26 +729,28 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                                                         >
                                                             {businessName}
                                                         </button>
-                                                        {pendingTasks > 0 ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openLeadDetails(task, 'tasks')}
-                                                                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-2xs tracking-tight transition-all hover:scale-105 cursor-pointer"
-                                                                title={`${pendingTasks} active task${pendingTasks > 1 ? 's' : ''} remaining — Click to view tasks`}
-                                                            >
-                                                                <ListTodo className="w-3 h-3 text-amber-700 shrink-0" />
-                                                                +{pendingTasks}
-                                                            </button>
-                                                        ) : (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openLeadDetails(task, 'tasks')}
-                                                                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs transition-all hover:scale-105 cursor-pointer"
-                                                                title="All assigned tasks completed for this lead — Click to view"
-                                                            >
-                                                                <CheckSquare className="w-3 h-3 text-emerald-600 shrink-0" />
-                                                                Done
-                                                            </button>
+                                                        {!isVirtual && (
+                                                            pendingTasks > 0 ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openLeadDetails(task, 'tasks')}
+                                                                    className="shrink-0 inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-2xs tracking-tight transition-all hover:scale-105 cursor-pointer"
+                                                                    title={`${pendingTasks} active task${pendingTasks > 1 ? 's' : ''} remaining — Click to view tasks`}
+                                                                >
+                                                                    <ListTodo className="w-3 h-3 text-amber-700 shrink-0" />
+                                                                    +{pendingTasks}
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openLeadDetails(task, 'tasks')}
+                                                                    className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs transition-all hover:scale-105 cursor-pointer"
+                                                                    title="All assigned tasks completed for this lead — Click to view"
+                                                                >
+                                                                    <CheckSquare className="w-3 h-3 text-emerald-600 shrink-0" />
+                                                                    Done
+                                                                </button>
+                                                            )
                                                         )}
                                                     </div>
                                                     <span className="block text-[11px] text-[#64748B] truncate mt-1">

@@ -467,7 +467,58 @@ router.get('/tasks', async (req: Request, res: Response) => {
             LIMIT 500
         `, params);
 
-        const leadIds = Array.from(new Set(tasks.map((t) => t.leadId)));
+        let taskList = [...tasks];
+        const allTaskLeadIds = new Set(taskList.map((t) => String(t.leadId || '')).filter(Boolean));
+
+        const statusAllowsPending = !status || status === 'all' || status === 'pending';
+        const typeAllowsOutreach = !taskType || taskType === 'all' || taskType === 'follow_up_call' || taskType === 'call';
+
+        if (statusAllowsPending && typeAllowsOutreach) {
+            const sParams: any[] = [agentId];
+            const sWhere: string[] = ['l.assigned_to = $1'];
+            if (leadId) {
+                sParams.push(leadId);
+                sWhere.push(`l.id::text = $${sParams.length}`);
+            }
+            if (priority && priority !== 'all') {
+                sParams.push(priority);
+                sWhere.push(`LOWER(COALESCE(l.opportunity_level, 'medium')) = $${sParams.length}`);
+            }
+
+            const { rows: salesLeadRows } = await query(`
+                SELECT 
+                    l.id::text AS "leadId",
+                    'follow_up_call' AS "taskType",
+                    'Outreach & Follow-Up' AS title,
+                    COALESCE(l.notes, '') AS notes,
+                    COALESCE(l.opportunity_level, 'medium') AS priority,
+                    'pending' AS status,
+                    NULL::timestamptz AS "dueDate",
+                    NULL::timestamptz AS "completedAt",
+                    l.created_at AS "createdAt",
+                    COALESCE(l.updated_at, l.created_at) AS "updatedAt",
+                    l.assigned_to AS "assignedToUserId",
+                    'sales_agent' AS "assignedToRole",
+                    'admin' AS "createdByRole",
+                    'Admin' AS "createdByName"
+                FROM sales_leads l
+                WHERE ${sWhere.join(' AND ')}
+                ORDER BY l.created_at DESC
+                LIMIT 500
+            `, sParams).catch(() => ({ rows: [] as any[] }));
+
+            for (const sl of salesLeadRows) {
+                if (!allTaskLeadIds.has(String(sl.leadId))) {
+                    taskList.push({
+                        ...sl,
+                        id: `virtual-${sl.leadId}`
+                    });
+                    allTaskLeadIds.add(String(sl.leadId));
+                }
+            }
+        }
+
+        const leadIds = Array.from(new Set(taskList.map((t) => t.leadId)));
         const leadMetaMap = await fetchLeadMetadataMap(leadIds);
         const auditIds = Array.from(
             new Set(
@@ -478,7 +529,7 @@ router.get('/tasks', async (req: Request, res: Response) => {
         );
         const shareMap = await fetchLatestAuditEmailShareMap(auditIds);
 
-        const enrichedTasks = tasks.map((t) => {
+        const enrichedTasks = taskList.map((t) => {
             const meta = leadMetaMap.get(t.leadId) || {};
             const share = shareInfoForAudit(shareMap, meta.auditId);
             return {

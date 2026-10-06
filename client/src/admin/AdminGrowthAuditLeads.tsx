@@ -48,7 +48,7 @@ import { cn } from '../shared/utils';
 
 type ContactFilter = 'any' | 'email' | 'phone' | 'both';
 type SourceCategoryFilter = 'all' | 'growth_audit' | 'added';
-type EmailOpenFilter = 'all' | 'opened' | 'not_opened' | 'not_sent';
+export type EmailOpenFilter = 'all' | 'sent' | 'opened' | 'not_opened' | 'not_sent';
 
 type AdminLead = GrowthAuditLeadRef & {
     type?: string | null;
@@ -239,7 +239,8 @@ export function matchesStatusDateFilter(
     filter: StatusDateFilter,
     customDate?: string
 ): boolean {
-    if (filter === 'all' || !dateStr) return true;
+    if (filter === 'all') return true;
+    if (!dateStr) return false;
     const d = new Date(dateStr);
     if (Number.isNaN(d.getTime())) return false;
 
@@ -458,12 +459,37 @@ export default function AdminGrowthAuditLeads() {
             if (excelBatchFilter !== 'all') {
                 if (!leadMatchesExcelBatch(lead, excelBatchFilter)) return false;
             }
+
+            if (query.trim()) {
+                const q = query.toLowerCase().trim();
+                const matchesQuery =
+                    String(lead.businessName || '').toLowerCase().includes(q) ||
+                    String(lead.name || '').toLowerCase().includes(q) ||
+                    String(lead.email || '').toLowerCase().includes(q) ||
+                    String(lead.phone || '').toLowerCase().includes(q) ||
+                    String(lead.address || '').toLowerCase().includes(q) ||
+                    String(lead.city || '').toLowerCase().includes(q) ||
+                    String(lead.notes || '').toLowerCase().includes(q) ||
+                    String(lead.assignedAgentName || '').toLowerCase().includes(q) ||
+                    String(lead.service || lead.serviceLabel || lead.industry || '').toLowerCase().includes(q);
+                if (!matchesQuery) return false;
+            }
+
+            if (hasContact !== 'any') {
+                const hasEmail = Boolean(String(lead.email || '').trim());
+                const hasPhone = Boolean(String(lead.phone || '').trim());
+                if (hasContact === 'email' && !hasEmail) return false;
+                if (hasContact === 'phone' && !hasPhone) return false;
+                if (hasContact === 'both' && (!hasEmail || !hasPhone)) return false;
+            }
+
             if (businessFilter !== 'all') {
                 const cat = getLeadBusinessCategory(lead);
                 if (!cat || cat.toLowerCase().trim() !== businessFilter.toLowerCase().trim()) {
                     return false;
                 }
             }
+
             if (selectedAgent !== 'all') {
                 const rawName = String(lead.assignedAgentName || (lead as any).assignedToName || '').trim().toLowerCase();
                 const rawId = String((lead as any).assignedToUserId || lead.assignedTo || '').trim().toLowerCase();
@@ -484,25 +510,109 @@ export default function AdminGrowthAuditLeads() {
                     }
                 }
             }
+
             if (selectedStatus !== 'all') {
-                const leadStat = (displayLeadStatus(lead) || lead.status || '').toLowerCase().trim().replace(/[-\s]/g, '_');
+                const rawStat = String(lead.status || '').toLowerCase().trim().replace(/[-\s]/g, '_');
+                const displayStat = (displayLeadStatus(lead) || '').toLowerCase().trim().replace(/[-\s]/g, '_');
+                const sheetStat = String(lead.spreadsheetStatus1 || lead.spreadsheetStatus || '').toLowerCase().trim().replace(/[-\s]/g, '_');
                 const target = selectedStatus.toLowerCase().trim().replace(/[-\s]/g, '_');
+
                 if (target === 'new') {
-                    if (leadStat && leadStat !== 'new' && leadStat !== 'submitted') return false;
+                    const isNew =
+                        rawStat === 'new' ||
+                        rawStat === 'pending' ||
+                        rawStat === 'submitted' ||
+                        !rawStat ||
+                        displayStat === 'new' ||
+                        displayStat === 'pending' ||
+                        displayStat === 'submitted' ||
+                        (!rawStat && !sheetStat);
+                    if (!isNew) return false;
                 } else if (target === 'not_interested') {
-                    if (!leadStat.includes('not_interested') && !leadStat.includes('not interested')) return false;
+                    const isNotInterested =
+                        rawStat === 'not_interested' ||
+                        displayStat.includes('not_interested') ||
+                        sheetStat.includes('not_interested') ||
+                        displayStat.includes('rejected') ||
+                        sheetStat.includes('rejected') ||
+                        displayStat.includes('declined') ||
+                        sheetStat.includes('declined');
+                    if (!isNotInterested) return false;
                 } else if (target === 'interested') {
-                    if (leadStat.includes('not_interested') || leadStat.includes('not interested') || !leadStat.includes('interested')) return false;
+                    const isInterested =
+                        (rawStat === 'interested' || displayStat.includes('interested') || sheetStat.includes('interested')) &&
+                        !displayStat.includes('not_interested') &&
+                        !sheetStat.includes('not_interested');
+                    if (!isInterested) return false;
                 } else if (target === 'follow_up' || target === 'callback') {
-                    if (!leadStat.includes('follow') && !leadStat.includes('callback')) return false;
-                } else if (!leadStat.includes(target) && leadStat !== target) {
+                    const isFollowUp =
+                        rawStat === 'follow_up' ||
+                        rawStat === 'callback' ||
+                        displayStat.includes('follow') ||
+                        displayStat.includes('callback') ||
+                        sheetStat.includes('follow') ||
+                        sheetStat.includes('callback');
+                    if (!isFollowUp) return false;
+                } else if (target === 'in_progress') {
+                    const isInProgress =
+                        rawStat === 'in_progress' ||
+                        displayStat.includes('in_progress') ||
+                        sheetStat.includes('in_progress') ||
+                        displayStat.includes('progress');
+                    if (!isInProgress) return false;
+                } else if (target === 'converted') {
+                    const isConverted =
+                        rawStat === 'converted' ||
+                        displayStat.includes('converted') ||
+                        sheetStat.includes('converted') ||
+                        displayStat.includes('won');
+                    if (!isConverted) return false;
+                } else if (target === 'completed') {
+                    const isCompleted =
+                        rawStat === 'completed' ||
+                        displayStat.includes('complete') ||
+                        sheetStat.includes('complete') ||
+                        displayStat.includes('done');
+                    if (!isCompleted) return false;
+                } else if (target === 'contacted') {
+                    const isContacted =
+                        rawStat === 'contacted' ||
+                        displayStat.includes('contacted') ||
+                        displayStat.includes('called') ||
+                        displayStat.includes('connected') ||
+                        sheetStat.includes('contacted') ||
+                        sheetStat.includes('called');
+                    if (!isContacted) return false;
+                } else if (target === 'voicemail') {
+                    const isVoicemail =
+                        rawStat === 'voicemail' ||
+                        displayStat.includes('voicemail') ||
+                        sheetStat.includes('voicemail');
+                    if (!isVoicemail) return false;
+                } else if (target === 'cancelled') {
+                    const isCancelled =
+                        rawStat === 'cancelled' ||
+                        displayStat.includes('cancel') ||
+                        sheetStat.includes('cancel') ||
+                        displayStat.includes('lost');
+                    if (!isCancelled) return false;
+                } else if (
+                    rawStat !== target &&
+                    !rawStat.includes(target) &&
+                    displayStat !== target &&
+                    !displayStat.includes(target) &&
+                    sheetStat !== target &&
+                    !sheetStat.includes(target)
+                ) {
                     return false;
                 }
             }
+
             if (selectedPriority !== 'all') {
-                const prio = ((lead as any).priority || '').toLowerCase().trim();
-                if (prio && prio !== selectedPriority) return false;
+                const prio = String(lead.opportunityLevel || (lead as any).priority || 'medium').toLowerCase().trim();
+                if (prio !== selectedPriority.toLowerCase().trim()) return false;
             }
+
             if (emailFilter !== 'all') {
                 const isObsOpened = lead.observationEmailShareStatus === 'opened';
                 const isAuditOpened = lead.emailShareStatus === 'opened';
@@ -514,7 +624,9 @@ export default function AdminGrowthAuditLeads() {
                 const isAnySent = isObsSent || isAuditSent;
                 const isAnyOpened = isObsOpened || isAuditOpened;
 
-                if (emailFilter === 'opened') {
+                if (emailFilter === 'sent') {
+                    if (!isAnySent) return false;
+                } else if (emailFilter === 'opened') {
                     if (!isAnyOpened) return false;
                 } else if (emailFilter === 'not_opened') {
                     if (!isAnySent || isAnyOpened) return false;
@@ -522,6 +634,7 @@ export default function AdminGrowthAuditLeads() {
                     if (isAnySent) return false;
                 }
             }
+
             const statusDate = lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt;
             if (!matchesStatusDateFilter(statusDate, statusDateFilter, statusCustomDate)) {
                 return false;
@@ -530,6 +643,8 @@ export default function AdminGrowthAuditLeads() {
         });
     }, [
         leads,
+        query,
+        hasContact,
         sourceCategory,
         excelBatchFilter,
         businessFilter,
@@ -832,7 +947,7 @@ export default function AdminGrowthAuditLeads() {
 
                         <div>
                             <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                                Lead Source / Batch
+                                Lead Source
                             </label>
                             <select
                                 value={excelBatchFilter !== 'all' ? excelBatchFilter : sourceCategory}
@@ -909,6 +1024,7 @@ export default function AdminGrowthAuditLeads() {
                                 title="Filter by email open status"
                             >
                                 <option value="all">All</option>
+                                <option value="sent">Email Sent</option>
                                 <option value="opened">Email Opened</option>
                                 <option value="not_opened">Not Opened</option>
                                 <option value="not_sent">Not Sent</option>

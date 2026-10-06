@@ -279,6 +279,27 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
         }
     } catch {}
 
+    // 3. Query lead_tasks for assigned agents to sync with tasks
+    try {
+        const { rows: taskRows } = await query(
+            `SELECT t.lead_id, t.assigned_to_user_id, u.name AS assigned_agent_name, u.email AS assigned_agent_email
+             FROM lead_tasks t
+             LEFT JOIN users u ON u.id = t.assigned_to_user_id
+             WHERE t.lead_id = ANY($1::text[]) AND t.assigned_to_user_id IS NOT NULL`,
+            [leadIds]
+        );
+        for (const row of taskRows) {
+            const idKey = String(row.lead_id);
+            const existing = map.get(idKey);
+            if (existing) {
+                if (!existing.assignedTo) {
+                    existing.assignedTo = row.assigned_to_user_id;
+                    existing.assignedAgentName = row.assigned_agent_name || row.assigned_agent_email || null;
+                }
+            }
+        }
+    } catch {}
+
     return map;
 }
 
