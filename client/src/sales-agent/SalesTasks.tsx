@@ -332,11 +332,12 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
         const result: GroupedSalesTask[] = [];
         for (const [key, list] of groups.entries()) {
             list.sort(compareTasksForPrimary);
-            const pendingCount = list.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').length;
+            const realTasks = list.filter((t) => !String(t.id || '').startsWith('virtual-'));
+            const pendingCount = realTasks.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').length;
             result.push({
                 leadId: key,
                 primaryTask: list[0],
-                totalTasks: list.length,
+                totalTasks: realTasks.length,
                 pendingTasks: pendingCount,
                 tasks: list
             });
@@ -702,7 +703,8 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                             </thead>
                             <tbody className="divide-y divide-[#F1F5F9]">
                                 {pagedGroups.map(({ primaryTask: task, pendingTasks }) => {
-                                    const isDone = pendingTasks === 0;
+                                    const isVirtual = String(task.id || '').startsWith('virtual-');
+                                    const isDone = !isVirtual && pendingTasks === 0;
                                     const prioConf = PRIORITY_BADGES[task.priority] || PRIORITY_BADGES.medium;
                                     const businessName = task.leadBusinessName || 'Lead';
                                     const industry = normalizeTaskIndustry(task);
@@ -727,26 +729,28 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                                                         >
                                                             {businessName}
                                                         </button>
-                                                        {pendingTasks > 0 ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openLeadDetails(task, 'tasks')}
-                                                                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-2xs tracking-tight transition-all hover:scale-105 cursor-pointer"
-                                                                title={`${pendingTasks} active task${pendingTasks > 1 ? 's' : ''} remaining — Click to view tasks`}
-                                                            >
-                                                                <ListTodo className="w-3 h-3 text-amber-700 shrink-0" />
-                                                                +{pendingTasks}
-                                                            </button>
-                                                        ) : (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openLeadDetails(task, 'tasks')}
-                                                                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs transition-all hover:scale-105 cursor-pointer"
-                                                                title="All assigned tasks completed for this lead — Click to view"
-                                                            >
-                                                                <CheckSquare className="w-3 h-3 text-emerald-600 shrink-0" />
-                                                                Done
-                                                            </button>
+                                                        {!isVirtual && (
+                                                            pendingTasks > 0 ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openLeadDetails(task, 'tasks')}
+                                                                    className="shrink-0 inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-2xs tracking-tight transition-all hover:scale-105 cursor-pointer"
+                                                                    title={`${pendingTasks} active task${pendingTasks > 1 ? 's' : ''} remaining — Click to view tasks`}
+                                                                >
+                                                                    <ListTodo className="w-3 h-3 text-amber-700 shrink-0" />
+                                                                    +{pendingTasks}
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openLeadDetails(task, 'tasks')}
+                                                                    className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs transition-all hover:scale-105 cursor-pointer"
+                                                                    title="All assigned tasks completed for this lead — Click to view"
+                                                                >
+                                                                    <CheckSquare className="w-3 h-3 text-emerald-600 shrink-0" />
+                                                                    Done
+                                                                </button>
+                                                            )
                                                         )}
                                                     </div>
                                                     <span className="block text-[11px] text-[#64748B] truncate mt-1">

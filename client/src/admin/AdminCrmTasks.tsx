@@ -173,6 +173,27 @@ export default function AdminCrmTasks() {
         return normalizeBusinessCategory(raw);
     }, [leads]);
 
+function isLeadAdded(lead: any) {
+    return (
+        lead.sourceCategory === 'added' ||
+        lead.type === 'added_lead' ||
+        lead.type === 'excel_import' ||
+        lead.type === 'manual' ||
+        lead.source === 'sales_lead' ||
+        String(lead.source || '').toLowerCase().includes('excel') ||
+        String(lead.source || '').toLowerCase().includes('manual')
+    );
+}
+
+    const growthAuditCount = useMemo(
+        () => leads.filter((l) => !isLeadAdded(l)).length,
+        [leads]
+    );
+    const addedCount = useMemo(
+        () => leads.filter((l) => isLeadAdded(l)).length,
+        [leads]
+    );
+
     const businessFilterOptions = useMemo(() => {
         const set = new Set<string>();
         tasks.forEach((t) => {
@@ -367,13 +388,14 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
         const result: GroupedAdminTask[] = [];
         for (const [key, list] of groups.entries()) {
             list.sort(compareTasksForPrimary);
-            const pendingCount = list.filter(
+            const realTasks = list.filter((t) => !String(t.id || '').startsWith('virtual-'));
+            const pendingCount = realTasks.filter(
                 (t) => t.status !== 'completed' && t.status !== 'cancelled'
             ).length;
             result.push({
                 leadId: key,
                 primaryTask: list[0],
-                totalTasks: list.length,
+                totalTasks: realTasks.length,
                 pendingTasks: pendingCount,
                 tasks: list
             });
@@ -529,8 +551,8 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             title="Filter by source or Excel import batch"
                         >
                             <option value="all">All Sources</option>
-                            <option value="added">Uploaded Leads</option>
-                            <option value="growth_audit">Growth Audit & Funnels</option>
+                            <option value="added">Uploaded / Added Leads ({addedCount})</option>
+                            <option value="growth_audit">Growth Audit & Funnels ({growthAuditCount})</option>
                             {excelBatches.map((b) => {
                                 let cleanName = b.fileName;
                                 try {
@@ -717,11 +739,12 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {pageGroups.map(({ primaryTask: task, pendingTasks }) => {
-                                    const isDone = pendingTasks === 0;
+                                    const isVirtual = String(task.id || '').startsWith('virtual-');
+                                    const isDone = !isVirtual && pendingTasks === 0;
                                     const leadName = task.leadBusinessName || getLeadName(task.leadId, task);
                                     const shareLabel = emailShareStatusLabel(task.emailShareStatus);
                                     const notesShareLabel = emailShareStatusLabel(
-                                        task.observationEmailShareStatus
+                                         task.observationEmailShareStatus
                                     );
 
                                     return (
@@ -743,26 +766,28 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                                                         >
                                                             {leadName}
                                                         </button>
-                                                        {pendingTasks > 0 ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openLeadPage(task, 'tasks')}
-                                                                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-2xs tracking-tight transition-all hover:scale-105 cursor-pointer"
-                                                                title={`${pendingTasks} active task${pendingTasks > 1 ? 's' : ''} remaining — Click to view tasks`}
-                                                            >
-                                                                <ListTodo className="w-3 h-3 text-amber-700 shrink-0" />
-                                                                +{pendingTasks}
-                                                            </button>
-                                                        ) : (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openLeadPage(task, 'tasks')}
-                                                                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs transition-all hover:scale-105 cursor-pointer"
-                                                                title="All assigned tasks completed for this lead — Click to view"
-                                                            >
-                                                                <CheckSquare className="w-3 h-3 text-emerald-600 shrink-0" />
-                                                                Done
-                                                            </button>
+                                                        {!isVirtual && (
+                                                            pendingTasks > 0 ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openLeadPage(task, 'tasks')}
+                                                                    className="shrink-0 inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 shadow-2xs tracking-tight transition-all hover:scale-105 cursor-pointer"
+                                                                    title={`${pendingTasks} active task${pendingTasks > 1 ? 's' : ''} remaining — Click to view tasks`}
+                                                                >
+                                                                    <ListTodo className="w-3 h-3 text-amber-700 shrink-0" />
+                                                                    +{pendingTasks}
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openLeadPage(task, 'tasks')}
+                                                                    className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-2xs transition-all hover:scale-105 cursor-pointer"
+                                                                    title="All assigned tasks completed for this lead — Click to view"
+                                                                >
+                                                                    <CheckSquare className="w-3 h-3 text-emerald-600 shrink-0" />
+                                                                    Done
+                                                                </button>
+                                                            )
                                                         )}
                                                     </div>
                                                     <div className="mt-1 flex flex-wrap items-center gap-1.5">

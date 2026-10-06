@@ -239,7 +239,7 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
         ]);
 
         const enrichedTasks = rows
-            .filter((t: any) => t.leadId && t.leadId !== 'general')
+            .filter((t: any) => t.leadId && t.leadId !== 'general' && leadMetaMap.has(String(t.leadId)))
             .map((t: any) => {
                 const meta = leadMetaMap.get(t.leadId) || {};
                 const share = shareInfoForAudit(shareMap, meta.auditId);
