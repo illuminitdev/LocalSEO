@@ -25,8 +25,10 @@ import {
 import {
     type LeadTask,
     type SalesAgent,
+    type ExcelImportBatch,
     fetchCrmTasks,
     fetchSalesAgents,
+    fetchAdminExcelBatches,
     adminGet
 } from './adminApi';
 import LeadStatusHistoryModal from './LeadStatusHistoryModal';
@@ -87,6 +89,8 @@ function fmtDate(value?: string | null) {
 
 const PAGE_SIZE = 10;
 
+type EmailOpenFilter = 'all' | 'opened' | 'not_opened' | 'not_sent';
+
 export default function AdminCrmTasks() {
     const navigate = useNavigate();
     const [tasks, setTasks] = useState<LeadTask[]>([]);
@@ -96,11 +100,14 @@ export default function AdminCrmTasks() {
     const [error, setError] = useState('');
 
     const [page, setPage] = useState(1);
+    const [excelBatches, setExcelBatches] = useState<ExcelImportBatch[]>([]);
+    const [excelBatchFilter, setExcelBatchFilter] = useState<string>('all');
     const [selectedAgent, setSelectedAgent] = useState<string>('all');
     const [selectedType, setSelectedType] = useState<string>('all');
     const [selectedStatus, setSelectedStatus] = useState<string>('all');
     const [selectedPriority, setSelectedPriority] = useState<string>('all');
     const [selectedBusiness, setSelectedBusiness] = useState<string>('all');
+    const [emailFilter, setEmailFilter] = useState<EmailOpenFilter>('all');
     const [statusDateFilter, setStatusDateFilter] = useState<StatusDateFilter>('all');
     const [statusCustomDate, setStatusCustomDate] = useState<string>('');
     const [searchQuery, setSearchQuery] = useState('');
@@ -113,7 +120,7 @@ export default function AdminCrmTasks() {
         setLoading(true);
         setError('');
         try {
-            const [tasksData, agentsData, leadsData] = await Promise.all([
+            const [tasksData, agentsData, leadsData, batchesData] = await Promise.all([
                 fetchCrmTasks({
                     assignedTo: selectedAgent !== 'all' ? selectedAgent : undefined,
                     taskType: selectedType !== 'all' ? selectedType : undefined,
@@ -122,12 +129,14 @@ export default function AdminCrmTasks() {
                     createdBy: 'admin'
                 }),
                 fetchSalesAgents().catch(() => []),
-                adminGet('/api/admin/growth-audit-leads?limit=200').then((r: any) => r.leads || []).catch(() => [])
+                adminGet('/api/admin/growth-audit-leads?limit=500').then((r: any) => r.leads || []).catch(() => []),
+                fetchAdminExcelBatches().catch(() => [] as ExcelImportBatch[])
             ]);
 
             setTasks(tasksData);
             setSalesAgents(agentsData);
             setLeads(leadsData);
+            setExcelBatches(batchesData);
         } catch (err: any) {
             setError(err.message || 'Failed to load tasks');
         } finally {
@@ -200,6 +209,42 @@ export default function AdminCrmTasks() {
                 }
             }
 
+            if (excelBatchFilter !== 'all') {
+                if (excelBatchFilter === 'growth_audit') {
+                    const src = String(t.leadSource || '').toLowerCase();
+                    const isAudit = src.includes('growth_audit') || src.includes('contact') || src.includes('funnel');
+                    if (!isAudit) return false;
+                } else if (excelBatchFilter === 'added') {
+                    const src = String(t.leadSource || '').toLowerCase();
+                    const isAudit = src.includes('growth_audit') || src.includes('contact') || src.includes('funnel');
+                    if (isAudit) return false;
+                } else if (excelBatchFilter === 'legacy') {
+                    const src = String(t.leadSource || '').toLowerCase();
+                    const isLegacy = src.includes('excel') && !(t as any).leadImportBatchId;
+                    if (!isLegacy) return false;
+                } else {
+                    const batchId = (t as any).leadImportBatchId;
+                    if (String(batchId || '') !== excelBatchFilter) return false;
+                }
+            }
+
+            if (emailFilter !== 'all') {
+                const isObsOpened = t.observationEmailShareStatus === 'opened';
+                const isAuditOpened = t.emailShareStatus === 'opened';
+                const isObsSent = t.observationEmailShareStatus === 'sent' || isObsOpened;
+                const isAuditSent = t.emailShareStatus === 'sent' || isAuditOpened;
+                const isAnySent = isObsSent || isAuditSent;
+                const isAnyOpened = isObsOpened || isAuditOpened;
+
+                if (emailFilter === 'opened') {
+                    if (!isAnyOpened) return false;
+                } else if (emailFilter === 'not_opened') {
+                    if (!isAnySent || isAnyOpened) return false;
+                } else if (emailFilter === 'not_sent') {
+                    if (isAnySent) return false;
+                }
+            }
+
             const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
             if (!matchesStatusDateFilter(taskStatusDate, statusDateFilter, statusCustomDate)) {
                 return false;
@@ -207,7 +252,7 @@ export default function AdminCrmTasks() {
 
             return true;
         });
-    }, [tasks, searchQuery, selectedBusiness, statusDateFilter, statusCustomDate, getTaskBusinessCategory]);
+    }, [tasks, searchQuery, selectedBusiness, emailFilter, statusDateFilter, statusCustomDate, getTaskBusinessCategory]);
 
 interface GroupedAdminTask {
     leadId: string;
@@ -369,10 +414,10 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                     </button>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 pt-2 border-t border-slate-100">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 pt-2 border-t border-slate-100">
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                            Business
+                            Business Category
                         </label>
                         <select
                             value={selectedBusiness}
@@ -405,11 +450,42 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                         >
                             <option value="all">All Agents</option>
+                            <option value="unassigned">Unassigned</option>
                             {salesAgents.map((agent) => (
                                 <option key={agent.id} value={agent.id}>
                                     {agent.name || agent.email}
                                 </option>
                             ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                            Lead Source / Batch
+                        </label>
+                        <select
+                            value={excelBatchFilter}
+                            onChange={(e) => {
+                                setExcelBatchFilter(e.target.value);
+                                setPage(1);
+                            }}
+                            className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                            title="Filter by source or Excel import batch"
+                        >
+                            <option value="all">All Sources</option>
+                            <option value="added">Uploaded Leads</option>
+                            <option value="growth_audit">Growth Audit & Funnels</option>
+                            {excelBatches.map((b) => {
+                                let cleanName = b.fileName;
+                                try {
+                                    cleanName = decodeURIComponent(cleanName).replace(/%20/g, ' ').replace(/_/g, ' ');
+                                } catch {}
+                                return (
+                                    <option key={b.batchId} value={b.batchId}>
+                                        Excel: {cleanName} ({b.leadCount})
+                                    </option>
+                                );
+                            })}
                         </select>
                     </div>
 
@@ -458,7 +534,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
 
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                            Status
+                            Task Status
                         </label>
                         <select
                             value={selectedStatus}
@@ -473,6 +549,27 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             <option value="in_progress">In Progress</option>
                             <option value="completed">Completed</option>
                             <option value="cancelled">Cancelled</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-1">
+                            <Mail className="w-3 h-3 text-slate-400 shrink-0" />
+                            Email Status
+                        </label>
+                        <select
+                            value={emailFilter}
+                            onChange={(e) => {
+                                setEmailFilter(e.target.value as EmailOpenFilter);
+                                setPage(1);
+                            }}
+                            className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                            title="Filter tasks by email open status"
+                        >
+                            <option value="all">All</option>
+                            <option value="opened">Email Opened</option>
+                            <option value="not_opened">Not Opened</option>
+                            <option value="not_sent">Not Sent</option>
                         </select>
                     </div>
 
