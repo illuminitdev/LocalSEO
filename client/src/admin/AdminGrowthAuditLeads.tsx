@@ -947,7 +947,7 @@ export default function AdminGrowthAuditLeads() {
 
                         <div>
                             <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                                Lead Source / Batch
+                                Lead Source
                             </label>
                             <select
                                 value={excelBatchFilter !== 'all' ? excelBatchFilter : sourceCategory}

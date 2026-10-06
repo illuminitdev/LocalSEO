@@ -253,20 +253,28 @@ function isLeadAdded(lead: any) {
 
             // 4. Lead Source / Batch
             if (excelBatchFilter !== 'all') {
+                const matchedLead = leads.find((l) => l.id === t.leadId);
+                const added = matchedLead
+                    ? isLeadAdded(matchedLead)
+                    : (
+                        t.leadSource === 'sales_lead' ||
+                        t.leadSource === 'added' ||
+                        t.leadSource === 'excel_import' ||
+                        Boolean((t as any).leadImportBatchId) ||
+                        String(t.leadSource || '').toLowerCase().includes('excel') ||
+                        String(t.leadSource || '').toLowerCase().includes('manual')
+                    );
+
                 if (excelBatchFilter === 'growth_audit') {
-                    const src = String(t.leadSource || '').toLowerCase();
-                    const isAudit = src.includes('growth_audit') || src.includes('contact') || src.includes('funnel');
-                    if (!isAudit) return false;
+                    if (added) return false;
                 } else if (excelBatchFilter === 'added') {
-                    const src = String(t.leadSource || '').toLowerCase();
-                    const isAudit = src.includes('growth_audit') || src.includes('contact') || src.includes('funnel');
-                    if (isAudit) return false;
+                    if (!added) return false;
                 } else if (excelBatchFilter === 'legacy') {
-                    const src = String(t.leadSource || '').toLowerCase();
-                    const isLegacy = src.includes('excel') && !(t as any).leadImportBatchId;
+                    const src = String(matchedLead?.source || t.leadSource || '').toLowerCase();
+                    const isLegacy = src.includes('excel') && !((matchedLead as any)?.importBatchId || (t as any).leadImportBatchId);
                     if (!isLegacy) return false;
                 } else {
-                    const batchId = (t as any).leadImportBatchId;
+                    const batchId = (matchedLead as any)?.importBatchId || (t as any).leadImportBatchId;
                     if (String(batchId || '') !== excelBatchFilter) return false;
                 }
             }
@@ -539,7 +547,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
 
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                            Lead Source / Batch
+                            Lead Source
                         </label>
                         <select
                             value={excelBatchFilter}
