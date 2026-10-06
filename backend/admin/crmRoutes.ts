@@ -118,11 +118,9 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
         const typeAllowsOutreach = !taskType || taskType === 'all' || taskType === 'follow_up_call' || taskType === 'call';
 
         if (statusAllowsPending && typeAllowsOutreach) {
-            const allTaskLeadIds = new Set(
-                (await query(`SELECT lead_id FROM lead_tasks WHERE lead_id IS NOT NULL`).then(r => r.rows.map((x: any) => String(x.lead_id))).catch(() => []))
-            );
+            const existingLeadIdsInRows = new Set(rows.map((t: any) => String(t.leadId || '')).filter(Boolean));
 
-            // 1. Fetch sales_leads that don't have task records yet
+            // 1. Fetch sales_leads that don't have task records in rows yet
             const sParams: any[] = [];
             const sWhere: string[] = ['1=1'];
             if (leadId) {
@@ -131,7 +129,6 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
             }
             if (assignedTo === 'unassigned') {
                 sWhere.push(`l.assigned_to IS NULL`);
-                sWhere.push(`NOT EXISTS (SELECT 1 FROM lead_tasks lt WHERE lt.lead_id = l.id::text AND lt.assigned_to_user_id IS NOT NULL)`);
             } else if (assignedTo && assignedTo !== 'all') {
                 sParams.push(assignedTo);
                 sWhere.push(`l.assigned_to = $${sParams.length}`);
@@ -164,15 +161,15 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
                 WHERE ${sWhere.join(' AND ')}
                 ORDER BY l.created_at DESC
                 LIMIT 500
-            `, sParams).catch(() => ({ rows: [] }));
+            `, sParams).catch(() => ({ rows: [] as any[] }));
 
             for (const sl of salesLeadRows) {
-                if (!allTaskLeadIds.has(String(sl.leadId))) {
+                if (!existingLeadIdsInRows.has(String(sl.leadId))) {
                     rows.push({
                         ...sl,
                         id: `virtual-${sl.leadId}`
                     });
-                    allTaskLeadIds.add(String(sl.leadId));
+                    existingLeadIdsInRows.add(String(sl.leadId));
                 }
             }
 
@@ -213,15 +210,15 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
                     WHERE ${subWhere.join(' AND ')}
                     ORDER BY s.created_at DESC
                     LIMIT 500
-                `, subParams).catch(() => ({ rows: [] }));
+                `, subParams).catch(() => ({ rows: [] as any[] }));
 
                 for (const sub of subRows) {
-                    if (!allTaskLeadIds.has(String(sub.leadId))) {
+                    if (!existingLeadIdsInRows.has(String(sub.leadId))) {
                         rows.push({
                             ...sub,
                             id: `virtual-${sub.leadId}`
                         });
-                        allTaskLeadIds.add(String(sub.leadId));
+                        existingLeadIdsInRows.add(String(sub.leadId));
                     }
                 }
             }
@@ -241,34 +238,42 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
             fetchLatestLeadObservationEmailShareMap(leadIds)
         ]);
 
-        const enrichedTasks = rows.map((t: any) => {
-            const meta = leadMetaMap.get(t.leadId) || {};
-            const share = shareInfoForAudit(shareMap, meta.auditId);
-            const obs = shareInfoForLeadObservation(obsMap, t.leadId);
-            return {
-                ...t,
-                leadBusinessName: meta.businessName || 'Lead',
-                leadPhone: meta.phone || '',
-                leadEmail: meta.email || '',
-                leadWebsite: meta.website || '',
-                leadAddress: meta.address || '',
-                leadCity: meta.city || '',
-                leadScoreTotal: meta.scoreTotal ?? null,
-                leadReportUrl: meta.reportUrl || null,
-                leadSource: meta.source || '',
-                leadIndustry: meta.industry || '',
-                leadAuditId: meta.auditId || null,
-                leadStatus: meta.status || (meta.isCustomer ? 'converted' : 'new'),
-                leadImportBatchId: meta.importBatchId || null,
-                leadImportFileName: meta.importFileName || null,
-                emailShareStatus: share.emailShareStatus,
-                emailShareSentAt: share.emailShareSentAt,
-                emailShareOpenedAt: share.emailShareOpenedAt,
-                observationEmailShareStatus: obs.observationEmailShareStatus,
-                observationEmailSentAt: obs.observationEmailSentAt,
-                observationEmailOpenedAt: obs.observationEmailOpenedAt
-            };
-        });
+        const enrichedTasks = rows
+            .filter((t: any) => t.leadId && t.leadId !== 'general')
+            .map((t: any) => {
+                const meta = leadMetaMap.get(t.leadId) || {};
+                const share = shareInfoForAudit(shareMap, meta.auditId);
+                const obs = shareInfoForLeadObservation(obsMap, t.leadId);
+                const effectiveAssignedToId = t.assignedToUserId || meta.assignedTo || null;
+                const effectiveAssignedToName = t.assignedToName || meta.assignedAgentName || null;
+                const effectiveAssignedToEmail = t.assignedToEmail || meta.assignedAgentEmail || null;
+                return {
+                    ...t,
+                    assignedToUserId: effectiveAssignedToId,
+                    assignedToName: effectiveAssignedToName,
+                    assignedToEmail: effectiveAssignedToEmail,
+                    leadBusinessName: meta.businessName || 'Lead',
+                    leadPhone: meta.phone || '',
+                    leadEmail: meta.email || '',
+                    leadWebsite: meta.website || '',
+                    leadAddress: meta.address || '',
+                    leadCity: meta.city || '',
+                    leadScoreTotal: meta.scoreTotal ?? null,
+                    leadReportUrl: meta.reportUrl || null,
+                    leadSource: meta.source || '',
+                    leadIndustry: meta.industry || '',
+                    leadAuditId: meta.auditId || null,
+                    leadStatus: meta.status || (meta.isCustomer ? 'converted' : 'new'),
+                    leadImportBatchId: meta.importBatchId || null,
+                    leadImportFileName: meta.importFileName || null,
+                    emailShareStatus: share.emailShareStatus,
+                    emailShareSentAt: share.emailShareSentAt,
+                    emailShareOpenedAt: share.emailShareOpenedAt,
+                    observationEmailShareStatus: obs.observationEmailShareStatus,
+                    observationEmailSentAt: obs.observationEmailSentAt,
+                    observationEmailOpenedAt: obs.observationEmailOpenedAt
+                };
+            });
 
         res.json({ tasks: enrichedTasks });
     } catch (err: any) {

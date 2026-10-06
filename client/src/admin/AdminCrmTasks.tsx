@@ -89,7 +89,7 @@ function fmtDate(value?: string | null) {
 
 const PAGE_SIZE = 10;
 
-type EmailOpenFilter = 'all' | 'opened' | 'not_opened' | 'not_sent';
+type EmailOpenFilter = 'all' | 'sent' | 'opened' | 'not_opened' | 'not_sent';
 
 export default function AdminCrmTasks() {
     const navigate = useNavigate();
@@ -122,10 +122,6 @@ export default function AdminCrmTasks() {
         try {
             const [tasksData, agentsData, leadsData, batchesData] = await Promise.all([
                 fetchCrmTasks({
-                    assignedTo: selectedAgent !== 'all' ? selectedAgent : undefined,
-                    taskType: selectedType !== 'all' ? selectedType : undefined,
-                    status: selectedStatus !== 'all' ? selectedStatus : undefined,
-                    priority: selectedPriority !== 'all' ? selectedPriority : undefined,
                     createdBy: 'admin'
                 }),
                 fetchSalesAgents().catch(() => []),
@@ -142,7 +138,7 @@ export default function AdminCrmTasks() {
         } finally {
             setLoading(false);
         }
-    }, [selectedAgent, selectedType, selectedStatus, selectedPriority]);
+    }, []);
 
     useEffect(() => {
         loadData();
@@ -192,16 +188,21 @@ export default function AdminCrmTasks() {
 
     const filteredTasks = useMemo(() => {
         return tasks.filter((t) => {
+            // 1. Search Query
             if (searchQuery.trim()) {
-                const q = searchQuery.toLowerCase();
+                const q = searchQuery.toLowerCase().trim();
                 const matchesQuery =
-                    t.title.toLowerCase().includes(q) ||
+                    (t.title || '').toLowerCase().includes(q) ||
                     (t.notes || '').toLowerCase().includes(q) ||
                     (t.leadBusinessName && t.leadBusinessName.toLowerCase().includes(q)) ||
+                    (t.leadPhone && t.leadPhone.toLowerCase().includes(q)) ||
+                    (t.leadEmail && t.leadEmail.toLowerCase().includes(q)) ||
+                    (t.leadCity && t.leadCity.toLowerCase().includes(q)) ||
                     (t.assignedToName && t.assignedToName.toLowerCase().includes(q));
                 if (!matchesQuery) return false;
             }
 
+            // 2. Business Category
             if (selectedBusiness !== 'all') {
                 const cat = getTaskBusinessCategory(t);
                 if (!cat || cat.toLowerCase().trim() !== selectedBusiness.toLowerCase().trim()) {
@@ -209,6 +210,27 @@ export default function AdminCrmTasks() {
                 }
             }
 
+            // 3. Sales Agent
+            if (selectedAgent !== 'all') {
+                const rawName = String(t.assignedToName || '').trim().toLowerCase();
+                const rawId = String(t.assignedToUserId || '').trim().toLowerCase();
+                const isAssigned = Boolean((rawId && rawId !== 'unassigned') || (rawName && rawName !== 'unassigned'));
+
+                if (selectedAgent === 'unassigned') {
+                    if (isAssigned) return false;
+                } else {
+                    const agent = salesAgents.find((a) => a.id === selectedAgent);
+                    const agentName = (agent?.name || agent?.email || '').toLowerCase().trim();
+                    if (
+                        rawId !== selectedAgent &&
+                        (!agentName || !rawName.includes(agentName))
+                    ) {
+                        return false;
+                    }
+                }
+            }
+
+            // 4. Lead Source / Batch
             if (excelBatchFilter !== 'all') {
                 if (excelBatchFilter === 'growth_audit') {
                     const src = String(t.leadSource || '').toLowerCase();
@@ -228,6 +250,17 @@ export default function AdminCrmTasks() {
                 }
             }
 
+            // 5. Task Type
+            if (selectedType !== 'all') {
+                if (t.taskType !== selectedType) return false;
+            }
+
+            // 6. Task Status
+            if (selectedStatus !== 'all') {
+                if (t.status !== selectedStatus) return false;
+            }
+
+            // 7. Email Status
             if (emailFilter !== 'all') {
                 const isObsOpened = t.observationEmailShareStatus === 'opened';
                 const isAuditOpened = t.emailShareStatus === 'opened';
@@ -236,7 +269,9 @@ export default function AdminCrmTasks() {
                 const isAnySent = isObsSent || isAuditSent;
                 const isAnyOpened = isObsOpened || isAuditOpened;
 
-                if (emailFilter === 'opened') {
+                if (emailFilter === 'sent') {
+                    if (!isAnySent) return false;
+                } else if (emailFilter === 'opened') {
                     if (!isAnyOpened) return false;
                 } else if (emailFilter === 'not_opened') {
                     if (!isAnySent || isAnyOpened) return false;
@@ -245,14 +280,35 @@ export default function AdminCrmTasks() {
                 }
             }
 
+            // 8. Status Date
             const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
             if (!matchesStatusDateFilter(taskStatusDate, statusDateFilter, statusCustomDate)) {
                 return false;
             }
 
+            // 9. Priority
+            if (selectedPriority !== 'all') {
+                const prio = String(t.priority || 'medium').toLowerCase().trim();
+                if (prio !== selectedPriority.toLowerCase().trim()) return false;
+            }
+
             return true;
         });
-    }, [tasks, searchQuery, selectedBusiness, emailFilter, statusDateFilter, statusCustomDate, getTaskBusinessCategory]);
+    }, [
+        tasks,
+        searchQuery,
+        selectedBusiness,
+        selectedAgent,
+        excelBatchFilter,
+        selectedType,
+        selectedStatus,
+        emailFilter,
+        statusDateFilter,
+        statusCustomDate,
+        selectedPriority,
+        salesAgents,
+        getTaskBusinessCategory
+    ]);
 
 interface GroupedAdminTask {
     leadId: string;
@@ -567,6 +623,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             title="Filter tasks by email open status"
                         >
                             <option value="all">All</option>
+                            <option value="sent">Email Sent</option>
                             <option value="opened">Email Opened</option>
                             <option value="not_opened">Not Opened</option>
                             <option value="not_sent">Not Sent</option>
