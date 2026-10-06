@@ -17,7 +17,7 @@ import adminRouter from './admin/routes';
 import salesRouter from './sales-agent/routes';
 import integrationsRouter from './routes/integrations';
 import { migrate } from './lib/db';
-import { loadOrgAppState, saveOrgAppState } from './lib/orgAppState';
+import { getLocalSeoUpgradeChoice, loadOrgAppState, saveOrgAppState, setLocalSeoUpgradeChoice } from './lib/orgAppState';
 
 dotenv.config({ override: true });
 
@@ -133,7 +133,12 @@ const emptyDashboard = () => ({
         avgRank: number;
         top3Percentage: number;
         updatedAt: string;
-    }>
+    }>,
+    gapAnalyses: [] as Array<Record<string, any>>,
+    localSeoUpgradeChoice: null as 'pending' | 'booking' | 'new' | null,
+    citationAudit: null as null | Record<string, any>,
+    citationHistory: [] as Record<string, any>[],
+    gbpDrafts: [] as Record<string, any>[]
 });
 
 let connectedBusiness = emptyBusiness();
@@ -745,6 +750,30 @@ app.post('/api/visibility-audit', requireAuth, hydrateOrgFromDb, async (req, res
     }
 });
 
+app.get('/api/business/upgrade-choice', requireAuth, requireFeature('local_presence'), async (req, res) => {
+    try {
+        const payload = await getLocalSeoUpgradeChoice(String((req as any).orgId || ''));
+        res.json(payload);
+    } catch (err: any) {
+        console.error('upgrade-choice read error:', err);
+        res.status(500).json({ error: err.message || 'Could not load local SEO setup choice.' });
+    }
+});
+
+app.post('/api/business/upgrade-choice', requireAuth, requireFeature('local_presence'), async (req, res) => {
+    const choice = String(req.body?.choice || '');
+    if (choice !== 'booking' && choice !== 'new') {
+        return res.status(400).json({ error: 'choice must be booking or new' });
+    }
+    try {
+        const payload = await setLocalSeoUpgradeChoice(String((req as any).orgId || ''), choice);
+        res.json(payload);
+    } catch (err: any) {
+        console.error('upgrade-choice write error:', err);
+        res.status(500).json({ error: err.message || 'Could not save local SEO setup choice.' });
+    }
+});
+
 app.get('/api/business', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), (_req, res) => {
     res.json(connectedBusiness);
 });
@@ -897,14 +926,26 @@ Return JSON only: score (0-100), optimizedDescription, recommendations (array of
 app.post('/api/ai/post-copy', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     if (!requireGemini(res)) return;
     if (!requireBusiness(res)) return;
-    const { postType, tone, businessName } = req.body;
+    const { postType, tone, businessName, topic, details, eventTitle, date, time } = req.body || {};
     const name = businessName || connectedBusiness.name;
+    const kind = String(postType || 'update');
+    const lines = [
+        topic ? `Topic: ${String(topic).slice(0, 200)}` : '',
+        kind === 'offer' && details
+            ? `Offer details the user provided. Use only these. Do not invent prices or terms: ${String(details).slice(0, 1000)}`
+            : '',
+        kind === 'event' && eventTitle ? `Event title: ${String(eventTitle).slice(0, 200)}` : '',
+        kind === 'event' && details ? `Event details: ${String(details).slice(0, 1000)}` : '',
+        date ? `Date: ${String(date).slice(0, 40)}` : '',
+        time ? `Time: ${String(time).slice(0, 40)}` : ''
+    ].filter(Boolean);
 
     try {
         const copy = await generateText(
-            `Write a Google Business Profile ${postType} post for "${name}" (${connectedBusiness.category}) at ${connectedBusiness.address}.
-Tone: ${tone}.
-Use only real details from this listing. Do not invent offers, prices, or events.
+            `Write a Google Business Profile ${kind} post for "${name}" (${connectedBusiness.category}) at ${connectedBusiness.address}.
+Tone: ${tone || 'professional'}.
+${lines.join('\n')}
+Use only real details from this listing and the details above. Do not invent offers, prices, or events.
 Keep under 120 words.`
         );
         if (!copy) return res.status(502).json({ error: 'Gemini returned empty post copy.' });
@@ -932,6 +973,33 @@ app.post('/api/ai/post-image', requireAuth, hydrateOrgFromDb, requireFeature('lo
         console.error('Post image error:', err);
         res.status(502).json({ error: `Gemini image failed: ${errMessage(err)}` });
     }
+});
+
+app.get('/api/ai/gbp-drafts', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), (_req, res) => {
+    const drafts = Array.isArray(dashboardState.gbpDrafts) ? dashboardState.gbpDrafts : [];
+    res.json({ drafts });
+});
+
+app.post('/api/ai/gbp-drafts', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    const body = req.body || {};
+    const draft = {
+        id: `${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        postType: String(body.postType || 'update').slice(0, 40),
+        tone: String(body.tone || 'professional').slice(0, 40),
+        topic: String(body.topic || '').slice(0, 200),
+        details: String(body.details || '').slice(0, 1000),
+        eventTitle: String(body.eventTitle || '').slice(0, 200),
+        cta: String(body.cta || 'Book').slice(0, 40),
+        date: String(body.date || '').slice(0, 40),
+        time: String(body.time || '').slice(0, 40),
+        copy: String(body.copy || '').slice(0, 4000),
+        imageUrl: typeof body.imageUrl === 'string' ? body.imageUrl : ''
+    };
+    const prev = Array.isArray(dashboardState.gbpDrafts) ? dashboardState.gbpDrafts : [];
+    dashboardState.gbpDrafts = [draft, ...prev].slice(0, 8);
+    await saveOrgToDb(req);
+    res.json({ draft, drafts: dashboardState.gbpDrafts });
 });
 
 app.post('/api/ai/review-reply', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
@@ -1036,6 +1104,34 @@ app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('
         );
         dashboardState.trackedKeywords = next;
         data.trackedKeywords = next;
+        const competitors = (Array.isArray(data.competitors) ? data.competitors : []).slice(0, 6).map((row: any) => ({
+            name: String(row?.name || '').slice(0, 160),
+            reviews: Number(row?.reviews) || 0,
+            rating: Number(row?.rating) || 0,
+            posts: Number(row?.posts) || 0,
+            photos: Number(row?.photos) || 0,
+            trend: row?.trend === 'down' ? 'down' : 'up',
+            lat: Number.isFinite(Number(row?.lat)) ? Number(row.lat) : null,
+            lng: Number.isFinite(Number(row?.lng)) ? Number(row.lng) : null,
+            placeId: String(row?.placeId || '').slice(0, 120),
+            address: String(row?.address || '').slice(0, 240)
+        }));
+        const run = {
+            keyword,
+            gapAnalysis: String(data.gapAnalysis || '').slice(0, 2500),
+            grid: Array.isArray(data.grid) ? data.grid : [],
+            competitors,
+            center: data.center || null,
+            avgRank: entry.avgRank,
+            top3Percentage: entry.top3Percentage,
+            updatedAt: entry.updatedAt
+        };
+        const prior = Array.isArray(dashboardState.gapAnalyses) ? dashboardState.gapAnalyses : [];
+        dashboardState.gapAnalyses = [
+            run,
+            ...prior.filter((item: any) => String(item?.keyword || '').toLowerCase() !== keyword.toLowerCase())
+        ].slice(0, 12);
+        data.gapAnalyses = dashboardState.gapAnalyses;
     };
 
     const withCompetitors = (data: any) => {
@@ -1076,6 +1172,7 @@ app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('
     if (!aiClient) {
         const data = withMeta(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
         applyGridStats(data);
+        await saveOrgToDb(req);
         return res.json(data);
     }
 
@@ -1101,12 +1198,14 @@ First competitors item must be "${connectedBusiness.name} (You)" with reviews=${
             console.warn('[gap-analysis] unusable Gemini JSON — using fallback');
             const fallback = withMeta(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
             applyGridStats(fallback);
+            await saveOrgToDb(req);
             return res.json(fallback);
         }
 
         withCompetitors(data);
         withMeta(data);
         applyGridStats(data);
+        await saveOrgToDb(req);
         res.json(data);
     } catch (err: any) {
         console.error('Gap analysis error (serving fallback):', errMessage(err));
@@ -1115,36 +1214,192 @@ First competitors item must be "${connectedBusiness.name} (You)" with reviews=${
         }
         const fallback = withMeta(withCompetitors(fallbackGapAnalysis(connectedBusiness, keyword, liveCompetitors)));
         applyGridStats(fallback);
+        await saveOrgToDb(req);
         res.json(fallback);
     }
 });
 
+function citationNorm(value: string) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function citationNameMatches(found: string, expected: string) {
+    const left = citationNorm(found);
+    const right = citationNorm(expected);
+    if (!left || !right) return false;
+    if (left.includes(right) || right.includes(left)) return true;
+    const words = right.split(' ').filter((word) => word.length > 2);
+    if (!words.length) return false;
+    const hits = words.filter((word) => left.includes(word));
+    return hits.length >= Math.min(2, words.length);
+}
+
+function citationPhoneMatches(found: string, expected: string) {
+    const left = String(found || '').replace(/\D/g, '');
+    const right = String(expected || '').replace(/\D/g, '');
+    if (left.length < 7 || right.length < 7) return false;
+    return left.slice(-7) === right.slice(-7);
+}
+
+function citationAddressMatches(found: string, expected: string) {
+    const hay = citationNorm(found);
+    const words = citationNorm(expected)
+        .split(' ')
+        .filter((word) => word.length > 3);
+    if (!hay || !words.length) return false;
+    return words.filter((word) => hay.includes(word)).length >= 2;
+}
+
+function matchCitationRows(citations: any[], business: { name?: string; address?: string; phone?: string }) {
+    const expectedName = String(business.name || '').trim();
+    const expectedAddress = String(business.address || '').trim();
+    const expectedPhone = String(business.phone || '').trim();
+    return (Array.isArray(citations) ? citations : []).map((row) => {
+        const businessName = String(row?.businessName || '').trim();
+        const address = String(row?.address || '').trim();
+        const phone = String(row?.phone || '').trim();
+        const url = String(row?.url || '').trim();
+        const stated = String(row?.status || '').trim();
+        if (stated === 'missing' || (!url && !businessName && !address && !phone)) {
+            return {
+                directory: row?.directory || '',
+                status: 'missing',
+                url: '',
+                businessName: '',
+                address: '',
+                phone: '',
+                note: 'No public listing found'
+            };
+        }
+        const sameName = citationNameMatches(businessName, expectedName);
+        const samePhone = citationPhoneMatches(phone, expectedPhone);
+        const sameAddress = citationAddressMatches(address, expectedAddress);
+        if (sameName && (samePhone || sameAddress)) {
+            return {
+                directory: row?.directory || '',
+                status: 'found',
+                url,
+                businessName,
+                address,
+                phone,
+                note: 'Matches this business'
+            };
+        }
+        return {
+            directory: row?.directory || '',
+            status: 'mismatch',
+            url,
+            businessName,
+            address,
+            phone,
+            note: 'Different listing or details do not match this business'
+        };
+    });
+}
+
+function summarizeCitations(citations: any[]) {
+    const found = citations.filter((row) => row.status === 'found').length;
+    const mismatch = citations.filter((row) => row.status === 'mismatch').length;
+    const missing = citations.filter((row) => row.status === 'missing').length;
+    return {
+        score: citations.length ? Math.round((found / citations.length) * 100) : 0,
+        found,
+        missing,
+        mismatch,
+        citations
+    };
+}
+
+function sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function geminiRetryDelayMs(err: any) {
+    const raw = errMessage(err);
+    const match = raw.match(/retryDelay["'\s:]*["']?(\d+(?:\.\d+)?)s/i);
+    const seconds = match ? Number(match[1]) : 20;
+    const safe = Number.isFinite(seconds) ? seconds : 20;
+    return Math.round(Math.min(90, Math.max(12, safe)) * 1000);
+}
+
+function citationHistoryList() {
+    const history = Array.isArray(dashboardState.citationHistory) ? dashboardState.citationHistory : [];
+    if (history.length) return history.slice(0, 20);
+    const saved = dashboardState.citationAudit;
+    return saved?.scannedAt ? [saved] : [];
+}
+
+async function storeCitationAudit(req: any, data: any) {
+    const matched = matchCitationRows(data?.citations || [], connectedBusiness);
+    const summary = summarizeCitations(matched);
+    const saved = {
+        ...data,
+        ...summary,
+        scannedAt: new Date().toISOString()
+    };
+    const prior = citationHistoryList().filter((item) => item?.scannedAt !== saved.scannedAt);
+    dashboardState.citationHistory = [saved, ...prior].slice(0, 20);
+    dashboardState.citationAudit = saved;
+    await saveOrgToDb(req);
+    return { ...saved, history: dashboardState.citationHistory };
+}
+
+app.get('/api/ai/citations', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), (_req, res) => {
+    const history = citationHistoryList();
+    const saved = dashboardState.citationAudit || history[0] || null;
+    if (!saved || !Array.isArray(saved.citations)) {
+        return res.json({ citations: [], found: 0, missing: 0, mismatch: 0, scannedAt: null, history });
+    }
+    res.json({ ...saved, history });
+});
+
 app.post('/api/ai/citations', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
-    if (!requireGemini(res)) return;
     if (!requireBusiness(res)) return;
 
-    try {
-        const text = await generateText(
-            `Citation audit for this real business. Use live public web results only. Do not invent listings.
+    if (aiClient) {
+        const prompt = `Citation audit for this real business. Use live public web results only. Do not invent listings.
 Name: ${connectedBusiness.name}
 Address: ${connectedBusiness.address}
 Phone: ${connectedBusiness.phone}
 Website: ${connectedBusiness.website}
 Check these directories if possible: Google, Apple Maps, Bing Places, Yelp, Facebook, Yellow Pages, BBB, TripAdvisor, Foursquare.
+For each directory, return the business name, street address, and phone shown on that listing. If the listing is a different business, still return those details and set status to mismatch.
 Return JSON only:
-{"score": 0, "found": 0, "missing": 0, "citations": [{"directory": "", "status": "found"|"missing"|"mismatch", "url": "", "note": ""}]}
-score is 0-100. status mismatch means NAP does not match.`,
-            { tools: [{ googleSearch: {} }] }
-        );
-        const data = parseJsonFromText(text);
-        if (!data?.citations) {
-            return res.status(502).json({ error: 'Gemini returned an unusable citation audit.' });
+{"score": 0, "found": 0, "missing": 0, "citations": [{"directory": "", "status": "found"|"missing"|"mismatch", "url": "", "businessName": "", "address": "", "phone": "", "note": ""}]}
+status found means this exact business. status mismatch means a different business or different phone or address. status missing means no listing. Leave businessName, address, and phone empty when status is missing.`;
+        const started = Date.now();
+        const budgetMs = 22000;
+        let lastErr: any = null;
+        while (Date.now() - started < budgetMs) {
+            try {
+                const text = await generateText(prompt, { tools: [{ googleSearch: {} }] });
+                const data = parseJsonFromText(text);
+                if (data?.citations) {
+                    const saved = await storeCitationAudit(req, data);
+                    return res.json(saved);
+                }
+                return res.status(502).json({ error: 'Citation search did not finish. Run it again.' });
+            } catch (err: any) {
+                lastErr = err;
+                if (!isGeminiQuotaError(err)) {
+                    console.warn('[citations] search failed:', errMessage(err));
+                    return res.status(502).json({ error: 'Citation search did not finish. Run it again.' });
+                }
+                const waitMs = geminiRetryDelayMs(err);
+                if (Date.now() - started + waitMs >= budgetMs) break;
+                console.warn('[citations] search limit hit, waiting', waitMs, 'ms');
+                await sleep(waitMs);
+            }
         }
-        res.json(data);
-    } catch (err: any) {
-        console.error('Citation audit error:', err);
-        res.status(502).json({ error: `Gemini citation audit failed: ${errMessage(err)}` });
+        const retryAfterSeconds = Math.ceil(geminiRetryDelayMs(lastErr) / 1000);
+        console.warn('[citations] search limit still active, asking client to wait', retryAfterSeconds, 's');
+        return res.json({ retry: true, retryAfterSeconds });
     }
+
+    return res.status(503).json({ error: 'Gemini API key is missing. Add GEMINI_API_KEY to backend/.env and restart.' });
 });
 
 app.post('/api/ai/media-generate', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
@@ -1286,7 +1541,7 @@ app.post('/api/dashboard/activity', requireAuth, hydrateOrgFromDb, requireFeatur
     res.json({ success: true, activities: dashboardState.activities, stats: dashboardState });
 });
 
-app.post('/api/dashboard/update-stats', requireAuth, hydrateOrgFromDb, requireFeature('reporting'), (req, res) => {
+app.post('/api/dashboard/update-stats', requireAuth, hydrateOrgFromDb, requireFeature('reporting'), async (req, res) => {
     const allowed = [
         'completenessScore',
         'visibilityRank',
@@ -1301,6 +1556,7 @@ app.post('/api/dashboard/update-stats', requireAuth, hydrateOrgFromDb, requireFe
     for (const key of allowed) {
         if (req.body[key] !== undefined) (dashboardState as any)[key] = req.body[key];
     }
+    await saveOrgToDb(req);
     res.json({ success: true, stats: dashboardState });
 });
 

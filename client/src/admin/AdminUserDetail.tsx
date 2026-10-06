@@ -20,7 +20,7 @@ import {
     type TaskPriority,
     type TaskStatus
 } from './adminApi';
-import { FEATURE_LABELS, PLANS, type FeatureKey } from '../shared/planCatalog';
+import { FEATURE_LABELS, PLANS, getPlanById, type FeatureKey } from '../shared/planCatalog';
 import { cn } from '../shared/utils';
 import {
     getBookingPreset,
@@ -261,6 +261,7 @@ export default function AdminUserDetail() {
     const [user, setUser] = useState<AdminUser | null>(null);
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
+    const [planConfirm, setPlanConfirm] = useState<string | null>(null);
 
     const load = () => {
         if (!kind || !id) return;
@@ -520,7 +521,11 @@ export default function AdminUserDetail() {
                                     <select
                                         disabled={busy}
                                         value={user.subscription?.planId || ''}
-                                        onChange={(e) => assignPlan(e.target.value)}
+                                        onChange={(e) => {
+                                            const next = e.target.value;
+                                            if (next === (user.subscription?.planId || '')) return;
+                                            setPlanConfirm(next);
+                                        }}
                                         className="mt-1.5 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm"
                                     >
                                         <option value="">Remove plan</option>
@@ -548,6 +553,46 @@ export default function AdminUserDetail() {
                     </div>
                 )}
             </div>
+            {planConfirm !== null && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0F172A]/40 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+                        <h2 className="text-lg font-black text-[#0F172A]">Change this plan?</h2>
+                        <p className="text-sm text-[#64748B]">
+                            Change this user&apos;s plan from{' '}
+                            <span className="font-semibold text-[#0F172A]">
+                                {user.subscription?.planName || 'No plan'}
+                            </span>{' '}
+                            to{' '}
+                            <span className="font-semibold text-[#0F172A]">
+                                {planConfirm ? getPlanById(planConfirm)?.name || planConfirm : 'No plan'}
+                            </span>
+                            ?
+                        </p>
+                        <div className="flex justify-end gap-2">
+                            <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => setPlanConfirm(null)}
+                                className="px-4 py-2 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#0F172A]"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => {
+                                    const next = planConfirm;
+                                    setPlanConfirm(null);
+                                    assignPlan(next);
+                                }}
+                                className="px-4 py-2 rounded-xl bg-[#0F172A] text-white text-sm font-bold"
+                            >
+                                Yes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

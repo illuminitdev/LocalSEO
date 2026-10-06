@@ -162,7 +162,7 @@ export function ReviewManagement() {
             type: 'review',
             message: `Published reply for review by ${targetReview.author}.`,
             icon: 'CheckCircle',
-            color: 'text-[#FF8800]'
+            color: 'text-[var(--brand-primary)]'
         });
     };
 
@@ -188,7 +188,7 @@ export function ReviewManagement() {
                 type: 'review',
                 message: 'Generated AI replies for pending reviews.',
                 icon: 'TrendingUp',
-                color: 'text-[#FF8800]'
+                color: 'text-[var(--brand-primary)]'
             });
         } catch (err: any) {
             setError(err.message || 'Batch draft failed');
@@ -311,7 +311,7 @@ export function ReviewManagement() {
                     <button
                         type="button"
                         onClick={() => setActiveTab('needs_reply')}
-                        className="text-[11px] font-semibold text-[#FF8800] hover:underline text-right mt-2 self-end cursor-pointer"
+                        className="text-[11px] font-semibold text-[var(--brand-primary)] hover:underline text-right mt-2 self-end cursor-pointer"
                     >
                         View all →
                     </button>
@@ -331,7 +331,7 @@ export function ReviewManagement() {
                     <button
                         type="button"
                         onClick={() => setActiveTab('drafts')}
-                        className="text-[11px] font-semibold text-[#FF8800] hover:underline text-right mt-2 self-end cursor-pointer"
+                        className="text-[11px] font-semibold text-[var(--brand-primary)] hover:underline text-right mt-2 self-end cursor-pointer"
                     >
                         View drafts →
                     </button>
@@ -388,7 +388,7 @@ export function ReviewManagement() {
                         onClick={() => setActiveTab('all')}
                         className={`text-xs font-semibold pb-2.5 transition-colors cursor-pointer ${
                             activeTab === 'all'
-                                ? 'border-b-2 border-[#FF8800] text-[#0F172A] font-bold'
+                                ? 'border-b-2 border-[var(--brand-primary)] text-[#0F172A] font-bold'
                                 : 'text-gray-500 hover:text-[#0F172A]'
                         }`}
                     >
@@ -399,7 +399,7 @@ export function ReviewManagement() {
                         onClick={() => setActiveTab('needs_reply')}
                         className={`text-xs font-semibold pb-2.5 transition-colors cursor-pointer ${
                             activeTab === 'needs_reply'
-                                ? 'border-b-2 border-[#FF8800] text-[#0F172A] font-bold'
+                                ? 'border-b-2 border-[var(--brand-primary)] text-[#0F172A] font-bold'
                                 : 'text-gray-500 hover:text-[#0F172A]'
                         }`}
                     >
@@ -410,7 +410,7 @@ export function ReviewManagement() {
                         onClick={() => setActiveTab('drafts')}
                         className={`text-xs font-semibold pb-2.5 transition-colors cursor-pointer ${
                             activeTab === 'drafts'
-                                ? 'border-b-2 border-[#FF8800] text-[#0F172A] font-bold'
+                                ? 'border-b-2 border-[var(--brand-primary)] text-[#0F172A] font-bold'
                                 : 'text-gray-500 hover:text-[#0F172A]'
                         }`}
                     >
@@ -421,7 +421,7 @@ export function ReviewManagement() {
                         onClick={() => setActiveTab('replied')}
                         className={`text-xs font-semibold pb-2.5 transition-colors cursor-pointer ${
                             activeTab === 'replied'
-                                ? 'border-b-2 border-[#FF8800] text-[#0F172A] font-bold'
+                                ? 'border-b-2 border-[var(--brand-primary)] text-[#0F172A] font-bold'
                                 : 'text-gray-500 hover:text-[#0F172A]'
                         }`}
                     >
@@ -438,7 +438,7 @@ export function ReviewManagement() {
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Search reviews by name or keyword..."
-                            className="w-full pl-8 pr-3 py-1.5 bg-white border border-[#E2E8F0] rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800]"
+                            className="w-full pl-8 pr-3 py-1.5 bg-white border border-[#E2E8F0] rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)]"
                         />
                     </div>
 
@@ -480,7 +480,7 @@ export function ReviewManagement() {
                                     onClick={() => setSelectedReviewId(review.id)}
                                     className={`rounded-2xl border p-4 transition-all cursor-pointer ${
                                         isSelected
-                                            ? 'bg-white border-[#FF8800] ring-2 ring-[#FF8800]/20 shadow-xs'
+                                            ? 'bg-white border-[var(--brand-primary)] ring-2 ring-[var(--brand-primary)]/20 shadow-xs'
                                             : 'bg-white border-[#E2E8F0] hover:border-gray-300 shadow-xs'
                                     }`}
                                 >
@@ -528,8 +528,8 @@ export function ReviewManagement() {
                                                     <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Replied
                                                 </span>
                                             ) : (
-                                                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#FF8800]">
-                                                    <div className="w-2 h-2 rounded-full bg-[#FF8800]"></div> Needs reply
+                                                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--brand-primary)]">
+                                                    <div className="w-2 h-2 rounded-full bg-[var(--brand-primary)]"></div> Needs reply
                                                 </span>
                                             )}
                                         </div>
@@ -557,7 +557,7 @@ export function ReviewManagement() {
                                                     disabled={review.isDrafting}
                                                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-xs ${
                                                         isSelected
-                                                            ? 'bg-[#FF8800] hover:bg-[#E67A00] text-white'
+                                                            ? 'bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white'
                                                             : 'bg-white hover:bg-gray-50 border border-[#E2E8F0] text-[#0F172A]'
                                                     }`}
                                                 >
@@ -620,7 +620,7 @@ export function ReviewManagement() {
                             {/* AI Generated Reply Content */}
                             <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4 mb-4">
                                 <div className="flex items-center gap-1.5 text-xs font-semibold text-[#0F172A] mb-2.5">
-                                    <Wand2 className="w-3.5 h-3.5 text-[#FF8800]" />
+                                    <Wand2 className="w-3.5 h-3.5 text-[var(--brand-primary)]" />
                                     <span>AI generated reply</span>
                                 </div>
 
@@ -639,7 +639,7 @@ export function ReviewManagement() {
                                                 )
                                             );
                                         }}
-                                        className="w-full p-2.5 bg-white border border-[#E2E8F0] rounded-lg text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 resize-none"
+                                        className="w-full p-2.5 bg-white border border-[#E2E8F0] rounded-lg text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 resize-none"
                                     />
                                 ) : (
                                     <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-line">
@@ -760,7 +760,7 @@ export function QAAutoResponder() {
             type: 'qa',
             message: `Saved Q&A answer for: "${targetQ.text}"`,
             icon: 'CheckCircle',
-            color: 'text-[#FF8800]'
+            color: 'text-[var(--brand-primary)]'
         });
     };
 
@@ -830,7 +830,7 @@ export function QAAutoResponder() {
                                     maxLength={2000}
                                     onChange={(e) => setKbText(e.target.value)}
                                     placeholder={`Parking: Free street parking nearby\nAccessibility: Step-free entrance\nAppointments: Booking recommended`}
-                                    className="w-full p-3.5 bg-white border border-[#E2E8F0] rounded-xl text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800] resize-none"
+                                    className="w-full p-3.5 bg-white border border-[#E2E8F0] rounded-xl text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)] resize-none"
                                 />
                                 <span className="absolute bottom-2.5 right-3 text-[10px] text-gray-400 font-medium">
                                     {kbText.length}/2000
@@ -848,7 +848,7 @@ export function QAAutoResponder() {
                                 type="button"
                                 onClick={handleSaveKB}
                                 disabled={isSavingKB}
-                                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#FF8800] hover:bg-[#E67A00] text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer shrink-0 disabled:opacity-70"
+                                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer shrink-0 disabled:opacity-70"
                             >
                                 {isSavingKB ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                                 {isSavingKB ? 'Saving...' : 'Save knowledge'}
@@ -868,7 +868,7 @@ export function QAAutoResponder() {
                             <select
                                 value={answerStyle}
                                 onChange={(e) => setAnswerStyle(e.target.value)}
-                                className="w-full appearance-none bg-white border border-[#E2E8F0] rounded-xl px-3.5 py-2.5 pr-8 text-xs font-semibold text-[#0F172A] shadow-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20"
+                                className="w-full appearance-none bg-white border border-[#E2E8F0] rounded-xl px-3.5 py-2.5 pr-8 text-xs font-semibold text-[#0F172A] shadow-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20"
                             >
                                 <option value="Professional & friendly">Professional & friendly</option>
                                 <option value="Direct & concise">Direct & concise</option>
@@ -907,7 +907,7 @@ export function QAAutoResponder() {
                                     onChange={(e) => setNewQuestion(e.target.value)}
                                     onKeyDown={(e) => e.key === 'Enter' && addQuestion()}
                                     placeholder="Type a question customers ask..."
-                                    className="flex-1 px-3.5 py-2.5 bg-white border border-[#E2E8F0] rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800]"
+                                    className="flex-1 px-3.5 py-2.5 bg-white border border-[#E2E8F0] rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)]"
                                 />
                                 <button
                                     type="button"
@@ -964,7 +964,7 @@ export function QAAutoResponder() {
                                                         type="button"
                                                         onClick={() => handleAutoAnswer(q.id, q.text)}
                                                         disabled={isGenerating === q.id}
-                                                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#FF8800] hover:bg-[#E67A00] text-white rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-xs disabled:opacity-70"
+                                                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-xs disabled:opacity-70"
                                                     >
                                                         {isGenerating === q.id ? (
                                                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -987,7 +987,7 @@ export function QAAutoResponder() {
                                                                 )
                                                             );
                                                         }}
-                                                        className="w-full p-2.5 bg-white border border-[#E2E8F0] rounded-lg text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 resize-none"
+                                                        className="w-full p-2.5 bg-white border border-[#E2E8F0] rounded-lg text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 resize-none"
                                                     />
                                                     <div className="flex items-center justify-end gap-2">
                                                         <button
@@ -1061,7 +1061,7 @@ export function QAAutoResponder() {
                                     className="w-full text-left p-3 rounded-xl border border-[#E2E8F0] bg-white hover:bg-gray-50 text-xs font-semibold text-[#0F172A] transition-colors cursor-pointer flex items-center justify-between gap-2"
                                 >
                                     <span>&quot;{exQ}&quot;</span>
-                                    <span className="text-[10px] text-[#FF8800] font-bold shrink-0">+ Add</span>
+                                    <span className="text-[10px] text-[var(--brand-primary)] font-bold shrink-0">+ Add</span>
                                 </button>
                             ))}
                         </div>

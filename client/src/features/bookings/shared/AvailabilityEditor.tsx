@@ -452,7 +452,7 @@ export default function AvailabilityEditor({
                 <div className="p-5 bg-[#FAFBFC]">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
-                            <Calendar className="w-4 h-4 text-[#F59E0B]" /> Hours by week
+                            <Calendar className="w-4 h-4 text-[var(--brand-primary)]" /> Hours by week
                         </h3>
                         <div className="flex gap-1">
                             <button
@@ -518,8 +518,8 @@ export default function AvailabilityEditor({
                                         selectedDate === d.date && 'bg-[#0F172A] text-white border-[#0F172A]',
                                         inSelectedWeek &&
                                             selectedDate !== d.date &&
-                                            'ring-1 ring-[#F59E0B]/40',
-                                        !isClosed && hasHours && selectedDate !== d.date && 'bg-[#FFFBEB]'
+                                            'ring-1 ring-[var(--brand-primary)]/40',
+                                        !isClosed && hasHours && selectedDate !== d.date && 'bg-[var(--brand-primary-soft)]'
                                     )}
                                 >
                                     {d.date.slice(8)}
@@ -531,7 +531,7 @@ export default function AvailabilityEditor({
                                                     ? 'bg-white'
                                                     : isClosed
                                                       ? 'bg-red-500'
-                                                      : 'bg-[#F59E0B]'
+                                                      : 'bg-[var(--brand-primary)]'
                                             )}
                                         />
                                     )}
@@ -566,7 +566,7 @@ export default function AvailabilityEditor({
                                     <button
                                         type="button"
                                         onClick={addSlot}
-                                        className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-[#F59E0B] text-white text-xs font-bold shrink-0"
+                                        className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-[var(--brand-primary)] text-white text-xs font-bold shrink-0"
                                     >
                                         <Plus className="w-4 h-4" /> Add hours
                                     </button>
@@ -619,7 +619,7 @@ export default function AvailabilityEditor({
                                                 className={cn(
                                                     'flex items-center gap-2 p-3 rounded-xl border',
                                                     isEditing
-                                                        ? 'border-[#F59E0B] bg-[#F59E0B]/5'
+                                                        ? 'border-[var(--brand-primary)] bg-[var(--brand-primary)]/5'
                                                         : 'border-[#E2E8F0] bg-[#FAFBFC]'
                                                 )}
                                             >
@@ -670,10 +670,10 @@ export default function AvailabilityEditor({
                 onClick={handleSave}
                 className={
                     saving
-                        ? 'px-5 py-2.5 rounded-xl bg-[#F59E0B] text-white font-bold text-sm disabled:opacity-60'
+                        ? 'px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] text-white font-bold text-sm disabled:opacity-60'
                         : saved
                           ? 'px-5 py-2.5 rounded-xl bg-emerald-600 text-white font-bold text-sm disabled:opacity-60'
-                          : 'px-5 py-2.5 rounded-xl bg-[#F59E0B] text-white font-bold text-sm disabled:opacity-60'
+                          : 'px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] text-white font-bold text-sm disabled:opacity-60'
                 }
             >
                 {saving ? 'Saving…' : saved ? 'Saved' : 'Save changes'}

@@ -119,7 +119,7 @@ export default function ProfileAudit() {
                 type: 'audit',
                 message: `AI Profile Audit executed. Optimization Score: ${data.score}/100.`,
                 icon: 'Activity',
-                color: 'text-[#FF8800]'
+                color: 'text-[var(--brand-primary)]'
             });
         } catch (err: any) {
             setError(err.message || 'Audit failed');
@@ -158,7 +158,7 @@ export default function ProfileAudit() {
                 type: 'audit',
                 message: 'Business profile saved and ready for AI Insights and other listing tools.',
                 icon: 'CheckCircle',
-                color: 'text-[#FF8800]'
+                color: 'text-[var(--brand-primary)]'
             });
             show('Business info saved. Connected to AI Insights, rankings, citations, and other listing tools.');
             setMode('view');
@@ -212,14 +212,14 @@ export default function ProfileAudit() {
 
             {/* Audit Results View (If Available) */}
             {auditResult && mode === 'view' && (
-                <div className="bg-[#F8FAFC] border border-[#FF8800]/30 rounded-2xl p-6 mb-6 shadow-xs animate-in zoom-in duration-300">
+                <div className="bg-[#F8FAFC] border border-[var(--brand-primary)]/30 rounded-2xl p-6 mb-6 shadow-xs animate-in zoom-in duration-300">
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
-                            <Wand2 className="w-4 h-4 text-[#FF8800]" /> Audit Results
+                            <Wand2 className="w-4 h-4 text-[var(--brand-primary)]" /> Audit Results
                         </h2>
                         <div className="flex items-center gap-2">
                             <span className="text-xs text-gray-500 font-semibold">Optimization Score:</span>
-                            <span className="px-3 py-1 bg-white border border-[#E2E8F0] rounded-full font-bold text-xs text-[#FF8800] shadow-xs">
+                            <span className="px-3 py-1 bg-white border border-[#E2E8F0] rounded-full font-bold text-xs text-[var(--brand-primary)] shadow-xs">
                                 {auditResult.score}/100
                             </span>
                         </div>
@@ -246,7 +246,7 @@ export default function ProfileAudit() {
                         {Array.isArray(auditResult.recommendations) && auditResult.recommendations.length > 0 && (
                             <div>
                                 <h3 className="text-xs font-bold text-[#0F172A] mb-2 flex items-center gap-1.5">
-                                    <ShieldAlert className="w-3.5 h-3.5 text-[#FF8800]" /> Actionable Recommendations
+                                    <ShieldAlert className="w-3.5 h-3.5 text-[var(--brand-primary)]" /> Actionable Recommendations
                                 </h3>
                                 <ul className="space-y-1.5">
                                     {auditResult.recommendations.map((rec: string, i: number) => (
@@ -254,7 +254,7 @@ export default function ProfileAudit() {
                                             key={i}
                                             className="flex gap-2 text-xs text-gray-600 bg-white p-2.5 rounded-lg border border-[#E2E8F0]"
                                         >
-                                            <div className="w-1.5 h-1.5 rounded-full bg-[#FF8800] mt-1.5 shrink-0" />
+                                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--brand-primary)] mt-1.5 shrink-0" />
                                             <span className="font-medium">{rec}</span>
                                         </li>
                                     ))}
@@ -271,7 +271,7 @@ export default function ProfileAudit() {
                     {/* Header inside card */}
                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
                         <div>
-                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-[#FFF7ED] text-[#FF8800] mb-1.5">
+                            <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-[var(--brand-primary-soft)] text-[var(--brand-primary)] mb-1.5">
                                 {hasBusiness ? 'SAVED LISTING' : 'NOT CONNECTED'}
                             </span>
                             <h2 className="text-2xl font-bold text-[#0F172A] leading-tight">
@@ -298,7 +298,7 @@ export default function ProfileAudit() {
                         {/* ADDRESS Box */}
                         <div className="rounded-xl border border-[#E2E8F0] p-4 flex items-start gap-3.5 bg-white shadow-xs">
                             <div className="w-9 h-9 rounded-full bg-orange-50 flex items-center justify-center shrink-0">
-                                <MapPin className="w-4 h-4 text-[#FF8800]" />
+                                <MapPin className="w-4 h-4 text-[var(--brand-primary)]" />
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">ADDRESS</p>
@@ -311,7 +311,7 @@ export default function ProfileAudit() {
                         {/* PHONE Box */}
                         <div className="rounded-xl border border-[#E2E8F0] p-4 flex items-start gap-3.5 bg-white shadow-xs">
                             <div className="w-9 h-9 rounded-full bg-orange-50 flex items-center justify-center shrink-0">
-                                <Phone className="w-4 h-4 text-[#FF8800]" />
+                                <Phone className="w-4 h-4 text-[var(--brand-primary)]" />
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">PHONE</p>
@@ -322,7 +322,7 @@ export default function ProfileAudit() {
                         {/* HOURS Box */}
                         <div className="rounded-xl border border-[#E2E8F0] p-4 flex items-start gap-3.5 bg-white shadow-xs">
                             <div className="w-9 h-9 rounded-full bg-orange-50 flex items-center justify-center shrink-0">
-                                <Clock className="w-4 h-4 text-[#FF8800]" />
+                                <Clock className="w-4 h-4 text-[var(--brand-primary)]" />
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2">HOURS</p>
@@ -335,7 +335,7 @@ export default function ProfileAudit() {
                         {/* WEBSITE Box */}
                         <div className="rounded-xl border border-[#E2E8F0] p-4 flex items-start gap-3.5 bg-white shadow-xs">
                             <div className="w-9 h-9 rounded-full bg-orange-50 flex items-center justify-center shrink-0">
-                                <Globe className="w-4 h-4 text-[#FF8800]" />
+                                <Globe className="w-4 h-4 text-[var(--brand-primary)]" />
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">WEBSITE</p>
@@ -344,10 +344,10 @@ export default function ProfileAudit() {
                                         href={formData.website}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="text-xs font-semibold text-[#FF8800] hover:underline inline-flex items-center gap-1.5 break-all"
+                                        className="text-xs font-semibold text-[var(--brand-primary)] hover:underline inline-flex items-center gap-1.5 break-all"
                                     >
                                         {formData.website}
-                                        <ExternalLink className="w-3.5 h-3.5 text-[#FF8800] shrink-0" />
+                                        <ExternalLink className="w-3.5 h-3.5 text-[var(--brand-primary)] shrink-0" />
                                     </a>
                                 ) : (
                                     <p className="text-xs text-gray-400 font-medium">Not provided</p>
@@ -359,7 +359,7 @@ export default function ProfileAudit() {
                     {/* ATTRIBUTES Full-Width Box */}
                     <div className="rounded-xl border border-[#E2E8F0] p-4 flex items-start gap-3.5 bg-white shadow-xs mt-4">
                         <div className="w-9 h-9 rounded-full bg-orange-50 flex items-center justify-center shrink-0">
-                            <Tag className="w-4 h-4 text-[#FF8800]" />
+                            <Tag className="w-4 h-4 text-[var(--brand-primary)]" />
                         </div>
                         <div className="flex-1 min-w-0">
                             <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2">ATTRIBUTES</p>
@@ -415,7 +415,7 @@ export default function ProfileAudit() {
                                 name="name"
                                 value={formData.name}
                                 onChange={handleChange}
-                                className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800] ${
+                                className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)] ${
                                     fieldErrors.name ? 'border-red-400' : 'border-[#E2E8F0]'
                                 }`}
                                 placeholder="Business name"
@@ -431,7 +431,7 @@ export default function ProfileAudit() {
                                 name="category"
                                 value={formData.category}
                                 onChange={handleChange}
-                                className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800] ${
+                                className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)] ${
                                     fieldErrors.category ? 'border-red-400' : 'border-[#E2E8F0]'
                                 }`}
                                 placeholder="e.g. Plumber, Hairdresser, Cafe"
@@ -447,7 +447,7 @@ export default function ProfileAudit() {
                                 name="address"
                                 value={formData.address}
                                 onChange={handleChange}
-                                className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800] ${
+                                className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)] ${
                                     fieldErrors.address ? 'border-red-400' : 'border-[#E2E8F0]'
                                 }`}
                                 placeholder="Street, city, postcode"
@@ -463,7 +463,7 @@ export default function ProfileAudit() {
                                 name="phone"
                                 value={formData.phone}
                                 onChange={handleChange}
-                                className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800] ${
+                                className={`w-full px-3.5 py-2 bg-white border rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)] ${
                                     fieldErrors.phone ? 'border-red-400' : 'border-[#E2E8F0]'
                                 }`}
                                 placeholder="Phone number"
@@ -477,7 +477,7 @@ export default function ProfileAudit() {
                                 name="website"
                                 value={formData.website}
                                 onChange={handleChange}
-                                className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800]"
+                                className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)]"
                                 placeholder="https://"
                             />
                         </div>
@@ -489,7 +489,7 @@ export default function ProfileAudit() {
                                 name="hours"
                                 value={formData.hours}
                                 onChange={handleChange}
-                                className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800]"
+                                className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)]"
                                 placeholder="e.g. Mon–Fri 9:00 AM – 5:00 PM"
                             />
                         </div>
@@ -503,7 +503,7 @@ export default function ProfileAudit() {
                                 name="attributes"
                                 value={formData.attributes}
                                 onChange={handleChange}
-                                className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800]"
+                                className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)]"
                                 placeholder="e.g. wheelchair_accessible, women_owned"
                             />
                         </div>
@@ -515,7 +515,7 @@ export default function ProfileAudit() {
                                 name="description"
                                 value={formData.description}
                                 onChange={handleChange}
-                                className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800] resize-none"
+                                className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)] resize-none"
                                 placeholder="Write a brief overview of your business..."
                             />
                         </div>
@@ -533,7 +533,7 @@ export default function ProfileAudit() {
                             type="button"
                             onClick={handleSaveChanges}
                             disabled={isSaving}
-                            className="inline-flex items-center gap-2 px-5 py-2 bg-[#FF8800] hover:bg-[#E67A00] text-white rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-colors disabled:opacity-70"
+                            className="inline-flex items-center gap-2 px-5 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-colors disabled:opacity-70"
                         >
                             {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                             {isSaving ? 'Saving...' : 'Save business info'}

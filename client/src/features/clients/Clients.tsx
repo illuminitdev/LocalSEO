@@ -227,7 +227,7 @@ function ClientsList() {
                 <button
                     type="button"
                     onClick={() => setShowCreate((v) => !v)}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#FF8800] hover:bg-[#E67A00] active:bg-[#CC6D00] text-white px-4 py-2.5 text-xs font-bold shadow-sm transition shrink-0"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white px-4 py-2.5 text-xs font-bold shadow-sm transition shrink-0"
                 >
                     <Plus className="w-4 h-4" /> Add client
                 </button>

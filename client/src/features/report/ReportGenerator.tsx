@@ -152,7 +152,7 @@ export default function ReportGenerator() {
                 {/* 2. Competitor activity */}
                 <div className="flex items-center gap-3.5 pt-3 md:pt-0 md:px-4">
                     <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center shrink-0">
-                        <Users className="w-5 h-5 text-[#FF8800]" />
+                        <Users className="w-5 h-5 text-[var(--brand-primary)]" />
                     </div>
                     <div>
                         <h3 className="font-bold text-sm text-[#0F172A]">Competitor activity</h3>
@@ -192,7 +192,7 @@ export default function ReportGenerator() {
                         type="button"
                         onClick={handleGenerate}
                         disabled={isGenerating}
-                        className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#FF8800] hover:bg-[#E67A00] text-white rounded-xl text-sm font-bold shadow-xs cursor-pointer transition-colors"
+                        className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-sm font-bold shadow-xs cursor-pointer transition-colors"
                     >
                         <FileText className="w-4 h-4" />
                         Generate your first report
@@ -202,7 +202,7 @@ export default function ReportGenerator() {
 
             {isGenerating && (
                 <div className="bg-white p-12 md:p-16 rounded-2xl border border-[#E2E8F0] text-center shadow-xs my-6">
-                    <div className="w-16 h-16 border-4 border-slate-100 border-t-[#FF8800] rounded-full animate-spin mx-auto mb-4"></div>
+                    <div className="w-16 h-16 border-4 border-slate-100 border-t-[var(--brand-primary)] rounded-full animate-spin mx-auto mb-4"></div>
                     <p className="text-base font-bold text-[#0F172A]">Aggregating LocalPulse Data...</p>
                     <p className="text-xs text-gray-500 mt-1">Analyzing local rankings, reviews, and competitors...</p>
                 </div>
@@ -265,7 +265,7 @@ export default function ReportGenerator() {
                                 Overall Grade
                             </span>
                             <div className="text-5xl font-black text-[#0F172A] mb-1">{reportData.grade}</div>
-                            <p className="text-xs text-[#0F172A] font-bold bg-[#FF8800]/10 px-3 py-1 rounded-full border border-[#FF8800]/20">
+                            <p className="text-xs text-[#0F172A] font-bold bg-[var(--brand-primary)]/10 px-3 py-1 rounded-full border border-[var(--brand-primary)]/20">
                                 {sourceLabel}
                             </p>
                         </div>
@@ -307,7 +307,7 @@ export default function ReportGenerator() {
                     </div>
 
                     <div className="mb-8">
-                        <h3 className="text-sm font-bold text-[#0F172A] border-b-2 border-[#FF8800] pb-1.5 mb-3 inline-block">
+                        <h3 className="text-sm font-bold text-[#0F172A] border-b-2 border-[var(--brand-primary)] pb-1.5 mb-3 inline-block">
                             Competitor Positioning
                         </h3>
                         <p className="text-gray-700 leading-relaxed text-xs">{reportData.positioningText}</p>
@@ -335,7 +335,7 @@ export default function ReportGenerator() {
                         <ul className="space-y-3">
                             {(reportData.roadmap || []).map((step: any) => (
                                 <li key={step.id} className="flex gap-3 p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
-                                    <div className="text-[#FF8800] font-bold text-base">{step.id}</div>
+                                    <div className="text-[var(--brand-primary)] font-bold text-base">{step.id}</div>
                                     <div>
                                         <h4 className="font-bold text-[#0F172A] text-xs">{step.title}</h4>
                                         <p className="text-xs text-gray-600 mt-0.5">{step.desc}</p>
@@ -391,7 +391,7 @@ export default function ReportGenerator() {
                         </button>
 
                         <div className="flex items-center gap-3 mb-4">
-                            <div className="w-10 h-10 rounded-xl bg-[#FF8800]/10 flex items-center justify-center text-[#FF8800]">
+                            <div className="w-10 h-10 rounded-xl bg-[var(--brand-primary)]/10 flex items-center justify-center text-[var(--brand-primary)]">
                                 <Sparkles className="w-5 h-5" />
                             </div>
                             <div>
@@ -430,7 +430,7 @@ export default function ReportGenerator() {
                                 setShowHowItWorks(false);
                                 handleGenerate();
                             }}
-                            className="w-full py-2.5 px-4 bg-[#FF8800] hover:bg-[#E67A00] text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                            className="w-full py-2.5 px-4 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
                         >
                             Generate report now
                         </button>

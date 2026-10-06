@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { darkenHex, readBrandPrimaryHex } from './orgBrand';
 
 
 const DEV_DEMO_MAPS_JS_KEY = 'AIzaSyDKn-KGL7tIv0kJpDZOjAjeP_1rQ484CSY';
@@ -130,7 +131,8 @@ export default function PlacesMap({
                 pointList.forEach((m, idx) => {
                     const pos = { lat: m.lat, lng: m.lng };
                     bounds.extend(pos);
-                    const fill = m.color || (m.highlight ? '#FF8800' : '#F97316');
+                    const brand = readBrandPrimaryHex();
+                    const fill = m.color || (m.highlight ? brand : darkenHex(brand));
                     const labelText = m.label !== undefined ? String(m.label) : String(idx + 1);
 
                     const svgPin = encodeURIComponent(`
@@ -244,7 +246,7 @@ export function geoGridMarkers(
                 label: String(Math.round(rank)),
                 title: `Estimated Local Pack rank ${Math.round(rank)}`,
                 highlight: rank <= 3,
-                color: rank <= 3 ? '#F59E0B' : rank <= 5 ? '#D97706' : '#EF4444'
+                color: rank <= 3 ? readBrandPrimaryHex() : rank <= 5 ? darkenHex(readBrandPrimaryHex()) : '#EF4444'
             });
         }
     }

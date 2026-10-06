@@ -78,7 +78,7 @@ export default function FoodOrdersHostPanel() {
                         Paid online orders — update status so guests can track delivery.
                     </p>
                 </div>
-                <button type="button" onClick={load} className="text-xs font-bold text-[#F59E0B] underline">
+                <button type="button" onClick={load} className="text-xs font-bold text-[var(--brand-primary)] underline">
                     Refresh
                 </button>
             </div>
@@ -121,7 +121,7 @@ export default function FoodOrdersHostPanel() {
                                 >
                                     {order.status.replace(/_/g, ' ')}
                                 </span>
-                                <p className="font-black text-[#F59E0B] mt-1">
+                                <p className="font-black text-[var(--brand-primary)] mt-1">
                                     {formatCents(order.totalCents)}
                                 </p>
                             </div>

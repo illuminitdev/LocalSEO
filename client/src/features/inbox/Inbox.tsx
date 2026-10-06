@@ -113,7 +113,7 @@ export default function Inbox() {
                                 className={cn(
                                     'px-3.5 py-1.5 rounded-lg text-xs font-bold transition',
                                     activeTab === 'all'
-                                        ? 'bg-[#FFEDD5] text-[#C2410C]'
+                                        ? 'bg-[var(--brand-primary-muted)] text-[var(--brand-primary-ink)]'
                                         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                                 )}
                             >
@@ -125,7 +125,7 @@ export default function Inbox() {
                                 className={cn(
                                     'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition',
                                     activeTab === 'unread'
-                                        ? 'bg-[#FFEDD5] text-[#C2410C] font-bold'
+                                        ? 'bg-[var(--brand-primary-muted)] text-[var(--brand-primary-ink)] font-bold'
                                         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                                 )}
                             >
@@ -137,7 +137,7 @@ export default function Inbox() {
                                 className={cn(
                                     'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition',
                                     activeTab === 'clients'
-                                        ? 'bg-[#FFEDD5] text-[#C2410C] font-bold'
+                                        ? 'bg-[var(--brand-primary-muted)] text-[var(--brand-primary-ink)] font-bold'
                                         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                                 )}
                             >
@@ -149,7 +149,7 @@ export default function Inbox() {
                                 className={cn(
                                     'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition',
                                     activeTab === 'team'
-                                        ? 'bg-[#FFEDD5] text-[#C2410C] font-bold'
+                                        ? 'bg-[var(--brand-primary-muted)] text-[var(--brand-primary-ink)] font-bold'
                                         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                                 )}
                             >
@@ -244,7 +244,7 @@ export default function Inbox() {
                                 >
                                     <path
                                         d="M20 16C13.37 16 8 21.37 8 28v20c0 6.63 5.37 12 12 12h20l14 10v-10h6c6.63 0 12-5.37 12-12V28c0-6.63-5.37-12-12-12H20z"
-                                        fill="#FED7AA"
+                                        fill="var(--brand-primary-line)"
                                     />
                                     {/* 3 Dots */}
                                     <circle cx="28" cy="38" r="3" fill="#EA580C" />

@@ -42,8 +42,65 @@ export function emptyDashboardState() {
             avgRank: number;
             top3Percentage: number;
             updatedAt: string;
-        }>
+        }>,
+        gapAnalyses: [] as Array<{
+            keyword: string;
+            gapAnalysis: string;
+            grid: number[][];
+            competitors: any[];
+            center: { lat: number; lng: number } | null;
+            avgRank: number;
+            top3Percentage: number;
+            updatedAt: string;
+        }>,
+        localSeoUpgradeChoice: null as 'pending' | 'booking' | 'new' | null,
+        citationAudit: null as null | Record<string, any>,
+        citationHistory: [] as Record<string, any>[],
+        gbpDrafts: [] as Record<string, any>[]
     };
+}
+
+const BOOKING_ONLY_PLAN_IDS = new Set(['booking-solo', 'booking-solo-plus', 'booking-pro']);
+
+export function isBookingOnlyPlan(planId: string | null | undefined) {
+    return BOOKING_ONLY_PLAN_IDS.has(String(planId || '').trim());
+}
+
+export async function markLocalSeoUpgradePending(orgId: string) {
+    const state = await loadOrgAppState(orgId);
+    if (state.business?.connected) return;
+    await saveOrgAppState(orgId, {
+        dashboard: { ...state.dashboard, localSeoUpgradeChoice: 'pending' }
+    });
+}
+
+export async function getLocalSeoUpgradeChoice(orgId: string) {
+    const state = await loadOrgAppState(orgId);
+    const raw = state.dashboard?.localSeoUpgradeChoice;
+    const choice = raw === 'pending' || raw === 'booking' || raw === 'new' ? raw : null;
+    const { rows } = await query(
+        `SELECT name, email, phone, service_area FROM organizations WHERE id = $1`,
+        [orgId]
+    );
+    const org = rows[0] || {};
+    return {
+        pending: choice === 'pending' && !state.business?.connected,
+        choice,
+        booking: {
+            name: String(org.name || ''),
+            email: String(org.email || ''),
+            phone: String(org.phone || ''),
+            address: String(org.service_area || '')
+        }
+    };
+}
+
+export async function setLocalSeoUpgradeChoice(orgId: string, choice: 'booking' | 'new') {
+    const state = await loadOrgAppState(orgId);
+    await saveOrgAppState(orgId, {
+        dashboard: { ...state.dashboard, localSeoUpgradeChoice: choice }
+    });
+    return getLocalSeoUpgradeChoice(orgId);
 }
 
 export async function loadOrgAppState(orgId: string) {

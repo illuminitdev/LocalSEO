@@ -974,7 +974,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                                                                 <p className="text-[10px] font-bold uppercase text-[#64748B]">
                                                                                     Price
                                                                                 </p>
-                                                                                <p className="text-xl font-black text-[#F59E0B]">
+                                                                                <p className="text-xl font-black text-[var(--brand-primary)]">
                                                                                     {formatCents(et.total_cents ?? et.deposit_cents)}
                                                                                 </p>
                                                                                 <p className="text-[10px] text-[#64748B] mt-0.5">
@@ -1080,7 +1080,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                                 <>
                                                     <div className="rounded-lg bg-[#F8FAFC] px-3 py-2">
                                                         <p className="text-[10px] font-bold uppercase text-[#64748B]">Deposit</p>
-                                                        <p className={cn('text-xl font-black', tpl?.accent || 'text-[#F59E0B]')}>
+                                                        <p className={cn('text-xl font-black', tpl?.accent || 'text-[var(--brand-primary)]')}>
                                                             {formatCents(et.deposit_cents)}
                                                         </p>
                                                     </div>

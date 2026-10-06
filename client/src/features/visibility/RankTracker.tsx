@@ -36,6 +36,17 @@ type TrackedKeyword = {
     updatedAt: string;
 };
 
+type GapRun = {
+    keyword: string;
+    gapAnalysis: string;
+    grid: number[][];
+    competitors: any[];
+    center?: { lat: number; lng: number } | null;
+    avgRank?: number;
+    top3Percentage?: number;
+    updatedAt?: string;
+};
+
 type LastAuditSummary = {
     total: number;
     bandLabel: string;
@@ -114,6 +125,8 @@ export default function RankTracker() {
     const [businessCategory, setBusinessCategory] = useState('');
     const [competitors, setCompetitors] = useState<any[]>([]);
     const [trackedKeywords, setTrackedKeywords] = useState<TrackedKeyword[]>([]);
+    const [gapRuns, setGapRuns] = useState<GapRun[]>([]);
+    const [showAllKeywords, setShowAllKeywords] = useState(false);
     const [lastAudit, setLastAudit] = useState<LastAuditSummary | null>(null);
     const [hasAuditReport, setHasAuditReport] = useState(false);
     const [showRankGrid, setShowRankGrid] = useState(false);
@@ -231,9 +244,37 @@ export default function RankTracker() {
                         });
                     }
                 }
+                const serverRuns: GapRun[] = Array.isArray(stats?.gapAnalyses) ? stats.gapAnalyses : [];
+                if (serverRuns.length) {
+                    setGapRuns(serverRuns);
+                    const latest = serverRuns[0];
+                    if (latest?.gapAnalysis) {
+                        setGapAnalysis(latest.gapAnalysis);
+                        setGridData(Array.isArray(latest.grid) ? latest.grid : []);
+                        setCompetitors(Array.isArray(latest.competitors) ? latest.competitors : []);
+                        if (latest.keyword) {
+                            setKeyword(latest.keyword);
+                            setActiveKeyword(latest.keyword);
+                        }
+                        if (latest.center && Number.isFinite(latest.center.lat) && Number.isFinite(latest.center.lng)) {
+                            setLat(latest.center.lat);
+                            setLng(latest.center.lng);
+                        }
+                        saveGapAnalysis({ ...latest, savedAt: latest.updatedAt });
+                    }
+                }
                 if (Array.isArray(stats?.trackedKeywords) && stats.trackedKeywords.length) {
                     setTrackedKeywords(stats.trackedKeywords);
                     saveTrackedKeywordsLocal(stats.trackedKeywords);
+                } else if (serverRuns.length) {
+                    const fromRuns = serverRuns.map((run) => ({
+                        keyword: run.keyword,
+                        avgRank: Number(run.avgRank) || 0,
+                        top3Percentage: Number(run.top3Percentage) || 0,
+                        updatedAt: run.updatedAt || new Date().toISOString()
+                    }));
+                    setTrackedKeywords(fromRuns);
+                    saveTrackedKeywordsLocal(fromRuns);
                 }
                 setHasAuditReport(Boolean(loadVisibilityAuditReport()));
             } catch {
@@ -412,6 +453,24 @@ export default function RankTracker() {
                 : upsertTrackedKeyword(trackedKeywords, entry);
             setTrackedKeywords(nextKeywords);
             saveTrackedKeywordsLocal(nextKeywords);
+            const serverRuns: GapRun[] = Array.isArray(data.gapAnalyses) ? data.gapAnalyses : [];
+            if (serverRuns.length) {
+                setGapRuns(serverRuns);
+            } else if (nextGap) {
+                const localRun: GapRun = {
+                    keyword: usedKeyword,
+                    gapAnalysis: nextGap,
+                    grid: nextGrid,
+                    competitors: nextCompetitors,
+                    center,
+                    avgRank,
+                    top3Percentage,
+                    updatedAt: entry.updatedAt
+                };
+                setGapRuns((current) =>
+                    [localRun, ...current.filter((run) => run.keyword.toLowerCase() !== usedKeyword.toLowerCase())].slice(0, 12)
+                );
+            }
             await updateDashboardStats({ trackedKeywords: nextKeywords });
 
             if (nextGrid.length && !center) {
@@ -424,7 +483,7 @@ export default function RankTracker() {
                 type: 'rank',
                 message: `GeoGrid analysis for "${usedKeyword}".`,
                 icon: 'TrendingUp',
-                color: 'text-[#FF8800]'
+                color: 'text-[var(--brand-primary)]'
             });
         } catch (err: any) {
             setError(err.message || 'Gap analysis failed');
@@ -433,19 +492,33 @@ export default function RankTracker() {
         }
     };
 
+    const applyGapRun = (run: GapRun) => {
+        setKeyword(run.keyword);
+        setActiveKeyword(run.keyword);
+        setGapAnalysis(run.gapAnalysis || null);
+        setGridData(Array.isArray(run.grid) ? run.grid : []);
+        setCompetitors(Array.isArray(run.competitors) ? run.competitors : []);
+        if (run.center && Number.isFinite(run.center.lat) && Number.isFinite(run.center.lng)) {
+            setLat(run.center.lat);
+            setLng(run.center.lng);
+        }
+        saveGapAnalysis({ ...run, savedAt: run.updatedAt || new Date().toISOString() });
+    };
+
     const loadKeyword = (row: TrackedKeyword) => {
-        setKeyword(row.keyword);
-        setActiveKeyword(row.keyword);
+        const run = gapRuns.find((item) => item.keyword.toLowerCase() === row.keyword.toLowerCase());
+        if (run?.gapAnalysis) {
+            applyGapRun(run);
+            return;
+        }
         const saved = loadGapAnalysis();
         if (saved?.keyword === row.keyword && saved.gapAnalysis) {
-            setGapAnalysis(saved.gapAnalysis);
-            setGridData(Array.isArray(saved.grid) ? saved.grid : []);
-            setCompetitors(Array.isArray(saved.competitors) ? saved.competitors : []);
-            if (saved.center && Number.isFinite(saved.center.lat) && Number.isFinite(saved.center.lng)) {
-                setLat(saved.center.lat);
-                setLng(saved.center.lng);
-            }
+            applyGapRun(saved);
+            return;
         }
+        setKeyword(row.keyword);
+        setActiveKeyword(row.keyword);
+        setError(`No saved analysis for "${row.keyword}" yet. Run Generate Gap Analysis to store it.`);
     };
 
     const runVisibilityAudit = async () => {
@@ -485,7 +558,7 @@ export default function RankTracker() {
                 type: 'audit',
                 message: `Local Visibility Audit scored ${data?.score?.total ?? '—'}/100.`,
                 icon: 'Radar',
-                color: 'text-[#FF8800]'
+                color: 'text-[var(--brand-primary)]'
             }).catch(() => undefined);
             setShowAuditForm(false);
             navigate('/visibility-audit/report');
@@ -497,7 +570,7 @@ export default function RankTracker() {
         }
     };
 
-    const effectiveKeywords: TrackedKeyword[] = trackedKeywords;
+    const effectiveKeywords: TrackedKeyword[] = showAllKeywords ? trackedKeywords : trackedKeywords.slice(0, 4);
 
     return (
         <div className="max-w-7xl mx-auto animate-in fade-in duration-500 pb-12">
@@ -524,7 +597,7 @@ export default function RankTracker() {
                                     handleGenerateGap();
                                 }
                             }}
-                            className="w-full pl-9 pr-8 py-2 bg-white border border-[#E2E8F0] rounded-xl text-sm font-medium text-[#0F172A] shadow-xs focus:outline-none focus:ring-2 focus:ring-[#FF8800]/20 focus:border-[#FF8800]"
+                            className="w-full pl-9 pr-8 py-2 bg-white border border-[#E2E8F0] rounded-xl text-sm font-medium text-[#0F172A] shadow-xs focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)]"
                             placeholder="your service near me"
                         />
                         {keyword && (
@@ -542,7 +615,7 @@ export default function RankTracker() {
                     <button
                         type="button"
                         onClick={() => setShowAuditForm(true)}
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#FF8800] hover:bg-[#E67A00] text-white rounded-xl text-sm font-bold cursor-pointer whitespace-nowrap shadow-xs transition-colors shrink-0"
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-sm font-bold cursor-pointer whitespace-nowrap shadow-xs transition-colors shrink-0"
                     >
                         <BarChart3 className="w-4 h-4" />
                         Local Visibility Audit
@@ -563,8 +636,8 @@ export default function RankTracker() {
                             <div>
                                 <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">AUDIT SCORE & TRACK</p>
                                 <h2 className="text-lg font-bold text-[#0F172A] flex items-center gap-2 mt-0.5">
-                                    <div className="w-5 h-5 rounded-full border-2 border-[#FF8800] flex items-center justify-center">
-                                        <div className="w-2 h-2 rounded-full bg-[#FF8800]"></div>
+                                    <div className="w-5 h-5 rounded-full border-2 border-[var(--brand-primary)] flex items-center justify-center">
+                                        <div className="w-2 h-2 rounded-full bg-[var(--brand-primary)]"></div>
                                     </div>
                                     Local Visibility Audit
                                 </h2>
@@ -607,7 +680,7 @@ export default function RankTracker() {
                             <button
                                 type="button"
                                 onClick={() => setShowAuditForm(true)}
-                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-[#FF8800] hover:bg-[#E67A00] text-white text-xs font-bold rounded-lg cursor-pointer shadow-xs transition-colors"
+                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold rounded-lg cursor-pointer shadow-xs transition-colors"
                             >
                                 <RotateCw className="w-3.5 h-3.5" /> Re-run audit
                             </button>
@@ -634,9 +707,10 @@ export default function RankTracker() {
                             </h2>
                             <button
                                 type="button"
-                                className="text-xs font-semibold text-gray-400 hover:text-gray-600 cursor-pointer"
+                                onClick={() => setShowAllKeywords((open) => !open)}
+                                className="text-xs font-semibold text-[var(--brand-primary)] hover:underline cursor-pointer"
                             >
-                                View all
+                                {showAllKeywords ? 'Show less' : 'View all'}
                             </button>
                         </div>
                         <p className="text-xs text-gray-500 mb-4">
@@ -666,7 +740,7 @@ export default function RankTracker() {
                                             <td className="py-3 font-semibold text-[#0F172A] max-w-[200px] truncate">
                                                 {row.keyword}
                                             </td>
-                                            <td className="py-3 font-bold text-[#FF8800] text-center">
+                                            <td className="py-3 font-bold text-[var(--brand-primary)] text-center">
                                                 {row.avgRank != null ? row.avgRank : '—'}
                                             </td>
                                             <td className="py-3 text-gray-700 font-semibold text-center">
@@ -687,6 +761,43 @@ export default function RankTracker() {
                                 </tbody>
                             </table>
                         </div>
+                        {showAllKeywords && gapRuns.length > 0 && (
+                            <div className="mt-4 space-y-3">
+                                {gapRuns.map((run) => (
+                                    <button
+                                        key={run.keyword}
+                                        type="button"
+                                        onClick={() => loadKeyword({
+                                            keyword: run.keyword,
+                                            avgRank: Number(run.avgRank) || 0,
+                                            top3Percentage: Number(run.top3Percentage) || 0,
+                                            updatedAt: run.updatedAt || ''
+                                        })}
+                                        className={`w-full text-left rounded-xl border px-3 py-3 ${
+                                            activeKeyword.toLowerCase() === run.keyword.toLowerCase()
+                                                ? 'border-[var(--brand-primary)] bg-[var(--brand-primary-soft)]'
+                                                : 'border-[#E2E8F0] bg-[#F8FAFC] hover:bg-white'
+                                        }`}
+                                    >
+                                        <p className="text-xs font-bold text-[#0F172A]">{run.keyword}</p>
+                                        <p className="text-[11px] text-gray-500 mt-0.5">
+                                            Avg rank {run.avgRank ?? '—'} · Top 3% {run.top3Percentage ?? '—'}%
+                                            {run.updatedAt
+                                                ? ` · ${new Date(run.updatedAt).toLocaleString('en-GB', {
+                                                      day: 'numeric',
+                                                      month: 'short',
+                                                      hour: '2-digit',
+                                                      minute: '2-digit'
+                                                  })}`
+                                                : ''}
+                                        </p>
+                                        <p className="text-xs text-gray-700 mt-2 leading-relaxed line-clamp-4">
+                                            {run.gapAnalysis}
+                                        </p>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -707,7 +818,7 @@ export default function RankTracker() {
                                     type="checkbox"
                                     checked={showRankGrid}
                                     onChange={(e) => setShowRankGrid(e.target.checked)}
-                                    className="w-3.5 h-3.5 rounded border-[#CBD5E1] text-[#FF8800] focus:ring-[#FF8800]"
+                                    className="w-3.5 h-3.5 rounded border-[#CBD5E1] text-[var(--brand-primary)] focus:ring-[var(--brand-primary)]"
                                 />
                                 Show rank grid
                             </label>
@@ -727,10 +838,10 @@ export default function RankTracker() {
                             {showRankGrid && (
                                 <>
                                     <span className="flex items-center gap-1.5">
-                                        <div className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]"></div> Rank 1-3
+                                        <div className="w-2.5 h-2.5 rounded-full bg-[var(--brand-primary)]"></div> Rank 1-3
                                     </span>
                                     <span className="flex items-center gap-1.5">
-                                        <div className="w-2.5 h-2.5 rounded-full bg-[#D97706]"></div> Rank 4-5
+                                        <div className="w-2.5 h-2.5 rounded-full bg-[var(--brand-primary-ink)]"></div> Rank 4-5
                                     </span>
                                     <span className="flex items-center gap-1.5">
                                         <div className="w-2.5 h-2.5 rounded-full bg-[#EF4444]"></div> Rank 6+
@@ -768,7 +879,7 @@ export default function RankTracker() {
                 <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-xs flex flex-col justify-between">
                     <div>
                         <h2 className="text-lg font-bold text-[#0F172A] flex items-center gap-2 mb-1">
-                            <BarChart3 className="w-5 h-5 text-[#FF8800]" />
+                            <BarChart3 className="w-5 h-5 text-[var(--brand-primary)]" />
                             AI Gap Analysis
                         </h2>
                         <p className="text-xs text-gray-500 mb-4">
@@ -803,9 +914,9 @@ export default function RankTracker() {
                                 </button>
                             </div>
                         ) : (
-                            <div className="bg-[#F8FAFC] p-5 rounded-xl border border-[#FF8800]/30 animate-in zoom-in duration-300">
+                            <div className="bg-[#F8FAFC] p-5 rounded-xl border border-[var(--brand-primary)]/30 animate-in zoom-in duration-300">
                                 <h3 className="text-[#0F172A] font-bold mb-2 flex items-center gap-2 text-sm">
-                                    <Wand2 className="w-4 h-4 text-[#FF8800]" /> Executive Insight
+                                    <Wand2 className="w-4 h-4 text-[var(--brand-primary)]" /> Executive Insight
                                 </h3>
                                 <p className="text-gray-700 leading-relaxed text-xs mb-4">{gapAnalysis}</p>
 
@@ -839,7 +950,7 @@ export default function RankTracker() {
                                     <button
                                         type="button"
                                         onClick={() => navigate('/posts')}
-                                        className="px-3.5 py-1.5 bg-[#FF8800] hover:bg-[#E67A00] text-white text-xs font-bold rounded-lg cursor-pointer"
+                                        className="px-3.5 py-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold rounded-lg cursor-pointer"
                                     >
                                         Draft Required Post
                                     </button>
@@ -893,12 +1004,12 @@ export default function RankTracker() {
                                         <td className="px-6 py-4 whitespace-nowrap text-[#0F172A]">
                                             {comp.name}{' '}
                                             {idx === 0 && (
-                                                <span className="ml-2 text-[10px] bg-[#FF8800] text-white px-2 py-0.5 rounded-full font-bold">
+                                                <span className="ml-2 text-[10px] bg-[var(--brand-primary)] text-white px-2 py-0.5 rounded-full font-bold">
                                                     You
                                                 </span>
                                             )}
                                         </td>
-                                        <td className="px-6 py-4 font-bold text-[#FF8800]">{comp.rating}</td>
+                                        <td className="px-6 py-4 font-bold text-[var(--brand-primary)]">{comp.rating}</td>
                                         <td className="px-6 py-4 text-gray-600 font-medium">{comp.reviews}</td>
                                         <td className="px-6 py-4 text-gray-600 font-medium">{comp.posts}</td>
                                         <td className="px-6 py-4 text-gray-600 font-medium">{comp.photos}</td>
@@ -953,11 +1064,11 @@ export default function RankTracker() {
                         </button>
 
                         <div className="flex items-start gap-3 mb-6 pr-10">
-                            <div className="p-2.5 rounded-xl bg-[#FF8800]/20 text-[#FF8800]">
-                                <Radar className="w-6 h-6 text-[#FF8800]" />
+                            <div className="p-2.5 rounded-xl bg-[var(--brand-primary)]/20 text-[var(--brand-primary)]">
+                                <Radar className="w-6 h-6 text-[var(--brand-primary)]" />
                             </div>
                             <div>
-                                <p className="text-xs font-bold uppercase tracking-wider text-[#FF8800]">
+                                <p className="text-xs font-bold uppercase tracking-wider text-[var(--brand-primary)]">
                                     LocalPulse Visibility Score
                                 </p>
                                 <h2 id="visibility-audit-title" className="text-xl font-bold mt-0.5">
@@ -1055,7 +1166,7 @@ export default function RankTracker() {
                                     <div
                                         key={step}
                                         className={`flex items-center gap-2 text-xs ${
-                                            i <= auditStep ? 'text-[#FF8800] font-semibold' : 'text-white/40'
+                                            i <= auditStep ? 'text-[var(--brand-primary)] font-semibold' : 'text-white/40'
                                         }`}
                                     >
                                         {i === auditStep && auditRunning ? (
@@ -1075,7 +1186,7 @@ export default function RankTracker() {
                             type="button"
                             disabled={auditRunning}
                             onClick={runVisibilityAudit}
-                            className="mt-6 inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#FF8800] hover:bg-[#E67A00] text-white rounded-xl text-xs font-bold disabled:opacity-70 cursor-pointer shadow-md transition-colors"
+                            className="mt-6 inline-flex items-center justify-center gap-2 px-6 py-3 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold disabled:opacity-70 cursor-pointer shadow-md transition-colors"
                         >
                             {auditRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Radar className="w-4 h-4" />}
                             {auditRunning ? 'Running audit…' : 'Run Free Local Visibility Audit'}

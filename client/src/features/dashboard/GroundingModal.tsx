@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { X, Search, MapPin, Star, Building, CheckCircle2 } from 'lucide-react';
 import { apiPost } from '../../shared/utils';
 import PlacesMap from '../../shared/PlacesMap';
@@ -6,14 +6,24 @@ import PlacesMap from '../../shared/PlacesMap';
 interface GroundingModalProps {
     isOpen: boolean;
     onClose: () => void;
+    initialQuery?: string;
 }
 
-export default function GroundingModal({ isOpen, onClose }: GroundingModalProps) {
-    const [query, setQuery] = useState('');
+export default function GroundingModal({ isOpen, onClose, initialQuery = '' }: GroundingModalProps) {
+    const [query, setQuery] = useState(initialQuery);
     const [isSearching, setIsSearching] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
     const [results, setResults] = useState<any>(null);
     const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setQuery(initialQuery || '');
+        setResults(null);
+        setError('');
+        setIsSearching(false);
+        setIsConnecting(false);
+    }, [isOpen, initialQuery]);
 
     if (!isOpen) return null;
 
@@ -106,11 +116,11 @@ export default function GroundingModal({ isOpen, onClose }: GroundingModalProps)
                                             <MapPin className="w-4 h-4" /> {results.address}
                                         </p>
                                     )}
-                                    {results.category && <p className="text-xs font-bold text-[#F59E0B] uppercase mt-1">{results.category}</p>}
+                                    {results.category && <p className="text-xs font-bold text-[var(--brand-primary)] uppercase mt-1">{results.category}</p>}
                                 </div>
                                 {results.rating != null && (
                                     <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-md border border-[#E2E8F0]">
-                                        <Star className="w-4 h-4 text-[#D97706] fill-current" />
+                                        <Star className="w-4 h-4 text-[var(--brand-primary-ink)] fill-current" />
                                         <span className="font-bold">{results.rating}</span>
                                         {results.reviewsCount ? <span className="text-gray-500 text-sm">({results.reviewsCount})</span> : null}
                                     </div>

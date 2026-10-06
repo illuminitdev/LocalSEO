@@ -1,4 +1,5 @@
 import { query } from '../lib/db';
+import { isBookingOnlyPlan, markLocalSeoUpgradePending } from '../lib/orgAppState';
 import { getFeaturesForPlan, getPlanById, getRequiredPlanHint, isValidPlanId } from '../lib/planCatalog';
 
 function entitlementsDisabled() {
@@ -244,6 +245,15 @@ async function upsertOrgSubscription(
     periodEnd.setMonth(periodEnd.getMonth() + 1);
     const cancelAtPeriodEnd = Boolean(opts?.cancelAtPeriodEnd);
 
+    const { rows: currentRows } = await query(
+        `SELECT plan_id FROM subscriptions
+         WHERE org_id = $1 AND status = 'active'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [orgId]
+    );
+    const previousPlanId = currentRows[0]?.plan_id ? String(currentRows[0].plan_id) : '';
+
     await query(
         `UPDATE subscriptions SET status = 'canceled', updated_at = NOW()
          WHERE org_id = $1 AND status = 'active'`,
@@ -262,6 +272,10 @@ async function upsertOrgSubscription(
          RETURNING *`,
         [orgId, planId, now, periodEnd, cancelAtPeriodEnd]
     );
+
+    if (isBookingOnlyPlan(previousPlanId) && planId === 'complete-growth-system') {
+        await markLocalSeoUpgradePending(String(orgId));
+    }
 
     const plan = getPlanById(planId);
     return {

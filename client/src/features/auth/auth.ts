@@ -1,4 +1,5 @@
 import { clearBookingOrgSlug } from '../bookings/shared/bookingUtils';
+import { clearOrgBrandCache } from '../../shared/orgBrand';
 
 const TOKEN_KEY = 'localpulse_token';
 const MUST_CHANGE_KEY = 'localpulse_must_change_password';
@@ -17,6 +18,7 @@ export function clearToken() {
     localStorage.removeItem(MUST_CHANGE_KEY);
     localStorage.removeItem(PLATFORM_ROLE_KEY);
     clearBookingOrgSlug();
+    clearOrgBrandCache();
 }
 
 export function setMustChangePassword(value: boolean) {

@@ -521,7 +521,7 @@ export default function Field() {
                     <button
                         type="button"
                         onClick={() => setShowCreateModal(true)}
-                        className="inline-flex items-center gap-1.5 bg-[#FF8800] hover:bg-[#E67A00] active:bg-[#CC6D00] text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm transition shrink-0"
+                        className="inline-flex items-center gap-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm transition shrink-0"
                     >
                         <Plus className="w-4 h-4" /> New field job
                     </button>
@@ -927,7 +927,7 @@ export default function Field() {
                             </button>
                             <button
                                 type="submit"
-                                className="px-5 py-2.5 rounded-xl bg-[#FF8800] hover:bg-[#E67A00] text-white text-xs font-bold shadow-sm transition"
+                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold shadow-sm transition"
                             >
                                 Save Field Job
                             </button>

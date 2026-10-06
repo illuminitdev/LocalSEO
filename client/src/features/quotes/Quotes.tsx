@@ -75,7 +75,7 @@ function QuotesList() {
                 <button
                     type="button"
                     onClick={() => navigate('/quotes/new')}
-                    className="rounded-xl bg-[#FF8800] hover:bg-[#E67A00] text-white px-5 py-2.5 text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+                    className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-5 py-2.5 text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
                 >
                     <Plus className="w-4 h-4 stroke-[2.5]" /> New quote
                 </button>
@@ -102,7 +102,7 @@ function QuotesList() {
                             className={cn(
                                 'px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer',
                                 status === pill.value
-                                    ? 'bg-[#FFF0DE] text-[#D97706]'
+                                    ? 'bg-[var(--brand-primary-soft)] text-[var(--brand-primary-ink)]'
                                     : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                             )}
                         >
@@ -113,7 +113,7 @@ function QuotesList() {
 
                 {/* Search & Filter Trigger */}
                 <div className="flex items-center gap-2">
-                    <div className="relative flex items-center bg-white border border-slate-200 rounded-xl px-3 py-1.5 w-full sm:w-64 focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-[#FF8800] transition">
+                    <div className="relative flex items-center bg-white border border-slate-200 rounded-xl px-3 py-1.5 w-full sm:w-64 focus-within:ring-2 focus-within:ring-orange-500/20 focus-within:border-[var(--brand-primary)] transition">
                         <Search className="w-3.5 h-3.5 text-slate-400 shrink-0 mr-2" />
                         <input
                             value={searchTerm}
@@ -171,7 +171,7 @@ function QuotesList() {
                                 <line x1="16" y1="17" x2="8" y2="17" />
                                 <line x1="10" y1="9" x2="8" y2="9" />
                             </svg>
-                            <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#FF8800] text-white flex items-center justify-center shadow-xs">
+                            <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[var(--brand-primary)] text-white flex items-center justify-center shadow-xs">
                                 <Plus className="w-3 h-3 stroke-[3]" />
                             </div>
                         </div>
@@ -182,7 +182,7 @@ function QuotesList() {
                         <button
                             type="button"
                             onClick={() => navigate('/quotes/new')}
-                            className="mt-5 rounded-xl bg-[#FF8800] hover:bg-[#E67A00] text-white px-6 py-2.5 text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 cursor-pointer"
+                            className="mt-5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-6 py-2.5 text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 cursor-pointer"
                         >
                             <Plus className="w-4 h-4 stroke-[2.5]" /> New quote
                         </button>
@@ -233,7 +233,7 @@ function QuotesList() {
                                             e.stopPropagation();
                                             navigate(`/quotes/${q.id}`);
                                         }}
-                                        className="text-xs font-bold text-[#FF8800] hover:underline"
+                                        className="text-xs font-bold text-[var(--brand-primary)] hover:underline"
                                     >
                                         View
                                     </button>
@@ -428,7 +428,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                             disabled={!isNew || !editable}
                             value={clientId}
                             onChange={(e) => setClientId(e.target.value)}
-                            className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-semibold text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[#FF8800] transition"
+                            className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-semibold text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[var(--brand-primary)] transition"
                         >
                             <option value="">Select client</option>
                             {clients.map((c) => (
@@ -445,7 +445,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                             disabled={!editable}
                             value={propertyId}
                             onChange={(e) => setPropertyId(e.target.value)}
-                            className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-semibold text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[#FF8800] transition"
+                            className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-semibold text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[var(--brand-primary)] transition"
                         >
                             <option value="">Default / first address</option>
                             {properties.map((p) => (
@@ -464,7 +464,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                         value={title}
                         onChange={(e) => setTitle(e.target.value)}
                         placeholder="e.g. Full Garden Maintenance"
-                        className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[#FF8800] transition"
+                        className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[var(--brand-primary)] transition"
                     />
                 </div>
 
@@ -478,7 +478,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                             step="0.01"
                             value={depositPounds}
                             onChange={(e) => setDepositPounds(e.target.value)}
-                            className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[#FF8800] transition"
+                            className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[var(--brand-primary)] transition"
                         />
                     </div>
                     <div>
@@ -488,7 +488,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                             type="date"
                             value={expiryDate}
                             onChange={(e) => setExpiryDate(e.target.value)}
-                            className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[#FF8800] transition"
+                            className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[var(--brand-primary)] transition"
                         />
                     </div>
                 </div>
@@ -501,7 +501,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                             <button
                                 type="button"
                                 onClick={() => setLines([...lines, emptyLine()])}
-                                className="text-xs font-bold text-[#FF8800] hover:underline flex items-center gap-1"
+                                className="text-xs font-bold text-[var(--brand-primary)] hover:underline flex items-center gap-1"
                             >
                                 <Plus className="w-3.5 h-3.5" /> Add line
                             </button>
@@ -584,7 +584,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                         onChange={(e) => setNotes(e.target.value)}
                         rows={3}
                         placeholder="Add additional terms, requirements or client notes here..."
-                        className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[#FF8800] transition"
+                        className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-[var(--brand-primary)] transition"
                     />
                 </div>
 
@@ -598,7 +598,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                         <div className="text-right">
                             <p className="text-xs text-slate-500">Public client approval link:</p>
                             <a
-                                className="text-xs font-bold text-[#FF8800] hover:underline break-all"
+                                className="text-xs font-bold text-[var(--brand-primary)] hover:underline break-all"
                                 href={`/quote/${publicToken}`}
                                 target="_blank"
                                 rel="noreferrer"
@@ -627,7 +627,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                                 type="button"
                                 disabled={busy}
                                 onClick={send}
-                                className="inline-flex items-center gap-1.5 rounded-xl bg-[#FF8800] hover:bg-[#E67A00] text-white px-5 py-2.5 text-sm font-bold transition shadow-sm disabled:opacity-50 cursor-pointer"
+                                className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-5 py-2.5 text-sm font-bold transition shadow-sm disabled:opacity-50 cursor-pointer"
                             >
                                 <Send className="w-3.5 h-3.5" /> {busy ? 'Sending…' : 'Send to client'}
                             </button>
@@ -637,7 +637,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                                 type="button"
                                 disabled={busy}
                                 onClick={save}
-                                className="rounded-xl bg-[#FF8800] hover:bg-[#E67A00] text-white px-5 py-2.5 text-sm font-bold transition shadow-sm disabled:opacity-50 cursor-pointer"
+                                className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-5 py-2.5 text-sm font-bold transition shadow-sm disabled:opacity-50 cursor-pointer"
                             >
                                 {busy ? 'Creating…' : 'Create quote'}
                             </button>

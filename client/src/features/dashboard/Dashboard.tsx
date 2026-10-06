@@ -23,7 +23,7 @@ import {
     ExternalLink,
     Search
 } from 'lucide-react';
-import { apiGet, formatCents } from '../../shared/utils';
+import { apiGet, apiPost, formatCents } from '../../shared/utils';
 import GroundingModal from './GroundingModal';
 import { useEntitlements } from '../../shared/EntitlementsContext';
 
@@ -63,15 +63,32 @@ type LocalBusinessData = {
     website?: string;
 };
 
+function formatMapRank(rank: number | null | undefined) {
+    const value = Number(rank);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    return `#${value}`;
+}
+
 export default function Dashboard() {
     const { features, planId } = useEntitlements();
     const [userName, setUserName] = useState('');
     const [bookingData, setBookingData] = useState<BookingOverview | null>(null);
     const [businessData, setBusinessData] = useState<LocalBusinessData | null>(null);
     const [locationModalOpen, setLocationModalOpen] = useState(false);
+    const [seoSearchQuery, setSeoSearchQuery] = useState('');
+    const [choosingSeo, setChoosingSeo] = useState(false);
+    const [upgradeChoice, setUpgradeChoice] = useState<{
+        pending: boolean;
+        booking: { name: string; email: string; phone: string; address: string };
+    } | null>(null);
+    const [mapStats, setMapStats] = useState<{
+        visibilityRank: number;
+        trackedKeywords: { keyword: string; avgRank: number }[];
+    } | null>(null);
 
     const hasBookings = features.includes('bookings');
     const hasLocalSeo = features.includes('local_presence') || features.includes('local_growth');
+    const hasReporting = features.includes('reporting');
 
     // 1. Booking-only
     const isBookingPlan =
@@ -106,7 +123,50 @@ export default function Dashboard() {
                 .then(setBusinessData)
                 .catch(() => {});
         }
-    }, [isBookingPlan, isLocalSeoPlan]);
+
+        if (hasBookings && hasLocalSeo) {
+            apiGet('/api/business/upgrade-choice')
+                .then(setUpgradeChoice)
+                .catch(() => {});
+        }
+
+        if (!isBookingPlan && hasReporting) {
+            apiGet('/api/dashboard/stats')
+                .then((stats) =>
+                    setMapStats({
+                        visibilityRank: Number(stats?.visibilityRank) || 0,
+                        trackedKeywords: Array.isArray(stats?.trackedKeywords) ? stats.trackedKeywords : []
+                    })
+                )
+                .catch(() => {});
+        }
+    }, [isBookingPlan, isLocalSeoPlan, hasBookings, hasLocalSeo, hasReporting]);
+
+    const chooseLocalSeoSetup = async (choice: 'booking' | 'new') => {
+        setChoosingSeo(true);
+        try {
+            const saved = await apiPost('/api/business/upgrade-choice', { choice });
+            setUpgradeChoice(saved);
+            const booking = saved?.booking || upgradeChoice?.booking;
+            setSeoSearchQuery(
+                choice === 'booking' ? [booking?.name, booking?.address].filter(Boolean).join(', ') : ''
+            );
+            setLocationModalOpen(true);
+        } catch {
+            /* keep the choice open so they can retry */
+        } finally {
+            setChoosingSeo(false);
+        }
+    };
+
+    const closeLocationModal = () => {
+        setLocationModalOpen(false);
+        if (!isBookingPlan) {
+            apiGet('/api/business')
+                .then(setBusinessData)
+                .catch(() => {});
+        }
+    };
 
     // ── 1. BOOKING-ONLY PLANS (Solo, Solo Plus, Pro) ──
     if (isBookingPlan) {
@@ -124,10 +184,11 @@ export default function Dashboard() {
                 <LocalSeoOnlyDashboard
                     userName={userName}
                     businessData={businessData}
+                    mapRank={formatMapRank(mapStats?.visibilityRank)}
                 />
                 <GroundingModal
                     isOpen={locationModalOpen}
-                    onClose={() => setLocationModalOpen(false)}
+                    onClose={closeLocationModal}
                 />
             </>
         );
@@ -140,10 +201,64 @@ export default function Dashboard() {
                 userName={userName}
                 bookingData={bookingData}
                 businessData={businessData}
+                mapRank={formatMapRank(mapStats?.visibilityRank)}
+                trackedKeywords={(mapStats?.trackedKeywords || [])
+                    .filter((row) => row?.keyword)
+                    .map((row) => ({
+                        keyword: row.keyword,
+                        rank: Number(row.avgRank) || 0
+                    }))}
             />
+            {upgradeChoice?.pending && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0F172A]/40 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4">
+                        <div>
+                            <p className="text-xs font-bold uppercase tracking-widest text-[var(--brand-primary)]">Local SEO</p>
+                            <h2 className="text-xl font-black text-[#0F172A] mt-1">Set up your local SEO business</h2>
+                            <p className="text-sm text-[#64748B] mt-1">
+                                Your booking board, jobs, and history stay as they are. Choose how to start the Google listing.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            disabled={choosingSeo}
+                            onClick={() => chooseLocalSeoSetup('booking')}
+                            className="w-full text-left rounded-2xl border-2 border-[var(--brand-primary)] bg-[var(--brand-primary-soft)] p-5 hover:bg-[var(--brand-primary-muted)] transition disabled:opacity-70"
+                        >
+                            <p className="text-[10px] font-black uppercase tracking-wider text-[var(--brand-primary-ink)]">
+                                Use booking board info
+                            </p>
+                            <p className="font-bold text-[#0F172A] text-lg mt-2">
+                                {upgradeChoice.booking.name || 'Your booking business'}
+                            </p>
+                            <p className="text-sm text-[#64748B] mt-1">
+                                {[
+                                    upgradeChoice.booking.email,
+                                    upgradeChoice.booking.phone,
+                                    upgradeChoice.booking.address
+                                ]
+                                    .filter(Boolean)
+                                    .join(' · ') || 'Name, phone, and area from your booking account'}
+                            </p>
+                        </button>
+                        <button
+                            type="button"
+                            disabled={choosingSeo}
+                            onClick={() => chooseLocalSeoSetup('new')}
+                            className="w-full text-left rounded-2xl border border-[#E2E8F0] bg-white p-5 hover:border-[#0F172A]/30 transition disabled:opacity-70"
+                        >
+                            <p className="font-bold text-[#0F172A]">Create a new business</p>
+                            <p className="text-sm text-[#64748B] mt-1">
+                                Search for a different Google listing. Booking details stay unchanged.
+                            </p>
+                        </button>
+                    </div>
+                </div>
+            )}
             <GroundingModal
                 isOpen={locationModalOpen}
-                onClose={() => setLocationModalOpen(false)}
+                initialQuery={seoSearchQuery}
+                onClose={closeLocationModal}
             />
         </>
     );
@@ -234,8 +349,8 @@ function BookingSoloDashboard({
                 <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 lg:gap-6">
                     {/* Left hero content */}
                     <div className="max-w-sm xl:max-w-md">
-                        <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#132E63]/90 text-[#FFA41C] text-[10px] font-bold tracking-wider uppercase backdrop-blur-md border border-[#254F9E]/60 shadow-inner">
-                            <CalendarDays className="w-3 h-3 text-[#FFA41C]" />
+                        <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#132E63]/90 text-[var(--brand-primary)] text-[10px] font-bold tracking-wider uppercase backdrop-blur-md border border-[#254F9E]/60 shadow-inner">
+                            <CalendarDays className="w-3 h-3 text-[var(--brand-primary)]" />
                             TODAY
                         </div>
                         <h2 className="text-xl sm:text-2xl font-black mt-2 tracking-tight text-white leading-tight">
@@ -246,7 +361,7 @@ function BookingSoloDashboard({
                         </p>
                         <Link
                             to="/booking"
-                            className="inline-flex items-center gap-1.5 rounded-full bg-[#FFA41C] hover:bg-[#FFB43A] active:scale-95 text-[#0F172A] px-4 py-2 text-[11px] font-black shadow-md shadow-amber-500/20 mt-3.5 transition-all hover:translate-x-0.5"
+                            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:scale-95 text-[#0F172A] px-4 py-2 text-[11px] font-black shadow-md shadow-amber-500/20 mt-3.5 transition-all hover:translate-x-0.5"
                         >
                             Open booking board <ArrowRight className="w-3.5 h-3.5 stroke-[2.5]" />
                         </Link>
@@ -282,7 +397,7 @@ function BookingSoloDashboard({
                                 <path d="M -5 102 L 52 144 L 10 158" />
                                 <path d="M 235 62 L 320 88" />
                             </g>
-                            <ellipse cx="180" cy="22" rx="18" ry="24" fill="#FFA41C" fillOpacity="0.2" />
+                            <ellipse cx="180" cy="22" rx="18" ry="24" fill="var(--brand-primary)" fillOpacity="0.2" />
 
                             <g>
                                 <path
@@ -298,7 +413,7 @@ function BookingSoloDashboard({
                                 <rect x="122" y="56" width="116" height="84" rx="12" fill="white" stroke="#F1F5F9" strokeWidth="1" />
                                 <rect x="122" y="56" width="116" height="14" rx="12" fill="#F8FAFC" />
                                 <circle cx="132" cy="63" r="2.2" fill="#EF4444" />
-                                <circle cx="138" cy="63" r="2.2" fill="#F59E0B" />
+                                <circle cx="138" cy="63" r="2.2" fill="var(--brand-primary)" />
                                 <circle cx="144" cy="63" r="2.2" fill="#10B981" />
 
                                 <path
@@ -334,10 +449,10 @@ function BookingSoloDashboard({
                             <g transform="translate(260, 66)" filter="url(#badgeShadow)">
                                 <rect width="84" height="48" rx="10" fill="white" stroke="#E2E8F0" strokeWidth="1" />
                                 <g transform="translate(8, 7)">
-                                    <text x="0" y="8" fontSize="9" fill="#FFA41C">★</text>
-                                    <text x="11" y="8" fontSize="9" fill="#FFA41C">★</text>
-                                    <text x="22" y="8" fontSize="9" fill="#FFA41C">★</text>
-                                    <text x="33" y="8" fontSize="9" fill="#FFA41C">★</text>
+                                    <text x="0" y="8" fontSize="9" fill="var(--brand-primary)">★</text>
+                                    <text x="11" y="8" fontSize="9" fill="var(--brand-primary)">★</text>
+                                    <text x="22" y="8" fontSize="9" fill="var(--brand-primary)">★</text>
+                                    <text x="33" y="8" fontSize="9" fill="var(--brand-primary)">★</text>
                                     <text x="44" y="8" fontSize="9" fill="#CBD5E1">★</text>
                                 </g>
                                 <rect x="8" y="21" width="14" height="14" rx="3.5" fill="#0284C7" />
@@ -369,13 +484,13 @@ function BookingSoloDashboard({
                                     More bookings
                                 </span>
                                 <svg
-                                    className="w-32 h-3.5 mt-0.5 -rotate-3 text-[#FFA41C]"
+                                    className="w-32 h-3.5 mt-0.5 -rotate-3 text-[var(--brand-primary)]"
                                     viewBox="0 0 120 14"
                                     fill="none"
                                     shapeRendering="geometricPrecision"
                                 >
-                                    <path d="M 4 6 Q 60 12 116 4" stroke="#FFA41C" strokeWidth="2.8" strokeLinecap="round" />
-                                    <path d="M 16 10 Q 64 15 106 8" stroke="#FFA41C" strokeWidth="1.8" strokeLinecap="round" />
+                                    <path d="M 4 6 Q 60 12 116 4" stroke="var(--brand-primary)" strokeWidth="2.8" strokeLinecap="round" />
+                                    <path d="M 16 10 Q 64 15 106 8" stroke="var(--brand-primary)" strokeWidth="1.8" strokeLinecap="round" />
                                 </svg>
                             </div>
                         </div>
@@ -415,7 +530,7 @@ function BookingSoloDashboard({
                     <div>
                         <div className="flex items-start justify-between gap-2 mb-4">
                             <div className="flex items-center gap-2.5">
-                                <div className="w-8 h-8 rounded-full bg-amber-50 text-[#F59E0B] flex items-center justify-center shrink-0">
+                                <div className="w-8 h-8 rounded-full bg-amber-50 text-[var(--brand-primary)] flex items-center justify-center shrink-0">
                                     <Wallet className="w-4 h-4" />
                                 </div>
                                 <div>
@@ -423,7 +538,7 @@ function BookingSoloDashboard({
                                     <p className="text-[11px] text-[#64748B]">Deposits, invoices, expenses</p>
                                 </div>
                             </div>
-                            <Link to="/money" className="text-xs font-bold text-[#F59E0B] hover:underline flex items-center gap-1">
+                            <Link to="/money" className="text-xs font-bold text-[var(--brand-primary)] hover:underline flex items-center gap-1">
                                 View details <ArrowRight className="w-3.5 h-3.5" />
                             </Link>
                         </div>
@@ -476,7 +591,7 @@ function BookingSoloDashboard({
                 <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 sm:p-6 shadow-sm flex flex-col justify-between">
                     <div>
                         <div className="flex items-center gap-2.5 mb-4">
-                            <div className="w-8 h-8 rounded-full bg-amber-50 text-[#F59E0B] flex items-center justify-center shrink-0">
+                            <div className="w-8 h-8 rounded-full bg-amber-50 text-[var(--brand-primary)] flex items-center justify-center shrink-0">
                                 <LinkIcon className="w-4 h-4" />
                             </div>
                             <div>
@@ -492,7 +607,7 @@ function BookingSoloDashboard({
                                     <Link
                                         key={link.to}
                                         to={link.to}
-                                        className="flex items-center justify-between rounded-xl border border-[#E2E8F0]/80 bg-[#F8FAFC]/70 hover:bg-[#F8FAFC] px-3.5 py-2.5 text-xs font-bold text-[#0F172A] hover:border-[#F59E0B] transition-all group"
+                                        className="flex items-center justify-between rounded-xl border border-[#E2E8F0]/80 bg-[#F8FAFC]/70 hover:bg-[#F8FAFC] px-3.5 py-2.5 text-xs font-bold text-[#0F172A] hover:border-[var(--brand-primary)] transition-all group"
                                     >
                                         <div className="flex items-center gap-2.5">
                                             <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${link.tone}`}>
@@ -514,10 +629,12 @@ function BookingSoloDashboard({
 //Local SEO Only Dashboard
 function LocalSeoOnlyDashboard({
     userName,
-    businessData
+    businessData,
+    mapRank
 }: {
     userName: string;
     businessData: LocalBusinessData | null;
+    mapRank: string;
 }) {
     const businessName = businessData?.name || 'your business';
     const rating = businessData?.rating ?? null;
@@ -528,11 +645,11 @@ function LocalSeoOnlyDashboard({
     const seoStats = [
         {
             label: 'Avg Map Rank',
-            value: '—',
+            value: mapRank || 'Not scanned',
             sub: 'in Local 3-Pack',
             icon: MapPin,
-            tone: 'bg-amber-50 text-[#FF8800]',
-            trend: 'Connect GBP to track',
+            tone: 'bg-amber-50 text-[var(--brand-primary)]',
+            trend: mapRank ? 'From rank tracker' : 'Open Local Search Grid',
             trendPositive: true
         },
         {
@@ -576,7 +693,7 @@ function LocalSeoOnlyDashboard({
     const trackedKeywords: { keyword: string; rank: number; prevRank: number; volume: string }[] = [];
 
     const quickSeoTools = [
-        { to: '/rank-tracker', label: 'Local Search Grid', icon: MapPin, desc: 'Track GeoGrid pin rankings', tone: 'bg-amber-50 text-[#FF8800]' },
+        { to: '/rank-tracker', label: 'Local Search Grid', icon: MapPin, desc: 'Track GeoGrid pin rankings', tone: 'bg-amber-50 text-[var(--brand-primary)]' },
         { to: '/report', label: 'AI Growth Insights', icon: Sparkles, desc: 'Actionable SEO recommendations', tone: 'bg-purple-50 text-purple-600' },
         { to: '/profile', label: 'Business Profile Audit', icon: Building2, desc: 'Optimize GBP completeness', tone: 'bg-sky-50 text-sky-600' },
         { to: '/reviews', label: 'Review Management', icon: Star, desc: 'Generate & reply to reviews', tone: 'bg-emerald-50 text-emerald-600' },
@@ -599,7 +716,7 @@ function LocalSeoOnlyDashboard({
 
                 <Link
                     to="/rank-tracker"
-                    className="rounded-xl bg-[#FF8800] hover:bg-[#E67A00] text-white px-5 py-2.5 text-xs sm:text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+                    className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-5 py-2.5 text-xs sm:text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
                 >
                     <Search className="w-4 h-4" /> Run Grid Scan
                 </Link>
@@ -612,8 +729,8 @@ function LocalSeoOnlyDashboard({
 
                 <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
                     <div className="max-w-xl">
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#132E63]/90 text-[#FFA41C] text-[11px] font-bold tracking-wider uppercase border border-[#254F9E]/60">
-                            <MapPin className="w-3.5 h-3.5 text-[#FFA41C]" />
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#132E63]/90 text-[var(--brand-primary)] text-[11px] font-bold tracking-wider uppercase border border-[#254F9E]/60">
+                            <MapPin className="w-3.5 h-3.5 text-[var(--brand-primary)]" />
                             LOCAL SEO GROWTH
                         </div>
                         <h2 className="text-xl sm:text-2xl font-black mt-2 text-white leading-tight">
@@ -627,7 +744,7 @@ function LocalSeoOnlyDashboard({
                         <div className="flex flex-wrap gap-2.5 mt-4">
                             <Link
                                 to="/rank-tracker"
-                                className="inline-flex items-center gap-1.5 rounded-full bg-[#FFA41C] hover:bg-[#FFB43A] active:scale-95 text-[#0F172A] px-4 py-2 text-xs font-black shadow-md transition"
+                                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:scale-95 text-[#0F172A] px-4 py-2 text-xs font-black shadow-md transition"
                             >
                                 Open Search Grid <ArrowRight className="w-3.5 h-3.5" />
                             </Link>
@@ -671,12 +788,22 @@ function LocalSeoOnlyDashboard({
                                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${s.tone}`}>
                                     <Icon className="w-4 h-4" />
                                 </div>
-                                <p className="text-2xl font-black text-slate-900 mt-2.5 tracking-tight">{s.value}</p>
+                                {s.label === 'Avg Map Rank' && !mapRank ? (
+                                    <Link to="/rank-tracker" className="text-lg font-black text-slate-900 mt-2.5 tracking-tight block hover:text-[var(--brand-primary)]">
+                                        {s.value}
+                                    </Link>
+                                ) : (
+                                    <p className="text-2xl font-black text-slate-900 mt-2.5 tracking-tight">{s.value}</p>
+                                )}
                                 <p className="text-xs font-bold text-slate-700 mt-0.5">{s.label}</p>
                                 <p className="text-[11px] text-slate-400">{s.sub}</p>
                             </div>
                             <p className="text-[10px] font-bold mt-3 text-emerald-600 flex items-center gap-1">
-                                {s.trend}
+                                {s.label === 'Avg Map Rank' && !mapRank ? (
+                                    <Link to="/rank-tracker" className="hover:underline">{s.trend}</Link>
+                                ) : (
+                                    s.trend
+                                )}
                             </p>
                         </div>
                     );
@@ -690,7 +817,7 @@ function LocalSeoOnlyDashboard({
                     <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-4">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2.5">
-                                <div className="w-8 h-8 rounded-xl bg-amber-50 text-[#FF8800] flex items-center justify-center">
+                                <div className="w-8 h-8 rounded-xl bg-amber-50 text-[var(--brand-primary)] flex items-center justify-center">
                                     <MapPin className="w-4 h-4" />
                                 </div>
                                 <div>
@@ -698,7 +825,7 @@ function LocalSeoOnlyDashboard({
                                     <p className="text-xs text-slate-400">Target search queries across your local area</p>
                                 </div>
                             </div>
-                            <Link to="/rank-tracker" className="text-xs font-bold text-[#FF8800] hover:underline flex items-center gap-1">
+                            <Link to="/rank-tracker" className="text-xs font-bold text-[var(--brand-primary)] hover:underline flex items-center gap-1">
                                 Full Grid <ArrowRight className="w-3.5 h-3.5" />
                             </Link>
                         </div>
@@ -761,7 +888,7 @@ function LocalSeoOnlyDashboard({
                                 <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
                                 <h3 className="font-bold text-slate-900 text-sm">Recent Reviews ({rating} ★)</h3>
                             </div>
-                            <Link to="/reviews" className="text-xs font-bold text-[#FF8800] hover:underline">
+                            <Link to="/reviews" className="text-xs font-bold text-[var(--brand-primary)] hover:underline">
                                 Reply to all →
                             </Link>
                         </div>
@@ -837,11 +964,15 @@ function LocalSeoOnlyDashboard({
 function HybridDashboard({
     userName,
     bookingData,
-    businessData
+    businessData,
+    mapRank,
+    trackedKeywords
 }: {
     userName: string;
     bookingData: BookingOverview | null;
     businessData: LocalBusinessData | null;
+    mapRank: string;
+    trackedKeywords: { keyword: string; rank: number }[];
 }) {
     const currency = bookingData?.organization?.currency || 'GBP';
     const depositsPaid = bookingData?.money?.depositsPaid ?? 0;
@@ -862,11 +993,11 @@ function HybridDashboard({
     const hybridStats = [
         {
             label: 'Avg Map Rank',
-            value: businessData ? '#—' : '—',
+            value: mapRank || 'Not scanned',
             sub: 'in Local 3-Pack',
             icon: MapPin,
             tone: 'bg-sky-50 text-sky-600',
-            trend: businessData ? 'From rank tracker' : 'Connect GBP to track'
+            trend: mapRank ? 'From rank tracker' : 'Open Local Search Grid'
         },
         {
             label: 'Google Reviews',
@@ -881,7 +1012,7 @@ function HybridDashboard({
             value: upcoming,
             sub: 'Appointments scheduled',
             icon: CalendarClock,
-            tone: 'bg-amber-50 text-[#FF8800]',
+            tone: 'bg-amber-50 text-[var(--brand-primary)]',
             trend: upcoming ? 'Active schedule' : 'No upcoming jobs'
         },
         {
@@ -902,8 +1033,6 @@ function HybridDashboard({
         }
     ];
 
-    const hybridKeywords: { keyword: string; rank: number; volume: string }[] = [];
-
     return (
         <div className="max-w-7xl mx-auto space-y-4 animate-in fade-in duration-300 pb-10">
             {/* Header */}
@@ -920,7 +1049,7 @@ function HybridDashboard({
                 <div className="flex items-center gap-2">
                     <Link
                         to="/booking"
-                        className="rounded-xl bg-[#FF8800] hover:bg-[#E67A00] text-white px-4 py-2.5 text-xs sm:text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 cursor-pointer"
+                        className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-4 py-2.5 text-xs sm:text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 cursor-pointer"
                     >
                         <CalendarClock className="w-4 h-4" /> Booking Board
                     </Link>
@@ -940,8 +1069,8 @@ function HybridDashboard({
 
                 <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
                     <div className="max-w-xl">
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#132E63]/90 text-[#FFA41C] text-[11px] font-bold tracking-wider uppercase border border-[#254F9E]/60">
-                            <Sparkles className="w-3.5 h-3.5 text-[#FFA41C]" />
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#132E63]/90 text-[var(--brand-primary)] text-[11px] font-bold tracking-wider uppercase border border-[#254F9E]/60">
+                            <Sparkles className="w-3.5 h-3.5 text-[var(--brand-primary)]" />
                             COMPLETE GROWTH SYSTEM
                         </div>
                         <h2 className="text-xl sm:text-2xl font-black mt-2 text-white leading-tight">
@@ -955,7 +1084,7 @@ function HybridDashboard({
                     <div className="flex items-center gap-2.5 shrink-0">
                         <Link
                             to="/booking"
-                            className="inline-flex items-center gap-1.5 rounded-full bg-[#FFA41C] hover:bg-[#FFB43A] active:scale-95 text-[#0F172A] px-4 py-2 text-xs font-black shadow-md transition"
+                            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:scale-95 text-[#0F172A] px-4 py-2 text-xs font-black shadow-md transition"
                         >
                             Booking board <ArrowRight className="w-3.5 h-3.5" />
                         </Link>
@@ -982,12 +1111,22 @@ function HybridDashboard({
                                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${s.tone}`}>
                                     <Icon className="w-4 h-4" />
                                 </div>
-                                <p className="text-2xl font-black text-slate-900 mt-2.5 tracking-tight">{s.value}</p>
+                                {s.label === 'Avg Map Rank' && !mapRank ? (
+                                    <Link to="/rank-tracker" className="text-lg font-black text-slate-900 mt-2.5 tracking-tight block hover:text-[var(--brand-primary)]">
+                                        {s.value}
+                                    </Link>
+                                ) : (
+                                    <p className="text-2xl font-black text-slate-900 mt-2.5 tracking-tight">{s.value}</p>
+                                )}
                                 <p className="text-xs font-bold text-slate-700 mt-0.5">{s.label}</p>
                                 <p className="text-[11px] text-slate-400">{s.sub}</p>
                             </div>
                             <p className="text-[10px] font-bold mt-3 text-emerald-600 flex items-center gap-1">
-                                {s.trend}
+                                {s.label === 'Avg Map Rank' && !mapRank ? (
+                                    <Link to="/rank-tracker" className="hover:underline">{s.trend}</Link>
+                                ) : (
+                                    s.trend
+                                )}
                             </p>
                         </div>
                     );
@@ -1002,7 +1141,7 @@ function HybridDashboard({
                         {/* Header */}
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2.5">
-                                <div className="w-8 h-8 rounded-xl bg-amber-50 text-[#FF8800] flex items-center justify-center">
+                                <div className="w-8 h-8 rounded-xl bg-amber-50 text-[var(--brand-primary)] flex items-center justify-center">
                                     <MapPin className="w-4 h-4" />
                                 </div>
                                 <div>
@@ -1010,7 +1149,7 @@ function HybridDashboard({
                                     <p className="text-xs text-slate-400">Map pack coverage & GBP status</p>
                                 </div>
                             </div>
-                            <Link to="/rank-tracker" className="text-xs font-bold text-[#FF8800] hover:underline flex items-center gap-1">
+                            <Link to="/rank-tracker" className="text-xs font-bold text-[var(--brand-primary)] hover:underline flex items-center gap-1">
                                 Full Grid <ArrowRight className="w-3.5 h-3.5" />
                             </Link>
                         </div>
@@ -1034,17 +1173,18 @@ function HybridDashboard({
                         <div className="space-y-1.5">
                             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Top Keyword Rankings</p>
                             <div className="divide-y divide-slate-100 rounded-xl border border-slate-100 bg-white overflow-hidden">
-                                {hybridKeywords.map((kw) => (
-                                    <div key={kw.keyword} className="px-3 py-2 flex items-center justify-between text-xs">
-                                        <span className="font-medium text-slate-800">{kw.keyword}</span>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-[11px] text-slate-400">{kw.volume}</span>
-                                            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[11px]">
-                                                #{kw.rank}
+                                {trackedKeywords.length ? (
+                                    trackedKeywords.map((kw) => (
+                                        <div key={kw.keyword} className="px-3 py-2 flex items-center justify-between text-xs">
+                                            <span className="font-medium text-slate-800">{kw.keyword}</span>
+                                            <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[11px]">
+                                                {kw.rank > 0 ? `#${kw.rank}` : 'Not scanned'}
                                             </span>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))
+                                ) : (
+                                    <p className="px-3 py-3 text-xs text-slate-500">No scan yet</p>
+                                )}
                             </div>
                         </div>
 
@@ -1068,7 +1208,7 @@ function HybridDashboard({
                     {/* Local SEO Tools Links */}
                     <div className="space-y-1.5 pt-1 border-t border-slate-100">
                         <Link to="/rank-tracker" className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 text-xs font-semibold text-slate-700 transition">
-                            <span className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-[#FF8800]" /> Local Search Grid scan</span>
+                            <span className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-[var(--brand-primary)]" /> Local Search Grid scan</span>
                             <ChevronRight className="w-4 h-4 text-slate-300" />
                         </Link>
                         <Link to="/report" className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 text-xs font-semibold text-slate-700 transition">
@@ -1130,7 +1270,7 @@ function HybridDashboard({
                                 <Link
                                     to={`/book/${orgSlug}`}
                                     target="_blank"
-                                    className="bg-[#FF8800] text-white font-bold px-2.5 py-1 rounded-lg hover:bg-[#E67A00] text-xs inline-flex items-center gap-1 shadow-2xs transition"
+                                    className="bg-[var(--brand-primary)] text-white font-bold px-2.5 py-1 rounded-lg hover:bg-[var(--brand-primary-hover)] text-xs inline-flex items-center gap-1 shadow-2xs transition"
                                 >
                                     <ExternalLink className="w-3 h-3" /> View
                                 </Link>
@@ -1153,7 +1293,7 @@ function HybridDashboard({
                     {/* Booking Tools Links */}
                     <div className="space-y-1.5 pt-1 border-t border-slate-100">
                         <Link to="/booking" className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 text-xs font-semibold text-slate-700 transition">
-                            <span className="flex items-center gap-2"><CalendarClock className="w-3.5 h-3.5 text-[#FF8800]" /> Booking board & schedule</span>
+                            <span className="flex items-center gap-2"><CalendarClock className="w-3.5 h-3.5 text-[var(--brand-primary)]" /> Booking board & schedule</span>
                             <ChevronRight className="w-4 h-4 text-slate-300" />
                         </Link>
                         <Link to="/clients" className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 text-xs font-semibold text-slate-700 transition">
