@@ -272,6 +272,8 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
                 spreadsheetStatus1: row.spreadsheet_status_1 || existing?.spreadsheetStatus1 || '',
                 spreadsheetStatus2: row.spreadsheet_status_2 || existing?.spreadsheetStatus2 || '',
                 spreadsheetStatus3: row.spreadsheet_status_3 || existing?.spreadsheetStatus3 || '',
+                importBatchId: row.import_batch_id || null,
+                importFileName: row.import_file_name || null,
                 updatedAt: row.updated_at || row.created_at || existing?.updatedAt || null
             });
         }

@@ -9,6 +9,8 @@ import {
     mapAdminLead,
     mapSalesLeadToAdminLead
 } from './leadHelpers';
+import { fetchLatestAuditEmailShareMap, shareInfoForAudit } from '../lib/auditEmailSends';
+import { fetchLatestLeadObservationEmailShareMap, shareInfoForLeadObservation } from '../lib/leadObservationEmailSends';
 
 const router = Router();
 
@@ -133,9 +135,13 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
             .map((l) => String(l.email || '').trim().toLowerCase())
             .filter(Boolean);
 
-        if (leadIds.length > 0 || emails.length > 0) {
+        const auditIds = Array.from(
+            new Set(allLeads.map((l) => String(l.auditId || '').trim()).filter(Boolean))
+        );
+
+        if (leadIds.length > 0 || emails.length > 0 || auditIds.length > 0) {
             try {
-                const [actResult, salesLeadStatusResult, taskResult] = await Promise.all([
+                const [actResult, salesLeadStatusResult, taskResult, shareMap, obsMap] = await Promise.all([
                     query(
                         `SELECT DISTINCT ON (COALESCE(LOWER(sl.email), LOWER(sub.email), a.lead_id))
                             a.lead_id, a.activity_type, a.disposition, a.note, a.author_name, a.created_at,
@@ -177,7 +183,9 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                            AND (t.lead_id = ANY($1::text[]) OR (COALESCE(LOWER(sl.email), LOWER(sub.email)) = ANY($2::text[]) AND COALESCE(sl.email, sub.email, '') <> ''))
                          ORDER BY COALESCE(LOWER(sl.email), LOWER(sub.email), t.lead_id), t.updated_at DESC`,
                         [leadIds, emails]
-                    ).catch(() => ({ rows: [] }))
+                    ).catch(() => ({ rows: [] })),
+                    fetchLatestAuditEmailShareMap(auditIds).catch(() => new Map()),
+                    fetchLatestLeadObservationEmailShareMap(leadIds).catch(() => new Map())
                 ]);
 
                 const actMap = new Map<string, any>();
@@ -239,7 +247,7 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                         }
                     }
 
-                    // 3. Lead tasks data — fallback/complement for notes & agent name
+                    // 3. Lead tasks data — fallback/complement for notes and assignment
                     const taskData = taskMap.get(leadIdStr) || (emailStr ? taskMap.get(emailStr) : null);
                     if (taskData) {
                         if (!(lead as any).salesNotes && taskData.notes) {
@@ -249,6 +257,16 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                             (lead as any).assignedAgentName = taskData.agentName;
                         }
                     }
+
+                    // 4. Email share & observation tracking info
+                    const share = shareInfoForAudit(shareMap, lead.auditId);
+                    const obs = shareInfoForLeadObservation(obsMap, leadIdStr);
+                    (lead as any).emailShareStatus = share.emailShareStatus;
+                    (lead as any).emailShareSentAt = share.emailShareSentAt;
+                    (lead as any).emailShareOpenedAt = share.emailShareOpenedAt;
+                    (lead as any).observationEmailShareStatus = obs.observationEmailShareStatus;
+                    (lead as any).observationEmailSentAt = obs.observationEmailSentAt;
+                    (lead as any).observationEmailOpenedAt = obs.observationEmailOpenedAt;
                 }
             } catch (actErr) {
                 console.warn('Could not attach lead activities to admin leads:', actErr);
