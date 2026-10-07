@@ -212,6 +212,17 @@ export class LocalSeoApiStack extends cdk.Stack {
       })
     );
 
+    const dataForSeoLogin = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      'DataForSeoLogin',
+      'Zappsites/prod/DATAFORSEO_LOGIN'
+    );
+    const dataForSeoPassword = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      'DataForSeoPassword',
+      'Zappsites/prod/DATAFORSEO_PASSWORD'
+    );
+
     const fn = new lambda.Function(this, 'ApiFn', {
       functionName: `localseo-api-${stage}`,
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -278,6 +289,8 @@ export class LocalSeoApiStack extends cdk.Stack {
           ? { GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY }
           : {}),
         ...(geminiKey ? { GEMINI_API_KEY: geminiKey } : {}),
+        DATAFORSEO_LOGIN: dataForSeoLogin.secretValue.unsafeUnwrap(),
+        DATAFORSEO_PASSWORD: dataForSeoPassword.secretValue.unsafeUnwrap(),
         EMAIL_TRANSPORT: 'ses',
         BOOKING_EMAIL_FROM: process.env.BOOKING_EMAIL_FROM || 'info@zappsites.com',
         SES_REGION: process.env.SES_REGION || 'us-east-1',
@@ -289,6 +302,8 @@ export class LocalSeoApiStack extends cdk.Stack {
     dbSecret.grantRead(fn);
     jwtSecret.grantRead(fn);
     auditOpsSecret.grantRead(fn);
+    dataForSeoLogin.grantRead(fn);
+    dataForSeoPassword.grantRead(fn);
     mediaBucket.grantPut(fn);
     mediaBucket.grantRead(fn);
 

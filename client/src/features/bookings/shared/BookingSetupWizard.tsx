@@ -171,7 +171,7 @@ export default function BookingSetupWizard({
     return (
         <div className="w-full max-w-3xl mx-auto space-y-5 animate-in fade-in duration-500">
             <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-[#F59E0B]">Booking Plots</p>
+                <p className="text-xs font-bold uppercase tracking-widest text-[var(--brand-primary)]">Booking Plots</p>
                 <h1 className="text-2xl lg:text-3xl font-black text-[#0F172A] mt-1">Set up your booking board</h1>
                 <p className="text-sm text-[#64748B] mt-1">
                     Your industry was chosen at payment. After setup you&apos;ll add your own services.
@@ -183,9 +183,9 @@ export default function BookingSetupWizard({
                     <button
                         type="button"
                         onClick={useSavedBusiness}
-                        className="w-full text-left rounded-2xl border-2 border-[#F59E0B] bg-[#FFFBEB] p-5 hover:bg-[#FEF3C7] transition shadow-sm"
+                        className="w-full text-left rounded-2xl border-2 border-[var(--brand-primary)] bg-[var(--brand-primary-soft)] p-5 hover:bg-[var(--brand-primary-muted)] transition shadow-sm"
                     >
-                        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-[#D97706]">
+                        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-[var(--brand-primary-ink)]">
                             <Building2 className="w-4 h-4" /> Use saved business profile
                         </div>
                         <p className="font-bold text-[#0F172A] text-lg mt-2">{linkedBusiness?.name}</p>
@@ -214,7 +214,7 @@ export default function BookingSetupWizard({
                     {!hasCheckoutIndustry ? (
                         <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 lg:p-6 shadow-sm space-y-4">
                             <div className="flex items-start gap-3">
-                                <Lock className="w-5 h-5 text-[#F59E0B] shrink-0 mt-0.5" />
+                                <Lock className="w-5 h-5 text-[var(--brand-primary)] shrink-0 mt-0.5" />
                                 <div>
                                     <h2 className="font-bold text-lg text-[#0F172A]">Your service (from payment)</h2>
                                     <p className="text-sm text-[#64748B] mt-1">
@@ -246,7 +246,7 @@ export default function BookingSetupWizard({
                                             step === i
                                                 ? 'flex-1 rounded-xl px-3 py-2 text-center border text-xs font-bold bg-[#0F172A] text-white border-[#0F172A]'
                                                 : step > i
-                                                  ? 'flex-1 rounded-xl px-3 py-2 text-center border text-xs font-bold bg-[#F59E0B]/20 text-[#0F172A] border-[#F59E0B]/50'
+                                                  ? 'flex-1 rounded-xl px-3 py-2 text-center border text-xs font-bold bg-[var(--brand-primary)]/20 text-[#0F172A] border-[var(--brand-primary)]/50'
                                                   : 'flex-1 rounded-xl px-3 py-2 text-center border text-xs font-bold bg-white text-[#64748B] border-[#E2E8F0]'
                                         }
                                     >
@@ -256,8 +256,8 @@ export default function BookingSetupWizard({
                             </div>
 
                             {}
-                            <div className="rounded-2xl border-2 border-[#F59E0B] bg-[#FFFBEB] p-4">
-                                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-[#D97706]">
+                            <div className="rounded-2xl border-2 border-[var(--brand-primary)] bg-[var(--brand-primary-soft)] p-4">
+                                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-[var(--brand-primary-ink)]">
                                     <Lock className="w-3.5 h-3.5" /> Locked from payment
                                 </div>
                                 <p className="font-bold text-[#0F172A] text-lg mt-1">{lockedName}</p>
@@ -427,7 +427,7 @@ export default function BookingSetupWizard({
                                 >
                                     <div>
                                         <h2 className="font-bold text-lg text-[#0F172A] flex items-center gap-2">
-                                            <Wallet className="w-5 h-5 text-[#F59E0B]" /> Bookings & deposit
+                                            <Wallet className="w-5 h-5 text-[var(--brand-primary)]" /> Bookings & deposit
                                         </h2>
                                         <p className="text-sm text-[#64748B] mt-1">
                                             Default deposits for {selectedPreset.shortName} services. You can edit each
@@ -494,7 +494,7 @@ export default function BookingSetupWizard({
                                         <button
                                             type="submit"
                                             disabled={busy}
-                                            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#F59E0B] text-[#0F172A] text-sm font-black disabled:opacity-60"
+                                            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[var(--brand-primary)] text-[#0F172A] text-sm font-black disabled:opacity-60"
                                         >
                                             {busy ? 'Launching…' : 'Launch booking board'}
                                         </button>

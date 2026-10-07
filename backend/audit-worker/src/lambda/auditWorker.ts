@@ -5,7 +5,7 @@ import { applyWebsiteChecks } from '../audit/checksWebsite.js';
 import { runLighthouse } from '../audit/lighthouseRunner.js';
 import { captureHomepageScreenshot } from '../audit/homepageScreenshot.js';
 import { fallbackPillarDecks } from '../audit/pillarFixDecks.js';
-import { aeoSpecsFromSearchLines, buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
+import { buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
 import { buildGeoChecklist, applyGeoChecklistToChecks } from '../audit/geoChecklist.js';
 import { buildAeoCoreChecklist } from '../audit/aeoCoreChecklist.js';
 import { buildLocalSeoCoreChecklist } from '../audit/localSeoCoreChecklist.js';
@@ -16,11 +16,9 @@ import { updateAuditJob } from '../lib/auditJobs.js';
 import {
   buildDeepLocalRank,
   buildGeoAiPrompts,
-  captureAeoSerpScreenshot,
   captureMapsScreenshotFromTask,
   captureOrganicLocalPackScreenshot,
   checkAiEngineMentionsMulti,
-  suggestAeoGoogleSearches,
   detectDuplicateListings,
   fetchBacklinksSummary,
   fetchGbpMyBusinessInfo,
@@ -42,7 +40,7 @@ import {
   gbpFieldsFromPlaceDetails,
   photoUrlsFromPlace
 } from '../lib/placesGbp.js';
-import { resolveSearchArea } from '../lib/searchArea.js';
+import { looksLikeStreet, resolveSearchArea } from '../lib/searchArea.js';
 
 async function staticMapDataUrl(lat: number, lng: number): Promise<string | null> {
   const key = String(process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '').trim();
@@ -265,11 +263,12 @@ async function enrichFromDataForSeo(audit: any) {
     else business.city = intakeCity;
     audit.business = business;
   }
+  const cityPlace = intakeCity && !looksLikeStreet(intakeCity) ? intakeCity : '';
   const nearPlace =
-    (searchArea && searchArea !== 'the local area' ? searchArea : '') ||
-    intakeCity ||
-    String(business.address || '').trim();
-  const formCity = intakeCity || String(business.city || '').trim();
+    (searchArea && searchArea !== 'the local area' && !looksLikeStreet(searchArea) ? searchArea : '') ||
+    cityPlace;
+  const formCityRaw = intakeCity || String(business.city || '').trim();
+  const formCity = formCityRaw && !looksLikeStreet(formCityRaw) ? formCityRaw : '';
   const businessName = String(business.businessName || '').trim();
 
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -281,28 +280,21 @@ async function enrichFromDataForSeo(audit: any) {
     (nearNorm === cityNorm || nearNorm.endsWith(` ${cityNorm}`) || nearNorm.includes(cityNorm));
 
   const locationLabel = nearPlace || formCity;
-  const brandQuery = [businessName, locationLabel || business.address]
+  const brandQuery = [businessName, locationLabel]
     .filter(Boolean)
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  const cityForQuery = formCity || nearPlace;
+  const cityForQuery = locationLabel;
   const packQueryVariants: string[] = [];
   const pushQ = (q: string) => {
     const cleaned = q.replace(/\s+/g, ' ').trim();
     if (cleaned && !packQueryVariants.includes(cleaned)) packQueryVariants.push(cleaned);
   };
-  if (nearPlace && formCity && !cityAlreadyInNear) {
-    pushQ(`${service} near ${nearPlace} in ${formCity}`);
-    pushQ(`${service} in ${formCity}`);
-    pushQ(`${service} near ${nearPlace}`);
-  } else if (cityForQuery) {
-    pushQ(`${service} near ${cityForQuery}`);
-    pushQ(`${service} in ${cityForQuery}`);
-    pushQ(`${service} ${cityForQuery}`);
-  }
-  if (brandQuery) pushQ(brandQuery);
+  // The Maps ranking uses one search only: "<service> in <city>" (city from the form). No brand name.
+  const rankCity = formCity || cityForQuery;
+  if (rankCity) pushQ(`${service} in ${rankCity}`);
 
   let packQuery = packQueryVariants[0] || '';
 
@@ -324,15 +316,12 @@ async function enrichFromDataForSeo(audit: any) {
       ...mapsOptsBase,
       keyword
     });
-    if (pack.items.length) {
-      packItems = pack.items;
-      packTaskId = pack.taskId;
-      packQuery = keyword;
-      break;
-    }
-    
     packQuery = keyword;
     packTaskId = pack.taskId || packTaskId;
+    if (pack.items.length) {
+      packItems = pack.items;
+      break;
+    }
   }
 
   let brandItems: DataForSeoMapsItem[] = [];
@@ -379,6 +368,7 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
+
   const attachLocalRank = (items: DataForSeoMapsItem[], query: string) => {
     const q = String(query || '').trim();
     if (!q) return;
@@ -397,8 +387,9 @@ async function enrichFromDataForSeo(audit: any) {
     };
   };
 
-  const rankItems = packItems.length ? packItems : brandItems;
-  const rankQuery = packItems.length ? packQuery : brandQuery || packQuery;
+  // Ranking always comes from the service search, never the brand-name search.
+  const rankItems = packItems;
+  const rankQuery = packQuery;
   if (rankQuery) {
     attachLocalRank(rankItems, rankQuery);
     if (!rankItems.length) {
@@ -688,8 +679,7 @@ async function enrichFromDataForSeo(audit: any) {
   
   const measuredQuery =
     String((audit.gbpLookup?.localRank as { query?: string } | undefined)?.query || '').trim() ||
-    packQuery ||
-    brandQuery;
+    packQuery;
   if (measuredQuery) {
     try {
       const [localPackScreenshot, mapsScreenshot] = await Promise.all([
@@ -799,6 +789,7 @@ async function enrichFromDataForSeo(audit: any) {
             prompt,
             promptKey: key,
             mentioned: null,
+            brandName: businessName,
             recommendedLikely: null,
             citedHosts: [],
             answerExcerpt: '',
@@ -811,58 +802,9 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  // AEO Visual: ChatGPT writes 4 searches for this service, then Google screenshots those searches.
-  let aeoSpecs = buildAeoQuerySpecs(audit);
-  try {
-    const lines = await suggestAeoGoogleSearches({
-      service,
-      city: locationLabel || String(business.city || business.searchAreaLabel || '').trim(),
-      businessName
-    });
-    aeoSpecs =
-      aeoSpecsFromSearchLines(lines, {
-        business: {
-          businessName,
-          service,
-          serviceLabel: service,
-          city: locationLabel || String(business.city || '').trim(),
-          searchAreaLabel: locationLabel || String(business.searchAreaLabel || '').trim()
-        }
-      }) || aeoSpecs;
-  } catch (aeoQueryErr) {
-    console.warn('[auditWorker] AEO search questions failed:', (aeoQueryErr as Error).message);
-  }
-  audit.aeoQuerySpecs = aeoSpecs;
-  try {
-    const aeoShots: SerpScreenshotResult[] = [];
-    const batchSize = 2;
-    for (let i = 0; i < aeoSpecs.length; i += batchSize) {
-      const batch = aeoSpecs.slice(i, i + batchSize);
-      const batchResults = await Promise.all(
-        batch.map((spec) =>
-          captureAeoSerpScreenshot({
-            keyword: spec.query,
-            lat: typeof lat === 'number' ? lat : null,
-            lng: typeof lng === 'number' ? lng : null,
-            locationName: locationLabel || undefined,
-            timeoutMs: 60000,
-            businessName
-          })
-        )
-      );
-      aeoShots.push(...batchResults);
-    }
-    audit.aeoSerpScreenshots = aeoShots;
-  } catch (aeoShotErr) {
-    const err = aeoShotErr as Error;
-    console.warn('[auditWorker] AEO SERP screenshots failed:', err.message);
-    audit.aeoSerpScreenshots = aeoSpecs.map((spec) => ({
-      query: spec.query,
-      skipped: true,
-      reason: err.message || 'AEO screenshot failed',
-      capturedAt: new Date().toISOString()
-    }));
-  }
+  // AEO questions come from the service and city. No ChatGPT prompts, Google search, or screenshots.
+  audit.aeoQuerySpecs = buildAeoQuerySpecs(audit);
+  audit.aeoSerpScreenshots = [];
 }
 
 export const main: SQSHandler = async (event: SQSEvent) => {
@@ -1070,9 +1012,15 @@ export const main: SQSHandler = async (event: SQSEvent) => {
       }
 
       const decksForScore = fallbackPillarDecks(audit);
-      const reportLocal = audit.aiReport?.localSeoFixes?.actions;
-      const reportAeo = audit.aiReport?.aeoFixes?.priorities;
-      const reportGeo = audit.aiReport?.geoFixes?.actions;
+      const report = (audit.aiReport || {}) as {
+        localSeoFixes?: { actions?: unknown };
+        aeoFixes?: { priorities?: unknown };
+        geoFixes?: { actions?: unknown };
+        criticalIssues?: unknown;
+      };
+      const reportLocal = report.localSeoFixes?.actions;
+      const reportAeo = report.aeoFixes?.priorities;
+      const reportGeo = report.geoFixes?.actions;
       audit.score = computeScore(audit.checklist.checks, {
         localRank: audit.gbpLookup?.localRank || null,
         aiEngineChecks: Array.isArray(audit.gbpLookup?.aiEngineChecks)
@@ -1093,7 +1041,8 @@ export const main: SQSHandler = async (event: SQSEvent) => {
               : decksForScore.aeoFixes?.priorities,
           geo:
             Array.isArray(reportGeo) && reportGeo.length ? reportGeo : decksForScore.geoFixes?.actions
-        }
+        },
+        criticalIssues: Array.isArray(report.criticalIssues) ? report.criticalIssues : []
       });
 
       await saveAudit(audit);

@@ -750,7 +750,7 @@ export default function BookingPlots() {
                             <button
                                 type="button"
                                 onClick={copyLink}
-                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#FF8800] hover:bg-[#E67A00] active:bg-[#CC6D00] text-white text-xs font-bold shadow-sm transition"
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white text-xs font-bold shadow-sm transition"
                             >
                                 <Link2 className="w-3.5 h-3.5 text-white" />
                                 {copied ? 'Copied!' : 'Copy link'}
@@ -1507,7 +1507,7 @@ export default function BookingPlots() {
                                                                 type="button"
                                                                 disabled={busy === b.id}
                                                                 onClick={() => startJob(b.id)}
-                                                                className="px-4 py-2 rounded-xl bg-[#FF8800] hover:bg-[#E67A00] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition disabled:opacity-50"
+                                                                className="px-4 py-2 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition disabled:opacity-50"
                                                             >
                                                                 <Play className="w-3.5 h-3.5 fill-current" />
                                                                 {busy === b.id ? 'Starting…' : 'Start job'}

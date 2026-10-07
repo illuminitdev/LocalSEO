@@ -157,6 +157,7 @@ export function buildAeoQueryCards(
     businessNamed?: boolean | null;
   }> | null
 ) {
+  const { name } = auditContext(audit);
   const shots = Array.isArray(screenshots) ? screenshots : [];
   const specs = storedAeoQuerySpecs(audit as { aeoQuerySpecs?: unknown }) || buildAeoQuerySpecs(audit);
   return specs.map((spec) => {
@@ -169,27 +170,21 @@ export function buildAeoQueryCards(
             .toLowerCase() === spec.query.toLowerCase()
       ) ||
       null;
-    const screenshot = shot
-      ? shot.dataUrl && String(shot.dataUrl).startsWith('data:image/')
-        ? {
-            dataUrl: shot.dataUrl,
-            query: spec.query,
-            capturedAt: shot.capturedAt || null
-          }
-        : {
-            skipped: true,
-            reason: shot.reason || 'Unavailable',
-            query: spec.query,
-            capturedAt: shot.capturedAt || null
-          }
-      : null;
+    const named = shot?.businessNamed === true;
+    const measured = shot?.businessNamed === true || shot?.businessNamed === false;
+    const brand = name || 'The brand';
     return {
       query: spec.query,
       intent: spec.intent,
       kind: spec.kind,
-      screenshot,
       peopleAlsoAsk: Array.isArray(shot?.peopleAlsoAsk) ? shot.peopleAlsoAsk : [],
-      answerBox: shot?.answerBox || null
+      answerBox: shot?.answerBox || null,
+      businessNamed: shot?.businessNamed ?? null,
+      answerVisibility: !measured
+        ? 'Answer visibility was not measured for this question.'
+        : named
+          ? `${brand} is visible in the answer for this question.`
+          : `${brand} is not visible in the answer for this question.`
     };
   });
 }
@@ -208,7 +203,7 @@ export function buildAeoFixes(audit) {
   return {
     title: 'AEO: Answer Engine Optimisation',
     visualIntro:
-      'Real Google results for four local question searches (2 service + 2 brand) — use these to see where FAQ and schema can win answer boxes.',
+      'People Also Ask: key AEO opportunities for this service and location.',
     aeoChecklist: buildAeoCoreChecklist(audit),
     priorities:
       priorities.length > 0

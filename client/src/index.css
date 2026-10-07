@@ -2,6 +2,12 @@
 
 :root {
   --brand-primary: #F59E0B;
+  --brand-primary-hover: color-mix(in srgb, var(--brand-primary) 84%, #000);
+  --brand-primary-active: color-mix(in srgb, var(--brand-primary) 72%, #000);
+  --brand-primary-ink: color-mix(in srgb, var(--brand-primary) 70%, #000);
+  --brand-primary-soft: color-mix(in srgb, var(--brand-primary) 12%, #fff);
+  --brand-primary-muted: color-mix(in srgb, var(--brand-primary) 22%, #fff);
+  --brand-primary-line: color-mix(in srgb, var(--brand-primary) 42%, #fff);
   --brand-secondary: #0F172A;
   --color-canvas: #F8FAFC;
   --color-navy: #0F172A;
@@ -48,6 +54,32 @@ body {
 }
 .text-brand-secondary {
   color: var(--brand-secondary);
+}
+
+/* Customer portal accents follow the saved brand instead of the default orange. */
+.portal-brand {
+  --color-orange-50: var(--brand-primary-soft);
+  --color-orange-100: var(--brand-primary-muted);
+  --color-orange-200: var(--brand-primary-line);
+  --color-orange-300: color-mix(in srgb, var(--brand-primary) 55%, #fff);
+  --color-orange-400: color-mix(in srgb, var(--brand-primary) 78%, #fff);
+  --color-orange-500: var(--brand-primary);
+  --color-orange-600: var(--brand-primary-hover);
+  --color-orange-700: var(--brand-primary-active);
+  --color-orange-800: var(--brand-primary-ink);
+  --color-orange-900: color-mix(in srgb, var(--brand-primary) 45%, #000);
+  --color-orange-950: color-mix(in srgb, var(--brand-primary) 32%, #000);
+  --color-amber-50: var(--brand-primary-soft);
+  --color-amber-100: var(--brand-primary-muted);
+  --color-amber-200: var(--brand-primary-line);
+  --color-amber-300: color-mix(in srgb, var(--brand-primary) 62%, #fff);
+  --color-amber-400: color-mix(in srgb, var(--brand-primary) 80%, #fff);
+  --color-amber-500: var(--brand-primary);
+  --color-amber-600: var(--brand-primary-hover);
+  --color-amber-700: var(--brand-primary-ink);
+  --color-amber-800: var(--brand-primary-ink);
+  --color-amber-900: color-mix(in srgb, var(--brand-primary) 42%, #000);
+  --color-amber-950: color-mix(in srgb, var(--brand-primary) 30%, #000);
 }
 
 

@@ -287,7 +287,7 @@ export default function VisibilityAuditReport() {
                                         </div>
                                         <div className="h-2.5 bg-[#F1F5F9] rounded-full overflow-hidden">
                                             <div
-                                                className="h-full rounded-full bg-[#F59E0B]"
+                                                className="h-full rounded-full bg-[var(--brand-primary)]"
                                                 style={{ width: `${(p.score / 10) * 100}%` }}
                                             />
                                         </div>
@@ -368,12 +368,12 @@ export default function VisibilityAuditReport() {
                                     key={`${r.placeId}-${r.position}`}
                                     className={`py-3 flex items-start gap-3 text-sm ${r.isThisBusiness ? 'bg-amber-50 -mx-2 px-2 rounded-lg' : ''}`}
                                 >
-                                    <span className="font-black text-[#F59E0B] w-6">#{r.position}</span>
+                                    <span className="font-black text-[var(--brand-primary)] w-6">#{r.position}</span>
                                     <div>
                                         <p className="font-semibold text-[#0F172A]">
                                             {r.name}
                                             {r.isThisBusiness && (
-                                                <span className="ml-2 text-xs bg-[#F59E0B] text-white px-2 py-0.5 rounded font-bold">
+                                                <span className="ml-2 text-xs bg-[var(--brand-primary)] text-white px-2 py-0.5 rounded font-bold">
                                                     This business
                                                 </span>
                                             )}

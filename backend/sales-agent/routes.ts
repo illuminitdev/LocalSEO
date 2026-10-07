@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { displayedOverallScore } from '../lib/displayScore';
 import { randomUUID } from 'crypto';
 import { requireSalesAgent } from '../middleware/auth';
 import { comparePassword, hashPassword } from '../lib/authTokens';
@@ -70,7 +71,7 @@ function metaFromZappAudit(auditId: string, audit: Record<string, unknown>) {
             ? (audit.score as { total?: number })
             : null;
     const scoreRaw =
-        (audit.totalScore as number | null | undefined) ?? scoreObj?.total ?? null;
+        displayedOverallScore(audit.score as any, (audit.totalScore as number | null | undefined) ?? scoreObj?.total ?? null);
     return {
         id: auditId,
         businessName: String(
@@ -1932,7 +1933,7 @@ router.post('/full-audits/:auditId/share-email', async (req: Request, res: Respo
                 ? (audit.score as { total?: number })
                 : null;
         const scoreRaw =
-            (audit.totalScore as number | null | undefined) ?? scoreObj?.total ?? null;
+            displayedOverallScore(audit.score as any, (audit.totalScore as number | null | undefined) ?? scoreObj?.total ?? null);
         const score =
             scoreRaw != null && Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw) : null;
         const reportUrl = reportShareUrl(auditId);

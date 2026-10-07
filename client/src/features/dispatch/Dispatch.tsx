@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPatch, cn } from '../../shared/utils';
 import PlacesMap, { geocodeAddress, mapsJsConfigured, type MapMarker } from '../../shared/PlacesMap';
+import { readBrandPrimaryHex } from '../../shared/orgBrand';
 
 function startOfWeek(d: Date) {
     const x = new Date(d);
@@ -148,7 +149,7 @@ export default function Dispatch() {
                     label: String(markers.length + 1),
                     title: `${b.customer_name || 'Job'} — ${b.customer_address || ''}`,
                     highlight: markers.length === 0,
-                    color: '#FF8800'
+                    color: readBrandPrimaryHex()
                 });
             }
 
@@ -284,7 +285,7 @@ export default function Dispatch() {
                     <button
                         type="button"
                         onClick={() => setShowAssignModal(true)}
-                        className="inline-flex items-center gap-1.5 bg-[#FF8800] hover:bg-[#E67A00] active:bg-[#CC6D00] text-white text-xs font-bold px-4 py-2 rounded-xl shadow-sm transition"
+                        className="inline-flex items-center gap-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white text-xs font-bold px-4 py-2 rounded-xl shadow-sm transition"
                     >
                         <Plus className="w-4 h-4" /> Assign job
                     </button>
@@ -313,7 +314,7 @@ export default function Dispatch() {
                             className={cn(
                                 'rounded-2xl p-3.5 min-h-[160px] flex flex-col justify-between transition-all cursor-pointer border select-none',
                                 isSelected
-                                    ? 'bg-[#FFF9F2] border-[#FDBA74] ring-2 ring-[#FF8800]/20 shadow-xs'
+                                    ? 'bg-[var(--brand-primary-soft)] border-[var(--brand-primary-line)] ring-2 ring-[var(--brand-primary)]/20 shadow-xs'
                                     : 'bg-white border-slate-200/90 hover:border-slate-300 shadow-xs'
                             )}
                         >
@@ -412,7 +413,7 @@ export default function Dispatch() {
                             href={googleMapsRouteUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs font-bold text-[#FF8800] hover:text-[#E67A00] transition shrink-0"
+                            className="inline-flex items-center gap-1 text-xs font-bold text-[var(--brand-primary)] hover:text-[var(--brand-primary-hover)] transition shrink-0"
                         >
                             Open in Google Maps <ExternalLink className="w-3.5 h-3.5" />
                         </a>
@@ -677,7 +678,7 @@ export default function Dispatch() {
                             </button>
                             <button
                                 type="submit"
-                                className="px-5 py-2.5 rounded-xl bg-[#FF8800] hover:bg-[#E67A00] text-white text-xs font-bold shadow-sm transition"
+                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold shadow-sm transition"
                             >
                                 Save & Dispatch
                             </button>

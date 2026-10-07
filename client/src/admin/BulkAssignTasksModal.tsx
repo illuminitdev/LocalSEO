@@ -4,7 +4,7 @@ import {
     AlertCircle,
     Check,
     Users,
-    Sparkles,
+    BadgeCheck,
     BarChart3,
     Phone,
     FileText,
@@ -191,7 +191,7 @@ export default function BulkAssignTasksModal({
                                 <span className="text-xs font-bold text-slate-800">
                                     Also create follow-up task for all selected leads
                                 </span>
-                                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                                <BadgeCheck className="w-3.5 h-3.5 text-amber-500" />
                             </div>
                         </label>
                     </div>

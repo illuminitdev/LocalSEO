@@ -1,3 +1,5 @@
+import { looksLikeStreet, resolveSearchArea } from '../lib/searchArea.js';
+
 export type AuditDeckContext = {
   name: string;
   city: string;
@@ -6,9 +8,13 @@ export type AuditDeckContext = {
 
 export function auditContext(audit: any): AuditDeckContext {
   const name = String(audit?.business?.businessName || '').trim() || 'This business';
-  const city =
+  let city =
     String(audit?.business?.searchAreaLabel || audit?.business?.city || '').trim() ||
     'the local area';
+  // Never show a street / estate name (e.g. "Trafford Park"); use the town or city instead.
+  if (looksLikeStreet(city)) {
+    city = resolveSearchArea({ city: '', address: audit?.business?.address }).label;
+  }
   const service =
     String(audit?.business?.serviceLabel || audit?.business?.service || '').trim() ||
     'local services';
