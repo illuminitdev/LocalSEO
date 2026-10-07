@@ -49,6 +49,9 @@ import TaskCompletionModal, { type CrmTaskStatus } from '../shared/TaskCompletio
 export default function AdminLeadDetail() {
     const { id } = useParams<{ id: string }>();
     const location = useLocation();
+    const navFrom = (location.state as { from?: string; fromLabel?: string } | null)?.from;
+    const backTo = typeof navFrom === 'string' && navFrom.startsWith('/') ? navFrom : '/admin/tasks';
+    const backLabel = (location.state as { fromLabel?: string } | null)?.fromLabel?.trim() || 'CRM';
     const { show } = useToast();
     const [lead, setLead] = useState<AdminLeadCrmDetail['lead'] | null>(null);
     const [tasks, setTasks] = useState<LeadTask[]>([]);
@@ -223,8 +226,8 @@ export default function AdminLeadDetail() {
     if (!lead) {
         return (
             <div className="space-y-4 max-w-4xl mx-auto">
-                <Link to="/admin/tasks" className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-900">
-                    <ArrowLeft className="w-3.5 h-3.5" /> Back to CRM tasks
+                <Link to={backTo} className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-900">
+                    <ArrowLeft className="w-3.5 h-3.5" /> Back to {backLabel}
                 </Link>
                 <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-sm text-red-700">
                     {error || 'Lead not found.'}
@@ -263,15 +266,16 @@ export default function AdminLeadDetail() {
             <div className="flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-2 flex-wrap">
                     <Link
-                        to="/admin/tasks"
+                        to={backTo}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-600 rounded-xl transition-colors shadow-2xs"
                     >
                         <ArrowLeft className="w-3.5 h-3.5" />
-                        Back to CRM
+                        Back to {backLabel}
                     </Link>
                     {id ? (
                         <Link
                             to={`/admin/leads/${encodeURIComponent(id)}`}
+                            state={location.state}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-xs font-bold text-indigo-700 rounded-xl transition-colors shadow-2xs"
                         >
                             Lead profile

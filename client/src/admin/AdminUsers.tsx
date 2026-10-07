@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
     Award,
     ChevronLeft,
@@ -54,6 +54,14 @@ type RoleFilter = 'all' | 'customer' | 'sales_agent' | 'converted_lead' | 'invit
 
 const PAGE_SIZE = 10;
 
+const USERS_FILTER_DEFAULTS = {
+    q: '',
+    role: 'all' as RoleFilter,
+    service: '',
+    plan: '',
+    page: '1'
+};
+
 function fmtDate(value?: string | null) {
     if (!value) return '—';
     try {
@@ -97,15 +105,85 @@ function serviceOf(user: AdminUser) {
 
 export default function AdminUsers() {
     const { show } = useToast();
+    const location = useLocation();
     const [users, setUsers] = useState<AdminUser[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
     const [activeLeadRef, setActiveLeadRef] = useState<GrowthAuditLeadRef | null>(null);
     const [error, setError] = useState('');
-    const [query, setQuery] = useState('');
-    const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
-    const [serviceFilter, setServiceFilter] = useState('');
-    const [planFilter, setPlanFilter] = useState('');
-    const [page, setPage] = useState(1);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const defaults = USERS_FILTER_DEFAULTS;
+
+    const filters = useMemo(() => {
+        const next = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+            const raw = searchParams.get(key);
+            if (raw != null && raw !== '') (next as Record<string, string>)[key] = raw;
+        }
+        return next;
+    }, [searchParams]);
+
+    const writeFilters = useCallback(
+        (next: typeof defaults) => {
+            const params = new URLSearchParams();
+            for (const [key, value] of Object.entries(next)) {
+                const def = (defaults as Record<string, string>)[key] ?? '';
+                const trimmed = String(value ?? '');
+                if (!trimmed || trimmed === def) continue;
+                if (key === 'page' && trimmed === '1') continue;
+                params.set(key, trimmed);
+            }
+            setSearchParams(params, { replace: true });
+        },
+        [setSearchParams]
+    );
+
+    const setFilter = useCallback(
+        (key: string, value: string) => {
+            const next = { ...filters, [key]: value } as typeof defaults;
+            if (key !== 'page' && key !== 'requestPage' && 'page' in next) (next as Record<string, string>).page = '1';
+            writeFilters(next);
+        },
+        [filters, writeFilters]
+    );
+
+    const [draftQ, setDraftQ] = useState(filters.q);
+    useEffect(() => {
+        setDraftQ(filters.q);
+    }, [filters.q]);
+    const qDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => {
+        return () => {
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+        };
+    }, []);
+    const setSearchQuery = useCallback(
+        (value: string) => {
+            setDraftQ(value);
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+            qDebounceRef.current = setTimeout(() => setFilter('q', value), 300);
+        },
+        [setFilter]
+    );
+
+    const query = filters.q;
+    const roleFilter = filters.role as RoleFilter;
+    const serviceFilter = filters.service;
+    const planFilter = filters.plan;
+    const page = Math.max(1, Number(filters.page) || 1);
+    const setPage = useCallback(
+        (next: number | ((p: number) => number)) => {
+            const value = typeof next === 'function' ? next(page) : next;
+            setFilter('page', String(Math.max(1, value)));
+        },
+        [page, setFilter]
+    );
+    const listReturnState = useMemo(
+        () => ({
+            from: `${location.pathname}${location.search}`,
+            fromLabel: 'Users'
+        }),
+        [location.pathname, location.search]
+    );
     const [addOpen, setAddOpen] = useState(false);
     const [addBusy, setAddBusy] = useState(false);
     const [deletingKey, setDeletingKey] = useState<string | null>(null);
@@ -202,10 +280,6 @@ export default function AdminUsers() {
             );
         });
     }, [users, query, roleFilter, serviceFilter, planFilter, industryOptions]);
-
-    useEffect(() => {
-        setPage(1);
-    }, [query, roleFilter, serviceFilter, planFilter]);
 
     const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
     const safePage = Math.min(page, totalPages);
@@ -370,8 +444,8 @@ export default function AdminUsers() {
                         <div className="relative flex-1">
                             <Search className="w-4 h-4 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2" />
                             <input
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
+                                value={draftQ}
+                                onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder="Search users by name, email, or phone..."
                                 className="w-full rounded-xl border border-[#E2E8F0] bg-white pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
                             />
@@ -380,7 +454,7 @@ export default function AdminUsers() {
                             Filter by Role
                             <select
                                 value={roleFilter}
-                                onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
+                                onChange={(e) => setFilter('role', e.target.value)}
                                 className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
                             >
                                 <option value="all">All Roles</option>
@@ -394,7 +468,7 @@ export default function AdminUsers() {
                             Filter by Service
                             <select
                                 value={serviceFilter}
-                                onChange={(e) => setServiceFilter(e.target.value)}
+                                onChange={(e) => setFilter('service', e.target.value)}
                                 className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
                             >
                                 <option value="">All services</option>
@@ -409,7 +483,7 @@ export default function AdminUsers() {
                             Filter by Plan
                             <select
                                 value={planFilter}
-                                onChange={(e) => setPlanFilter(e.target.value)}
+                                onChange={(e) => setFilter('plan', e.target.value)}
                                 className="mt-1 w-full rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/25 focus:border-[#F59E0B]"
                             >
                                 <option value="">All plans</option>
@@ -486,6 +560,7 @@ export default function AdminUsers() {
                                     ) : (
                                         <Link
                                             to={detailPath(user)}
+                                            state={listReturnState}
                                             className="flex items-center gap-4 min-w-0 flex-1"
                                         >
                                             <div

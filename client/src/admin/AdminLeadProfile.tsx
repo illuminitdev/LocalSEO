@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
     ArrowLeft,
     Bot,
@@ -155,6 +155,10 @@ function leadToDrawerRef(lead: LeadProfile): GrowthAuditLeadRef {
 export default function AdminLeadProfile() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const location = useLocation();
+    const navFrom = (location.state as { from?: string; fromLabel?: string } | null)?.from;
+    const backTo = typeof navFrom === 'string' && navFrom.startsWith('/') ? navFrom : '/admin/growth-audit-leads';
+    const backLabel = (location.state as { fromLabel?: string } | null)?.fromLabel?.trim() || 'Leads';
     const { show } = useToast();
     const [lead, setLead] = useState<LeadProfile | null>(null);
     const [loading, setLoading] = useState(true);
@@ -241,10 +245,10 @@ export default function AdminLeadProfile() {
         return (
             <div className="space-y-4 max-w-4xl mx-auto">
                 <Link
-                    to="/admin/growth-audit-leads"
+                    to={backTo}
                     className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-900"
                 >
-                    <ArrowLeft className="w-3.5 h-3.5" /> Back to Leads
+                    <ArrowLeft className="w-3.5 h-3.5" /> Back to {backLabel}
                 </Link>
                 <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-sm text-red-700">
                     {error || 'Lead not found.'}
@@ -281,11 +285,11 @@ export default function AdminLeadProfile() {
         <div className="space-y-6 max-w-4xl mx-auto pb-16">
             <div className="flex items-center justify-between flex-wrap gap-3">
                 <Link
-                    to="/admin/growth-audit-leads"
+                    to={backTo}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-xs font-bold text-slate-600 rounded-xl transition-colors shadow-2xs"
                 >
                     <ArrowLeft className="w-3.5 h-3.5" />
-                    Back to Leads
+                    Back to {backLabel}
                 </Link>
                 <div className="flex items-center gap-2 flex-wrap">
                     {obsLabel ? (
@@ -398,7 +402,11 @@ export default function AdminLeadProfile() {
                     </button>
                     <button
                         type="button"
-                        onClick={() => navigate(`/admin/crm/leads/${encodeURIComponent(lead.id)}`)}
+                        onClick={() =>
+                            navigate(`/admin/crm/leads/${encodeURIComponent(lead.id)}`, {
+                                state: location.state
+                            })
+                        }
                         className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs font-bold rounded-xl transition-colors shadow-2xs"
                     >
                         Open in CRM

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
     Search,
     RefreshCw,
@@ -40,12 +40,87 @@ const SERVICE_STATUS_OPTIONS = [
     { label: 'Inactive', value: 'inactive' }
 ];
 
+const CUSTOMERS_FILTER_DEFAULTS = {
+    q: '',
+    industry: 'all',
+    service: 'all'
+};
+
 export default function CustomersPage() {
+    const location = useLocation();
     const [customers, setCustomers] = useState<SalesUnifiedLead[]>([]);
     const [industries, setIndustries] = useState<Array<{ name: string; count: number }>>([]);
-    const [selectedIndustry, setSelectedIndustry] = useState<string>('all');
-    const [serviceStatus, setServiceStatus] = useState<string>('all');
-    const [searchQuery, setSearchQuery] = useState('');
+    const [searchParams, setSearchParams] = useSearchParams();
+    const defaults = CUSTOMERS_FILTER_DEFAULTS;
+
+    const filters = useMemo(() => {
+        const next = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+            const raw = searchParams.get(key);
+            if (raw != null && raw !== '') (next as Record<string, string>)[key] = raw;
+        }
+        return next;
+    }, [searchParams]);
+
+    const writeFilters = useCallback(
+        (next: typeof defaults) => {
+            const params = new URLSearchParams();
+            for (const [key, value] of Object.entries(next)) {
+                const def = (defaults as Record<string, string>)[key] ?? '';
+                const trimmed = String(value ?? '');
+                if (!trimmed || trimmed === def) continue;
+                params.set(key, trimmed);
+            }
+            setSearchParams(params, { replace: true });
+        },
+        [setSearchParams]
+    );
+
+    const setFilter = useCallback(
+        (key: string, value: string) => {
+            const next = { ...filters, [key]: value } as typeof defaults;
+            writeFilters(next);
+        },
+        [filters, writeFilters]
+    );
+
+    const patchFilters = useCallback(
+        (patch: Partial<typeof defaults>) => {
+            const next = { ...filters, ...patch } as typeof defaults;
+            writeFilters(next);
+        },
+        [filters, writeFilters]
+    );
+
+    const selectedIndustry = filters.industry;
+    const serviceStatus = filters.service;
+    const searchQuery = filters.q;
+
+    const [draftQ, setDraftQ] = useState(filters.q);
+    useEffect(() => {
+        setDraftQ(filters.q);
+    }, [filters.q]);
+    const qDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => {
+        return () => {
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+        };
+    }, []);
+    const setSearchQuery = useCallback(
+        (value: string) => {
+            setDraftQ(value);
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+            qDebounceRef.current = setTimeout(() => setFilter('q', value), 300);
+        },
+        [setFilter]
+    );
+    const listReturnState = useMemo(
+        () => ({
+            from: `${location.pathname}${location.search}`,
+            fromLabel: 'Customers'
+        }),
+        [location.pathname, location.search]
+    );
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
@@ -208,14 +283,18 @@ export default function CustomersPage() {
                         <input
                             type="text"
                             placeholder="Search business, phone, town, or website..."
-                            value={searchQuery}
+                            value={draftQ}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="w-full pl-10 pr-9 py-2 text-xs sm:text-sm bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl placeholder:text-slate-400 text-slate-800 focus:bg-white focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/10 transition-all"
                         />
                         {searchQuery && (
                             <button
                                 type="button"
-                                onClick={() => setSearchQuery('')}
+                                onClick={() => {
+                                    setDraftQ('');
+                                    if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+                                    setFilter('q', '');
+                                }}
                                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
                             >
                                 <X className="w-3.5 h-3.5" />
@@ -259,7 +338,7 @@ export default function CustomersPage() {
                                         <button
                                             type="button"
                                             onClick={() => {
-                                                setSelectedIndustry('all');
+                                                setFilter('industry', 'all');
                                                 setIndustryDropdownOpen(false);
                                             }}
                                             className={cn(
@@ -277,7 +356,7 @@ export default function CustomersPage() {
                                                 key={ind.name}
                                                 type="button"
                                                 onClick={() => {
-                                                    setSelectedIndustry(ind.name);
+                                                    setFilter('industry', ind.name);
                                                     setIndustryDropdownOpen(false);
                                                 }}
                                                 className={cn(
@@ -333,7 +412,7 @@ export default function CustomersPage() {
                                                 key={opt.value}
                                                 type="button"
                                                 onClick={() => {
-                                                    setServiceStatus(opt.value);
+                                                    setFilter('service', opt.value);
                                                     setServiceDropdownOpen(false);
                                                 }}
                                                 className={cn(
@@ -367,7 +446,7 @@ export default function CustomersPage() {
                             <button
                                 key={pill.value}
                                 type="button"
-                                onClick={() => setSelectedIndustry(pill.value)}
+                                onClick={() => setFilter('industry', pill.value)}
                                 className={cn(
                                     'px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer shrink-0 select-none',
                                     active
@@ -402,11 +481,7 @@ export default function CustomersPage() {
                         {searchQuery || selectedIndustry !== 'all' || serviceStatus !== 'all' ? (
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setSearchQuery('');
-                                    setSelectedIndustry('all');
-                                    setServiceStatus('all');
-                                }}
+                                onClick={() => patchFilters({ q: '', industry: 'all', service: 'all' })}
                                 className="inline-flex items-center gap-2 bg-[#0B132B] hover:bg-[#1E293B] text-white px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-xs cursor-pointer"
                             >
                                 <span>Reset filters</span>
@@ -550,6 +625,7 @@ export default function CustomersPage() {
                                                 </button>
                                                 <Link
                                                     to={`/sales/leads/${c.id}`}
+                                                    state={listReturnState}
                                                     className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#F8FAFC] hover:bg-[#F1F5F9] border border-[#E2E8F0] text-[#0F172A] text-xs font-bold rounded-xl transition-colors"
                                                 >
                                                     <span>View CRM</span>

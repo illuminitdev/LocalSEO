@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     CheckSquare,
     Phone,
@@ -104,25 +104,110 @@ function displayIndustryName(name: string): string {
     return cleaned || 'General';
 }
 
+const SALES_TASK_FILTER_DEFAULTS = {
+    q: '',
+    status: 'all',
+    priority: 'all',
+    type: 'all',
+    leadKind: 'all',
+    industry: 'all',
+    statusDate: 'all' as StatusDateFilter,
+    statusDateCustom: '',
+    dueToday: '0',
+    page: '1'
+};
+
 export default function SalesTasks() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [tasks, setTasks] = useState<SalesLeadTask[]>([]);
     const [industries, setIndustries] = useState<Array<{ name: string; count: number }>>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    const [searchQuery, setSearchQuery] = useState('');
-    const [statusFilter, setStatusFilter] = useState<string>('all');
-    const [priorityFilter, setPriorityFilter] = useState<string>('all');
-    const [typeFilter, setTypeFilter] = useState<string>('all');
-    const [leadKindFilter, setLeadKindFilter] = useState<'all' | 'full_audit' | 'leads'>('all');
-    const [industryFilter, setIndustryFilter] = useState<string>('all');
-    const [statusDateFilter, setStatusDateFilter] = useState<StatusDateFilter>('all');
-    const [statusCustomDate, setStatusCustomDate] = useState<string>('');
-    const [dueTodayOnly, setDueTodayOnly] = useState(false);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const defaults = SALES_TASK_FILTER_DEFAULTS;
 
-    const TASKS_PER_PAGE = 10;
-    const [currentPage, setCurrentPage] = useState(1);
+    const filters = useMemo(() => {
+        const next = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+            const raw = searchParams.get(key);
+            if (raw != null && raw !== '') (next as Record<string, string>)[key] = raw;
+        }
+        return next;
+    }, [searchParams]);
+
+    const writeFilters = useCallback(
+        (next: typeof defaults) => {
+            const params = new URLSearchParams();
+            for (const [key, value] of Object.entries(next)) {
+                const def = (defaults as Record<string, string>)[key] ?? '';
+                const trimmed = String(value ?? '');
+                if (!trimmed || trimmed === def) continue;
+                if (key === 'page' && trimmed === '1') continue;
+                params.set(key, trimmed);
+            }
+            setSearchParams(params, { replace: true });
+        },
+        [setSearchParams]
+    );
+
+    const setFilter = useCallback(
+        (key: string, value: string) => {
+            const next = { ...filters, [key]: value } as typeof defaults;
+            if (key !== 'page' && key !== 'requestPage' && 'page' in next) (next as Record<string, string>).page = '1';
+            writeFilters(next);
+        },
+        [filters, writeFilters]
+    );
+
+    const patchFilters = useCallback(
+        (patch: Partial<typeof defaults>) => {
+            const next = { ...filters, ...patch } as typeof defaults;
+            const keys = Object.keys(patch);
+            const onlyPagination = keys.length > 0 && keys.every((k) => k === 'page' || k === 'requestPage');
+            if (!onlyPagination && 'page' in next && !('page' in patch)) (next as Record<string, string>).page = '1';
+            writeFilters(next);
+        },
+        [filters, writeFilters]
+    );
+
+    const [draftQ, setDraftQ] = useState(filters.q);
+    useEffect(() => {
+        setDraftQ(filters.q);
+    }, [filters.q]);
+    const qDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => {
+        return () => {
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+        };
+    }, []);
+    const setSearchQuery = useCallback(
+        (value: string) => {
+            setDraftQ(value);
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+            qDebounceRef.current = setTimeout(() => setFilter('q', value), 300);
+        },
+        [setFilter]
+    );
+
+    const searchQuery = filters.q;
+    const statusFilter = filters.status;
+    const priorityFilter = filters.priority;
+    const typeFilter = filters.type;
+    const leadKindFilter = filters.leadKind as 'all' | 'full_audit' | 'leads';
+    const industryFilter = filters.industry;
+    const statusDateFilter = filters.statusDate as StatusDateFilter;
+    const statusCustomDate = filters.statusDateCustom;
+    const dueTodayOnly = filters.dueToday === '1';
+    const currentPage = Math.max(1, Number(filters.page) || 1);
+    const setCurrentPage = useCallback(
+        (next: number | ((p: number) => number)) => {
+            const value = typeof next === 'function' ? next(currentPage) : next;
+            setFilter('page', String(Math.max(1, value)));
+        },
+        [currentPage, setFilter]
+    );
 
     const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
 
@@ -157,7 +242,11 @@ export default function SalesTasks() {
 
     const openLeadDetails = (task: SalesLeadTask, focusSection?: string) => {
         navigate(`/sales/leads/${encodeURIComponent(task.leadId)}${focusSection ? `#${focusSection}` : ''}`, {
-            state: { from: '/sales/tasks', fromLabel: 'Tasks', scrollTo: focusSection }
+            state: {
+                from: `${location.pathname}${location.search}`,
+                fromLabel: 'Tasks',
+                scrollTo: focusSection
+            }
         });
     };
 
@@ -391,9 +480,10 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                 <button
                     type="button"
                     onClick={() => {
-                        setStatusFilter(statusFilter === 'new' ? 'all' : 'new');
-                        setDueTodayOnly(false);
-                        setCurrentPage(1);
+                        patchFilters({
+                            status: statusFilter === 'new' ? 'all' : 'new',
+                            dueToday: '0'
+                        });
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-slate-300",
@@ -414,9 +504,10 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                 <button
                     type="button"
                     onClick={() => {
-                        setStatusFilter(statusFilter === 'contacted' ? 'all' : 'contacted');
-                        setDueTodayOnly(false);
-                        setCurrentPage(1);
+                        patchFilters({
+                            status: statusFilter === 'contacted' ? 'all' : 'contacted',
+                            dueToday: '0'
+                        });
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-blue-300",
@@ -437,9 +528,10 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                 <button
                     type="button"
                     onClick={() => {
-                        setStatusFilter(statusFilter === 'follow_up' ? 'all' : 'follow_up');
-                        setDueTodayOnly(false);
-                        setCurrentPage(1);
+                        patchFilters({
+                            status: statusFilter === 'follow_up' ? 'all' : 'follow_up',
+                            dueToday: '0'
+                        });
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-amber-300",
@@ -460,9 +552,10 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                 <button
                     type="button"
                     onClick={() => {
-                        setStatusFilter(statusFilter === 'interested' ? 'all' : 'interested');
-                        setDueTodayOnly(false);
-                        setCurrentPage(1);
+                        patchFilters({
+                            status: statusFilter === 'interested' ? 'all' : 'interested',
+                            dueToday: '0'
+                        });
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-emerald-300",
@@ -483,9 +576,10 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                 <button
                     type="button"
                     onClick={() => {
-                        setStatusFilter(statusFilter === 'converted' ? 'all' : 'converted');
-                        setDueTodayOnly(false);
-                        setCurrentPage(1);
+                        patchFilters({
+                            status: statusFilter === 'converted' ? 'all' : 'converted',
+                            dueToday: '0'
+                        });
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-purple-300",
@@ -506,9 +600,10 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                 <button
                     type="button"
                     onClick={() => {
-                        setDueTodayOnly(!dueTodayOnly);
-                        if (!dueTodayOnly) setStatusFilter('all');
-                        setCurrentPage(1);
+                        patchFilters({
+                            dueToday: dueTodayOnly ? '0' : '1',
+                            ...(!dueTodayOnly ? { status: 'all' } : {})
+                        });
                     }}
                     className={cn(
                         "bg-white border rounded-2xl p-3.5 shadow-xs text-left transition-all hover:border-rose-300",
@@ -544,7 +639,7 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                         <Search className="w-4 h-4 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2" />
                         <input
                             type="text"
-                            value={searchQuery}
+                            value={draftQ}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Search tasks, lead, notes…"
                             className="w-full pl-9 pr-3 py-1.5 text-xs bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl focus:outline-none focus:border-[#F59E0B] focus:bg-white"
@@ -553,7 +648,7 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
 
                     <select
                         value={statusFilter}
-                        onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
+                        onChange={(e) => setFilter('status', e.target.value)}
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                     >
                         <option value="all">All Lead Statuses ({industryScopedTasks.length})</option>
@@ -567,7 +662,7 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
 
                     <select
                         value={industryFilter}
-                        onChange={(e) => { setIndustryFilter(e.target.value); setCurrentPage(1); }}
+                        onChange={(e) => setFilter('industry', e.target.value)}
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none max-w-[200px]"
                         title="Filter by business / service industry"
                     >
@@ -581,7 +676,7 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
 
                     <select
                         value={priorityFilter}
-                        onChange={(e) => { setPriorityFilter(e.target.value); setCurrentPage(1); }}
+                        onChange={(e) => setFilter('priority', e.target.value)}
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                     >
                         <option value="all">All Priorities</option>
@@ -596,10 +691,7 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                             <Calendar className="w-3.5 h-3.5 text-[#94A3B8] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                             <select
                                 value={statusDateFilter}
-                                onChange={(e) => {
-                                    setStatusDateFilter(e.target.value as StatusDateFilter);
-                                    setCurrentPage(1);
-                                }}
+                                onChange={(e) => setFilter('statusDate', e.target.value)}
                                 className="pl-8 pr-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                                 title="Filter by status updated date"
                             >
@@ -615,10 +707,7 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                             <input
                                 type="date"
                                 value={statusCustomDate}
-                                onChange={(e) => {
-                                    setStatusCustomDate(e.target.value);
-                                    setCurrentPage(1);
-                                }}
+                                onChange={(e) => setFilter('statusDateCustom', e.target.value)}
                                 className="px-2 py-1 text-xs bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                             />
                         )}
@@ -626,7 +715,7 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
 
                     <select
                         value={typeFilter}
-                        onChange={(e) => { setTypeFilter(e.target.value); setCurrentPage(1); }}
+                        onChange={(e) => setFilter('type', e.target.value)}
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                     >
                         <option value="all">All Task Types</option>
@@ -639,10 +728,7 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
 
                     <select
                         value={leadKindFilter}
-                        onChange={(e) => {
-                            setLeadKindFilter(e.target.value as 'all' | 'full_audit' | 'leads');
-                            setCurrentPage(1);
-                        }}
+                        onChange={(e) => setFilter('leadKind', e.target.value)}
                         className="px-3 py-1.5 text-xs font-bold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-[#0F172A] focus:outline-none"
                         title="Filter by lead type"
                     >
@@ -653,7 +739,7 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
 
                     <button
                         type="button"
-                        onClick={() => { setDueTodayOnly((v) => !v); setCurrentPage(1); }}
+                        onClick={() => setFilter('dueToday', dueTodayOnly ? '0' : '1')}
                         className={cn(
                             'px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors shrink-0',
                             dueTodayOnly

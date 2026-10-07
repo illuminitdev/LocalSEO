@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback, useMemo, type FormEvent } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useEffect, useState, useCallback, useMemo, useRef, type FormEvent } from 'react';
+import { useSearchParams, Link, useLocation } from 'react-router-dom';
 import {
     Phone,
     RefreshCw,
@@ -42,9 +42,92 @@ const DISPOSITION_CONFIG: Record<string, { label: string; bg: string; text: stri
     other: { label: 'Other', bg: 'bg-slate-50', text: 'text-slate-800', border: 'border-slate-300' }
 };
 
+const CALL_LOG_FILTER_DEFAULTS = {
+    q: '',
+    disposition: 'all',
+    page: '1'
+};
+
 export default function SalesActivityLogs() {
-    const [searchParams] = useSearchParams();
+    const location = useLocation();
+    const [searchParams, setSearchParams] = useSearchParams();
     const queryLeadId = searchParams.get('leadId') || '';
+    const defaults = CALL_LOG_FILTER_DEFAULTS;
+    const PRESERVE = ['leadId'] as const;
+
+    const filters = useMemo(() => {
+        const next = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+            const raw = searchParams.get(key);
+            if (raw != null && raw !== '') (next as Record<string, string>)[key] = raw;
+        }
+        return next;
+    }, [searchParams]);
+
+    const writeFilters = useCallback(
+        (next: typeof defaults) => {
+            const params = new URLSearchParams();
+            for (const key of PRESERVE) {
+                const v = searchParams.get(key);
+                if (v) params.set(key, v);
+            }
+            for (const [key, value] of Object.entries(next)) {
+                const def = (defaults as Record<string, string>)[key] ?? '';
+                const trimmed = String(value ?? '');
+                if (!trimmed || trimmed === def) continue;
+                if (key === 'page' && trimmed === '1') continue;
+                params.set(key, trimmed);
+            }
+            setSearchParams(params, { replace: true });
+        },
+        [searchParams, setSearchParams]
+    );
+
+    const setFilter = useCallback(
+        (key: string, value: string) => {
+            const next = { ...filters, [key]: value } as typeof defaults;
+            if (key !== 'page' && key !== 'requestPage' && 'page' in next) (next as Record<string, string>).page = '1';
+            writeFilters(next);
+        },
+        [filters, writeFilters]
+    );
+
+    const [draftQ, setDraftQ] = useState(filters.q);
+    useEffect(() => {
+        setDraftQ(filters.q);
+    }, [filters.q]);
+    const qDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => {
+        return () => {
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+        };
+    }, []);
+    const setSearchQuery = useCallback(
+        (value: string) => {
+            setDraftQ(value);
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+            qDebounceRef.current = setTimeout(() => setFilter('q', value), 300);
+        },
+        [setFilter]
+    );
+
+    const searchQuery = filters.q;
+    const selectedDispositionFilter = filters.disposition;
+    const activityPage = Math.max(1, Number(filters.page) || 1);
+    const setActivityPage = useCallback(
+        (next: number | ((p: number) => number)) => {
+            const value = typeof next === 'function' ? next(activityPage) : next;
+            setFilter('page', String(Math.max(1, value)));
+        },
+        [activityPage, setFilter]
+    );
+    const listReturnState = useMemo(
+        () => ({
+            from: `${location.pathname}${location.search}`,
+            fromLabel: 'Call logs'
+        }),
+        [location.pathname, location.search]
+    );
 
     const [activities, setActivities] = useState<SalesLeadActivity[]>([]);
     const [leads, setLeads] = useState<any[]>([]);
@@ -58,10 +141,6 @@ export default function SalesActivityLogs() {
     const [callNotes, setCallNotes] = useState('');
     const [nextFollowUp, setNextFollowUp] = useState('');
     const [submitting, setSubmitting] = useState(false);
-
-    // Filters
-    const [selectedDispositionFilter, setSelectedDispositionFilter] = useState<string>('all');
-    const [searchQuery, setSearchQuery] = useState('');
 
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -145,7 +224,6 @@ export default function SalesActivityLogs() {
         }
     };
 
-    const [activityPage, setActivityPage] = useState(1);
     const ACTIVITIES_PER_PAGE = 5;
 
     const filteredActivities = useMemo(() => {
@@ -160,10 +238,6 @@ export default function SalesActivityLogs() {
             );
         });
     }, [activities, searchQuery]);
-
-    useEffect(() => {
-        setActivityPage(1);
-    }, [searchQuery, selectedDispositionFilter]);
 
     const totalActivityPages = Math.max(1, Math.ceil(filteredActivities.length / ACTIVITIES_PER_PAGE));
     const currentActivityPage = Math.min(activityPage, totalActivityPages);
@@ -265,6 +339,7 @@ export default function SalesActivityLogs() {
                                 {selectedLeadId ? (
                                     <Link
                                         to={`/sales/leads/${encodeURIComponent(selectedLeadId)}`}
+                                        state={listReturnState}
                                         className="inline-flex items-center gap-1 text-[11px] font-bold text-[#F97316] hover:text-[#EA580C] bg-orange-50/60 hover:bg-orange-50 border border-orange-200/80 px-2.5 py-1 rounded-lg transition-colors shadow-2xs"
                                     >
                                         <span>View profile</span>
@@ -372,7 +447,7 @@ export default function SalesActivityLogs() {
                             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                             <input
                                 type="text"
-                                value={searchQuery}
+                                value={draftQ}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder="Search customer, phone, or notes..."
                                 className="w-full pl-9 pr-3 py-1.5 text-xs bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#F97316] focus:bg-white transition-colors"
@@ -381,7 +456,7 @@ export default function SalesActivityLogs() {
 
                         <select
                             value={selectedDispositionFilter}
-                            onChange={(e) => setSelectedDispositionFilter(e.target.value)}
+                            onChange={(e) => setFilter('disposition', e.target.value)}
                             className="px-3 py-1.5 text-xs font-semibold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-slate-800 focus:outline-none focus:border-[#F97316] cursor-pointer"
                         >
                             <option value="all">All outcomes</option>
@@ -444,6 +519,7 @@ export default function SalesActivityLogs() {
                                                         {act.leadBusinessName && (
                                                             <Link
                                                                 to={`/sales/leads/${encodeURIComponent(act.leadId)}`}
+                                                                state={listReturnState}
                                                                 className="inline-flex items-center gap-1 font-bold text-xs text-[#F97316] hover:text-[#EA580C] hover:underline"
                                                             >
                                                                 <Building2 className="w-3.5 h-3.5 text-[#F97316]" />

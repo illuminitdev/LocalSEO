@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback, useMemo, type FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useEffect, useState, useCallback, useMemo, useRef, type FormEvent } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
     Bell,
     Check,
@@ -170,10 +170,90 @@ const PRIORITY_BADGES: Record<SalesTaskPriority, { label: string; bg: string; te
     low: { label: 'Low', bg: 'bg-slate-50 border-slate-200', text: 'text-slate-600', dot: 'bg-slate-400' }
 };
 
+const REMINDER_FILTER_DEFAULTS = {
+    q: '',
+    status: 'all',
+    priority: 'all',
+    type: 'all',
+    dueToday: '0',
+    sort: 'newest'
+};
+
 export default function SalesReminders() {
     const { show } = useToast();
-    const [searchParams] = useSearchParams();
+    const location = useLocation();
+    const [searchParams, setSearchParams] = useSearchParams();
     const initialLeadId = searchParams.get('leadId') || '';
+    const defaults = REMINDER_FILTER_DEFAULTS;
+    const PRESERVE = ['leadId'] as const;
+
+    const filters = useMemo(() => {
+        const next = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+            const raw = searchParams.get(key);
+            if (raw != null && raw !== '') (next as Record<string, string>)[key] = raw;
+        }
+        return next;
+    }, [searchParams]);
+
+    const writeFilters = useCallback(
+        (next: typeof defaults) => {
+            const params = new URLSearchParams();
+            for (const key of PRESERVE) {
+                const v = searchParams.get(key);
+                if (v) params.set(key, v);
+            }
+            for (const [key, value] of Object.entries(next)) {
+                const def = (defaults as Record<string, string>)[key] ?? '';
+                const trimmed = String(value ?? '');
+                if (!trimmed || trimmed === def) continue;
+                params.set(key, trimmed);
+            }
+            setSearchParams(params, { replace: true });
+        },
+        [searchParams, setSearchParams]
+    );
+
+    const setFilter = useCallback(
+        (key: string, value: string) => {
+            const next = { ...filters, [key]: value } as typeof defaults;
+            writeFilters(next);
+        },
+        [filters, writeFilters]
+    );
+
+    const [draftQ, setDraftQ] = useState(filters.q);
+    useEffect(() => {
+        setDraftQ(filters.q);
+    }, [filters.q]);
+    const qDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => {
+        return () => {
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+        };
+    }, []);
+    const setSearchQuery = useCallback(
+        (value: string) => {
+            setDraftQ(value);
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+            qDebounceRef.current = setTimeout(() => setFilter('q', value), 300);
+        },
+        [setFilter]
+    );
+
+    const searchQuery = filters.q;
+    const statusFilter = filters.status;
+    const priorityFilter = filters.priority;
+    const typeFilter = filters.type;
+    const dueTodayOnly = filters.dueToday === '1';
+    const sortNewestFirst = filters.sort !== 'due';
+    const listReturnState = useMemo(
+        () => ({
+            from: `${location.pathname}${location.search}`,
+            fromLabel: 'Reminders'
+        }),
+        [location.pathname, location.search]
+    );
 
     const [tasks, setTasks] = useState<SalesLeadTask[]>([]);
     const [leads, setLeads] = useState<SalesLead[]>([]);
@@ -181,14 +261,6 @@ export default function SalesReminders() {
     const [error, setError] = useState('');
     const [selectedHistoryTask, setSelectedHistoryTask] = useState<SalesLeadTask | null>(null);
     const [showLearnMore, setShowLearnMore] = useState(false);
-
-    // Filters
-    const [searchQuery, setSearchQuery] = useState('');
-    const [statusFilter, setStatusFilter] = useState<string>('all');
-    const [priorityFilter, setPriorityFilter] = useState<string>('all');
-    const [typeFilter, setTypeFilter] = useState<string>('all');
-    const [dueTodayOnly, setDueTodayOnly] = useState(false);
-    const [sortNewestFirst, setSortNewestFirst] = useState(true);
 
     // Create Reminder Form State
     const [taskType, setTaskType] = useState<SalesTaskType>('follow_up_call');
@@ -625,7 +697,7 @@ export default function SalesReminders() {
                         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                         <input
                             type="text"
-                            value={searchQuery}
+                            value={draftQ}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Search reminder title, lead, phone..."
                             className="w-full pl-9 pr-3 py-2 text-xs bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#F97316] focus:bg-white transition-colors"
@@ -634,7 +706,7 @@ export default function SalesReminders() {
 
                     <select
                         value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
+                        onChange={(e) => setFilter('status', e.target.value)}
                         className="px-3 py-2 text-xs font-semibold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-slate-800 focus:outline-none focus:border-[#F97316] cursor-pointer"
                     >
                         <option value="all">All Reminders ({tasks.length})</option>
@@ -646,7 +718,7 @@ export default function SalesReminders() {
 
                     <select
                         value={priorityFilter}
-                        onChange={(e) => setPriorityFilter(e.target.value)}
+                        onChange={(e) => setFilter('priority', e.target.value)}
                         className="px-3 py-2 text-xs font-semibold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-slate-800 focus:outline-none focus:border-[#F97316] cursor-pointer"
                     >
                         <option value="all">All Priorities</option>
@@ -658,7 +730,7 @@ export default function SalesReminders() {
 
                     <select
                         value={typeFilter}
-                        onChange={(e) => setTypeFilter(e.target.value)}
+                        onChange={(e) => setFilter('type', e.target.value)}
                         className="px-3 py-2 text-xs font-semibold bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-slate-800 focus:outline-none focus:border-[#F97316] cursor-pointer"
                     >
                         <option value="all">All Types</option>
@@ -671,7 +743,7 @@ export default function SalesReminders() {
 
                     <button
                         type="button"
-                        onClick={() => setDueTodayOnly((v) => !v)}
+                        onClick={() => setFilter('dueToday', dueTodayOnly ? '0' : '1')}
                         className={cn(
                             'px-3 py-2 rounded-xl border text-xs font-semibold transition-colors cursor-pointer',
                             dueTodayOnly
@@ -686,7 +758,7 @@ export default function SalesReminders() {
                 {/* Sort Toggle Button */}
                 <button
                     type="button"
-                    onClick={() => setSortNewestFirst((v) => !v)}
+                    onClick={() => setFilter('sort', sortNewestFirst ? 'due' : 'newest')}
                     className="p-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer shrink-0"
                     title={sortNewestFirst ? 'Sorted by: Newest First (Click to sort by Due Date)' : 'Sorted by: Due Date (Click to sort by Newest)'}
                 >
@@ -795,6 +867,7 @@ export default function SalesReminders() {
                                             <div className="mt-2.5 flex items-center gap-2 flex-wrap text-xs">
                                                 <Link
                                                     to={`/sales/leads/${encodeURIComponent(task.leadId)}`}
+                                                    state={listReturnState}
                                                     className="inline-flex items-center gap-1.5 font-bold text-[#F97316] hover:text-[#EA580C] bg-orange-50 border border-orange-200/80 px-2.5 py-1 rounded-lg hover:underline group/lead"
                                                 >
                                                     <Building2 className="w-3.5 h-3.5 text-[#F97316]" />

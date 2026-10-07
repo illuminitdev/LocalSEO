@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
     AlertCircle,
     ArrowRight,
@@ -81,7 +81,67 @@ function formatRelativeTime(iso?: string | null) {
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+const QUEUE_FILTER_DEFAULTS = {
+    date: 'today' as DateFilterMode,
+    customDate: new Date().toISOString().slice(0, 10)
+};
+
 export default function SalesQueue() {
+    const location = useLocation();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const defaults = QUEUE_FILTER_DEFAULTS;
+
+    const filters = useMemo(() => {
+        const next = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+            const raw = searchParams.get(key);
+            if (raw != null && raw !== '') (next as Record<string, string>)[key] = raw;
+        }
+        return next;
+    }, [searchParams]);
+
+    const writeFilters = useCallback(
+        (next: typeof defaults) => {
+            const params = new URLSearchParams();
+            for (const [key, value] of Object.entries(next)) {
+                const def = (defaults as Record<string, string>)[key] ?? '';
+                const trimmed = String(value ?? '');
+                if (!trimmed || trimmed === def) continue;
+                params.set(key, trimmed);
+            }
+            setSearchParams(params, { replace: true });
+        },
+        [setSearchParams]
+    );
+
+    const setFilter = useCallback(
+        (key: string, value: string) => {
+            const next = { ...filters, [key]: value } as typeof defaults;
+            writeFilters(next);
+        },
+        [filters, writeFilters]
+    );
+
+    const patchFilters = useCallback(
+        (patch: Partial<typeof defaults>) => {
+            const next = { ...filters, ...patch } as typeof defaults;
+            writeFilters(next);
+        },
+        [filters, writeFilters]
+    );
+    const dateFilter = filters.date as DateFilterMode;
+    const customDate = filters.customDate;
+    const setDateFilter = useCallback(
+        (mode: DateFilterMode) => setFilter('date', mode),
+        [setFilter]
+    );
+    const listReturnState = useMemo(
+        () => ({
+            from: `${location.pathname}${location.search}`,
+            fromLabel: 'Dashboard'
+        }),
+        [location.pathname, location.search]
+    );
     const [summary, setSummary] = useState<SalesSummaryMetrics>({
         pendingTasksCount: 0,
         inProgressTasksCount: 0,
@@ -97,9 +157,6 @@ export default function SalesQueue() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    // Date Filter State
-    const [dateFilter, setDateFilter] = useState<DateFilterMode>('today');
-    const [customDate, setCustomDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
     const [datePickerOpen, setDatePickerOpen] = useState(false);
     const datePickerRef = useRef<HTMLDivElement | null>(null);
 
@@ -484,8 +541,7 @@ export default function SalesQueue() {
                                             value={customDate}
                                             onChange={(e) => {
                                                 if (e.target.value) {
-                                                    setCustomDate(e.target.value);
-                                                    setDateFilter('custom');
+                                                    patchFilters({ customDate: e.target.value, date: 'custom' });
                                                     setDatePickerOpen(false);
                                                 }
                                             }}
@@ -646,6 +702,7 @@ export default function SalesQueue() {
                                     <Link
                                         key={task.id}
                                         to={`/sales/leads/${encodeURIComponent(task.leadId)}#tasks`}
+                                        state={listReturnState}
                                         className="flex items-start gap-3 px-4 py-3 hover:bg-[#F8FAFC] transition-colors"
                                     >
                                         <span
@@ -707,6 +764,7 @@ export default function SalesQueue() {
                                 <Link
                                     key={lead.id}
                                     to={`/sales/leads/${encodeURIComponent(lead.id)}`}
+                                    state={listReturnState}
                                     className="flex items-center gap-3 px-4 py-3 hover:bg-[#F8FAFC] transition-colors"
                                 >
                                     <div className="w-9 h-9 rounded-xl bg-[#FFF7ED] text-orange-700 flex items-center justify-center text-xs font-black shrink-0">
@@ -759,6 +817,7 @@ export default function SalesQueue() {
                                 <Link
                                     key={act.id}
                                     to={`/sales/leads/${encodeURIComponent(act.leadId)}`}
+                                    state={listReturnState}
                                     className="flex items-start gap-3 px-4 py-3 hover:bg-[#F8FAFC] transition-colors"
                                 >
                                     <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
