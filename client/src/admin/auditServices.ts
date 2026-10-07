@@ -53,6 +53,32 @@ export const AUDIT_SERVICE_OPTIONS: AuditServiceOption[] = [
     { id: 'other', label: 'Other', search: '', tradeId: 'general' }
 ];
 
+/** Match a lead industry or service to the audit dropdown. Unknown names use Other. */
+export function matchAuditServiceOption(raw: string): { serviceId: string; serviceOther: string } {
+    const text = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (!text) return { serviceId: '', serviceOther: '' };
+    const norm = text.toLowerCase();
+    const options = AUDIT_SERVICE_OPTIONS.filter((o) => o.id !== 'other');
+    let best: { id: string; score: number } | null = null;
+    for (const option of options) {
+        const label = option.label.toLowerCase();
+        const search = option.search.toLowerCase();
+        let score = 0;
+        if (option.id === norm || label === norm || search === norm) score = 100;
+        else if (search.length >= 4 && norm.includes(search)) score = 80 + search.length;
+        else if (norm.length >= 4 && label.includes(norm)) score = 70 + norm.length;
+        else if (label.length >= 4 && norm.includes(label)) score = 60 + label.length;
+        else {
+            const token = search.split(/\s+/).find((word) => word.length >= 4);
+            const stem = token ? token.slice(0, Math.min(5, token.length)) : '';
+            if (stem.length >= 4 && norm.includes(stem)) score = 40 + stem.length;
+        }
+        if (score > 0 && (!best || score > best.score)) best = { id: option.id, score };
+    }
+    if (best) return { serviceId: best.id, serviceOther: '' };
+    return { serviceId: 'other', serviceOther: text };
+}
+
 export function resolveAuditService(input: {
     serviceId?: string;
     serviceOther?: string;

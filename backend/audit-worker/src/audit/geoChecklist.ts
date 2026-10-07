@@ -109,13 +109,13 @@ export const GEO_CHECKLIST_DEFS: Array<{
     items: [
       {
         id: 'geo_ai_1',
-        label: 'Business mentioned in AI answers',
-        definition: 'Whether ChatGPT, Claude, or Perplexity name this business in their replies.'
+        label: 'Brand mentioned in AI answers',
+        definition: 'Whether ChatGPT, Claude, or Perplexity name this brand in their top 5.'
       },
       {
         id: 'geo_ai_2',
-        label: 'Business recommended for local searches',
-        definition: 'Whether an AI answer uses recommendation language alongside the brand.'
+        label: 'Brand recommended for local searches',
+        definition: 'Whether an AI answer uses recommendation language alongside the brand in the top 5.'
       },
       {
         id: 'geo_ai_3',
@@ -365,27 +365,28 @@ export function buildGeoChecklist(opts: {
 
   const aiVis: GeoChecklistItem[] = [
     (() => {
+      const who = name || 'The brand';
       const s = statusFromBool(
         anyMeasured ? anyMentioned : null,
-        `Mentioned in ${engines.filter((e) => e.mentioned).map((e) => e.label || e.engine).join(' / ') || 'AI'}`,
-        'Not mentioned in measured ChatGPT / Claude / Perplexity answers',
-        'ChatGPT, Claude, and Perplexity answers were not confirmed for this business'
+        `${who} is in the top 5 on ${engines.filter((e) => e.mentioned).map((e) => e.label || e.engine).join(' / ') || 'AI'}`,
+        `${who} is not in the top 5 of measured ChatGPT, Claude, or Perplexity answers`,
+        'ChatGPT, Claude, and Perplexity answers were not confirmed'
       );
-      return item('geo_ai_1', 'Business mentioned in AI answers', s.status, s.evidence);
+      return item('geo_ai_1', 'Brand mentioned in AI answers', s.status, s.evidence);
     })(),
     (() => {
       const s = statusFromBool(
         anyMeasured ? recommended : null,
         'AI answer uses recommendation language with the brand',
         'No clear recommendation language with the brand in measured answers',
-        'ChatGPT, Claude, and Perplexity answers were not confirmed for this business'
+        'ChatGPT, Claude, and Perplexity answers were not confirmed'
       );
-      return item('geo_ai_2', 'Business recommended for local searches', s.status, s.evidence);
+      return item('geo_ai_2', 'Brand recommended for local searches', s.status, s.evidence);
     })(),
     (() => {
       const slice = nearSlice;
       const stats = promptSliceStats(slice);
-      const prompt = slice[0]?.prompt || (service && city ? `${service} near ${city}` : 'service near location');
+      const prompt = slice[0]?.prompt || (service ? `${service} near me` : 'service near me');
       const s = statusFromBool(
         stats.anyMeasured ? stats.anyMentioned : null,
         `Mentioned for “${prompt}”`,

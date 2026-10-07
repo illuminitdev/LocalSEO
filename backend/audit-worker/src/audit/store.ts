@@ -146,13 +146,15 @@ export async function saveAudit(audit: AuditRecord) {
     } | null;
     const aeoChecklist = buildAeoCoreChecklist(audit);
     const localSeoChecklist = buildLocalSeoCoreChecklist(audit);
+    const reportIssues = (audit.aiReport as { criticalIssues?: unknown } | null | undefined)?.criticalIssues;
     audit.score = computeScore(audit.checklist?.checks || [], {
       localRank: gbpLookup?.localRank || null,
       aiEngineChecks: Array.isArray(gbpLookup?.aiEngineChecks) ? gbpLookup.aiEngineChecks : [],
       aeoChecklist,
       aeoQueries: Array.isArray(audit.aeoSerpScreenshots) ? audit.aeoSerpScreenshots : [],
       localSeoChecklist,
-      geoChecklist: (gbpLookup?.geoChecklist as { groups?: Array<{ items?: any[] }> } | null) || null
+      geoChecklist: (gbpLookup?.geoChecklist as { groups?: Array<{ items?: any[] }> } | null) || null,
+      criticalIssues: Array.isArray(reportIssues) ? reportIssues : []
     }) as AuditRecord['score'];
   }
   audit.topFixes = deriveTopFixes(audit);
@@ -458,6 +460,7 @@ export function publicReportView(audit: AuditRecord | null) {
                     ? row.promptKey
                     : null,
                 mentioned: typeof row?.mentioned === 'boolean' ? row.mentioned : null,
+                brandName: String(row?.brandName || '').trim() || null,
                 recommendedLikely:
                   typeof row?.recommendedLikely === 'boolean' ? row.recommendedLikely : null,
                 citedHosts: Array.isArray(row?.citedHosts)

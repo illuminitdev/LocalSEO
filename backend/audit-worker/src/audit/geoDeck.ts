@@ -34,15 +34,17 @@ export function buildGeoFixes(audit) {
   const geoPromptSummary =
     geoPromptTexts.length > 0
       ? geoPromptTexts.map((p) => `“${p}”`).join(', ')
-      : `“${measuredQuery}”, “best ${service} in ${city}”, “${service} near me”`;
+      : `“${service} near me”, “best ${service}”, “${service} in my area”`;
+  const areaName = city && city !== 'the local area' ? city : 'the city or area';
+  const areaNote = `Searched for ${areaName}, not a street or road.`;
 
   const geoActions = toActions(geoFails, 'Medium');
 
   return {
     title: 'GEO: AI mentions and citations',
-    visualIntro: `Whether ChatGPT, Claude, and Perplexity name ${name} for the measured prompts: ${geoPromptSummary}.`,
-    goalLine: `Get ${name} named and cited in ChatGPT, Claude, and Perplexity for ${geoPromptSummary}.`,
-    verifyHint: `Ask ChatGPT, Claude, and Perplexity: ${geoPromptSummary}.`,
+    visualIntro: `Whether ChatGPT, Claude, and Perplexity name ${name} in the top 5 for ${geoPromptSummary}. ${areaNote}`,
+    goalLine: `Get ${name} named in the top 5 on ChatGPT, Claude, and Perplexity for ${geoPromptSummary}. ${areaNote}`,
+    verifyHint: `Ask ChatGPT, Claude, and Perplexity: ${geoPromptSummary}. ${areaNote}`,
     queryCards: [
       {
         query: measuredQuery,

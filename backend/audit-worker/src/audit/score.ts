@@ -99,6 +99,7 @@ type ScoreContext = {
     aeo?: any[] | null;
     geo?: any[] | null;
   } | null;
+  criticalIssues?: any[] | null;
 };
 
 const MAP_POSITION_POINTS = [0, 100, 90, 80, 70, 60, 50, 40, 30, 20, 10];
@@ -126,17 +127,16 @@ function aeoRowsFromQueries(queries: any[] = []) {
   const out: Array<{ id: string; status: string; label: string; evidence: string }> = [];
   for (const row of queries) {
     if (!row || row.serpMeasured !== true) continue;
-    if (typeof row.dataUrl !== 'string' || !row.dataUrl.startsWith('data:image/')) continue;
     if (row.businessNamed !== true && row.businessNamed !== false) continue;
     const query = String(row.query || '').trim();
     const named = row.businessNamed === true;
     out.push({
       id: `aeo_query_${out.length + 1}`,
       status: named ? 'pass' : 'fail',
-      label: query ? `Google result for “${query}”` : 'Google result',
+      label: query ? `Answer visibility for “${query}”` : 'Answer visibility',
       evidence: named
-        ? 'The business name appears in the answer box, People Also Ask, or the organic results.'
-        : 'This search was measured, and the business name is not in the answer box, People Also Ask, or the organic results.'
+        ? 'The brand is visible in People Also Ask or the answer box.'
+        : 'This question was measured, and the brand is not visible in People Also Ask or the answer box.'
     });
   }
   return out;
@@ -232,13 +232,14 @@ function mentionChecksFromEngines(rows: any[] = []) {
     const prompt = String(row.prompt || '').trim();
     const quoted = prompt ? ` for “${prompt}”` : '';
     const mentioned = row.mentioned === true;
+    const brand = String(row.brandName || '').trim() || 'the brand';
     out.push({
       id: `llm_mention_${out.length + 1}`,
       status: mentioned ? 'pass' : 'fail',
       label: `${engine} mentioned${quoted}`,
       evidence: mentioned
-        ? `${engine} named the business${quoted}.`
-        : `${engine} did not name the business${quoted}.`
+        ? `${engine} named ${brand} in the top 5${quoted}.`
+        : `${engine} did not name ${brand} in the top 5${quoted}.`
     });
   }
   return out;
@@ -349,7 +350,13 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
   const inPack = rank && typeof rank.position === 'number';
   const position = inPack ? Number(rank.position) : null;
 
-  const total = Math.round(local.score * 0.4 + aeo.score * 0.3 + geo.score * 0.3);
+  const measuredTotal = Math.round(local.score * 0.4 + aeo.score * 0.3 + geo.score * 0.3);
+  const criticalIssueCount = Math.min(
+    4,
+    (Array.isArray(context.criticalIssues) ? context.criticalIssues : []).filter(Boolean).length
+  );
+  const criticalPenalty = criticalIssueCount * 8;
+  const total = Math.min(70, Math.max(0, measuredTotal - criticalPenalty));
 
   const triad = {
     local_seo: {
@@ -389,12 +396,15 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
   return {
     mode: 'deep-local-aeo-geo',
     total,
+    measuredTotal,
+    criticalIssueCount,
+    criticalPenalty,
     max: 100,
     band: deepBand(total),
     pillars: [triad.local_seo, triad.aeo, triad.geo],
     triad,
     note:
-      'Overall = Local SEO 40% + AEO 30% + GEO 30% (on-site checks). Unknown/N/A checks are excluded.',
+      'Overall = Local SEO 40% + AEO 30% + GEO 30%, shown out of 100. Each of up to four critical issues deducts 8 points, so the result stays below 71. Unknown/N/A checks are excluded.',
     localPack: inPack
       ? { listed: true, position }
       : rank

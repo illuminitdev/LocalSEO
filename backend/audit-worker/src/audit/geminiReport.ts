@@ -478,7 +478,7 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
     };
   }
 
-  // AEO Visual queryCards are measured SERP screenshots — drop any Gemini-invented SERP mocks
+  // AEO queryCards are measured answer visibility — drop any Gemini-invented cards
   if (out.aeoFixes) {
     const { queryCards: _dropCards, ...aeoRest } = out.aeoFixes;
     out.aeoFixes = aeoRest;
@@ -750,7 +750,7 @@ Return ONLY JSON:
   },
   "aeoFixes": {
     "title": "AEO: Answer Engine Optimisation",
-    "visualIntro": "one sentence about question / FAQ search readiness for this service and city — AEO Visual uses measured Google SERP screenshots (do not invent SERP cards)",
+    "visualIntro": "one sentence about question / FAQ search readiness — AEO shows People Also Ask and answer visibility, not screenshots",
     "priorities": [
       { "priority": "Critical|High|Medium", "title": "", "detail": "", "howTo": "concrete how-to steps", "issue": "", "evidence": "", "impact": "", "recommendation": "" }
     ],
@@ -787,7 +787,7 @@ Return ONLY JSON:
 
 For every criticalIssue, finding, priorityFix, and deck action/priority use Issue → Evidence → Impact → Recommendation → Priority (map title/detail/why/action into those fields; keep existing keys too).
 Include exactly 4 criticalIssues covering Local SEO, AEO, and GEO when those pillars have failed checks, 4-6 findings, exactly 3 priorityFixes, roadmap months 1–3,
-do NOT generate aeoFixes.queryCards / featuredSnippet / paaQuestions (AEO Visual uses measured Google SERP screenshots). geoFixes.queryCards may keep the single measured Maps query for the existing report layout; do not narrate that card as the GEO finding. 3-4 Local SEO actions on GBP, NAP, citations, or Maps. 3-4 GEO actions on AI mentions and citations. 3-4 AEO priorities on FAQ and direct answers.
+do NOT generate aeoFixes.queryCards / featuredSnippet / paaQuestions (AEO shows measured People Also Ask and answer visibility, not screenshots). geoFixes.queryCards may keep the single measured Maps query for the existing report layout; do not narrate that card as the GEO finding. 3-4 Local SEO actions on GBP, NAP, citations, or Maps. 3-4 GEO actions on AI mentions and citations. 3-4 AEO priorities on FAQ and direct answers.
 Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (you may refine titles only — never change phone/address facts or invent missing phones).`;
 
   let lastError;
@@ -842,7 +842,7 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
         priorities: Array.isArray(parsed.aeoFixes?.priorities)
           ? parsed.aeoFixes.priorities.slice(0, 4)
           : fallbacks.aeoFixes.priorities,
-        // Measured Google SERP screenshots only — never Gemini-invented snippet/PAA cards
+        // Measured answer visibility only — never Gemini-invented snippet cards
         queryCards: Array.isArray(fallbacks.aeoFixes.queryCards)
           ? fallbacks.aeoFixes.queryCards
           : []

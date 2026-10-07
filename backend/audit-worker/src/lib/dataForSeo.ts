@@ -617,37 +617,17 @@ export async function captureAeoSerpScreenshot(opts: {
 
       const items = Array.isArray(taskResult?.result?.[0]?.items) ? taskResult.result[0].items : [];
       measured = extractAeoSerpFacts(items, String(opts.businessName || ''));
-
-      let dataUrl = await captureSerpScreenshotDataUrl(taskId, { timeoutMs: 50000 });
-      if (!dataUrl) {
-        console.warn('[dataForSeo] AEO screenshot attempt', attempt + 1, 'no image');
-        continue;
-      }
-      dataUrl = await cropSerpScreenshotToLocalPack(dataUrl, null, {
-        maxHeight: 720,
-        minHeight: 420,
-        quality: 58,
-        maxBase64Len: 1_200_000
-      });
-      if (dataUrl.startsWith('data:image/')) {
-        return { dataUrl, query, capturedAt: new Date().toISOString(), ...measured };
-      }
+      return {
+        query,
+        capturedAt: new Date().toISOString(),
+        ...measured
+      };
     } catch (err: any) {
       const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
-      console.warn('[dataForSeo] AEO screenshot attempt', attempt + 1, msg || 'failed');
+      console.warn('[dataForSeo] AEO search attempt', attempt + 1, msg || 'failed');
     } finally {
       clearTimeout(timer);
     }
-  }
-
-  if (measured) {
-    return {
-      query,
-      skipped: true,
-      reason: 'Google results were read, but the screenshot could not be captured',
-      capturedAt: new Date().toISOString(),
-      ...measured
-    };
   }
 
   return {
@@ -920,6 +900,7 @@ export type AiEngineCheckResult = {
   prompt: string;
   promptKey?: GeoAiPromptKey;
   mentioned: boolean | null;
+  brandName?: string;
   recommendedLikely?: boolean | null;
   citedHosts?: string[];
   answerExcerpt: string;
@@ -999,18 +980,10 @@ export function buildGeoAiPrompts(opts: {
   country?: string | null;
 }): Array<{ key: GeoAiPromptKey; prompt: string }> {
   const service = String(opts.service || 'local business').replace(/\s+/g, ' ').trim() || 'local business';
-  const city = String(opts.city || '').replace(/\s+/g, ' ').trim();
-  const country =
-    String(opts.country || countryFromAddress(opts.address)).replace(/\s+/g, ' ').trim() || 'UK';
-  const withCountry = (q: string) => `${q}, ${country}`;
-
-  const nearBase = city ? `${service} near ${city}` : `${service} near me`;
-  const bestBase = city ? `best ${service} in ${city}` : `best ${service}`;
-  const nearMe = `${service} near me in ${country}`;
   return [
-    { key: 'near', prompt: withCountry(nearBase) },
-    { key: 'best', prompt: withCountry(bestBase) },
-    { key: 'near_me', prompt: nearMe }
+    { key: 'near', prompt: `${service} near me` },
+    { key: 'best', prompt: `best ${service}` },
+    { key: 'near_me', prompt: `${service} in my area` }
   ];
 }
 
@@ -1097,6 +1070,26 @@ function brandMentionedInText(answer: string, businessName: string): boolean {
   if (core.length >= 2 && core.every((t) => text.includes(t))) return true;
 
   return tokens.every((t) => text.includes(t));
+}
+
+/** True only when the brand name itself is written in the text. */
+function brandNameShownInText(answer: string, businessName: string): boolean {
+  const text = String(answer || '').toLowerCase();
+  const name = String(businessName || '').trim().toLowerCase();
+  if (!text || name.length < 3) return false;
+  const containsName = (value: string) => {
+    const cleaned = value.replace(/\s+/g, ' ').trim();
+    if (cleaned.length < 3) return false;
+    const escaped = cleaned.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'i').test(text);
+  };
+  if (containsName(name)) return true;
+  const stripped = name
+    .replace(/\b(ltd|limited|llp|plc|inc|co|company)\b/g, '')
+    .replace(/[^a-z0-9\s']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped.length >= 3 && stripped !== name && containsName(stripped);
 }
 
 function shortCityForWebSearch(city?: string): string | undefined {
@@ -2439,6 +2432,7 @@ export async function checkAiEngineMentions(opts: {
     prompt,
     promptKey,
     mentioned: null,
+    brandName: businessName,
     recommendedLikely: null,
     citedHosts: [],
     answerExcerpt: '',
@@ -2482,6 +2476,13 @@ export async function checkAiEngineMentions(opts: {
     })
   ]);
 
+  const mentionFromAnswer = (answer: string) => {
+    const ranked = extractRankedLinesFromMarkdown(answer).slice(0, 5);
+    const excerpt = formatTop5List(ranked);
+    const mentioned = ranked.length > 0 && brandNameShownInText(excerpt, businessName);
+    return { ranked, excerpt, mentioned };
+  };
+
   const toScraperRow = (
     engine: AiEngineCheckResult['engine'],
     label: string,
@@ -2490,17 +2491,16 @@ export async function checkAiEngineMentions(opts: {
     if (!res.top5 && !res.text) {
       return skippedRow(engine, label, res.error || 'No answer');
     }
-    const mentionSource = res.text || res.top5;
-    const excerpt = res.top5 || sanitizeLlmExcerpt(res.text, 420);
-    const mentioned = brandMentionedInText(mentionSource, businessName);
+    const { excerpt, mentioned } = mentionFromAnswer(res.text || res.top5);
     return {
       engine,
       label,
       prompt,
       promptKey,
       mentioned,
-      recommendedLikely: recommendedLikelyInText(mentionSource, mentioned),
-      citedHosts: extractCitedHostsFromText(mentionSource),
+      brandName: businessName,
+      recommendedLikely: recommendedLikelyInText(excerpt, mentioned),
+      citedHosts: extractCitedHostsFromText(excerpt),
       answerExcerpt: excerpt,
       capturedAt
     };
@@ -2514,16 +2514,16 @@ export async function checkAiEngineMentions(opts: {
     if (!res.text) {
       return skippedRow(engine, label, res.error || 'No answer');
     }
-    const excerpt = sanitizeLlmExcerpt(res.text, 420);
-    const mentioned = brandMentionedInText(res.text, businessName);
+    const { excerpt, mentioned } = mentionFromAnswer(res.text);
     return {
       engine,
       label,
       prompt,
       promptKey,
       mentioned,
-      recommendedLikely: recommendedLikelyInText(res.text, mentioned),
-      citedHosts: extractCitedHostsFromText(res.text),
+      brandName: businessName,
+      recommendedLikely: recommendedLikelyInText(excerpt, mentioned),
+      citedHosts: extractCitedHostsFromText(excerpt),
       answerExcerpt: excerpt,
       capturedAt
     };

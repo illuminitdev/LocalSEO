@@ -371,6 +371,13 @@ export type FullAuditRequest = {
     completedAt?: string | null;
     notes?: string;
     reportUrl?: string | null;
+    address?: string;
+    city?: string;
+    website?: string;
+    phone?: string;
+    email?: string;
+    contactName?: string;
+    industry?: string;
 };
 
 export async function fetchFullAuditRequests(status?: string): Promise<FullAuditRequest[]> {

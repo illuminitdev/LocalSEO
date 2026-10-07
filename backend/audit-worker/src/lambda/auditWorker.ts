@@ -42,7 +42,7 @@ import {
   gbpFieldsFromPlaceDetails,
   photoUrlsFromPlace
 } from '../lib/placesGbp.js';
-import { resolveSearchArea } from '../lib/searchArea.js';
+import { looksLikeStreet, resolveSearchArea } from '../lib/searchArea.js';
 
 async function staticMapDataUrl(lat: number, lng: number): Promise<string | null> {
   const key = String(process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '').trim();
@@ -265,11 +265,12 @@ async function enrichFromDataForSeo(audit: any) {
     else business.city = intakeCity;
     audit.business = business;
   }
+  const cityPlace = intakeCity && !looksLikeStreet(intakeCity) ? intakeCity : '';
   const nearPlace =
-    (searchArea && searchArea !== 'the local area' ? searchArea : '') ||
-    intakeCity ||
-    String(business.address || '').trim();
-  const formCity = intakeCity || String(business.city || '').trim();
+    (searchArea && searchArea !== 'the local area' && !looksLikeStreet(searchArea) ? searchArea : '') ||
+    cityPlace;
+  const formCityRaw = intakeCity || String(business.city || '').trim();
+  const formCity = formCityRaw && !looksLikeStreet(formCityRaw) ? formCityRaw : '';
   const businessName = String(business.businessName || '').trim();
 
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -281,13 +282,13 @@ async function enrichFromDataForSeo(audit: any) {
     (nearNorm === cityNorm || nearNorm.endsWith(` ${cityNorm}`) || nearNorm.includes(cityNorm));
 
   const locationLabel = nearPlace || formCity;
-  const brandQuery = [businessName, locationLabel || business.address]
+  const brandQuery = [businessName, locationLabel]
     .filter(Boolean)
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  const cityForQuery = formCity || nearPlace;
+  const cityForQuery = locationLabel;
   const packQueryVariants: string[] = [];
   const pushQ = (q: string) => {
     const cleaned = q.replace(/\s+/g, ' ').trim();
@@ -799,6 +800,7 @@ async function enrichFromDataForSeo(audit: any) {
             prompt,
             promptKey: key,
             mentioned: null,
+            brandName: businessName,
             recommendedLikely: null,
             citedHosts: [],
             answerExcerpt: '',
@@ -811,7 +813,7 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  // AEO Visual: ChatGPT writes 4 searches for this service, then Google screenshots those searches.
+  // AEO: ChatGPT writes 4 question searches, then Google answer visibility (People Also Ask and answer box). No screenshots.
   let aeoSpecs = buildAeoQuerySpecs(audit);
   try {
     const lines = await suggestAeoGoogleSearches({
@@ -855,11 +857,11 @@ async function enrichFromDataForSeo(audit: any) {
     audit.aeoSerpScreenshots = aeoShots;
   } catch (aeoShotErr) {
     const err = aeoShotErr as Error;
-    console.warn('[auditWorker] AEO SERP screenshots failed:', err.message);
+    console.warn('[auditWorker] AEO answer visibility failed:', err.message);
     audit.aeoSerpScreenshots = aeoSpecs.map((spec) => ({
       query: spec.query,
       skipped: true,
-      reason: err.message || 'AEO screenshot failed',
+      reason: err.message || 'AEO answer visibility failed',
       capturedAt: new Date().toISOString()
     }));
   }
@@ -1070,9 +1072,15 @@ export const main: SQSHandler = async (event: SQSEvent) => {
       }
 
       const decksForScore = fallbackPillarDecks(audit);
-      const reportLocal = audit.aiReport?.localSeoFixes?.actions;
-      const reportAeo = audit.aiReport?.aeoFixes?.priorities;
-      const reportGeo = audit.aiReport?.geoFixes?.actions;
+      const report = (audit.aiReport || {}) as {
+        localSeoFixes?: { actions?: unknown };
+        aeoFixes?: { priorities?: unknown };
+        geoFixes?: { actions?: unknown };
+        criticalIssues?: unknown;
+      };
+      const reportLocal = report.localSeoFixes?.actions;
+      const reportAeo = report.aeoFixes?.priorities;
+      const reportGeo = report.geoFixes?.actions;
       audit.score = computeScore(audit.checklist.checks, {
         localRank: audit.gbpLookup?.localRank || null,
         aiEngineChecks: Array.isArray(audit.gbpLookup?.aiEngineChecks)
@@ -1093,7 +1101,8 @@ export const main: SQSHandler = async (event: SQSEvent) => {
               : decksForScore.aeoFixes?.priorities,
           geo:
             Array.isArray(reportGeo) && reportGeo.length ? reportGeo : decksForScore.geoFixes?.actions
-        }
+        },
+        criticalIssues: Array.isArray(report.criticalIssues) ? report.criticalIssues : []
       });
 
       await saveAudit(audit);

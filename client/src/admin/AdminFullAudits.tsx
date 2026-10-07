@@ -39,7 +39,7 @@ import {
     type FullAuditRequest,
     type SalesAgent
 } from './adminApi';
-import { AUDIT_SERVICE_OPTIONS, resolveAuditService } from './auditServices';
+import { AUDIT_SERVICE_OPTIONS, matchAuditServiceOption, resolveAuditService } from './auditServices';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { resolveAuditReportUrl } from '../shared/apiConfig';
 import { useToast } from '../shared/Toast';
@@ -216,6 +216,51 @@ async function copyText(text: string) {
     }
 }
 
+function cityFromAddress(address: string): string {
+    const postcode = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
+    const street = /\b(street|road|lane|avenue|drive|close|way|terrace|crescent|grove)\b|^\d+\b/i;
+    const parts = String(address || '')
+        .split(',')
+        .map((part) => part.trim())
+        .filter(
+            (part) =>
+                part &&
+                !postcode.test(part) &&
+                !/^(uk|united kingdom|england|scotland|wales)$/i.test(part) &&
+                !street.test(part)
+        );
+    return parts[parts.length - 1] || '';
+}
+
+function websiteForForm(raw: string): string {
+    const value = String(raw || '').trim();
+    if (!value) return '';
+    if (/^https?:\/\//i.test(value)) return value;
+    return `https://${value.replace(/^\/+/, '')}`;
+}
+
+function formFromAuditRequest(req: FullAuditRequest) {
+    const email = String(req.email || req.toEmail || '').trim();
+    const phone = String(req.phone || '').trim();
+    const emailOk = email.includes('@');
+    const phoneOk = Boolean(phone) && !phone.includes('@');
+    const service = matchAuditServiceOption(req.industry || '');
+    const address = String(req.address || '').trim();
+    return {
+        ...EMPTY_FORM,
+        businessName: req.businessName || '',
+        address,
+        city: String(req.city || '').trim() || cityFromAddress(address),
+        website: websiteForForm(req.website || ''),
+        contact: emailOk ? email : phoneOk ? phone : email || phone,
+        extraContact: emailOk && phoneOk ? phone : '',
+        showExtraContact: emailOk && phoneOk,
+        contactName: req.contactName || '',
+        serviceId: service.serviceId,
+        serviceOther: service.serviceOther
+    };
+}
+
 function auditToLeadRef(a: FullAuditListItem): GrowthAuditLeadRef {
     const report = resolveAuditReportUrl(a.shareUrl || a.reportUrl || a.id) || null;
     return {
@@ -360,11 +405,7 @@ export default function AdminFullAudits() {
 
     const openNewFormFromRequest = (req: FullAuditRequest) => {
         setPrefillRequestId(req.id);
-        setForm({
-            ...EMPTY_FORM,
-            businessName: req.businessName || '',
-            contact: req.toEmail || ''
-        });
+        setForm(formFromAuditRequest(req));
         setShowForm(true);
         setTab('audits');
         setError('');

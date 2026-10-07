@@ -23,6 +23,14 @@ function looksLikeFullAddress(s: string): boolean {
   return false;
 }
 
+/** Street, road, and similar address lines are not a search area. */
+export function looksLikeStreet(s: string): boolean {
+  const t = String(s || '').trim();
+  if (!t) return false;
+  if (/^\d+\b/.test(t)) return true;
+  return /\b(street|road|lane|avenue|drive|close|way|terrace|crescent|grove|gardens|mews|parade)\b/i.test(t);
+}
+
 function looksLikeTownOrSuburb(s: string): boolean {
   const t = String(s || '').trim();
   if (!t || looksLikeFullAddress(t)) return false;
@@ -46,16 +54,10 @@ function suburbFromAddress(address: string): string | undefined {
   if (!parts.length) return undefined;
 
   const withoutPostcode = parts.filter((p) => !UK_POSTCODE_RE.test(p) && !/^uk$|^united kingdom$/i.test(p));
-  if (!withoutPostcode.length) return undefined;
-
-  
-  if (withoutPostcode.length >= 2) {
-    const candidate = withoutPostcode[withoutPostcode.length - 2] || withoutPostcode[withoutPostcode.length - 1];
-    if (candidate && looksLikeTownOrSuburb(candidate)) return candidate;
-  }
-  const last = withoutPostcode[withoutPostcode.length - 1];
-  if (last && looksLikeTownOrSuburb(last)) return last;
-  return undefined;
+  const places = withoutPostcode.filter((p) => looksLikeTownOrSuburb(p) && !looksLikeStreet(p));
+  if (!places.length) return undefined;
+  if (places.length >= 2) return places[places.length - 2];
+  return places[places.length - 1];
 }
 
 export type SearchArea = {
@@ -75,7 +77,7 @@ export function resolveSearchArea(input: {
   const addressRaw = String(input.address || '').trim();
   const postcode = extractPostcode(addressRaw) || extractPostcode(cityRaw);
 
-  if (cityRaw && looksLikeTownOrSuburb(cityRaw)) {
+  if (cityRaw && looksLikeTownOrSuburb(cityRaw) && !looksLikeStreet(cityRaw)) {
     const fromAddress = suburbFromAddress(addressRaw);
     if (
       fromAddress &&
@@ -101,14 +103,19 @@ export function resolveSearchArea(input: {
   if (postcode) return { label: postcode, postcode };
 
   if (cityRaw) {
-    
     const shortened = cityRaw.split(',')[0]?.trim();
-    if (shortened) return { label: shortened, postcode };
+    if (shortened && !looksLikeStreet(shortened) && looksLikeTownOrSuburb(shortened)) {
+      return { label: shortened, postcode };
+    }
   }
 
   if (addressRaw) {
-    const first = addressRaw.split(',')[0]?.trim();
-    if (first) return { label: first, postcode };
+    for (const part of addressRaw.split(',')) {
+      const piece = part.trim();
+      if (piece && looksLikeTownOrSuburb(piece) && !looksLikeStreet(piece)) {
+        return { label: piece, postcode };
+      }
+    }
   }
 
   return { label: 'the local area' };
