@@ -5,7 +5,7 @@ import { applyWebsiteChecks } from '../audit/checksWebsite.js';
 import { runLighthouse } from '../audit/lighthouseRunner.js';
 import { captureHomepageScreenshot } from '../audit/homepageScreenshot.js';
 import { fallbackPillarDecks } from '../audit/pillarFixDecks.js';
-import { aeoSpecsFromSearchLines, buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
+import { buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
 import { buildGeoChecklist, applyGeoChecklistToChecks } from '../audit/geoChecklist.js';
 import { buildAeoCoreChecklist } from '../audit/aeoCoreChecklist.js';
 import { buildLocalSeoCoreChecklist } from '../audit/localSeoCoreChecklist.js';
@@ -16,11 +16,9 @@ import { updateAuditJob } from '../lib/auditJobs.js';
 import {
   buildDeepLocalRank,
   buildGeoAiPrompts,
-  captureAeoSerpScreenshot,
   captureMapsScreenshotFromTask,
   captureOrganicLocalPackScreenshot,
   checkAiEngineMentionsMulti,
-  suggestAeoGoogleSearches,
   detectDuplicateListings,
   fetchBacklinksSummary,
   fetchGbpMyBusinessInfo,
@@ -294,16 +292,9 @@ async function enrichFromDataForSeo(audit: any) {
     const cleaned = q.replace(/\s+/g, ' ').trim();
     if (cleaned && !packQueryVariants.includes(cleaned)) packQueryVariants.push(cleaned);
   };
-  if (nearPlace && formCity && !cityAlreadyInNear) {
-    pushQ(`${service} near ${nearPlace} in ${formCity}`);
-    pushQ(`${service} in ${formCity}`);
-    pushQ(`${service} near ${nearPlace}`);
-  } else if (cityForQuery) {
-    pushQ(`${service} near ${cityForQuery}`);
-    pushQ(`${service} in ${cityForQuery}`);
-    pushQ(`${service} ${cityForQuery}`);
-  }
-  if (brandQuery) pushQ(brandQuery);
+  // The Maps ranking uses one search only: "<service> in <city>" (city from the form). No brand name.
+  const rankCity = formCity || cityForQuery;
+  if (rankCity) pushQ(`${service} in ${rankCity}`);
 
   let packQuery = packQueryVariants[0] || '';
 
@@ -325,15 +316,12 @@ async function enrichFromDataForSeo(audit: any) {
       ...mapsOptsBase,
       keyword
     });
-    if (pack.items.length) {
-      packItems = pack.items;
-      packTaskId = pack.taskId;
-      packQuery = keyword;
-      break;
-    }
-    
     packQuery = keyword;
     packTaskId = pack.taskId || packTaskId;
+    if (pack.items.length) {
+      packItems = pack.items;
+      break;
+    }
   }
 
   let brandItems: DataForSeoMapsItem[] = [];
@@ -380,6 +368,7 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
+
   const attachLocalRank = (items: DataForSeoMapsItem[], query: string) => {
     const q = String(query || '').trim();
     if (!q) return;
@@ -398,8 +387,9 @@ async function enrichFromDataForSeo(audit: any) {
     };
   };
 
-  const rankItems = packItems.length ? packItems : brandItems;
-  const rankQuery = packItems.length ? packQuery : brandQuery || packQuery;
+  // Ranking always comes from the service search, never the brand-name search.
+  const rankItems = packItems;
+  const rankQuery = packQuery;
   if (rankQuery) {
     attachLocalRank(rankItems, rankQuery);
     if (!rankItems.length) {
@@ -689,8 +679,7 @@ async function enrichFromDataForSeo(audit: any) {
   
   const measuredQuery =
     String((audit.gbpLookup?.localRank as { query?: string } | undefined)?.query || '').trim() ||
-    packQuery ||
-    brandQuery;
+    packQuery;
   if (measuredQuery) {
     try {
       const [localPackScreenshot, mapsScreenshot] = await Promise.all([
@@ -813,58 +802,9 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  // AEO: ChatGPT writes 4 question searches, then Google answer visibility (People Also Ask and answer box). No screenshots.
-  let aeoSpecs = buildAeoQuerySpecs(audit);
-  try {
-    const lines = await suggestAeoGoogleSearches({
-      service,
-      city: locationLabel || String(business.city || business.searchAreaLabel || '').trim(),
-      businessName
-    });
-    aeoSpecs =
-      aeoSpecsFromSearchLines(lines, {
-        business: {
-          businessName,
-          service,
-          serviceLabel: service,
-          city: locationLabel || String(business.city || '').trim(),
-          searchAreaLabel: locationLabel || String(business.searchAreaLabel || '').trim()
-        }
-      }) || aeoSpecs;
-  } catch (aeoQueryErr) {
-    console.warn('[auditWorker] AEO search questions failed:', (aeoQueryErr as Error).message);
-  }
-  audit.aeoQuerySpecs = aeoSpecs;
-  try {
-    const aeoShots: SerpScreenshotResult[] = [];
-    const batchSize = 2;
-    for (let i = 0; i < aeoSpecs.length; i += batchSize) {
-      const batch = aeoSpecs.slice(i, i + batchSize);
-      const batchResults = await Promise.all(
-        batch.map((spec) =>
-          captureAeoSerpScreenshot({
-            keyword: spec.query,
-            lat: typeof lat === 'number' ? lat : null,
-            lng: typeof lng === 'number' ? lng : null,
-            locationName: locationLabel || undefined,
-            timeoutMs: 60000,
-            businessName
-          })
-        )
-      );
-      aeoShots.push(...batchResults);
-    }
-    audit.aeoSerpScreenshots = aeoShots;
-  } catch (aeoShotErr) {
-    const err = aeoShotErr as Error;
-    console.warn('[auditWorker] AEO answer visibility failed:', err.message);
-    audit.aeoSerpScreenshots = aeoSpecs.map((spec) => ({
-      query: spec.query,
-      skipped: true,
-      reason: err.message || 'AEO answer visibility failed',
-      capturedAt: new Date().toISOString()
-    }));
-  }
+  // AEO questions come from the service and city. No ChatGPT prompts, Google search, or screenshots.
+  audit.aeoQuerySpecs = buildAeoQuerySpecs(audit);
+  audit.aeoSerpScreenshots = [];
 }
 
 export const main: SQSHandler = async (event: SQSEvent) => {

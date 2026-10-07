@@ -34,7 +34,7 @@ export function buildGeoFixes(audit) {
   const geoPromptSummary =
     geoPromptTexts.length > 0
       ? geoPromptTexts.map((p) => `“${p}”`).join(', ')
-      : `“${service} near me”, “best ${service}”, “${service} in my area”`;
+      : `“${service} near me, ${city}”, “best ${service}, ${city}”, “top rated ${service} in ${city}”`;
   const areaName = city && city !== 'the local area' ? city : 'the city or area';
   const areaNote = `Searched for ${areaName}, not a street or road.`;
 

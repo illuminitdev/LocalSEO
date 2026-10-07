@@ -28,7 +28,7 @@ export function looksLikeStreet(s: string): boolean {
   const t = String(s || '').trim();
   if (!t) return false;
   if (/^\d+\b/.test(t)) return true;
-  return /\b(street|road|lane|avenue|drive|close|way|terrace|crescent|grove|gardens|mews|parade)\b/i.test(t);
+  return /\b(street|st|road|rd|lane|ln|avenue|ave|drive|dr|close|way|terrace|crescent|grove|gardens|mews|parade|park|estate|industrial|trading|retail|centre|center|works|yard|quay|wharf|mill|court|square|place|row|moss)\b/i.test(t);
 }
 
 function looksLikeTownOrSuburb(s: string): boolean {

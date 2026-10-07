@@ -980,10 +980,12 @@ export function buildGeoAiPrompts(opts: {
   country?: string | null;
 }): Array<{ key: GeoAiPromptKey; prompt: string }> {
   const service = String(opts.service || 'local business').replace(/\s+/g, ' ').trim() || 'local business';
+  const city = String(opts.city || '').replace(/\s+/g, ' ').trim();
+  const place = city && !/^the (local area|city or area)\b/i.test(city) ? `, ${city}` : '';
   return [
-    { key: 'near', prompt: `${service} near me` },
-    { key: 'best', prompt: `best ${service}` },
-    { key: 'near_me', prompt: `${service} in my area` }
+    { key: 'near', prompt: `${service} near me${place}` },
+    { key: 'best', prompt: `best ${service}${place}` },
+    { key: 'near_me', prompt: `top rated ${service} in${place ? place.replace(/^,/, '') : ' my area'}` }
   ];
 }
 
@@ -2478,8 +2480,13 @@ export async function checkAiEngineMentions(opts: {
 
   const mentionFromAnswer = (answer: string) => {
     const ranked = extractRankedLinesFromMarkdown(answer).slice(0, 5);
+    if (!ranked.length) {
+      // No numbered list (e.g. Claude answered in prose): keep the answer text so the card is never empty.
+      const excerpt = sanitizeLlmExcerpt(answer, 420);
+      return { ranked, excerpt, mentioned: Boolean(excerpt) && brandNameShownInText(answer, businessName) };
+    }
     const excerpt = formatTop5List(ranked);
-    const mentioned = ranked.length > 0 && brandNameShownInText(excerpt, businessName);
+    const mentioned = brandNameShownInText(excerpt, businessName);
     return { ranked, excerpt, mentioned };
   };
 

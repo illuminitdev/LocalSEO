@@ -203,7 +203,7 @@ export function buildAeoFixes(audit) {
   return {
     title: 'AEO: Answer Engine Optimisation',
     visualIntro:
-      'Questions people ask on Google for this service, and whether the brand is visible in People Also Ask or the answer box.',
+      'People Also Ask: key AEO opportunities for this service and location.',
     aeoChecklist: buildAeoCoreChecklist(audit),
     priorities:
       priorities.length > 0

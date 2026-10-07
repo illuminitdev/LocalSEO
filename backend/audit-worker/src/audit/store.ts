@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import { displayedOverallScore } from './displayScore.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
@@ -201,7 +202,7 @@ function auditListItem(a: AuditRecord) {
     phone: a.business?.phone || '',
     published: !!a.published,
     status: a.status,
-    totalScore: score?.total ?? null,
+    totalScore: displayedOverallScore(a.score as any, score?.total ?? null),
     auditKind: a.auditKind || null,
     scoreMode: score?.mode || null,
     crawlMode: crawlMeta?.mode || null,

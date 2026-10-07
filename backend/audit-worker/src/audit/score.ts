@@ -350,7 +350,11 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
   const inPack = rank && typeof rank.position === 'number';
   const position = inPack ? Number(rank.position) : null;
 
-  const measuredTotal = Math.round(local.score * 0.4 + aeo.score * 0.3 + geo.score * 0.3);
+  const capPillar = (value: number) => Math.min(70, Math.max(0, Math.round(Number(value) || 0)));
+  const localShown = capPillar(local.score);
+  const aeoShown = capPillar(aeo.score);
+  const geoShown = capPillar(geo.score);
+  const measuredTotal = Math.round(localShown * 0.4 + aeoShown * 0.3 + geoShown * 0.3);
   const criticalIssueCount = Math.min(
     4,
     (Array.isArray(context.criticalIssues) ? context.criticalIssues : []).filter(Boolean).length
@@ -364,7 +368,7 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
       label: 'Local SEO',
       focus: 'GBP + Website + Citations + Maps Visibility',
       weight: 40,
-      score: local.score,
+      score: localShown,
       max: 100,
       assessed: local.assessed,
       incomplete: local.incomplete
@@ -375,7 +379,7 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
       focus:
         'Optimising content to appear as answers to user questions — e.g. Google People Also Ask, featured snippets, direct answers, and AI-generated answers.',
       weight: 30,
-      score: aeo.score,
+      score: aeoShown,
       max: 100,
       assessed: aeo.assessed,
       incomplete: aeo.incomplete
@@ -386,7 +390,7 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
       focus:
         'Optimising a business/entity to be mentioned or recommended in generative AI/search experiences such as Google AI Overviews, ChatGPT, Perplexity, etc.',
       weight: 30,
-      score: geo.score,
+      score: geoShown,
       max: 100,
       assessed: geo.assessed,
       incomplete: geo.incomplete
