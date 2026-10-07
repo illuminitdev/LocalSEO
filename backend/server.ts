@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import Stripe from 'stripe';
 import { GoogleGenAI } from '@google/genai';
 import * as store from './lib/store';
-import { requirePlacesConfigured, searchBusiness, nearbyCompetitors, geocodeAddress } from './lib/googlePlaces';
+import { requirePlacesConfigured, searchBusiness, nearbyCompetitors, geocodeAddress, getBusinessByPlaceId } from './lib/googlePlaces';
 import { runVisibilityAudit } from './lib/visibilityAudit';
 import { createStripeWebhookHandler } from './routes/webhooks';
 import { requireAuth } from './middleware/auth';
@@ -17,7 +17,8 @@ import adminRouter from './admin/routes';
 import salesRouter from './sales-agent/routes';
 import integrationsRouter from './routes/integrations';
 import { migrate } from './lib/db';
-import { getLocalSeoUpgradeChoice, loadOrgAppState, saveOrgAppState, setLocalSeoUpgradeChoice } from './lib/orgAppState';
+import { ensureLocalSeoBusiness, getLocalSeoUpgradeChoice, loadOrgAppState, saveOrgAppState, setLocalSeoUpgradeChoice } from './lib/orgAppState';
+import { CitationScanError, collectCitationScan, startCitationScan } from './lib/dataForSeoCitations';
 
 dotenv.config({ override: true });
 
@@ -44,6 +45,12 @@ if (process.env.GEMINI_API_KEY) {
     }
 } else {
     console.warn('GEMINI_API_KEY is missing. Add it to backend/.env');
+}
+
+if (process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD) {
+    console.log('DataForSEO ready.');
+} else {
+    console.warn('DATAFORSEO_LOGIN or DATAFORSEO_PASSWORD is missing. Citation audits need both.');
 }
 
 if (requirePlacesConfigured()) {
@@ -83,7 +90,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     const send = res.json.bind(res);
     (res as any).json = (body: any) => {
         send(body);
-        if (res.statusCode < 500) {
+        if (res.statusCode < 500 && (req as any).orgStateHydrated) {
             persistAppState();
             saveOrgToDb(req).catch((err: any) => {
                 console.error('[orgAppState] Failed to persist:', err.message);
@@ -99,6 +106,7 @@ const emptyBusiness = () => ({
     category: '',
     address: '',
     phone: '',
+    email: '',
     website: '',
     hours: '',
     attributes: '',
@@ -138,7 +146,15 @@ const emptyDashboard = () => ({
     localSeoUpgradeChoice: null as 'pending' | 'booking' | 'new' | null,
     citationAudit: null as null | Record<string, any>,
     citationHistory: [] as Record<string, any>[],
-    gbpDrafts: [] as Record<string, any>[]
+    citationPending: null as null | {
+        mapsTaskId: string;
+        organicTaskId: string;
+        bingTaskId: string;
+        startedAt: string;
+    },
+    gbpDrafts: [] as Record<string, any>[],
+    strategyReport: null as null | Record<string, any>,
+    strategyReportHistory: [] as Record<string, any>[]
 });
 
 let connectedBusiness = emptyBusiness();
@@ -280,11 +296,12 @@ function persistAppState() {
 async function hydrateOrgFromDb(req: any, res: Response, next: NextFunction) {
     if (!req.orgId) return next();
     try {
-        const state = await loadOrgAppState(req.orgId);
+        const state = await ensureLocalSeoBusiness(req.orgId);
         connectedBusiness = state.business;
         dashboardState = state.dashboard;
         req.connectedBusiness = state.business;
         req.dashboardState = state.dashboard;
+        req.orgStateHydrated = true;
         next();
     } catch (err: any) {
         console.error('hydrateOrgFromDb error:', err.message);
@@ -293,10 +310,20 @@ async function hydrateOrgFromDb(req: any, res: Response, next: NextFunction) {
 }
 
 async function saveOrgToDb(req: any) {
-    if (!req.orgId) return;
+    if (!req.orgId || !req.orgStateHydrated) return;
+    let business = req.connectedBusiness || connectedBusiness;
+    const dashboard = req.dashboardState || dashboardState;
+    if (!String(business?.name || '').trim()) {
+        const current = await loadOrgAppState(req.orgId);
+        if (String(current.business?.name || '').trim()) {
+            business = current.business;
+            connectedBusiness = { ...emptyBusiness(), ...current.business };
+            req.connectedBusiness = connectedBusiness;
+        }
+    }
     await saveOrgAppState(req.orgId, {
-        business: connectedBusiness,
-        dashboard: dashboardState
+        business,
+        dashboard
     });
 }
 
@@ -705,6 +732,7 @@ function pushActivity({ type, message, icon, color }: any) {
 app.get('/api/status', (_req, res) => {
     res.json({
         gemini: Boolean(aiClient),
+        dataForSeo: Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD),
         places: requirePlacesConfigured(),
         textModel: TEXT_MODEL,
         imageModel: IMAGE_MODEL
@@ -774,20 +802,85 @@ app.post('/api/business/upgrade-choice', requireAuth, requireFeature('local_pres
     }
 });
 
-app.get('/api/business', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), (_req, res) => {
+app.get('/api/business', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    // If connectedBusiness has a placeId or name+address but rating/reviews are missing, refresh from Google Places
+    if (connectedBusiness.connected && (connectedBusiness.rating == null || !connectedBusiness.reviews?.length) && requirePlacesConfigured()) {
+        try {
+            let placeDetails: any = null;
+            if (connectedBusiness.placeId) {
+                placeDetails = await getBusinessByPlaceId(connectedBusiness.placeId);
+            }
+            if (!placeDetails && connectedBusiness.name) {
+                const searchQ = [connectedBusiness.name, connectedBusiness.address].filter(Boolean).join(', ');
+                placeDetails = await searchBusiness(searchQ);
+            }
+            if (placeDetails) {
+                if (placeDetails.rating != null && connectedBusiness.rating == null) {
+                    connectedBusiness.rating = placeDetails.rating;
+                }
+                if (placeDetails.reviewsCount && !connectedBusiness.reviewsCount) {
+                    connectedBusiness.reviewsCount = placeDetails.reviewsCount;
+                }
+                if (Array.isArray(placeDetails.reviews) && placeDetails.reviews.length && (!connectedBusiness.reviews || !connectedBusiness.reviews.length)) {
+                    connectedBusiness.reviews = placeDetails.reviews;
+                }
+                if (!connectedBusiness.placeId && placeDetails.placeId) {
+                    connectedBusiness.placeId = placeDetails.placeId;
+                }
+                if (connectedBusiness.lat == null && placeDetails.lat != null) {
+                    connectedBusiness.lat = placeDetails.lat;
+                    connectedBusiness.lng = placeDetails.lng;
+                }
+                await saveOrgToDb(req).catch(() => {});
+            }
+        } catch (err: any) {
+            console.warn('[api/business] auto-enrich places failed:', err?.message || err);
+        }
+    }
     res.json(connectedBusiness);
 });
 
 app.post('/api/business/connect', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     const incoming = req.body || {};
+    // Retain existing reviews, rating, reviewsCount, and placeId if not in incoming
+    const existing = (connectedBusiness || {}) as any;
     connectedBusiness = {
         ...emptyBusiness(),
+        ...existing,
         ...incoming,
         connected: true,
-        reviews: Array.isArray(incoming.reviews) ? incoming.reviews : []
+        rating: incoming.rating !== undefined ? incoming.rating : existing.rating,
+        reviewsCount: incoming.reviewsCount !== undefined ? incoming.reviewsCount : (existing.reviewsCount || 0),
+        reviews: Array.isArray(incoming.reviews) && incoming.reviews.length ? incoming.reviews : (Array.isArray(existing.reviews) ? existing.reviews : [])
     };
+    (req as any).connectedBusiness = connectedBusiness;
 
-    
+    // If rating/reviews are still missing, try looking up via Places API
+    if ((connectedBusiness.rating == null || !connectedBusiness.reviews?.length) && requirePlacesConfigured()) {
+        try {
+            let placeDetails: any = null;
+            if (connectedBusiness.placeId) {
+                placeDetails = await getBusinessByPlaceId(connectedBusiness.placeId);
+            }
+            if (!placeDetails && connectedBusiness.name) {
+                const searchQ = [connectedBusiness.name, connectedBusiness.address].filter(Boolean).join(', ');
+                placeDetails = await searchBusiness(searchQ);
+            }
+            if (placeDetails) {
+                if (placeDetails.rating != null) connectedBusiness.rating = placeDetails.rating;
+                if (placeDetails.reviewsCount) connectedBusiness.reviewsCount = placeDetails.reviewsCount;
+                if (Array.isArray(placeDetails.reviews) && placeDetails.reviews.length) connectedBusiness.reviews = placeDetails.reviews;
+                if (!connectedBusiness.placeId && placeDetails.placeId) connectedBusiness.placeId = placeDetails.placeId;
+                if (connectedBusiness.lat == null && placeDetails.lat != null) {
+                    connectedBusiness.lat = placeDetails.lat;
+                    connectedBusiness.lng = placeDetails.lng;
+                }
+            }
+        } catch (err: any) {
+            console.warn('[business/connect] places enrich failed:', err?.message || err);
+        }
+    }
+
     const hasCoords =
         typeof connectedBusiness.lat === 'number' &&
         typeof connectedBusiness.lng === 'number' &&
@@ -892,6 +985,7 @@ app.post('/api/ai/audit', requireAuth, hydrateOrgFromDb, requireFeature('local_p
             connected: true,
             reviews: Array.isArray(incoming.reviews) ? incoming.reviews : connectedBusiness.reviews
         };
+        (req as any).connectedBusiness = connectedBusiness;
         dashboardState.completenessScore = scoreProfile(connectedBusiness);
         await saveOrgToDb(req);
     }
@@ -1277,24 +1371,34 @@ function matchCitationRows(citations: any[], business: { name?: string; address?
         const sameName = citationNameMatches(businessName, expectedName);
         const samePhone = citationPhoneMatches(phone, expectedPhone);
         const sameAddress = citationAddressMatches(address, expectedAddress);
-        if (sameName && (samePhone || sameAddress)) {
-            return {
-                directory: row?.directory || '',
-                status: 'found',
-                url,
-                businessName,
-                address,
-                phone,
-                note: 'Matches this business'
-            };
-        }
-        return {
+        const phoneCompared = Boolean(phone && expectedPhone);
+        const addressCompared = Boolean(address && expectedAddress);
+        const base = {
             directory: row?.directory || '',
-            status: 'mismatch',
             url,
             businessName,
             address,
-            phone,
+            phone
+        };
+        if (phoneCompared && !samePhone) {
+            return { ...base, status: 'mismatch', note: 'Phone on this listing does not match' };
+        }
+        if (sameName && addressCompared && !sameAddress && !samePhone) {
+            return { ...base, status: 'mismatch', note: 'Address on this listing does not match' };
+        }
+        if (sameName || samePhone) {
+            const compared = samePhone || sameAddress;
+            return {
+                ...base,
+                status: 'found',
+                note: compared
+                    ? 'Matches this business'
+                    : 'Listing found. Phone and address were not in the search result.'
+            };
+        }
+        return {
+            ...base,
+            status: 'mismatch',
             note: 'Different listing or details do not match this business'
         };
     });
@@ -1302,27 +1406,16 @@ function matchCitationRows(citations: any[], business: { name?: string; address?
 
 function summarizeCitations(citations: any[]) {
     const found = citations.filter((row) => row.status === 'found').length;
-    const mismatch = citations.filter((row) => row.status === 'mismatch').length;
+    const mismatchOnly = citations.filter((row) => row.status === 'mismatch').length;
     const missing = citations.filter((row) => row.status === 'missing').length;
     return {
         score: citations.length ? Math.round((found / citations.length) * 100) : 0,
         found,
         missing,
-        mismatch,
+        mismatch: mismatchOnly + missing,
+        total: citations.length,
         citations
     };
-}
-
-function sleep(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function geminiRetryDelayMs(err: any) {
-    const raw = errMessage(err);
-    const match = raw.match(/retryDelay["'\s:]*["']?(\d+(?:\.\d+)?)s/i);
-    const seconds = match ? Number(match[1]) : 20;
-    const safe = Number.isFinite(seconds) ? seconds : 20;
-    return Math.round(Math.min(90, Math.max(12, safe)) * 1000);
 }
 
 function citationHistoryList() {
@@ -1359,47 +1452,35 @@ app.get('/api/ai/citations', requireAuth, hydrateOrgFromDb, requireFeature('loca
 app.post('/api/ai/citations', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     if (!requireBusiness(res)) return;
 
-    if (aiClient) {
-        const prompt = `Citation audit for this real business. Use live public web results only. Do not invent listings.
-Name: ${connectedBusiness.name}
-Address: ${connectedBusiness.address}
-Phone: ${connectedBusiness.phone}
-Website: ${connectedBusiness.website}
-Check these directories if possible: Google, Apple Maps, Bing Places, Yelp, Facebook, Yellow Pages, BBB, TripAdvisor, Foursquare.
-For each directory, return the business name, street address, and phone shown on that listing. If the listing is a different business, still return those details and set status to mismatch.
-Return JSON only:
-{"score": 0, "found": 0, "missing": 0, "citations": [{"directory": "", "status": "found"|"missing"|"mismatch", "url": "", "businessName": "", "address": "", "phone": "", "note": ""}]}
-status found means this exact business. status mismatch means a different business or different phone or address. status missing means no listing. Leave businessName, address, and phone empty when status is missing.`;
-        const started = Date.now();
-        const budgetMs = 22000;
-        let lastErr: any = null;
-        while (Date.now() - started < budgetMs) {
-            try {
-                const text = await generateText(prompt, { tools: [{ googleSearch: {} }] });
-                const data = parseJsonFromText(text);
-                if (data?.citations) {
-                    const saved = await storeCitationAudit(req, data);
-                    return res.json(saved);
-                }
-                return res.status(502).json({ error: 'Citation search did not finish. Run it again.' });
-            } catch (err: any) {
-                lastErr = err;
-                if (!isGeminiQuotaError(err)) {
-                    console.warn('[citations] search failed:', errMessage(err));
-                    return res.status(502).json({ error: 'Citation search did not finish. Run it again.' });
-                }
-                const waitMs = geminiRetryDelayMs(err);
-                if (Date.now() - started + waitMs >= budgetMs) break;
-                console.warn('[citations] search limit hit, waiting', waitMs, 'ms');
-                await sleep(waitMs);
-            }
+    try {
+        const pending = dashboardState.citationPending;
+        const pendingAge = pending?.startedAt ? Date.now() - new Date(pending.startedAt).getTime() : 0;
+        const pendingFresh = Boolean(pending?.mapsTaskId && pending?.organicTaskId && pendingAge < 3 * 60 * 1000);
+        if (!pendingFresh) {
+            dashboardState.citationPending = await startCitationScan(connectedBusiness);
+            await saveOrgToDb(req);
+            return res.json({ retry: true, retryAfterSeconds: 4 });
         }
-        const retryAfterSeconds = Math.ceil(geminiRetryDelayMs(lastErr) / 1000);
-        console.warn('[citations] search limit still active, asking client to wait', retryAfterSeconds, 's');
-        return res.json({ retry: true, retryAfterSeconds });
+        const collected = await collectCitationScan(dashboardState.citationPending, connectedBusiness);
+        if (!collected.ready) {
+            return res.json({ retry: true, retryAfterSeconds: 6 });
+        }
+        dashboardState.citationPending = null;
+        const saved = await storeCitationAudit(req, collected);
+        return res.json(saved);
+    } catch (err: any) {
+        dashboardState.citationPending = null;
+        try {
+            await saveOrgToDb(req);
+        } catch {
+            // Keep the error response even if the pending scan could not be cleared.
+        }
+        const status = err instanceof CitationScanError ? err.status : 502;
+        console.warn('[citations] DataForSEO search failed:', errMessage(err));
+        return res.status(status).json({
+            error: errMessage(err) || 'Citation search did not finish. Run it again.'
+        });
     }
-
-    return res.status(503).json({ error: 'Gemini API key is missing. Add GEMINI_API_KEY to backend/.env and restart.' });
 });
 
 app.post('/api/ai/media-generate', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
@@ -1443,6 +1524,32 @@ app.post('/api/ai/media-generate', requireAuth, hydrateOrgFromDb, requireFeature
     }
 });
 
+function strategyReportHistoryList() {
+    const history = Array.isArray(dashboardState.strategyReportHistory) ? dashboardState.strategyReportHistory : [];
+    if (history.length) return history.slice(0, 20);
+    const saved = dashboardState.strategyReport;
+    return saved?.createdAt ? [saved] : [];
+}
+
+async function storeStrategyReport(req: any, reportData: any, businessName: string) {
+    const saved = {
+        ...reportData,
+        businessName: businessName || connectedBusiness.name || '',
+        createdAt: reportData?.createdAt || new Date().toISOString()
+    };
+    const prior = strategyReportHistoryList().filter((item) => item?.createdAt !== saved.createdAt);
+    dashboardState.strategyReportHistory = [saved, ...prior].slice(0, 20);
+    dashboardState.strategyReport = saved;
+    await saveOrgToDb(req);
+    return { ...saved, history: dashboardState.strategyReportHistory };
+}
+
+app.get('/api/ai/strategy-report', requireAuth, hydrateOrgFromDb, requireAllFeatures(['local_growth', 'reporting']), (_req, res) => {
+    const history = strategyReportHistoryList();
+    const saved = dashboardState.strategyReport || history[0] || null;
+    res.json({ report: saved, history });
+});
+
 app.post('/api/ai/strategy-report', requireAuth, hydrateOrgFromDb, requireAllFeatures(['local_growth', 'reporting']), async (req, res) => {
     if (!requireBusiness(res)) return;
     const stats = { ...dashboardState, ...req.body };
@@ -1476,7 +1583,8 @@ app.post('/api/ai/strategy-report', requireAuth, hydrateOrgFromDb, requireAllFea
     };
 
     if (!aiClient) {
-        return res.json(fallback);
+        const saved = await storeStrategyReport(req, fallback, connectedBusiness.name);
+        return res.json(saved);
     }
 
     try {
@@ -1514,18 +1622,21 @@ Return JSON only:
         const data = parseJsonFromText(text);
         if (!data?.grade) {
             console.warn('[strategy-report] unusable Gemini JSON — using fallback');
-            return res.json(fallback);
+            const saved = await storeStrategyReport(req, fallback, connectedBusiness.name);
+            return res.json(saved);
         }
-        res.json({
+        const reportResult = {
             ...data,
             source: 'gemini',
             competitors: liveCompetitors.slice(0, 5),
             metrics: { ...groundedMetrics, ...(data.metrics || {}), ...groundedMetrics }
-        });
+        };
+        const saved = await storeStrategyReport(req, reportResult, connectedBusiness.name);
+        res.json(saved);
     } catch (err: any) {
         console.error('Strategy report error (serving fallback):', errMessage(err));
-        
-        res.json(fallback);
+        const saved = await storeStrategyReport(req, fallback, connectedBusiness.name);
+        res.json(saved);
     }
 });
 

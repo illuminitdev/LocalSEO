@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Map,
     Users,
-    Wand2,
+    BadgeCheck,
     TrendingUp,
     TrendingDown,
     Loader2,
@@ -908,7 +908,7 @@ export default function RankTracker() {
                                     {isGeneratingGap ? (
                                         <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
                                     ) : (
-                                        <Wand2 className="w-4 h-4 text-amber-300" />
+                                        <BadgeCheck className="w-4 h-4 text-emerald-400" />
                                     )}
                                     {isGeneratingGap ? 'Analyzing Ecosystem...' : 'Generate Gap Analysis'}
                                 </button>
@@ -916,7 +916,7 @@ export default function RankTracker() {
                         ) : (
                             <div className="bg-[#F8FAFC] p-5 rounded-xl border border-[var(--brand-primary)]/30 animate-in zoom-in duration-300">
                                 <h3 className="text-[#0F172A] font-bold mb-2 flex items-center gap-2 text-sm">
-                                    <Wand2 className="w-4 h-4 text-[var(--brand-primary)]" /> Executive Insight
+                                    <BadgeCheck className="w-4 h-4 text-[var(--brand-primary)]" /> Executive Insight
                                 </h3>
                                 <p className="text-gray-700 leading-relaxed text-xs mb-4">{gapAnalysis}</p>
 

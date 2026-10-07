@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
     Image as ImageIcon,
-    Wand2,
+    BadgeCheck,
     MapPin,
     Tag as TagIcon,
     CheckCircle2,
@@ -10,7 +10,6 @@ import {
     Home,
     Users,
     ShoppingBag,
-    Sparkles,
     Loader2,
     Info,
     Download,
@@ -32,7 +31,7 @@ const CATEGORIES: CategoryStatus[] = [
     { id: 'Interior', name: 'Interior', icon: Home, count: 0, minRequired: 3 },
     { id: 'Team', name: 'Team', icon: Users, count: 0, minRequired: 3 },
     { id: 'Product', name: 'Product', icon: ShoppingBag, count: 0, minRequired: 3 },
-    { id: 'Logo', name: 'Logo', icon: Sparkles, count: 0, minRequired: 1 }
+    { id: 'Logo', name: 'Logo', icon: BadgeCheck, count: 0, minRequired: 1 }
 ];
 
 export default function MediaOptimization() {
@@ -100,7 +99,7 @@ export default function MediaOptimization() {
                     {isGenerating ? (
                         <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
                     ) : (
-                        <Wand2 className="w-4 h-4 text-amber-300" />
+                        <BadgeCheck className="w-4 h-4 text-emerald-400" />
                     )}
                     {isGenerating ? 'Generating Photo...' : 'AI Generate Photo'}
                 </button>
@@ -231,7 +230,7 @@ export default function MediaOptimization() {
                             {isGenerating ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
-                                <Wand2 className="w-3.5 h-3.5" />
+                                <BadgeCheck className="w-3.5 h-3.5" />
                             )}
                             {isGenerating ? 'Generating...' : `Generate ${activeTab} Photo`}
                         </button>
@@ -253,7 +252,7 @@ export default function MediaOptimization() {
                                 disabled={isGenerating}
                                 className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
                             >
-                                <Wand2 className="w-3.5 h-3.5 text-amber-300" />
+                                <BadgeCheck className="w-3.5 h-3.5 text-emerald-400" />
                                 Generate first photo
                             </button>
                         </div>

@@ -1,4 +1,5 @@
 import { query } from './db';
+import { planIncludesFeature } from './planCatalog';
 
 export function emptyBusinessProfile() {
     return {
@@ -6,6 +7,7 @@ export function emptyBusinessProfile() {
         category: '',
         address: '',
         phone: '',
+        email: '',
         website: '',
         hours: '',
         attributes: '',
@@ -56,7 +58,15 @@ export function emptyDashboardState() {
         localSeoUpgradeChoice: null as 'pending' | 'booking' | 'new' | null,
         citationAudit: null as null | Record<string, any>,
         citationHistory: [] as Record<string, any>[],
-        gbpDrafts: [] as Record<string, any>[]
+        citationPending: null as null | {
+            mapsTaskId: string;
+            organicTaskId: string;
+            bingTaskId: string;
+            startedAt: string;
+        },
+        gbpDrafts: [] as Record<string, any>[],
+        strategyReport: null as null | Record<string, any>,
+        strategyReportHistory: [] as Record<string, any>[]
     };
 }
 
@@ -74,32 +84,152 @@ export async function markLocalSeoUpgradePending(orgId: string) {
     });
 }
 
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function clock(value: unknown) {
+    return String(value || '').slice(0, 5);
+}
+
+function formatOpeningHours(rules: Array<{ day_of_week: number; start_time: unknown; end_time: unknown }>) {
+    const byDay = new Map<string, string[]>();
+    for (const rule of rules) {
+        const day = WEEKDAYS[Number(rule.day_of_week)];
+        const start = clock(rule.start_time);
+        const end = clock(rule.end_time);
+        if (!day || !start || !end) continue;
+        const windows = byDay.get(day) || [];
+        windows.push(`${start}–${end}`);
+        byDay.set(day, windows);
+    }
+    return WEEKDAYS.filter((day) => byDay.has(day))
+        .map((day) => `${day} ${byDay.get(day)!.join(', ')}`)
+        .join('\n');
+}
+
+async function orgHasBookingPlan(orgId: string) {
+    const { rows } = await query(
+        `SELECT plan_id FROM subscriptions
+         WHERE org_id = $1 AND status = 'active'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [orgId]
+    );
+    return planIncludesFeature(String(rows[0]?.plan_id || ''), 'bookings');
+}
+
+export async function loadBookingBusiness(orgId: string) {
+    const { rows } = await query(
+        `SELECT name, email, phone, service_area, trade_type, site_blurb, site_services, setup_complete
+         FROM organizations WHERE id = $1`,
+        [orgId]
+    );
+    const org = rows[0] || {};
+    const { rows: rules } = await query(
+        `SELECT day_of_week, start_time, end_time
+         FROM availability_rules
+         WHERE org_id = $1 AND user_id IS NULL AND enabled = TRUE
+         ORDER BY day_of_week, start_time`,
+        [orgId]
+    );
+    const { rows: events } = await query(
+        `SELECT name FROM event_types
+         WHERE org_id = $1 AND active = TRUE
+         ORDER BY sort_order, created_at`,
+        [orgId]
+    );
+    const services = events.map((row: any) => String(row.name || '').trim()).filter(Boolean);
+    return {
+        name: String(org.name || '').trim(),
+        email: String(org.email || '').trim(),
+        phone: String(org.phone || '').trim(),
+        address: String(org.service_area || '').trim(),
+        category: String(org.trade_type || '').trim(),
+        hours: formatOpeningHours(rules),
+        attributes: String(org.site_services || '').trim() || services.join(', '),
+        description: String(org.site_blurb || '').trim(),
+        setupComplete: Boolean(org.setup_complete)
+    };
+}
+
+function fillFromBooking(
+    current: any,
+    booking: Awaited<ReturnType<typeof loadBookingBusiness>>,
+    overwrite: boolean
+) {
+    const pick = (key: string, incoming: string) => {
+        const existing = String(current?.[key] || '').trim();
+        const next = String(incoming || '').trim();
+        if (overwrite) return next || existing;
+        return existing || next;
+    };
+    const name = pick('name', booking.name);
+    return {
+        ...emptyBusinessProfile(),
+        ...(current || {}),
+        name,
+        category: pick('category', booking.category),
+        address: pick('address', booking.address),
+        phone: pick('phone', booking.phone),
+        email: pick('email', booking.email),
+        hours: pick('hours', booking.hours),
+        attributes: pick('attributes', booking.attributes),
+        description: pick('description', booking.description),
+        connected: Boolean(name)
+    };
+}
+
+function profileChanged(current: any, next: any) {
+    const keys = ['name', 'category', 'address', 'phone', 'email', 'hours', 'attributes', 'description', 'website'];
+    return keys.some((key) => String(current?.[key] || '').trim() !== String(next?.[key] || '').trim());
+}
+
+export async function ensureLocalSeoBusiness(orgId: string) {
+    const state = await loadOrgAppState(orgId);
+    const choice = state.dashboard?.localSeoUpgradeChoice;
+    if (choice === 'new') return state;
+    if (choice === 'pending' && !String(state.business?.name || '').trim()) return state;
+    if (!(await orgHasBookingPlan(orgId))) return state;
+    const booking = await loadBookingBusiness(orgId);
+    if (!booking.name || !booking.category) return state;
+    const business = fillFromBooking(state.business, booking, false);
+    if (!profileChanged(state.business, business)) return state;
+    const dashboard = {
+        ...state.dashboard,
+        localSeoUpgradeChoice: choice || 'booking'
+    };
+    await saveOrgAppState(orgId, { business, dashboard });
+    return { business, dashboard };
+}
+
 export async function getLocalSeoUpgradeChoice(orgId: string) {
     const state = await loadOrgAppState(orgId);
     const raw = state.dashboard?.localSeoUpgradeChoice;
     const choice = raw === 'pending' || raw === 'booking' || raw === 'new' ? raw : null;
-    const { rows } = await query(
-        `SELECT name, email, phone, service_area FROM organizations WHERE id = $1`,
-        [orgId]
-    );
-    const org = rows[0] || {};
+    const booking = await loadBookingBusiness(orgId);
     return {
-        pending: choice === 'pending' && !state.business?.connected,
+        pending: choice === 'pending' && !String(state.business?.name || '').trim(),
         choice,
-        booking: {
-            name: String(org.name || ''),
-            email: String(org.email || ''),
-            phone: String(org.phone || ''),
-            address: String(org.service_area || '')
-        }
+        booking
     };
 }
 
 export async function setLocalSeoUpgradeChoice(orgId: string, choice: 'booking' | 'new') {
     const state = await loadOrgAppState(orgId);
-    await saveOrgAppState(orgId, {
-        dashboard: { ...state.dashboard, localSeoUpgradeChoice: choice }
-    });
+    const booking = await loadBookingBusiness(orgId);
+    if (choice === 'booking' && booking.name) {
+        await saveOrgAppState(orgId, {
+            business: fillFromBooking(state.business, booking, true),
+            dashboard: { ...state.dashboard, localSeoUpgradeChoice: 'booking' }
+        });
+    } else {
+        const keepGoogleListing = Boolean(String(state.business?.placeId || '').trim());
+        await saveOrgAppState(orgId, {
+            business: keepGoogleListing
+                ? state.business
+                : { ...emptyBusinessProfile(), connected: false },
+            dashboard: { ...state.dashboard, localSeoUpgradeChoice: 'new' }
+        });
+    }
     return getLocalSeoUpgradeChoice(orgId);
 }
 

@@ -9,11 +9,13 @@ import {
     Lightbulb,
     BookOpen,
     X,
-    Sparkles,
-    CheckCircle2
+    BadgeCheck,
+    CheckCircle2,
+    Clock
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
 import { downloadElementAsPdf } from '../../shared/downloadElementAsPdf';
+import { useOrgBrand } from '../../shared/OrgBrandContext';
 
 const REPORT_STORAGE_KEY = 'localpulse_strategy_report';
 
@@ -41,23 +43,67 @@ function saveReport(reportData: any, businessName: string, reportDate: string) {
 }
 
 export default function ReportGenerator() {
+    const { logoUrl: brandLogoUrl } = useOrgBrand();
     const [isGenerating, setIsGenerating] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [reportReady, setReportReady] = useState(false);
     const [reportData, setReportData] = useState<any>(null);
+    const [history, setHistory] = useState<any[]>([]);
     const [error, setError] = useState('');
     const [businessName, setBusinessName] = useState('');
     const [reportDate, setReportDate] = useState(() => new Date().toLocaleDateString());
     const [showHowItWorks, setShowHowItWorks] = useState(false);
 
-    useEffect(() => {
-        const saved = loadSavedReport();
-        if (!saved) return;
-        setReportData(saved.reportData);
-        setBusinessName(saved.businessName || '');
-        if (saved.reportDate) setReportDate(saved.reportDate);
+    const applyReportPayload = (item: any) => {
+        if (!item || !item.grade) return;
+        setReportData(item);
+        const name = item.businessName || businessName || '';
+        if (name) setBusinessName(name);
+        const dateStr = item.createdAt
+            ? new Date(item.createdAt).toLocaleString('en-GB', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+              })
+            : new Date().toLocaleDateString();
+        setReportDate(dateStr);
         setReportReady(true);
+        saveReport(item, name, dateStr);
+    };
+
+    useEffect(() => {
+        // First try local cached session
+        const saved = loadSavedReport();
+        if (saved) {
+            setReportData(saved.reportData);
+            setBusinessName(saved.businessName || '');
+            if (saved.reportDate) setReportDate(saved.reportDate);
+            setReportReady(true);
+        }
+
+        // Fetch persisted report & history from backend
+        apiGet('/api/ai/strategy-report')
+            .then((data: any) => {
+                const runs = Array.isArray(data?.history) ? data.history : [];
+                setHistory(runs);
+                const currentReport = data?.report || runs[0];
+                if (currentReport?.grade && !saved) {
+                    applyReportPayload(currentReport);
+                }
+            })
+            .catch(() => {});
     }, []);
+
+    const handleSelectHistory = (item: any) => {
+        applyReportPayload(item);
+        // Smooth scroll to report view
+        const el = document.getElementById('report-content');
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth' });
+        }
+    };
 
     const handleGenerate = async () => {
         setIsGenerating(true);
@@ -72,10 +118,21 @@ export default function ReportGenerator() {
             const name = stats.businessName || business.name || '';
             setBusinessName(name);
             const data = await apiPost('/api/ai/strategy-report', stats);
-            const dated = new Date().toLocaleDateString();
+            const dated = new Date().toLocaleString('en-GB', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
             setReportDate(dated);
             setReportData(data);
             setReportReady(true);
+            if (Array.isArray(data?.history)) {
+                setHistory(data.history);
+            } else {
+                setHistory((prev) => [data, ...prev.filter((p) => p.createdAt !== data.createdAt)].slice(0, 20));
+            }
             saveReport(data, name, dated);
             await logDashboardActivity({
                 type: 'report',
@@ -216,18 +273,17 @@ export default function ReportGenerator() {
                     <div className="mb-6 pb-4 border-b border-[#E2E8F0]">
                         <div className="flex items-center justify-between gap-3 mb-3">
                             <img
-                                src="/localseo.png"
-                                alt="ZappSites Local SEO"
-                                width={120}
-                                height={28}
-                                className="block shrink-0"
+                                src={brandLogoUrl || '/localseo.png'}
+                                alt={brandLogoUrl ? (businessName || 'Business logo') : 'ZappSites Local SEO'}
+                                width={140}
+                                height={36}
+                                className="block shrink-0 object-contain object-left"
                                 style={{
-                                    height: 28,
+                                    height: brandLogoUrl ? 36 : 28,
                                     width: 'auto',
-                                    maxWidth: 120,
-                                    maxHeight: 28,
-                                    minWidth: 0,
-                                    objectFit: 'contain'
+                                    maxWidth: 160,
+                                    maxHeight: 40,
+                                    minWidth: 0
                                 }}
                             />
                             <div className="flex items-center gap-2 print:hidden">
@@ -347,6 +403,80 @@ export default function ReportGenerator() {
                 </div>
             )}
 
+            {/* Past Reports / History List */}
+            {history.length > 0 && (
+                <div className="mt-6 mb-6 bg-white rounded-2xl border border-[#E2E8F0] shadow-xs overflow-hidden print:hidden">
+                    <div className="p-4 border-b border-[#E2E8F0] flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-gray-700" />
+                            <h2 className="text-xs font-bold text-[#0F172A]">Past report history</h2>
+                        </div>
+                        <span className="text-[11px] text-gray-400 font-medium">{history.length} {history.length === 1 ? 'report' : 'reports'} saved</span>
+                    </div>
+                    <ul className="divide-y divide-[#E2E8F0]">
+                        {history.map((run, idx) => {
+                            const isCurrent = (reportData?.createdAt && run.createdAt === reportData.createdAt) ||
+                                (reportData && !reportData.createdAt && idx === 0);
+                            const when = run.createdAt
+                                ? new Date(run.createdAt).toLocaleString('en-GB', {
+                                      day: 'numeric',
+                                      month: 'short',
+                                      year: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                  })
+                                : 'Saved report';
+                            const gradeColor =
+                                run.grade?.startsWith('A')
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : run.grade?.startsWith('B')
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200';
+
+                            return (
+                                <li key={run.createdAt || idx}>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleSelectHistory(run)}
+                                        className={`w-full text-left px-4 py-3.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs transition-colors cursor-pointer ${
+                                            isCurrent ? 'bg-[var(--brand-primary-soft)]' : 'hover:bg-[#F8FAFC]'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <span className={`inline-flex items-center justify-center font-black px-2.5 py-0.5 rounded-lg text-xs border ${gradeColor}`}>
+                                                Grade {run.grade || '—'}
+                                            </span>
+                                            <div>
+                                                <span className="font-bold text-[#0F172A] block">{when}</span>
+                                                <span className="text-[11px] text-gray-500">
+                                                    {run.businessName || businessName || 'Listing'} • {run.source === 'fallback' ? 'Template report' : 'Gemini AI'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-3 text-xs text-gray-600">
+                                            {run.metrics?.localPackRank !== undefined && (
+                                                <span className="hidden sm:inline bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-[11px]">
+                                                    Rank #{run.metrics.localPackRank || '—'}
+                                                </span>
+                                            )}
+                                            {run.metrics?.completeness !== undefined && (
+                                                <span className="hidden sm:inline bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-[11px]">
+                                                    {run.metrics.completeness}% complete
+                                                </span>
+                                            )}
+                                            <span className={`text-[11px] font-bold ${isCurrent ? 'text-[var(--brand-primary)]' : 'text-gray-400'}`}>
+                                                {isCurrent ? 'Viewing' : 'View report →'}
+                                            </span>
+                                        </div>
+                                    </button>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </div>
+            )}
+
             {/* Bottom Help Banner */}
             <div className="bg-[#F8FAFC] rounded-2xl border border-[#E2E8F0] p-4 md:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs print:hidden">
                 <div className="flex items-center gap-3.5">
@@ -392,7 +522,7 @@ export default function ReportGenerator() {
 
                         <div className="flex items-center gap-3 mb-4">
                             <div className="w-10 h-10 rounded-xl bg-[var(--brand-primary)]/10 flex items-center justify-center text-[var(--brand-primary)]">
-                                <Sparkles className="w-5 h-5" />
+                                <BadgeCheck className="w-5 h-5" />
                             </div>
                             <div>
                                 <h3 className="text-lg font-bold text-[#0F172A]">How AI Insights Works</h3>

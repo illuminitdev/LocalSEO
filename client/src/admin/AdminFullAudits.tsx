@@ -21,7 +21,7 @@ import {
     Share2,
     Trash2,
     UserCheck,
-    Wand2,
+    BadgeCheck,
     X
 } from 'lucide-react';
 import {
@@ -1134,7 +1134,7 @@ export default function AdminFullAudits() {
                                 <CrawlProgressRing percent={progressPct} />
                                 <div>
                                     <p className="text-xs font-bold uppercase tracking-wide text-[#F59E0B] flex items-center gap-1.5">
-                                        <Wand2 className="w-3.5 h-3.5" /> Building full crawl report
+                                        <BadgeCheck className="w-3.5 h-3.5" /> Building full crawl report
                                     </p>
                                     <h3 className="text-base font-bold text-[#0F172A] mt-1">
                                         Please wait — this usually takes 3–8 minutes
@@ -1167,7 +1167,7 @@ export default function AdminFullAudits() {
                                     const done = i < activeStepIndex;
                                     const active = i === activeStepIndex;
                                     const Icon =
-                                        i === 0 ? MapPinned : i === 1 ? Globe2 : i === 2 ? Search : Wand2;
+                                        i === 0 ? MapPinned : i === 1 ? Globe2 : i === 2 ? Search : BadgeCheck;
                                     return (
                                         <li
                                             key={step.id}

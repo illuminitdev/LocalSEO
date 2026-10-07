@@ -15,7 +15,7 @@ import {
     ChevronRight,
     MapPin,
     Star,
-    Sparkles,
+    BadgeCheck,
     TrendingUp,
     Building2,
     BookMarked,
@@ -57,7 +57,9 @@ type LocalBusinessData = {
     phone?: string;
     rating?: number;
     review_count?: number;
+    reviewsCount?: number;
     place_id?: string;
+    placeId?: string;
     reviews?: any[];
     categories?: string[];
     website?: string;
@@ -79,7 +81,7 @@ export default function Dashboard() {
     const [choosingSeo, setChoosingSeo] = useState(false);
     const [upgradeChoice, setUpgradeChoice] = useState<{
         pending: boolean;
-        booking: { name: string; email: string; phone: string; address: string };
+        booking: { name: string; email: string; phone: string; address: string; category?: string };
     } | null>(null);
     const [mapStats, setMapStats] = useState<{
         visibilityRank: number;
@@ -148,9 +150,12 @@ export default function Dashboard() {
             const saved = await apiPost('/api/business/upgrade-choice', { choice });
             setUpgradeChoice(saved);
             const booking = saved?.booking || upgradeChoice?.booking;
-            setSeoSearchQuery(
-                choice === 'booking' ? [booking?.name, booking?.address].filter(Boolean).join(', ') : ''
-            );
+            if (choice === 'booking') {
+                const business = await apiGet('/api/business');
+                setBusinessData(business);
+                return;
+            }
+            setSeoSearchQuery([booking?.name, booking?.address].filter(Boolean).join(', '));
             setLocationModalOpen(true);
         } catch {
             /* keep the choice open so they can retry */
@@ -233,6 +238,7 @@ export default function Dashboard() {
                             </p>
                             <p className="text-sm text-[#64748B] mt-1">
                                 {[
+                                    upgradeChoice.booking.category,
                                     upgradeChoice.booking.email,
                                     upgradeChoice.booking.phone,
                                     upgradeChoice.booking.address
@@ -637,9 +643,9 @@ function LocalSeoOnlyDashboard({
     mapRank: string;
 }) {
     const businessName = businessData?.name || 'your business';
-    const rating = businessData?.rating ?? null;
-    const reviewCount = businessData?.review_count ?? 0;
     const reviews = businessData?.reviews || [];
+    const reviewCount = businessData?.reviewsCount ?? businessData?.review_count ?? reviews.length;
+    const rating = businessData?.rating ?? (reviews.length ? Number((reviews.reduce((acc: number, r: any) => acc + (Number(r.rating) || 5), 0) / reviews.length).toFixed(1)) : null);
     const hasBusiness = Boolean(businessData?.name);
 
     const seoStats = [
@@ -694,7 +700,7 @@ function LocalSeoOnlyDashboard({
 
     const quickSeoTools = [
         { to: '/rank-tracker', label: 'Local Search Grid', icon: MapPin, desc: 'Track GeoGrid pin rankings', tone: 'bg-amber-50 text-[var(--brand-primary)]' },
-        { to: '/report', label: 'AI Growth Insights', icon: Sparkles, desc: 'Actionable SEO recommendations', tone: 'bg-purple-50 text-purple-600' },
+        { to: '/report', label: 'AI Growth Insights', icon: BadgeCheck, desc: 'Actionable SEO recommendations', tone: 'bg-purple-50 text-purple-600' },
         { to: '/profile', label: 'Business Profile Audit', icon: Building2, desc: 'Optimize GBP completeness', tone: 'bg-sky-50 text-sky-600' },
         { to: '/reviews', label: 'Review Management', icon: Star, desc: 'Generate & reply to reviews', tone: 'bg-emerald-50 text-emerald-600' },
         { to: '/citations', label: 'Citation Network', icon: BookMarked, desc: '40+ local directories sync', tone: 'bg-rose-50 text-rose-600' },
@@ -752,7 +758,7 @@ function LocalSeoOnlyDashboard({
                                 to="/report"
                                 className="inline-flex items-center gap-1.5 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 text-white px-4 py-2 text-xs font-bold border border-white/20 transition"
                             >
-                                <Sparkles className="w-3.5 h-3.5 text-amber-300" /> AI Insights
+                                <BadgeCheck className="w-3.5 h-3.5 text-amber-300" /> AI Insights
                             </Link>
                         </div>
                     </div>
@@ -979,8 +985,9 @@ function HybridDashboard({
     const openBalance = bookingData?.money?.openBalance ?? 0;
     const quotesOpen = bookingData?.quotesOpen ?? 0;
     const upcoming = bookingData?.upcoming ?? 0;
-    const rating = businessData?.rating ?? null;
-    const reviewCount = businessData?.review_count ?? 0;
+    const reviews = businessData?.reviews || [];
+    const reviewCount = businessData?.reviewsCount ?? businessData?.review_count ?? reviews.length;
+    const rating = businessData?.rating ?? (reviews.length ? Number((reviews.reduce((acc: number, r: any) => acc + (Number(r.rating) || 5), 0) / reviews.length).toFixed(1)) : null);
     const orgSlug = bookingData?.organization?.slug || '';
     const [copied, setCopied] = useState(false);
 
@@ -1070,7 +1077,7 @@ function HybridDashboard({
                 <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
                     <div className="max-w-xl">
                         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#132E63]/90 text-[var(--brand-primary)] text-[11px] font-bold tracking-wider uppercase border border-[#254F9E]/60">
-                            <Sparkles className="w-3.5 h-3.5 text-[var(--brand-primary)]" />
+                            <BadgeCheck className="w-3.5 h-3.5 text-[var(--brand-primary)]" />
                             COMPLETE GROWTH SYSTEM
                         </div>
                         <h2 className="text-xl sm:text-2xl font-black mt-2 text-white leading-tight">
@@ -1212,7 +1219,7 @@ function HybridDashboard({
                             <ChevronRight className="w-4 h-4 text-slate-300" />
                         </Link>
                         <Link to="/report" className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 text-xs font-semibold text-slate-700 transition">
-                            <span className="flex items-center gap-2"><Sparkles className="w-3.5 h-3.5 text-purple-600" /> AI Growth Insights & audit</span>
+                            <span className="flex items-center gap-2"><BadgeCheck className="w-3.5 h-3.5 text-purple-600" /> AI Growth Insights & audit</span>
                             <ChevronRight className="w-4 h-4 text-slate-300" />
                         </Link>
                         <Link to="/reviews" className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 text-xs font-semibold text-slate-700 transition">

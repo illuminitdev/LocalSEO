@@ -10,7 +10,7 @@ import {
     Image as ImageIcon,
     BookMarked,
     CalendarClock,
-    Wand2,
+    BadgeCheck,
     Settings,
     UserRound,
     Users,
@@ -625,7 +625,7 @@ export default function Layout() {
                                                         : n.type === 'quote'
                                                         ? FileText
                                                         : n.type === 'rank'
-                                                        ? Wand2
+                                                        ? BadgeCheck
                                                         : n.type === 'security'
                                                         ? KeyRound
                                                         : CalendarClock;

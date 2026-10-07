@@ -50,7 +50,7 @@ import {
     Store,
     Award,
     BarChart3,
-    Sparkles
+    BadgeCheck
 } from 'lucide-react';
 
 type LeadDetailLocationState = {
@@ -925,7 +925,7 @@ export default function SalesLeadDetail() {
                                                         </p>
                                                         {isCustomerRequested ? (
                                                             <span className="inline-flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 text-emerald-800 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
-                                                                <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                                                                <BadgeCheck className="w-2.5 h-2.5 text-emerald-600" />
                                                                 Customer Inbound
                                                             </span>
                                                         ) : isAuditRequest ? (

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
-    Wand2,
+    BadgeCheck,
     Save,
     ShieldAlert,
     CheckCircle2,
     Pencil,
     MapPin,
     Phone,
+    Mail,
     Clock,
     Globe,
     Tag,
@@ -26,6 +27,7 @@ const EMPTY_PROFILE = {
     category: '',
     address: '',
     phone: '',
+    email: '',
     website: '',
     hours: '',
     attributes: '',
@@ -41,6 +43,11 @@ export default function ProfileAudit() {
     const [formData, setFormData] = useState({ ...EMPTY_PROFILE });
     const [error, setError] = useState('');
     const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
+    const [bookingOffer, setBookingOffer] = useState<{
+        pending: boolean;
+        booking: { name: string; email: string; phone: string; address: string; category: string };
+    } | null>(null);
+    const [usingBooking, setUsingBooking] = useState(false);
 
     const applyBusiness = (b: any) => {
         if (!b) return;
@@ -49,6 +56,7 @@ export default function ProfileAudit() {
             category: b?.category || '',
             address: b?.address || '',
             phone: b?.phone || '',
+            email: b?.email || '',
             website: b?.website || '',
             hours: b?.hours || '',
             attributes: b?.attributes || '',
@@ -61,9 +69,35 @@ export default function ProfileAudit() {
             const b = await apiGet('/api/business');
             if (b && b.name) {
                 applyBusiness(b);
+                setBookingOffer(null);
+                return;
             }
         } catch {
             // Leave empty until the user connects or enters their business
+        }
+        try {
+            const choice = await apiGet('/api/business/upgrade-choice');
+            if (choice?.pending && choice?.booking?.name) {
+                setBookingOffer(choice);
+            }
+        } catch {
+            // No booking business to offer
+        }
+    };
+
+    const useBookingBusiness = async () => {
+        setUsingBooking(true);
+        setError('');
+        try {
+            await apiPost('/api/business/upgrade-choice', { choice: 'booking' });
+            const b = await apiGet('/api/business');
+            applyBusiness(b);
+            setBookingOffer(null);
+            show('Booking business details are now on this profile.');
+        } catch (err: any) {
+            setError(err?.message || 'Could not use the booking business');
+        } finally {
+            setUsingBooking(false);
         }
     };
 
@@ -198,7 +232,7 @@ export default function ProfileAudit() {
                     {isAuditing ? (
                         <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
                     ) : (
-                        <Wand2 className="w-4 h-4 text-amber-300" />
+                        <BadgeCheck className="w-4 h-4 text-emerald-400" />
                     )}
                     {isAuditing ? 'Analyzing Profile...' : 'Run AI audit'}
                 </button>
@@ -210,12 +244,39 @@ export default function ProfileAudit() {
                 </p>
             )}
 
+            {bookingOffer?.pending && !hasBusiness && (
+                <div className="mb-6 rounded-2xl border-2 border-[var(--brand-primary)] bg-[var(--brand-primary-soft)] p-5">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-[var(--brand-primary-ink)]">
+                        Booking business
+                    </p>
+                    <h2 className="text-lg font-bold text-[#0F172A] mt-1">{bookingOffer.booking.name}</h2>
+                    <p className="text-sm text-[#64748B] mt-1">
+                        {[
+                            bookingOffer.booking.category,
+                            bookingOffer.booking.email,
+                            bookingOffer.booking.phone,
+                            bookingOffer.booking.address
+                        ]
+                            .filter(Boolean)
+                            .join(' · ') || 'Name, phone, and area from your booking account'}
+                    </p>
+                    <button
+                        type="button"
+                        disabled={usingBooking}
+                        onClick={useBookingBusiness}
+                        className="mt-4 inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-[#0F172A] text-white text-xs font-bold disabled:opacity-70"
+                    >
+                        {usingBooking ? 'Saving...' : 'Use this booking business'}
+                    </button>
+                </div>
+            )}
+
             {/* Audit Results View (If Available) */}
             {auditResult && mode === 'view' && (
                 <div className="bg-[#F8FAFC] border border-[var(--brand-primary)]/30 rounded-2xl p-6 mb-6 shadow-xs animate-in zoom-in duration-300">
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
-                            <Wand2 className="w-4 h-4 text-[var(--brand-primary)]" /> Audit Results
+                            <BadgeCheck className="w-4 h-4 text-[var(--brand-primary)]" /> Audit Results
                         </h2>
                         <div className="flex items-center gap-2">
                             <span className="text-xs text-gray-500 font-semibold">Optimization Score:</span>
@@ -316,6 +377,16 @@ export default function ProfileAudit() {
                             <div className="flex-1 min-w-0">
                                 <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">PHONE</p>
                                 <p className="text-xs font-semibold text-[#0F172A]">{formData.phone || 'Not set'}</p>
+                            </div>
+                        </div>
+
+                        <div className="rounded-xl border border-[#E2E8F0] p-4 flex items-start gap-3.5 bg-white shadow-xs">
+                            <div className="w-9 h-9 rounded-full bg-orange-50 flex items-center justify-center shrink-0">
+                                <Mail className="w-4 h-4 text-[var(--brand-primary)]" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">EMAIL</p>
+                                <p className="text-xs font-semibold text-[#0F172A] break-all">{formData.email || 'Not set'}</p>
                             </div>
                         </div>
 
@@ -467,6 +538,18 @@ export default function ProfileAudit() {
                                     fieldErrors.phone ? 'border-red-400' : 'border-[#E2E8F0]'
                                 }`}
                                 placeholder="Phone number"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block font-bold text-gray-700 mb-1">Email</label>
+                            <input
+                                type="email"
+                                name="email"
+                                value={formData.email}
+                                onChange={handleChange}
+                                className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)]"
+                                placeholder="hello@yourbusiness.com"
                             />
                         </div>
 
