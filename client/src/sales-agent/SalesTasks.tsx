@@ -176,7 +176,8 @@ export default function SalesTasks() {
     useEffect(() => {
         setDraftQ(filters.q);
     }, [filters.q]);
-    const qDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+    const qDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const TASKS_PER_PAGE = 10;
     useEffect(() => {
         return () => {
             if (qDebounceRef.current) clearTimeout(qDebounceRef.current);

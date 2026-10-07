@@ -438,7 +438,7 @@ export default function AdminGrowthAuditLeads() {
     useEffect(() => {
         setDraftQ(filters.q);
     }, [filters.q]);
-    const qDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+    const qDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     useEffect(() => {
         return () => {
             if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
