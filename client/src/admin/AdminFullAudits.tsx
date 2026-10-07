@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
     Check,
     CheckSquare,
@@ -277,10 +277,98 @@ function auditToLeadRef(a: FullAuditListItem): GrowthAuditLeadRef {
     };
 }
 
+const FULL_AUDIT_LIST_DEFAULTS = {
+    reqFilter: 'open' as RequestFilter,
+    page: '1',
+    requestPage: '1'
+};
+
 export default function AdminFullAudits() {
     const { show } = useToast();
+    const location = useLocation();
     const [searchParams, setSearchParams] = useSearchParams();
     const activeTab = searchParams.get('tab') === 'requests' ? 'requests' : 'audits';
+    const listDefaults = FULL_AUDIT_LIST_DEFAULTS;
+    const LIST_PRESERVE = ['tab'] as const;
+
+    const listFilters = useMemo(() => {
+        const next = { ...listDefaults };
+        for (const key of Object.keys(listDefaults)) {
+            const raw = searchParams.get(key);
+            if (raw != null && raw !== '') (next as Record<string, string>)[key] = raw;
+        }
+        return next;
+    }, [searchParams]);
+
+    const writeListFilters = useCallback(
+        (next: typeof listDefaults) => {
+            const params = new URLSearchParams();
+            for (const key of LIST_PRESERVE) {
+                const v = searchParams.get(key);
+                if (v) params.set(key, v);
+            }
+            for (const [key, value] of Object.entries(next)) {
+                const def = (listDefaults as Record<string, string>)[key] ?? '';
+                const trimmed = String(value ?? '');
+                if (!trimmed || trimmed === def) continue;
+                if (key === 'page' && trimmed === '1') continue;
+                if (key === 'requestPage' && trimmed === '1') continue;
+                params.set(key, trimmed);
+            }
+            setSearchParams(params, { replace: true });
+        },
+        [searchParams, setSearchParams]
+    );
+
+    const setListFilter = useCallback(
+        (key: string, value: string) => {
+            const next = { ...listFilters, [key]: value } as typeof listDefaults;
+            if (key !== 'page' && key !== 'requestPage' && 'page' in next) (next as Record<string, string>).page = '1';
+            writeListFilters(next);
+        },
+        [listFilters, writeListFilters]
+    );
+
+    const patchListFilters = useCallback(
+        (patch: Partial<typeof listDefaults>) => {
+            const next = { ...listFilters, ...patch } as typeof listDefaults;
+            const keys = Object.keys(patch);
+            const onlyPagination = keys.length > 0 && keys.every((k) => k === 'page' || k === 'requestPage');
+            if (!onlyPagination && 'page' in next && !('page' in patch)) (next as Record<string, string>).page = '1';
+            writeListFilters(next);
+        },
+        [listFilters, writeListFilters]
+    );
+    const requestFilter = listFilters.reqFilter as RequestFilter;
+    const page = Math.max(1, Number(listFilters.page) || 1);
+    const requestPage = Math.max(1, Number(listFilters.requestPage) || 1);
+    const setPage = useCallback(
+        (next: number | ((p: number) => number)) => {
+            const value = typeof next === 'function' ? next(page) : next;
+            setListFilter('page', String(Math.max(1, value)));
+        },
+        [page, setListFilter]
+    );
+    const setRequestPage = useCallback(
+        (next: number | ((p: number) => number)) => {
+            const value = typeof next === 'function' ? next(requestPage) : next;
+            setListFilter('requestPage', String(Math.max(1, value)));
+        },
+        [requestPage, setListFilter]
+    );
+    const setRequestFilter = useCallback(
+        (value: RequestFilter) => {
+            patchListFilters({ reqFilter: value, requestPage: '1' });
+        },
+        [patchListFilters]
+    );
+    const listReturnState = useMemo(
+        () => ({
+            from: `${location.pathname}${location.search}`,
+            fromLabel: 'Full audits'
+        }),
+        [location.pathname, location.search]
+    );
     const [audits, setAudits] = useState<FullAuditListItem[]>([]);
     const [requests, setRequests] = useState<FullAuditRequest[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
@@ -289,13 +377,10 @@ export default function AdminFullAudits() {
     const [error, setError] = useState('');
     const [busyId, setBusyId] = useState('');
     const [busyAction, setBusyAction] = useState<'share' | 'delete' | ''>('');
-    const [page, setPage] = useState(1);
-    const [requestPage, setRequestPage] = useState(1);
     const [fulfillAuditId, setFulfillAuditId] = useState('');
     const [fulfillAgentId, setFulfillAgentId] = useState('');
     const [assignModalReq, setAssignModalReq] = useState<FullAuditRequest | null>(null);
     const [assignSaving, setAssignSaving] = useState(false);
-    const [requestFilter, setRequestFilter] = useState<RequestFilter>('open');
     const [seenRequestIds, setSeenRequestIds] = useState<Set<string>>(() => loadSeenRequestIds());
     const [prefillRequestId, setPrefillRequestId] = useState<string | null>(null);
     const pendingAssignRef = useRef<{ reqId: string; auditId: string } | null>(null);
@@ -319,8 +404,6 @@ export default function AdminFullAudits() {
                 setAudits(list);
                 setSalesAgents(agents);
                 setRequests(reqs);
-                setPage(1);
-                setRequestPage(1);
                 const pending = pendingAssignRef.current;
                 if (pending) {
                     pendingAssignRef.current = null;
@@ -908,10 +991,7 @@ export default function AdminFullAudits() {
                                 <button
                                     key={f.id}
                                     type="button"
-                                    onClick={() => {
-                                        setRequestFilter(f.id);
-                                        setRequestPage(1);
-                                    }}
+                                    onClick={() => setRequestFilter(f.id)}
                                     className={cn(
                                         'px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors',
                                         requestFilter === f.id
@@ -1073,13 +1153,14 @@ export default function AdminFullAudits() {
                                                                 Dismiss
                                                             </button>
                                                             {req.leadId ? (
-                                                                <a
-                                                                    href={`/admin/leads/${encodeURIComponent(req.leadId)}`}
+                                                                <Link
+                                                                    to={`/admin/leads/${encodeURIComponent(req.leadId)}`}
+                                                                    state={listReturnState}
                                                                     className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-[#0F172A] transition-colors whitespace-nowrap"
                                                                 >
                                                                     <span>Open lead</span>
                                                                     <ExternalLink className="w-3 h-3" />
-                                                                </a>
+                                                                </Link>
                                                             ) : null}
                                                         </>
                                                     ) : (
@@ -1094,13 +1175,14 @@ export default function AdminFullAudits() {
                                                                 <span>Edit Assignment</span>
                                                             </button>
                                                             {req.leadId ? (
-                                                                <a
-                                                                    href={`/admin/leads/${encodeURIComponent(req.leadId)}`}
+                                                                <Link
+                                                                    to={`/admin/leads/${encodeURIComponent(req.leadId)}`}
+                                                                    state={listReturnState}
                                                                     className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-[#0F172A] transition-colors whitespace-nowrap"
                                                                 >
                                                                     <span>Open lead</span>
                                                                     <ExternalLink className="w-3 h-3" />
-                                                                </a>
+                                                                </Link>
                                                             ) : null}
                                                         </div>
                                                     )}

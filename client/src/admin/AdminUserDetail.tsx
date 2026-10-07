@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import {
     ArrowLeft,
     Calendar,
@@ -257,6 +257,9 @@ function SalesAgentDetailBody({ user }: { user: AdminUser }) {
 
 export default function AdminUserDetail() {
     const { kind, id } = useParams<{ kind: string; id: string }>();
+    const location = useLocation();
+    const navFrom = (location.state as { from?: string; fromLabel?: string } | null)?.from;
+    const backTo = typeof navFrom === 'string' && navFrom.startsWith('/') ? navFrom : '/admin/users';
     const { show } = useToast();
     const [user, setUser] = useState<AdminUser | null>(null);
     const [error, setError] = useState('');
@@ -297,7 +300,7 @@ export default function AdminUserDetail() {
     if (error && !user) {
         return (
             <div className="max-w-3xl space-y-4">
-                <Link to="/admin/users" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0F172A]">
+                <Link to={backTo} className="inline-flex items-center gap-2 text-sm font-semibold text-[#0F172A]">
                     <ArrowLeft className="w-4 h-4" /> Back to users
                 </Link>
                 <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{error}</p>
@@ -317,7 +320,7 @@ export default function AdminUserDetail() {
     return (
         <div className="max-w-4xl space-y-5 pb-8">
             <Link
-                to="/admin/users"
+                to={backTo}
                 className="inline-flex items-center gap-2 text-sm font-semibold text-[#64748B] hover:text-[#0F172A]"
             >
                 <ArrowLeft className="w-4 h-4" /> Back to users

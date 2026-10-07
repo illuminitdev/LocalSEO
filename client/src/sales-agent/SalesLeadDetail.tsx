@@ -53,18 +53,13 @@ import {
     BadgeCheck
 } from 'lucide-react';
 
-type LeadDetailLocationState = {
-    from?: string;
-    fromLabel?: string;
-} | null;
-
 export default function SalesLeadDetail() {
     const { id } = useParams<{ id: string }>();
     const location = useLocation();
-    const navState = (location.state as LeadDetailLocationState) || null;
     const { show } = useToast();
-    const backTo = navState?.from || '/sales';
-    const backLabel = navState?.fromLabel ? `Back to ${navState.fromLabel}` : 'Back to Dashboard';
+    const navFrom = (location.state as { from?: string; fromLabel?: string } | null)?.from;
+    const backTo = typeof navFrom === 'string' && navFrom.startsWith('/') ? navFrom : '/sales';
+    const backLabel = `Back to ${(location.state as { fromLabel?: string } | null)?.fromLabel?.trim() || 'Dashboard'}`;
     const [lead, setLead] = useState<SalesUnifiedLead | null>(null);
     const [tasks, setTasks] = useState<SalesLeadTask[]>([]);
     const [activities, setActivities] = useState<SalesLeadActivity[]>([]);

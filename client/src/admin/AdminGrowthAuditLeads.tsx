@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     ClipboardList,
     MessageSquare,
@@ -328,45 +328,161 @@ export function getLeadBusinessCategory(lead: {
     return normalizeBusinessCategory(raw);
 }
 
+const LEADS_FILTER_DEFAULTS = (() => {
+    let source: SourceCategoryFilter = 'all';
+    try {
+        const saved = localStorage.getItem('localpulse_admin_leads_source_tab');
+        if (saved === 'all' || saved === 'growth_audit' || saved === 'added') source = saved;
+    } catch {}
+    return {
+        q: '',
+        contact: 'any' as ContactFilter,
+        source,
+        batch: 'all',
+        business: 'all',
+        agent: 'all',
+        status: 'all',
+        priority: 'all',
+        statusDate: 'all' as StatusDateFilter,
+        statusDateCustom: '',
+        email: 'all' as EmailOpenFilter,
+        page: '1'
+    };
+})();
+
 export default function AdminGrowthAuditLeads() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [leads, setLeads] = useState<AdminLead[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
     const [activeLead, setActiveLead] = useState<GrowthAuditLeadRef | null>(null);
     const [viewingLeadDetails, setViewingLeadDetails] = useState<GrowthAuditLeadRef | null>(null);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(true);
-    const [query, setQuery] = useState('');
-    const [draftQuery, setDraftQuery] = useState('');
-    const [hasContact, setHasContact] = useState<ContactFilter>('any');
-    const [sourceCategory, setSourceCategory] = useState<SourceCategoryFilter>(() => {
-        try {
-            const saved = localStorage.getItem('localpulse_admin_leads_source_tab');
-            if (saved === 'all' || saved === 'growth_audit' || saved === 'added') return saved;
-        } catch {}
-        return 'all';
-    });
-    const [page, setPage] = useState(1);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const defaults = LEADS_FILTER_DEFAULTS;
+
+    const readFiltersFromUrl = useCallback((params: URLSearchParams) => {
+        const next = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+            const raw = params.get(key);
+            if (raw != null && raw !== '') (next as Record<string, string>)[key] = raw;
+        }
+        return next;
+    }, [defaults]);
+
+    // UI source of truth — survives Refresh (which only reloads data).
+    const [filters, setFilters] = useState(() => readFiltersFromUrl(searchParams));
+    const filtersRef = useRef(filters);
+    filtersRef.current = filters;
+    const skipUrlToStateRef = useRef(false);
+
+    const writeFiltersToUrl = useCallback(
+        (next: typeof defaults) => {
+            const params = new URLSearchParams();
+            for (const [key, value] of Object.entries(next)) {
+                const def = (defaults as Record<string, string>)[key] ?? '';
+                const trimmed = String(value ?? '');
+                if (!trimmed || trimmed === def) continue;
+                if (key === 'page' && trimmed === '1') continue;
+                params.set(key, trimmed);
+            }
+            const nextQs = params.toString();
+            const currentQs = window.location.search.startsWith('?')
+                ? window.location.search.slice(1)
+                : window.location.search;
+            if (nextQs === currentQs) return;
+            skipUrlToStateRef.current = true;
+            setSearchParams(params, { replace: true });
+        },
+        [defaults, setSearchParams]
+    );
+
+    // Keep URL in sync when filters change (for back/detail restore).
+    useEffect(() => {
+        writeFiltersToUrl(filters);
+    }, [filters, writeFiltersToUrl]);
+
+    // Browser back/forward: adopt URL into state (ignore our own writes).
+    useEffect(() => {
+        if (skipUrlToStateRef.current) {
+            skipUrlToStateRef.current = false;
+            return;
+        }
+        const fromUrl = readFiltersFromUrl(searchParams);
+        const same = Object.keys(defaults).every(
+            (k) => (filtersRef.current as Record<string, string>)[k] === (fromUrl as Record<string, string>)[k]
+        );
+        if (!same) setFilters(fromUrl);
+    }, [searchParams, readFiltersFromUrl, defaults]);
+
+    const setFilter = useCallback((key: string, value: string) => {
+        setFilters((prev) => {
+            const next = { ...prev, [key]: value } as typeof defaults;
+            if (key !== 'page' && key !== 'requestPage') (next as Record<string, string>).page = '1';
+            return next;
+        });
+    }, []);
+
+    const patchFilters = useCallback((patch: Partial<typeof defaults>) => {
+        setFilters((prev) => {
+            const next = { ...prev, ...patch } as typeof defaults;
+            const keys = Object.keys(patch);
+            const onlyPagination = keys.length > 0 && keys.every((k) => k === 'page' || k === 'requestPage');
+            if (!onlyPagination && !('page' in patch)) (next as Record<string, string>).page = '1';
+            return next;
+        });
+    }, []);
+
+    const [draftQ, setDraftQ] = useState(filters.q);
+    useEffect(() => {
+        setDraftQ(filters.q);
+    }, [filters.q]);
+    const qDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    useEffect(() => {
+        return () => {
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+        };
+    }, []);
+    const setSearchQuery = useCallback(
+        (value: string) => {
+            setDraftQ(value);
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+            qDebounceRef.current = setTimeout(() => setFilter('q', value), 300);
+        },
+        [setFilter]
+    );
+
+    const query = filters.q;
+    const hasContact = filters.contact as ContactFilter;
+    const sourceCategory = filters.source as SourceCategoryFilter;
+    const page = Math.max(1, Number(filters.page) || 1);
+    const excelBatchFilter = filters.batch;
+    const businessFilter = filters.business;
+    const selectedAgent = filters.agent;
+    const selectedStatus = filters.status;
+    const selectedPriority = filters.priority;
+    const statusDateFilter = filters.statusDate as StatusDateFilter;
+    const statusCustomDate = filters.statusDateCustom;
+    const emailFilter = filters.email as EmailOpenFilter;
+    const setPage = useCallback(
+        (next: number | ((p: number) => number)) => {
+            const value = typeof next === 'function' ? next(page) : next;
+            setFilter('page', String(Math.max(1, value)));
+        },
+        [page, setFilter]
+    );
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
     const [isAddLeadModalOpen, setIsAddLeadModalOpen] = useState(false);
     const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
     const [selectedStatusLead, setSelectedStatusLead] = useState<AdminLead | null>(null);
     const [excelBatches, setExcelBatches] = useState<ExcelImportBatch[]>([]);
-    const [excelBatchFilter, setExcelBatchFilter] = useState<string>('all');
-    const [businessFilter, setBusinessFilter] = useState<string>('all');
-    const [selectedAgent, setSelectedAgent] = useState<string>('all');
-    const [selectedStatus, setSelectedStatus] = useState<string>('all');
-    const [selectedPriority, setSelectedPriority] = useState<string>('all');
-    const [statusDateFilter, setStatusDateFilter] = useState<StatusDateFilter>('all');
-    const [statusCustomDate, setStatusCustomDate] = useState<string>('');
-    const [emailFilter, setEmailFilter] = useState<EmailOpenFilter>('all');
 
     const handleSetSourceCategory = (cat: SourceCategoryFilter) => {
-        setSourceCategory(cat);
+        setFilter('source', cat);
         try {
             localStorage.setItem('localpulse_admin_leads_source_tab', cat);
         } catch {}
-        setPage(1);
     };
 
     const load = useCallback(() => {
@@ -386,7 +502,6 @@ export default function AdminGrowthAuditLeads() {
                 setLeads(data.leads || []);
                 setSalesAgents(agents);
                 setExcelBatches(batches);
-                setPage(1);
             })
             .catch((err: Error) => {
                 setLeads([]);
@@ -400,15 +515,31 @@ export default function AdminGrowthAuditLeads() {
     }, [load]);
 
     useEffect(() => {
-        if (excelBatchFilter !== 'all' && !excelBatches.some((b) => b.batchId === excelBatchFilter)) {
-            setExcelBatchFilter('all');
+        // Only auto-clear real Excel batch IDs that no longer exist — never source tabs.
+        if (
+            excelBatchFilter === 'all' ||
+            excelBatchFilter === 'added' ||
+            excelBatchFilter === 'growth_audit' ||
+            excelBatchFilter === 'legacy'
+        ) {
+            return;
         }
-    }, [excelBatches, excelBatchFilter]);
+        if (!excelBatches.some((b) => b.batchId === excelBatchFilter)) {
+            setFilter('batch', 'all');
+        }
+    }, [excelBatches, excelBatchFilter, setFilter]);
 
-    useEffect(() => {
-        const t = window.setTimeout(() => setQuery(draftQuery), 300);
-        return () => window.clearTimeout(t);
-    }, [draftQuery]);
+    const openLeadProfile = useCallback(
+        (leadId: string) => {
+            navigate(`/admin/leads/${encodeURIComponent(leadId)}`, {
+                state: {
+                    from: `${location.pathname}${location.search}`,
+                    fromLabel: 'Leads'
+                }
+            });
+        },
+        [navigate, location.pathname, location.search]
+    );
 
     const growthAuditCount = useMemo(
         () => leads.filter((l) => !isLeadAdded(l)).length,
@@ -730,7 +861,7 @@ export default function AdminGrowthAuditLeads() {
         setError('');
         try {
             await deleteAdminExcelLeads(excelBatchFilter);
-            setExcelBatchFilter('all');
+            setFilter('batch', 'all');
             setSelectedLeadIds(new Set());
             await load();
         } catch (err: any) {
@@ -820,8 +951,8 @@ export default function AdminGrowthAuditLeads() {
                         <div className="relative flex-1 max-w-md min-w-0">
                             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94A3B8]" />
                             <input
-                                value={draftQuery}
-                                onChange={(e) => setDraftQuery(e.target.value)}
+                                value={draftQ}
+                                onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder="Search leads by business, name, email, phone, city..."
                                 className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-[#E2E8F0] text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 bg-slate-50 focus:bg-white"
                             />
@@ -883,7 +1014,29 @@ export default function AdminGrowthAuditLeads() {
 
                             <button
                                 type="button"
-                                onClick={load}
+                                onClick={() => {
+                                    // Refresh = clear filters back to defaults, then reload
+                                    const cleared = {
+                                        q: '',
+                                        contact: 'any' as ContactFilter,
+                                        source: 'all' as SourceCategoryFilter,
+                                        batch: 'all',
+                                        business: 'all',
+                                        agent: 'all',
+                                        status: 'all',
+                                        priority: 'all',
+                                        statusDate: 'all' as StatusDateFilter,
+                                        statusDateCustom: '',
+                                        email: 'all' as EmailOpenFilter,
+                                        page: '1'
+                                    };
+                                    setDraftQ('');
+                                    setFilters(cleared);
+                                    try {
+                                        localStorage.setItem('localpulse_admin_leads_source_tab', 'all');
+                                    } catch {}
+                                    load();
+                                }}
                                 disabled={loading}
                                 className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all"
                             >
@@ -901,10 +1054,7 @@ export default function AdminGrowthAuditLeads() {
                             </label>
                             <select
                                 value={businessFilter}
-                                onChange={(e) => {
-                                    setBusinessFilter(e.target.value);
-                                    setPage(1);
-                                }}
+                                onChange={(e) => setFilter('business', e.target.value)}
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                                 title="Filter by Business category"
                             >
@@ -929,10 +1079,7 @@ export default function AdminGrowthAuditLeads() {
                             </label>
                             <select
                                 value={selectedAgent}
-                                onChange={(e) => {
-                                    setSelectedAgent(e.target.value);
-                                    setPage(1);
-                                }}
+                                onChange={(e) => setFilter('agent', e.target.value)}
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             >
                                 <option value="all">All Agents</option>
@@ -955,12 +1102,13 @@ export default function AdminGrowthAuditLeads() {
                                     const val = e.target.value;
                                     if (val === 'all' || val === 'added' || val === 'growth_audit') {
                                         handleSetSourceCategory(val as SourceCategoryFilter);
-                                        setExcelBatchFilter('all');
+                                        setFilter('batch', 'all');
                                     } else {
-                                        setExcelBatchFilter(val);
-                                        setSourceCategory('added');
+                                        patchFilters({ batch: val, source: 'added' });
+                                        try {
+                                            localStorage.setItem('localpulse_admin_leads_source_tab', 'added');
+                                        } catch {}
                                     }
-                                    setPage(1);
                                     setSelectedLeadIds(new Set());
                                 }}
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
@@ -989,10 +1137,7 @@ export default function AdminGrowthAuditLeads() {
                             </label>
                             <select
                                 value={selectedStatus}
-                                onChange={(e) => {
-                                    setSelectedStatus(e.target.value);
-                                    setPage(1);
-                                }}
+                                onChange={(e) => setFilter('status', e.target.value)}
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             >
                                 <option value="all">All Statuses</option>
@@ -1016,10 +1161,7 @@ export default function AdminGrowthAuditLeads() {
                             </label>
                             <select
                                 value={emailFilter}
-                                onChange={(e) => {
-                                    setEmailFilter(e.target.value as EmailOpenFilter);
-                                    setPage(1);
-                                }}
+                                onChange={(e) => setFilter('email', e.target.value)}
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                                 title="Filter by email open status"
                             >
@@ -1038,10 +1180,7 @@ export default function AdminGrowthAuditLeads() {
                             </label>
                             <select
                                 value={statusDateFilter}
-                                onChange={(e) => {
-                                    setStatusDateFilter(e.target.value as StatusDateFilter);
-                                    setPage(1);
-                                }}
+                                onChange={(e) => setFilter('statusDate', e.target.value)}
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                                 title="Filter leads by updated status date"
                             >
@@ -1056,10 +1195,7 @@ export default function AdminGrowthAuditLeads() {
                                 <input
                                     type="date"
                                     value={statusCustomDate}
-                                    onChange={(e) => {
-                                        setStatusCustomDate(e.target.value);
-                                        setPage(1);
-                                    }}
+                                    onChange={(e) => setFilter('statusDateCustom', e.target.value)}
                                     className="w-full mt-1 px-2 py-1 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                                 />
                             )}
@@ -1074,13 +1210,13 @@ export default function AdminGrowthAuditLeads() {
                                 onChange={(e) => {
                                     const val = e.target.value;
                                     if (val.startsWith('contact_')) {
-                                        setHasContact(val.replace('contact_', '') as ContactFilter);
-                                        setSelectedPriority('all');
+                                        patchFilters({
+                                            contact: val.replace('contact_', '') as ContactFilter,
+                                            priority: 'all'
+                                        });
                                     } else {
-                                        setSelectedPriority(val);
-                                        setHasContact('any');
+                                        patchFilters({ priority: val, contact: 'any' });
                                     }
-                                    setPage(1);
                                 }}
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             >
@@ -1606,7 +1742,7 @@ export default function AdminGrowthAuditLeads() {
                                                         <div className="flex items-center justify-end gap-1.5">
                                                             <button
                                                                 type="button"
-                                                                onClick={() => navigate(`/admin/leads/${encodeURIComponent(lead.id)}`)}
+                                                                onClick={() => openLeadProfile(lead.id)}
                                                                 className="inline-flex items-center justify-center p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg transition-colors shadow-2xs shrink-0"
                                                                 title="View Details"
                                                                 aria-label="View Details"
@@ -1705,7 +1841,7 @@ export default function AdminGrowthAuditLeads() {
                     onTaskUpdated={load}
                     onViewDetails={(lead) => {
                         setActiveLead(null);
-                        navigate(`/admin/leads/${encodeURIComponent(lead.id)}`);
+                        openLeadProfile(lead.id);
                     }}
                 />
             )}
