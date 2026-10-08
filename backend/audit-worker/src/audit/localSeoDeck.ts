@@ -247,12 +247,13 @@ export function buildLocalSeoFixes(audit) {
       inPack,
       status: inPack ? 'yes' : 'no',
       evidence: inPack
-        ? `Appears at #${audit?.gbpLookup?.localRank?.position} for “${measuredQuery}”`
+        ? String(audit?.gbpLookup?.localRank?.evidence || `Appears for “${measuredQuery}”`)
         : mapsResults.length
           ? `Not in Maps results for “${measuredQuery}” — showing ${mapsResults.length} other listings`
           : `Not in Maps results for “${measuredQuery}”`,
       results: mapsResults,
-      mapsResults
+      mapsResults,
+      queryRanks: audit?.gbpLookup?.localRank?.queryRanks || []
     },
     actions:
       actions.length > 0

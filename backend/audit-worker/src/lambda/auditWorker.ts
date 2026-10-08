@@ -26,10 +26,12 @@ import {
   fetchGbpReviewsSample,
   fetchGbpUpdates,
   fetchMapsLocalPack,
+  finalizeWorstLocalRank,
   fetchOrganicBrandImages,
   fetchOrganicLocalRank,
   findMatchingMapsItem,
   measureGeoGridVisibility,
+  pickWorstLocalRank,
   requireDataForSeoConfigured,
   type DataForSeoMapsItem,
   type SerpScreenshotResult
@@ -288,13 +290,24 @@ async function enrichFromDataForSeo(audit: any) {
 
   const cityForQuery = locationLabel;
   const packQueryVariants: string[] = [];
-  const pushQ = (q: string) => {
+  const packQueryPlace = new Map<string, string>();
+  const pushQ = (q: string, place = '') => {
     const cleaned = q.replace(/\s+/g, ' ').trim();
-    if (cleaned && !packQueryVariants.includes(cleaned)) packQueryVariants.push(cleaned);
+    if (cleaned && !packQueryVariants.some((q) => q.toLowerCase() === cleaned.toLowerCase())) {
+      packQueryVariants.push(cleaned);
+      packQueryPlace.set(cleaned, place);
+    }
   };
-  // The Maps ranking uses one search only: "<service> in <city>" (city from the form). No brand name.
+  // The Maps ranking uses four searches (no brand name): service in/near the city, and in/near the area.
+  // The area is the town or suburb, never a street or road.
   const rankCity = formCity || cityForQuery;
-  if (rankCity) pushQ(`${service} in ${rankCity}`);
+  const rankArea = nearPlace && !looksLikeStreet(nearPlace) ? nearPlace : rankCity;
+  for (const place of [rankCity, rankArea]) {
+    if (place) pushQ(`${service} in ${place}`, place);
+  }
+  for (const place of [rankCity, rankArea]) {
+    if (place) pushQ(`${service} near ${place}`, place);
+  }
 
   let packQuery = packQueryVariants[0] || '';
 
@@ -311,16 +324,54 @@ async function enrichFromDataForSeo(audit: any) {
 
   let packItems: DataForSeoMapsItem[] = [];
   let packTaskId: string | null = null;
-  for (const keyword of packQueryVariants) {
-    const pack = await fetchMapsLocalPack({
-      ...mapsOptsBase,
-      keyword
-    });
-    packQuery = keyword;
-    packTaskId = pack.taskId || packTaskId;
-    if (pack.items.length) {
-      packItems = pack.items;
-      break;
+  let measuredRank: ReturnType<typeof finalizeWorstLocalRank> | null = null;
+
+  /** Run every Maps search and keep the worst result (a search with no results at all is treated as unmeasured). */
+  const measureWorstRank = async (opts: typeof mapsOptsBase) => {
+    const runs = await Promise.all(
+      packQueryVariants.map(async (keyword) => {
+        // Anchor each search to its named place (not the business's own pin) so repeat runs see the same
+        // results; only fall back to the business coordinates when the place name returns nothing.
+        const place = packQueryPlace.get(keyword) || '';
+        let pack = await fetchMapsLocalPack({
+          ...opts,
+          keyword,
+          lat: null,
+          lng: null,
+          locationName: place || opts.locationName
+        });
+        if (!pack.items.length) pack = await fetchMapsLocalPack({ ...opts, keyword });
+        const rank = buildDeepLocalRank({
+          query: keyword,
+          items: pack.items,
+          businessName,
+          placeId: audit.gbpLookup?.placeId || '',
+          phone: business.phone,
+          website: business.website
+        });
+        return { keyword, pack, rank };
+      })
+    );
+    const withItems = runs.filter((r) => r.pack.items.length);
+    const pool = withItems.length ? withItems : runs;
+    const worstRank = pickWorstLocalRank(pool.map((r) => r.rank));
+    const worst = pool.find((r) => r.rank === worstRank) || pool[0];
+    if (!worst) return null;
+    return {
+      items: worst.pack.items,
+      taskId: worst.pack.taskId || null,
+      query: worst.keyword,
+      rank: finalizeWorstLocalRank(worst.rank, runs.map((r) => r.rank))
+    };
+  };
+
+  if (packQueryVariants.length) {
+    const first = await measureWorstRank(mapsOptsBase);
+    if (first) {
+      packItems = first.items;
+      packTaskId = first.taskId;
+      packQuery = first.query;
+      measuredRank = first.rank;
     }
   }
 
@@ -369,31 +420,19 @@ async function enrichFromDataForSeo(audit: any) {
   }
 
 
-  const attachLocalRank = (items: DataForSeoMapsItem[], query: string) => {
-    const q = String(query || '').trim();
-    if (!q) return;
-    const localRank = buildDeepLocalRank({
-      query: q,
-      items: Array.isArray(items) ? items : [],
-      businessName,
-      placeId: audit.gbpLookup?.placeId || '',
-      phone: business.phone,
-      website: business.website
-    });
+  const attachLocalRank = (rank: ReturnType<typeof finalizeWorstLocalRank>) => {
     audit.gbpLookup = {
       ...(audit.gbpLookup || {}),
-      localRank,
-      serviceQuery: q
+      localRank: rank,
+      serviceQuery: rank.query
     };
   };
 
-  // Ranking always comes from the service search, never the brand-name search.
-  const rankItems = packItems;
-  const rankQuery = packQuery;
-  if (rankQuery) {
-    attachLocalRank(rankItems, rankQuery);
-    if (!rankItems.length) {
-      console.warn('[auditWorker] DataForSEO Maps empty for', rankQuery, '— saved measured No');
+  // Ranking always comes from the service searches, never the brand-name search.
+  if (measuredRank) {
+    attachLocalRank(measuredRank);
+    if (!packItems.length) {
+      console.warn('[auditWorker] DataForSEO Maps empty for', packQuery, '— saved measured No');
     }
   } else {
     console.warn('[auditWorker] No Maps query could be built for', businessName);
@@ -502,6 +541,7 @@ async function enrichFromDataForSeo(audit: any) {
           fetchGbpReviewsSample({
             placeId: placeId || undefined,
             keyword: placeId ? undefined : String(keyword),
+            fallbackKeyword: [businessName || gbp.gbpName, locationLabel].filter(Boolean).join(' '),
             ...locOpts,
             depth: 20,
             recentDays: 90
@@ -642,25 +682,6 @@ async function enrichFromDataForSeo(audit: any) {
 
   lat = audit.gbpLookup?.latitude ?? audit.gbpLookup?.lat ?? null;
   lng = audit.gbpLookup?.longitude ?? audit.gbpLookup?.lng ?? null;
-  const hadCoordsBefore = typeof lat === 'number' && typeof lng === 'number';
-  if (hadCoordsBefore && packQuery) {
-    const refreshed = await fetchMapsLocalPack({
-      keyword: packQuery,
-      lat,
-      lng,
-      locationName: locationLabel || undefined,
-      depth: 10,
-      timeoutMs: 35000
-    });
-    if (refreshed.items.length) {
-      attachLocalRank(refreshed.items, packQuery);
-      packTaskId = refreshed.taskId || packTaskId;
-    } else if (!audit.gbpLookup?.localRank) {
-      attachLocalRank([], packQuery);
-    }
-  }
-
-  
   const localRank = audit.gbpLookup?.localRank as
     | { topResults?: Array<{ mainImage?: string; isProspect?: boolean }> }
     | undefined;

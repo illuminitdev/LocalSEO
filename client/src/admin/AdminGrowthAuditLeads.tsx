@@ -45,6 +45,7 @@ import ExcelLeadUploadModal, { downloadLeadsExcelTemplate } from '../sales-agent
 import AddLeadModal from '../sales-agent/AddLeadModal';
 import { emailShareStatusLabel, emailShareStatusHint } from '../shared/emailShareStatus';
 import { cn } from '../shared/utils';
+import { matchesEmailFilter, matchesLeadStatusFilter } from './crmFilters';
 
 type ContactFilter = 'any' | 'email' | 'phone' | 'both';
 type SourceCategoryFilter = 'all' | 'growth_audit' | 'added';
@@ -264,8 +265,8 @@ export function matchesStatusDateFilter(
         return targetTime >= thirtyDaysAgo;
     }
     if (filter === 'custom' && customDate) {
-        const targetIso = d.toISOString().slice(0, 10);
-        return targetIso === customDate;
+        const targetLocal = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        return targetLocal === customDate;
     }
     return true;
 }
@@ -524,6 +525,8 @@ export default function AdminGrowthAuditLeads() {
         ) {
             return;
         }
+        // Batches load asynchronously; don't wipe a restored batch before they arrive.
+        if (excelBatches.length === 0) return;
         if (!excelBatches.some((b) => b.batchId === excelBatchFilter)) {
             setFilter('batch', 'all');
         }
@@ -642,129 +645,14 @@ export default function AdminGrowthAuditLeads() {
                 }
             }
 
-            if (selectedStatus !== 'all') {
-                const rawStat = String(lead.status || '').toLowerCase().trim().replace(/[-\s]/g, '_');
-                const displayStat = (displayLeadStatus(lead) || '').toLowerCase().trim().replace(/[-\s]/g, '_');
-                const sheetStat = String(lead.spreadsheetStatus1 || lead.spreadsheetStatus || '').toLowerCase().trim().replace(/[-\s]/g, '_');
-                const target = selectedStatus.toLowerCase().trim().replace(/[-\s]/g, '_');
-
-                if (target === 'new') {
-                    const isNew =
-                        rawStat === 'new' ||
-                        rawStat === 'pending' ||
-                        rawStat === 'submitted' ||
-                        !rawStat ||
-                        displayStat === 'new' ||
-                        displayStat === 'pending' ||
-                        displayStat === 'submitted' ||
-                        (!rawStat && !sheetStat);
-                    if (!isNew) return false;
-                } else if (target === 'not_interested') {
-                    const isNotInterested =
-                        rawStat === 'not_interested' ||
-                        displayStat.includes('not_interested') ||
-                        sheetStat.includes('not_interested') ||
-                        displayStat.includes('rejected') ||
-                        sheetStat.includes('rejected') ||
-                        displayStat.includes('declined') ||
-                        sheetStat.includes('declined');
-                    if (!isNotInterested) return false;
-                } else if (target === 'interested') {
-                    const isInterested =
-                        (rawStat === 'interested' || displayStat.includes('interested') || sheetStat.includes('interested')) &&
-                        !displayStat.includes('not_interested') &&
-                        !sheetStat.includes('not_interested');
-                    if (!isInterested) return false;
-                } else if (target === 'follow_up' || target === 'callback') {
-                    const isFollowUp =
-                        rawStat === 'follow_up' ||
-                        rawStat === 'callback' ||
-                        displayStat.includes('follow') ||
-                        displayStat.includes('callback') ||
-                        sheetStat.includes('follow') ||
-                        sheetStat.includes('callback');
-                    if (!isFollowUp) return false;
-                } else if (target === 'in_progress') {
-                    const isInProgress =
-                        rawStat === 'in_progress' ||
-                        displayStat.includes('in_progress') ||
-                        sheetStat.includes('in_progress') ||
-                        displayStat.includes('progress');
-                    if (!isInProgress) return false;
-                } else if (target === 'converted') {
-                    const isConverted =
-                        rawStat === 'converted' ||
-                        displayStat.includes('converted') ||
-                        sheetStat.includes('converted') ||
-                        displayStat.includes('won');
-                    if (!isConverted) return false;
-                } else if (target === 'completed') {
-                    const isCompleted =
-                        rawStat === 'completed' ||
-                        displayStat.includes('complete') ||
-                        sheetStat.includes('complete') ||
-                        displayStat.includes('done');
-                    if (!isCompleted) return false;
-                } else if (target === 'contacted') {
-                    const isContacted =
-                        rawStat === 'contacted' ||
-                        displayStat.includes('contacted') ||
-                        displayStat.includes('called') ||
-                        displayStat.includes('connected') ||
-                        sheetStat.includes('contacted') ||
-                        sheetStat.includes('called');
-                    if (!isContacted) return false;
-                } else if (target === 'voicemail') {
-                    const isVoicemail =
-                        rawStat === 'voicemail' ||
-                        displayStat.includes('voicemail') ||
-                        sheetStat.includes('voicemail');
-                    if (!isVoicemail) return false;
-                } else if (target === 'cancelled') {
-                    const isCancelled =
-                        rawStat === 'cancelled' ||
-                        displayStat.includes('cancel') ||
-                        sheetStat.includes('cancel') ||
-                        displayStat.includes('lost');
-                    if (!isCancelled) return false;
-                } else if (
-                    rawStat !== target &&
-                    !rawStat.includes(target) &&
-                    displayStat !== target &&
-                    !displayStat.includes(target) &&
-                    sheetStat !== target &&
-                    !sheetStat.includes(target)
-                ) {
-                    return false;
-                }
-            }
+            if (!matchesLeadStatusFilter(lead, selectedStatus)) return false;
 
             if (selectedPriority !== 'all') {
                 const prio = String(lead.opportunityLevel || (lead as any).priority || 'medium').toLowerCase().trim();
                 if (prio !== selectedPriority.toLowerCase().trim()) return false;
             }
 
-            if (emailFilter !== 'all') {
-                const isObsOpened = lead.observationEmailShareStatus === 'opened';
-                const isAuditOpened = lead.emailShareStatus === 'opened';
-                const isObsSent =
-                    lead.observationEmailShareStatus === 'sent' ||
-                    isObsOpened ||
-                    lead.latestActivity?.disposition === 'observation_email';
-                const isAuditSent = lead.emailShareStatus === 'sent' || isAuditOpened;
-                const isAnySent = isObsSent || isAuditSent;
-                const isAnyOpened = isObsOpened || isAuditOpened;
-
-                if (emailFilter === 'sent') {
-                    if (!isAnySent) return false;
-                } else if (emailFilter === 'opened') {
-                    if (!isAnyOpened) return false;
-                } else if (emailFilter === 'not_opened') {
-                    if (!isAnySent || isAnyOpened) return false;
-                } else if (emailFilter === 'not_sent') {
-                    if (isAnySent) return false;
-                }
-            }
+            if (!matchesEmailFilter(lead, emailFilter)) return false;
 
             const statusDate = lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt;
             if (!matchesStatusDateFilter(statusDate, statusDateFilter, statusCustomDate)) {
@@ -1203,21 +1091,11 @@ export default function AdminGrowthAuditLeads() {
 
                         <div>
                             <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                                Priority / Contact
+                                Priority
                             </label>
                             <select
-                                value={selectedPriority !== 'all' ? selectedPriority : hasContact !== 'any' ? `contact_${hasContact}` : 'all'}
-                                onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (val.startsWith('contact_')) {
-                                        patchFilters({
-                                            contact: val.replace('contact_', '') as ContactFilter,
-                                            priority: 'all'
-                                        });
-                                    } else {
-                                        patchFilters({ priority: val, contact: 'any' });
-                                    }
-                                }}
+                                value={selectedPriority}
+                                onChange={(e) => setFilter('priority', e.target.value)}
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             >
                                 <option value="all">All Priorities</option>
@@ -1225,9 +1103,22 @@ export default function AdminGrowthAuditLeads() {
                                 <option value="high">High Priority</option>
                                 <option value="medium">Medium Priority</option>
                                 <option value="low">Low Priority</option>
-                                <option value="contact_email">Has Email</option>
-                                <option value="contact_phone">Has Phone</option>
-                                <option value="contact_both">Both Email & Phone</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                                Contact
+                            </label>
+                            <select
+                                value={hasContact}
+                                onChange={(e) => setFilter('contact', e.target.value)}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                            >
+                                <option value="any">Any Contact</option>
+                                <option value="email">Has Email</option>
+                                <option value="phone">Has Phone</option>
+                                <option value="both">Both Email &amp; Phone</option>
                             </select>
                         </div>
                     </div>

@@ -892,6 +892,43 @@ export function buildDeepLocalRank(opts: {
   };
 }
 
+type DeepLocalRank = ReturnType<typeof buildDeepLocalRank>;
+
+/** The least favourable result: a search where the business is missing beats any ranked one; otherwise the largest position. */
+export function pickWorstLocalRank<T extends { position: number | null }>(ranks: T[]): T | null {
+  let worst: T | null = null;
+  for (const r of ranks) {
+    if (!worst) {
+      worst = r;
+      continue;
+    }
+    const w = worst.position ?? Infinity;
+    const c = r.position ?? Infinity;
+    if (c > w) worst = r;
+  }
+  return worst;
+}
+
+/**
+ * Final rank for the report: the worst of several searches, with every search recorded.
+ * The business is never displayed at #1, so its row is dropped when it would be.
+ */
+export function finalizeWorstLocalRank(chosen: DeepLocalRank, all: DeepLocalRank[]) {
+  const out: DeepLocalRank & { queryRanks?: Array<{ query: string; position: number | null; found: boolean }> } = {
+    ...chosen
+  };
+  out.queryRanks = all.map((r) => ({ query: r.query, position: r.position, found: r.position != null }));
+  if (out.position === 1) {
+    out.topResults = out.topResults.filter((r) => !r.isProspect);
+    out.evidence = `Ranks first on Google Maps in every measured search, led by “${out.query}”`;
+  } else if (out.position != null) {
+    out.evidence = `Lowest Maps result across ${all.length} searches: appears at #${out.position} for “${out.query}”`;
+  } else {
+    out.evidence = `Not in the top ${out.totalChecked || 10} on Google Maps for “${out.query}”`;
+  }
+  return out;
+}
+
 export type GeoAiPromptKey = 'near' | 'best' | 'near_me';
 
 export type AiEngineCheckResult = {
@@ -1418,6 +1455,7 @@ export async function fetchGbpReviewsSample(opts: {
   timeoutMs?: number;
   replyRateYesThreshold?: number;
   recentDays?: number;
+  fallbackKeyword?: string;
 }): Promise<GbpReviewsSampleResult> {
   const unknown = (ev: string): GbpReviewsSampleResult => ({
     ok: false,
@@ -1436,19 +1474,27 @@ export async function fetchGbpReviewsSample(opts: {
   if (!keyword) return unknown('Missing place_id or keyword — reviews not measured');
 
   try {
-    const task: Record<string, unknown> = {
-      language_code: opts.languageCode || 'en',
-      keyword,
-      depth: opts.depth ?? 20,
-      sort_by: 'newest'
-    };
-    applyBusinessDataLocation(task, opts);
-    const ready = await postAndPollBusinessData(
-      'business_data/google/reviews/task_post',
-      'business_data/google/reviews/task_get',
-      task,
-      opts.timeoutMs ?? 60000
+    // Try the place_id first, then fall back to the business name + area when that fetch fails.
+    const keywords = [keyword, String(opts.fallbackKeyword || '').trim()].filter(
+      (k, i, all) => k && all.indexOf(k) === i
     );
+    let ready: any = null;
+    for (const kw of keywords) {
+      const task: Record<string, unknown> = {
+        language_code: opts.languageCode || 'en',
+        keyword: kw,
+        depth: opts.depth ?? 20,
+        sort_by: 'newest'
+      };
+      applyBusinessDataLocation(task, opts);
+      ready = await postAndPollBusinessData(
+        'business_data/google/reviews/task_post',
+        'business_data/google/reviews/task_get',
+        task,
+        opts.timeoutMs ?? 60000
+      );
+      if (ready) break;
+    }
     if (!ready) return unknown('Google reviews fetch failed or timed out — not measured');
 
     const result = Array.isArray(ready.result) ? ready.result[0] : ready.result;
@@ -2410,6 +2456,9 @@ export async function suggestAeoGoogleSearches(opts: {
   return [];
 }
 
+/** Answers sampled per engine and prompt; a mention counts when it appears in the majority. */
+const GEO_SAMPLES_PER_ENGINE = 3;
+
 export async function checkAiEngineMentions(opts: {
   prompt: string;
   businessName: string;
@@ -2451,31 +2500,20 @@ export async function checkAiEngineMentions(opts: {
     ];
   }
 
+  // LLM answers vary from run to run, so each engine is asked several times and the result is the majority.
+  const sample = async (platform: 'chat_gpt' | 'claude' | 'perplexity', models: string[]) => {
+    const runs: Array<{ text: string; error?: string }> = [];
+    for (let i = 0; i < GEO_SAMPLES_PER_ENGINE; i++) {
+      runs.push(
+        await fetchLlmWithModelFallback({ platform, models, prompt, city, address, timeoutMs: 60000 })
+      );
+    }
+    return runs;
+  };
   const [gpt, claude, perplexity] = await Promise.all([
-    fetchLlmWithModelFallback({
-      platform: 'chat_gpt',
-      models: ['gpt-4.1-mini', 'gpt-4o-mini'],
-      prompt,
-      city,
-      address,
-      timeoutMs: 60000
-    }),
-    fetchLlmWithModelFallback({
-      platform: 'claude',
-      models: ['claude-sonnet-4-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
-      prompt,
-      city,
-      address,
-      timeoutMs: 60000
-    }),
-    fetchLlmWithModelFallback({
-      platform: 'perplexity',
-      models: ['sonar', 'sonar-pro'],
-      prompt,
-      city,
-      address,
-      timeoutMs: 60000
-    })
+    sample('chat_gpt', ['gpt-4.1-mini', 'gpt-4o-mini']),
+    sample('claude', ['claude-sonnet-4-5', 'claude-sonnet-4-6', 'claude-haiku-4-5']),
+    sample('perplexity', ['sonar', 'sonar-pro'])
   ]);
 
   const mentionFromAnswer = (answer: string) => {
@@ -2490,38 +2528,18 @@ export async function checkAiEngineMentions(opts: {
     return { ranked, excerpt, mentioned };
   };
 
-  const toScraperRow = (
-    engine: AiEngineCheckResult['engine'],
-    label: string,
-    res: { text: string; top5: string; error?: string }
-  ): AiEngineCheckResult => {
-    if (!res.top5 && !res.text) {
-      return skippedRow(engine, label, res.error || 'No answer');
-    }
-    const { excerpt, mentioned } = mentionFromAnswer(res.text || res.top5);
-    return {
-      engine,
-      label,
-      prompt,
-      promptKey,
-      mentioned,
-      brandName: businessName,
-      recommendedLikely: recommendedLikelyInText(excerpt, mentioned),
-      citedHosts: extractCitedHostsFromText(excerpt),
-      answerExcerpt: excerpt,
-      capturedAt
-    };
-  };
-
   const toApiRow = (
     engine: AiEngineCheckResult['engine'],
     label: string,
-    res: { text: string; error?: string }
+    runs: Array<{ text: string; error?: string }>
   ): AiEngineCheckResult => {
-    if (!res.text) {
-      return skippedRow(engine, label, res.error || 'No answer');
+    const answered = runs.filter((r) => r.text).map((r) => ({ run: r, ...mentionFromAnswer(r.text) }));
+    if (!answered.length) {
+      return skippedRow(engine, label, runs.find((r) => r.error)?.error || 'No answer');
     }
-    const { excerpt, mentioned } = mentionFromAnswer(res.text);
+    const mentionedCount = answered.filter((a) => a.mentioned).length;
+    const mentioned = mentionedCount >= Math.ceil(answered.length / 2);
+    const shown = answered.find((a) => a.mentioned === mentioned) || answered[0];
     return {
       engine,
       label,
@@ -2529,9 +2547,9 @@ export async function checkAiEngineMentions(opts: {
       promptKey,
       mentioned,
       brandName: businessName,
-      recommendedLikely: recommendedLikelyInText(excerpt, mentioned),
-      citedHosts: extractCitedHostsFromText(excerpt),
-      answerExcerpt: excerpt,
+      recommendedLikely: recommendedLikelyInText(shown.excerpt, mentioned),
+      citedHosts: extractCitedHostsFromText(shown.excerpt),
+      answerExcerpt: shown.excerpt,
       capturedAt
     };
   };

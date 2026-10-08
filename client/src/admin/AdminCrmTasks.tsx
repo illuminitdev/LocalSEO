@@ -38,6 +38,7 @@ import {
     type StatusDateFilter
 } from './AdminGrowthAuditLeads';
 import { cn } from '../shared/utils';
+import { matchesEmailFilter } from './crmFilters';
 import { emailShareStatusLabel, emailShareStatusHint } from '../shared/emailShareStatus';
 import { getLeadStatusConfig } from '../sales-agent/SalesTasks';
 
@@ -398,24 +399,7 @@ function isLeadAdded(lead: any) {
             }
 
             // 7. Email Status
-            if (emailFilter !== 'all') {
-                const isObsOpened = t.observationEmailShareStatus === 'opened';
-                const isAuditOpened = t.emailShareStatus === 'opened';
-                const isObsSent = t.observationEmailShareStatus === 'sent' || isObsOpened;
-                const isAuditSent = t.emailShareStatus === 'sent' || isAuditOpened;
-                const isAnySent = isObsSent || isAuditSent;
-                const isAnyOpened = isObsOpened || isAuditOpened;
-
-                if (emailFilter === 'sent') {
-                    if (!isAnySent) return false;
-                } else if (emailFilter === 'opened') {
-                    if (!isAnyOpened) return false;
-                } else if (emailFilter === 'not_opened') {
-                    if (!isAnySent || isAnyOpened) return false;
-                } else if (emailFilter === 'not_sent') {
-                    if (isAnySent) return false;
-                }
-            }
+            if (!matchesEmailFilter(t, emailFilter)) return false;
 
             // 8. Status Date
             const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
