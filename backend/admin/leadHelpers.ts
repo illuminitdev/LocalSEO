@@ -25,7 +25,7 @@ function normalizeLeadStatus(raw: unknown): string | null {
         .trim()
         .toLowerCase();
     if (!s) return null;
-    if (s === 'otp_pending' || s === 'unverified' || s === 'pending') return s === 'pending' ? 'otp_pending' : s;
+    if (s === 'otp_pending' || s === 'unverified' || s === 'pending') return 'new';
     if (s === 'completed' || s === 'submitted' || s === 'converted') return s;
     return s;
 }

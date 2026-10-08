@@ -295,14 +295,14 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
       ? { status: 'yes', evidence: gbp.qaEvidence || 'GBP Q&A present' }
       : gbp.qaOk === true && gbp.hasQa === false
         ? { status: 'no', evidence: gbp.qaEvidence || 'No GBP Q&A found' }
-        : { status: 'unknown', evidence: gbp.qaEvidence || 'GBP Q&A not measured' };
+        : { status: 'no', evidence: gbp.qaEvidence || 'No GBP Q&A could be confirmed' };
 
   const reviewRecencySe: StatusEv =
     gbp.reviewsOk === true && gbp.reviewsLookRecent === true
       ? { status: 'yes', evidence: gbp.reviewRecencyEvidence || 'Recent reviews found' }
       : gbp.reviewsOk === true && gbp.reviewsLookRecent === false
         ? { status: 'no', evidence: gbp.reviewRecencyEvidence || 'No recent reviews' }
-        : { status: 'unknown', evidence: gbp.reviewRecencyEvidence || 'Review recency not measured' };
+        : { status: 'no', evidence: gbp.reviewRecencyEvidence || 'No recent reviews could be confirmed' };
 
   const photosCheck = fromCheck(
     checkByLabel(checks, /photos updated|photos\b/i) || checkById(checks, 'gbp_13')
@@ -325,8 +325,8 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
     reviewResponseSe = { status: 'no', evidence: gbp.ownerRepliesEvidence || 'Few or no owner replies' };
   } else {
     reviewResponseSe = {
-      status: 'unknown',
-      evidence: gbp.ownerRepliesEvidence || 'Review replies not measured'
+      status: 'no',
+      evidence: 'No owner replies could be confirmed on the reviews retrieved'
     };
   }
 
@@ -339,7 +339,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   } else if (gbp.postsOk !== true && gbp.hasRecentPosts === true) {
     postsSe = { status: 'yes', evidence: gbp.postsEvidence || 'Recent Google Posts found' };
   } else {
-    postsSe = { status: 'unknown', evidence: gbp.postsEvidence || 'Google Posts not measured' };
+    postsSe = { status: 'no', evidence: gbp.postsEvidence || 'No Google Posts could be confirmed' };
   }
 
   const svcChecks = checks.filter((c) => c.section === 'service_pages');

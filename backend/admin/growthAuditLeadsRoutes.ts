@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../lib/db';
 import { requireAdmin, resolveAdminCredentials } from './adminAuth';
-import { ensureCrmTables } from '../sales-agent/sales';
+import { ensureCrmTables, LEAD_STATUSES } from '../sales-agent/sales';
 import {
     zappSitesOrigin,
     growthAuditTablesMissing,
@@ -201,6 +201,16 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                     if (act.lead_email) actMap.set(String(act.lead_email).toLowerCase(), entry);
                 }
 
+                // Only explicit status changes may set a lead's status; task events, call logs and
+                // email notes reuse `disposition` for other meanings. Rows are newest-first per lead.
+                const statusActMap = new Map<string, string>();
+                for (const act of actResult.rows) {
+                    const disp = String(act.disposition || '').trim().toLowerCase();
+                    if (act.activity_type !== 'status_change' || !(LEAD_STATUSES as readonly string[]).includes(disp)) continue;
+                    const keys = [act.lead_id && String(act.lead_id), act.lead_email && String(act.lead_email).toLowerCase()];
+                    for (const k of keys) if (k && !statusActMap.has(k)) statusActMap.set(k, disp);
+                }
+
                 const statusMap = new Map<string, { status: string; notes: string | null; agentName: string | null }>();
                 for (const sl of salesLeadStatusResult.rows) {
                     const entry = { status: sl.status, notes: sl.notes || null, agentName: sl.assigned_agent_name || null };
@@ -228,9 +238,10 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                     const latest = actMap.get(leadIdStr) || (emailStr ? actMap.get(emailStr) : null);
                     if (latest) {
                         (lead as any).latestActivity = latest;
-                        if (latest.disposition && (!lead.status || lead.status === 'new' || lead.status === 'otp_pending')) {
-                            lead.status = latest.disposition;
-                        }
+                    }
+                    const statusFromActivity = statusActMap.get(leadIdStr) || (emailStr ? statusActMap.get(emailStr) : undefined);
+                    if (statusFromActivity && (!lead.status || lead.status === 'new' || lead.status === 'otp_pending')) {
+                        lead.status = statusFromActivity === 'pending' ? 'new' : statusFromActivity;
                     }
 
                     // 2. Direct sales_leads data always wins — authoritative agent update
