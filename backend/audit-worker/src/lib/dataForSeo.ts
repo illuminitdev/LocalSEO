@@ -699,7 +699,7 @@ function normalizeItem(raw: any, index: number): DataForSeoMapsItem | null {
   };
 }
 
-
+//Map Ranking Search
 export async function fetchMapsLocalPack(opts: {
   keyword: string;
   lat?: number | null;
@@ -804,7 +804,6 @@ function hostOf(u: string) {
       .toLowerCase();
   }
 }
-
 
 export function findMatchingMapsItem(
   items: DataForSeoMapsItem[],

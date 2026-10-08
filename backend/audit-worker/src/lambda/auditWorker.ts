@@ -298,8 +298,7 @@ async function enrichFromDataForSeo(audit: any) {
       packQueryPlace.set(cleaned, place);
     }
   };
-  // The Maps ranking uses four searches (no brand name): service in/near the city, and in/near the area.
-  // The area is the town or suburb, never a street or road.
+  // The Maps ranking searches for the service in the city and area.
   const rankCity = formCity || cityForQuery;
   const rankArea = nearPlace && !looksLikeStreet(nearPlace) ? nearPlace : rankCity;
   for (const place of [rankCity, rankArea]) {
@@ -326,12 +325,10 @@ async function enrichFromDataForSeo(audit: any) {
   let packTaskId: string | null = null;
   let measuredRank: ReturnType<typeof finalizeWorstLocalRank> | null = null;
 
-  /** Run every Maps search and keep the worst result (a search with no results at all is treated as unmeasured). */
+  /** Run every Maps search and keep the worst result. */
   const measureWorstRank = async (opts: typeof mapsOptsBase) => {
     const runs = await Promise.all(
       packQueryVariants.map(async (keyword) => {
-        // Anchor each search to its named place (not the business's own pin) so repeat runs see the same
-        // results; only fall back to the business coordinates when the place name returns nothing.
         const place = packQueryPlace.get(keyword) || '';
         let pack = await fetchMapsLocalPack({
           ...opts,
