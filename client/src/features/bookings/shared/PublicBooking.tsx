@@ -296,6 +296,15 @@ export function PublicBookEvent() {
     if (loading) return <div className="min-h-screen flex items-center justify-center text-[#64748B]">Loading schedule…</div>;
     if (error || !data) return <div className="min-h-screen flex items-center justify-center text-red-600 p-6">{error || 'Not found'}</div>;
 
+    const menuItems = (data.menuItems || []).map((m: any) => ({
+        id: m.id,
+        category: m.category || '',
+        name: m.name,
+        description: m.description || '',
+        priceCents: Number(m.priceCents ?? m.price_cents) || 0,
+        available: m.active !== false && m.available !== false
+    }));
+
     return (
         <PublicCustomerPortal
             hostSlug={hostSlug!}
@@ -313,6 +322,7 @@ export function PublicBookEvent() {
                     category: resolveSalonServiceCategory(data.eventType.name, data.eventType.category)
                 }
             ]}
+            menuItems={menuItems}
             eventSlug={eventSlug!}
         />
     );

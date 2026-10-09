@@ -240,6 +240,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     ]);
                     const memberHasSchedule =
                         (memberDateRules || []).length > 0 || (memberWeeklyRules || []).length > 0;
+                    const orgHasSchedule =
+                        (orgDateRules || []).length > 0 || (orgWeeklyRules || []).length > 0;
                     const { rows: bookings } = await query(
                         `SELECT start_at, end_at FROM bookings
                          WHERE org_id = $1 AND status IN ('confirmed', 'done')
@@ -252,18 +254,28 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     );
                     let busyBlocks: any[] = [];
                     busyBlocks = await fetchBusyBlocks(mid, `${fromDate}T00:00:00`, `${toDate}T23:59:59`);
-                    // Members without a personal calendar inherit org opening hours.
+                    // Org ∩ member when both exist; member-only if no org hours;
+                    // members without a personal calendar inherit org opening hours.
+                    const intersectWithOrg = memberHasSchedule && orgHasSchedule;
                     const slots = generateSlots({
                         fromDate,
                         toDate,
                         timezone: org.timezone,
-                        intersectWithOrg: memberHasSchedule,
+                        intersectWithOrg,
                         orgDateRules,
                         orgWeeklyRules,
                         memberDateRules,
                         memberWeeklyRules,
-                        dateRules: memberHasSchedule ? undefined : orgDateRules,
-                        weeklyRules: memberHasSchedule ? undefined : orgWeeklyRules,
+                        dateRules: memberHasSchedule
+                            ? intersectWithOrg
+                                ? undefined
+                                : memberDateRules
+                            : orgDateRules,
+                        weeklyRules: memberHasSchedule
+                            ? intersectWithOrg
+                                ? undefined
+                                : memberWeeklyRules
+                            : orgWeeklyRules,
                         durationMinutes,
                         bufferMinutes: org.buffer_minutes,
                         minNoticeHours: org.min_notice_hours,
@@ -1433,9 +1445,9 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
 
             const { rows: anyRules } = await query(
                 teamsEnabled
-                    ? `(SELECT id FROM availability_rules WHERE org_id = $1 AND enabled = TRUE AND user_id IS NULL LIMIT 1)
+                    ? `(SELECT id FROM availability_rules WHERE org_id = $1 AND enabled = TRUE LIMIT 1)
                        UNION ALL
-                       (SELECT id FROM availability_date_rules WHERE org_id = $1 AND enabled = TRUE AND user_id IS NULL LIMIT 1)`
+                       (SELECT id FROM availability_date_rules WHERE org_id = $1 AND enabled = TRUE LIMIT 1)`
                     : `(SELECT id FROM availability_rules WHERE org_id = $1 AND enabled = TRUE AND user_id IS NULL LIMIT 1)
                        UNION ALL
                        (SELECT id FROM availability_date_rules WHERE org_id = $1 AND enabled = TRUE AND user_id IS NULL LIMIT 1)`,

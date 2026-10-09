@@ -528,10 +528,12 @@ export default function CustomerViewPortal({
                 setDaySlots(data.slots || []);
                 setHasAvailabilityRules(Boolean(data.hasAvailabilityRules));
                 if (data.maxDaysAhead) setMaxDaysAhead(data.maxDaysAhead);
+                setError('');
             })
-            .catch(() => {
+            .catch((e: any) => {
                 setDaySlots([]);
                 setHasAvailabilityRules(false);
+                setError(e?.message || 'Could not load available times.');
             })
             .finally(() => setLoadingSlots(false));
         setSelectedSlot(null);
