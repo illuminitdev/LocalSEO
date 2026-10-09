@@ -1045,7 +1045,8 @@ export default function CustomerViewPortal({
                         type="button"
                         disabled={stickyCta.disabled}
                         onClick={stickyCta.action}
-                        className="w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40 text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
+                        className="w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40 bg-[var(--brand-primary)]"
+                        style={{ color: brand.brandPrimaryForeground }}
                     >
                         {stickyCta.label}
                         <ArrowRight className="w-4 h-4" />
@@ -1171,12 +1172,15 @@ export default function CustomerViewPortal({
                                         className={cn(
                                             'min-w-[96px] rounded-lg border px-4 py-2 text-sm font-bold transition',
                                             inCart
-                                                ? 'text-[var(--brand-secondary)] border-transparent'
+                                                ? 'border-transparent'
                                                 : 'bg-white'
                                         )}
                                         style={
                                             inCart
-                                                ? { background: 'var(--brand-primary)' }
+                                                ? {
+                                                      background: 'var(--brand-primary)',
+                                                      color: brand.brandPrimaryForeground
+                                                  }
                                                 : {
                                                       borderColor: 'var(--brand-primary)',
                                                       color: 'var(--brand-primary)'
@@ -1238,12 +1242,15 @@ export default function CustomerViewPortal({
                                             className={cn(
                                                 'min-w-[96px] rounded-lg border px-4 py-2 text-sm font-bold transition',
                                                 inCart
-                                                    ? 'text-[var(--brand-secondary)] border-transparent'
+                                                    ? 'border-transparent'
                                                     : 'bg-white'
                                             )}
                                             style={
                                                 inCart
-                                                    ? { background: 'var(--brand-primary)' }
+                                                    ? {
+                                                          background: 'var(--brand-primary)',
+                                                          color: brand.brandPrimaryForeground
+                                                      }
                                                     : {
                                                           borderColor: 'var(--brand-primary)',
                                                           color: 'var(--brand-primary)'
@@ -1321,13 +1328,21 @@ export default function CustomerViewPortal({
                                 key={s.key}
                                 className={cn(
                                     'inline-flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.06em]',
-                                    active && 'text-[#0F172A] shadow-sm',
+                                    active && 'shadow-sm',
+                                    active && (brand.isPrimaryDark ? 'text-white' : 'text-[#0F172A]'),
                                     doneStep && !active && 'bg-[#E2E8F0] text-[#0F172A]',
                                     !active &&
                                         !doneStep &&
                                         'bg-white text-[#94A3B8] border border-[#E2E8F0]'
                                 )}
-                                style={active ? { background: 'var(--brand-primary)' } : undefined}
+                                style={
+                                    active
+                                        ? {
+                                              background: 'var(--brand-primary)',
+                                              color: brand.brandPrimaryForeground
+                                          }
+                                        : undefined
+                                }
                             >
                                 {i + 1}. {s.label}
                             </span>
@@ -2035,7 +2050,8 @@ export default function CustomerViewPortal({
                                             type="button"
                                             disabled={submitting}
                                             onClick={submit}
-                                            className="w-full max-w-lg rounded-xl px-4 py-3.5 text-sm font-black disabled:opacity-50 text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
+                                            className="w-full max-w-lg rounded-xl px-4 py-3.5 text-sm font-black disabled:opacity-50 bg-[var(--brand-primary)]"
+                                            style={{ color: brand.brandPrimaryForeground }}
                                         >
                                             {submitting
                                                 ? 'Processing…'
