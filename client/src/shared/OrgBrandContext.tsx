@@ -107,25 +107,12 @@ export function OrgBrandProvider({ children }: { children: ReactNode }) {
     // Clear any leftover document brand overrides so the host client portal stays on defaults.
     // Customer booking UIs scope colors via orgBrandStyle() + .portal-brand on their root.
     useLayoutEffect(() => {
-<<<<<<< HEAD
         const root = document.documentElement;
         root.style.removeProperty('--brand-primary');
         root.style.removeProperty('--brand-secondary');
         root.style.removeProperty('--color-orange');
         root.style.removeProperty('--color-orange-dark');
     }, []);
-=======
-        applyDocumentBrandVars(brandPrimary, brandSecondary);
-        return () => {
-            const root = document.documentElement;
-            root.style.removeProperty('--brand-primary');
-            root.style.removeProperty('--brand-primary-foreground');
-            root.style.removeProperty('--brand-secondary');
-            root.style.removeProperty('--color-orange');
-            root.style.removeProperty('--color-orange-dark');
-        };
-    }, [brandPrimary, brandSecondary]);
->>>>>>> 392864c180fd900e9d381e42be72504a811de28e
 
     const value = useMemo<OrgBrandState>(
         () => ({
