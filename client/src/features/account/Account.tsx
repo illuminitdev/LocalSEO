@@ -743,7 +743,7 @@ export default function Account() {
                                         return (
                                             <li
                                                 key={sub.id}
-                                                className="rounded-2xl border border-[#FED7AA]/70 bg-gradient-to-br from-[#FFFBEB] to-white p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
+                                                className="rounded-2xl border border-[var(--brand-primary-line)]/70 bg-gradient-to-br from-[var(--brand-primary-soft)] to-white p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
                                             >
                                                 <div className="flex flex-wrap items-end justify-between gap-3">
                                                     <div>
@@ -773,7 +773,7 @@ export default function Account() {
                                     })}
                                 </ul>
                             ) : (
-                                <div className="rounded-2xl border border-[#FED7AA]/70 bg-gradient-to-br from-[#FFFBEB] to-white p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+                                <div className="rounded-2xl border border-[var(--brand-primary-line)]/70 bg-gradient-to-br from-[var(--brand-primary-soft)] to-white p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
                                     <div className="flex flex-wrap items-end justify-between gap-3">
                                         <div>
                                             <p className="text-2xl font-black tracking-tight text-[#0F172A]">{planName}</p>

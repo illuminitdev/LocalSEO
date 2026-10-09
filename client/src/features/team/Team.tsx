@@ -253,7 +253,7 @@ export default function Team() {
                 <button
                     type="button"
                     onClick={() => setShowInviteModal(true)}
-                    className="inline-flex items-center gap-1.5 bg-[#FF8800] hover:bg-[#E67A00] active:bg-[#CC6D00] text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm transition shrink-0"
+                    className="inline-flex items-center gap-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm transition shrink-0"
                 >
                     <Plus className="w-4 h-4" /> Invite team member
                 </button>
@@ -493,7 +493,7 @@ export default function Team() {
                                                         onClick={() => toggleBookable(m)}
                                                         className={cn(
                                                             'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden',
-                                                            m.bookable ? 'bg-[#FF8800]' : 'bg-slate-200'
+                                                            m.bookable ? 'bg-[var(--brand-primary)]' : 'bg-slate-200'
                                                         )}
                                                     >
                                                         <span
@@ -618,7 +618,7 @@ export default function Team() {
             </div>
 
             {/* 5. Bottom Callout Banner: Manage Schedules */}
-            <div className="bg-[#FFF9F2] border border-[#FDE68A]/80 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+            <div className="bg-[var(--brand-primary-soft)] border border-[#FDE68A]/80 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
                 <div className="flex items-center gap-3.5">
                     <div className="w-10 h-10 rounded-xl bg-orange-100/70 text-orange-600 flex items-center justify-center shrink-0 border border-orange-200">
                         <Lightbulb className="w-5 h-5 text-orange-600" />
@@ -712,7 +712,7 @@ export default function Team() {
                                     onClick={() => setInviteForm((prev) => ({ ...prev, bookable: !prev.bookable }))}
                                     className={cn(
                                         'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out',
-                                        inviteForm.bookable ? 'bg-[#FF8800]' : 'bg-slate-200'
+                                        inviteForm.bookable ? 'bg-[var(--brand-primary)]' : 'bg-slate-200'
                                     )}
                                 >
                                     <span
@@ -736,7 +736,7 @@ export default function Team() {
                             <button
                                 type="submit"
                                 disabled={busy}
-                                className="px-5 py-2.5 rounded-xl bg-[#FF8800] hover:bg-[#E67A00] text-white text-xs font-bold shadow-sm transition disabled:opacity-50"
+                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold shadow-sm transition disabled:opacity-50"
                             >
                                 {busy ? 'Sending…' : 'Send Invite'}
                             </button>

@@ -50,21 +50,16 @@ import {
     Store,
     Award,
     BarChart3,
-    Sparkles
+    BadgeCheck
 } from 'lucide-react';
-
-type LeadDetailLocationState = {
-    from?: string;
-    fromLabel?: string;
-} | null;
 
 export default function SalesLeadDetail() {
     const { id } = useParams<{ id: string }>();
     const location = useLocation();
-    const navState = (location.state as LeadDetailLocationState) || null;
     const { show } = useToast();
-    const backTo = navState?.from || '/sales';
-    const backLabel = navState?.fromLabel ? `Back to ${navState.fromLabel}` : 'Back to Dashboard';
+    const navFrom = (location.state as { from?: string; fromLabel?: string } | null)?.from;
+    const backTo = typeof navFrom === 'string' && navFrom.startsWith('/') ? navFrom : '/sales';
+    const backLabel = `Back to ${(location.state as { fromLabel?: string } | null)?.fromLabel?.trim() || 'Dashboard'}`;
     const [lead, setLead] = useState<SalesUnifiedLead | null>(null);
     const [tasks, setTasks] = useState<SalesLeadTask[]>([]);
     const [activities, setActivities] = useState<SalesLeadActivity[]>([]);
@@ -925,7 +920,7 @@ export default function SalesLeadDetail() {
                                                         </p>
                                                         {isCustomerRequested ? (
                                                             <span className="inline-flex items-center gap-1 rounded border border-emerald-300 bg-emerald-50 text-emerald-800 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
-                                                                <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                                                                <BadgeCheck className="w-2.5 h-2.5 text-emerald-600" />
                                                                 Customer Inbound
                                                             </span>
                                                         ) : isAuditRequest ? (

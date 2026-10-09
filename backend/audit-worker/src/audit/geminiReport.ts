@@ -341,13 +341,136 @@ function scrubPositiveContradictions(list, { photosPresent, descriptionPresent, 
     .filter(Boolean);
 }
 
+/** Praise wording that must never appear in report narrative (gaps only). */
+const POSITIVE_WORDS =
+  /\b(strong|strongly|solid|well[- ]optimi[sz]ed|well[- ]established|well[- ]maintained|verified|good|great|excellent|healthy|robust|impressive|successfully|effective(?:ly)?|positive|strengths?|commendable|maintains?|performs? well|doing well|thrives?)\b/i;
+const NEGATION_WORDS =
+  /\b(not|no|lack|lacks|lacking|missing|without|fail|fails|failed|failing|absent|never|unable|low|poor|weak|weakly|don't|doesn't|isn't|aren't|cannot|can't)\b/i;
+
+function splitSentences(text) {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/(?<=[.!?])\s+(?=[A-Z0-9“"'(])/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+const POSITIVE_CLAUSE =
+  /\b(strong|strongly|solid|well[- ]optimi[sz]ed|well[- ]established|verified|good|great|excellent|healthy|robust|impressive|effective(?:ly)?|maintains?|correct|accurate|consistent|complete|optimi[sz]ed|established|claimed|active|performs? well|doing well|has|have|with)\b/i;
+const CONTRAST = /,?\s*;?\s*\b(but|however|although|though|yet|while|whereas)\b,?\s+/i;
+
+/** A clause that states what is missing; given a subject when it starts with a bare verb. */
+function asGapClause(clause) {
+  const c = String(clause || '').trim();
+  if (!c) return '';
+  return /^(lacks?|lacking|does|do|is|are|fails?|misses|needs?|has no|have no|cannot|can't)\b/i.test(c)
+    ? `The business ${c}`
+    : c;
+}
+
+/**
+ * Keep only what is missing: praise sentences are dropped, and when a sentence praises first and then
+ * turns ("maintains X, but lacks Y"), only the gap after the turn is kept.
+ */
+export function stripPositiveSentences(text) {
+  const out = [];
+  for (const raw of splitSentences(text)) {
+    let sentence = raw.replace(/^(furthermore|moreover|additionally|that said|also),?\s+/i, '');
+    const label = sentence.match(/^((?:Local SEO|AEO|GEO)):\s*/i);
+    const prefix = label ? `${label[1]}: ` : '';
+    if (label) sentence = sentence.slice(label[0].length);
+
+    const turn = sentence.match(CONTRAST);
+    if (turn && turn.index != null) {
+      const before = sentence.slice(0, turn.index);
+      const after = sentence.slice(turn.index + turn[0].length);
+      if (POSITIVE_CLAUSE.test(before) && !NEGATION_WORDS.test(before)) {
+        sentence = asGapClause(after);
+      }
+    }
+    sentence = sentence.replace(/^(however|but|yet),?\s+/i, '').trim();
+    if (!sentence) continue;
+    if (POSITIVE_CLAUSE.test(sentence) && !NEGATION_WORDS.test(sentence)) continue;
+    const text2 = prefix ? sentence.charAt(0).toLowerCase() + sentence.slice(1) : sentence.charAt(0).toUpperCase() + sentence.slice(1);
+    out.push(`${prefix}${text2}`);
+  }
+  return out.join(' ').trim();
+}
+
+function failedLabelsByPillar(audit) {
+  const out = { 'Local SEO': [], AEO: [], GEO: [] };
+  for (const c of collectAuditChecks(audit)) {
+    if (c?.status !== 'fail') continue;
+    const label = String(c.label || '').trim();
+    const area = pillarForCheck(c);
+    if (label && out[area] && !out[area].includes(label)) out[area].push(label);
+  }
+  return out;
+}
+
+function gapSentence(pillar, labels) {
+  if (!labels.length) return '';
+  const shown = labels.slice(0, 3).join('; ');
+  return `${pillar}: the business is missing or failing ${shown}${labels.length > 3 ? ` and ${labels.length - 3} more` : ''}.`;
+}
+
+/** Report text is gaps-only: no strengths, no praise, rebuilt from failed checks when a field is left empty. */
+export function stripPositiveNarrative(report, audit) {
+  const out = { ...(report || {}) };
+  const byPillar = failedLabelsByPillar(audit);
+  const pillarKeys = { local_seo: 'Local SEO', aeo: 'AEO', geo: 'GEO' };
+  const gapLines = Object.entries(byPillar).map(([pillar, labels]) => gapSentence(pillar, labels));
+  const failedTotal = Object.values(byPillar).reduce((n, l) => n + l.length, 0);
+  const total = audit?.score?.total;
+
+  out.strengths = [];
+
+  out.executiveSummary = stripPositiveSentences(out.executiveSummary) || gapLines.filter(Boolean).join(' ');
+  out.overallVerdict =
+    stripPositiveSentences(out.overallVerdict) ||
+    (failedTotal ? `${failedTotal} measured gaps are holding back local visibility.` : '');
+  out.scoreComment =
+    stripPositiveSentences(out.scoreComment) ||
+    (failedTotal && total != null
+      ? `The overall score of ${total} out of 100 is held back by ${failedTotal} failed checks across Local SEO, AEO and GEO.`
+      : '');
+  out.headline = stripPositiveSentences(out.headline) || 'Digital presence audit: key gaps to fix';
+  out.gbpNote = stripPositiveSentences(out.gbpNote);
+
+  const comments = { ...(out.pillarComments || {}) };
+  for (const [key, pillar] of Object.entries(pillarKeys)) {
+    comments[key] = stripPositiveSentences(comments[key]) || gapSentence(pillar, byPillar[pillar]);
+  }
+  out.pillarComments = comments;
+
+  // Pillar deck blurbs from the model: drop praise so the deck defaults (gap wording) fill in.
+  const deckFields: Array<[string, string[]]> = [
+    ['localSeoFixes', ['takeaway']],
+    ['aeoFixes', ['visualIntro', 'opportunity']],
+    ['geoFixes', ['visualIntro', 'goalLine', 'opportunity']]
+  ];
+  for (const [deckKey, fields] of deckFields) {
+    const deck = out[deckKey];
+    if (!deck || typeof deck !== 'object') continue;
+    const next = { ...deck };
+    for (const f of fields) {
+      if (typeof next[f] !== 'string') continue;
+      const cleaned = stripPositiveSentences(next[f]);
+      if (cleaned) next[f] = cleaned;
+      else delete next[f];
+    }
+    out[deckKey] = next;
+  }
+  return out;
+}
+
 /** Fill missing narrative fields from measured checks so the report never shows empty/wrong sections. */
 export function ensureNarrativeSections(aiReport, audit) {
   const out = { ...(aiReport || {}) };
   const gbp = audit?.gbpLookup || {};
   const passedLabels = buildDeterministicStrengths(audit, 20);
   const detCritical = buildDeterministicCriticalIssues(audit, 4);
-  const detStrengths = buildDeterministicStrengths(audit, 4);
   const detFixes = buildDeterministicPriorityFixes(audit, 3);
 
   let critical = filterPositiveAsIssues(out.criticalIssues);
@@ -359,12 +482,6 @@ export function ensureNarrativeSections(aiReport, audit) {
   });
   if (!critical.length) critical = detCritical;
   out.criticalIssues = ensurePillarCriticalIssues(critical.slice(0, 4), audit);
-
-  if (!Array.isArray(out.strengths) || !out.strengths.length) {
-    out.strengths = detStrengths;
-  } else {
-    out.strengths = out.strengths.map(String).slice(0, 4);
-  }
 
   let fixes = filterPositiveAsIssues(out.priorityFixes);
   fixes = scrubPositiveContradictions(fixes, {
@@ -383,7 +500,7 @@ export function ensureNarrativeSections(aiReport, audit) {
     out.offerLine =
       'We can help close these gaps with managed Local Presence or Local Growth at clear monthly pricing.';
   }
-  return out;
+  return stripPositiveNarrative(out, audit);
 }
 
 function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards, localRank, gbpFacts, passedLabels }) {
@@ -478,7 +595,7 @@ function sanitizeDeepReportAgainstFacts(parsed, { phoneVisibleOnCrawl, napCards,
     };
   }
 
-  // AEO Visual queryCards are measured SERP screenshots — drop any Gemini-invented SERP mocks
+  // AEO queryCards are measured answer visibility — drop any Gemini-invented cards
   if (out.aeoFixes) {
     const { queryCards: _dropCards, ...aeoRest } = out.aeoFixes;
     out.aeoFixes = aeoRest;
@@ -534,6 +651,7 @@ export async function generateAiReport(audit) {
 Focus on PUBLIC local visibility: website live?, Google Business Profile name, NAP (name/address/phone), reviews & owner replies, GBP optimisation, Google Maps listing, and where they appear for local searches like “{service} near {town}”.
 Do NOT invent ratings, review counts, owner replies, or rankings. Use only the measured JSON below.
 If owner replies are unknown, say so clearly and tell them to check Maps.
+GAPS ONLY: describe only what is missing, failing or weak. Never praise the business (no "strong", "solid", "good", "well optimised", "verified"). strengths must be [].
 If near-me position is measured, explain it in plain English (e.g. “#2 for pest control near Didsbury” or “not in the top 10 for the measured local area”). Prefer the business town/suburb/search area over a large city name.
 British English. Commercial but honest. Soft-sell ZappSites Local Presence (£99/mo) or Local Growth (£199/mo) as ways we can fix gaps — no hard pressure, no fake guarantees.
 
@@ -558,7 +676,7 @@ Return ONLY JSON:
   "executiveSummary": "2-4 sentences on local visibility gaps/opportunities",
   "overallVerdict": "one sentence",
   "scoreComment": "one sentence on the /100 presence score",
-  "strengths": ["up to 4 strengths"],
+  "strengths": [],
   "findings": [
     { "title": "", "detail": "", "impact": "High|Medium|Low", "area": "Website|GBP|NAP|Reviews|Maps|Optimisation" }
   ],
@@ -641,7 +759,7 @@ export async function generateDeepAiReport(audit) {
 
   const prompt = `You are a UK Local SEO + AEO + GEO consultant writing an internal ZappSites Deep Audit report.
 Tone: clear, commercial, British English. Do NOT invent ratings, rankings, credentials, phones, or crawl facts.
-Use only the measured JSON. Structure the narrative like a client deck: overall visibility, Local SEO / AEO / GEO, four critical issues, strengths, 90-day roadmap, plus three fix decks.
+Use only the measured JSON. Structure the narrative like a client deck: overall visibility, Local SEO / AEO / GEO, four critical issues, 90-day roadmap, plus three fix decks.
 For every issue use Issue → Evidence → Impact → Recommendation → Priority (fill evidence/recommendation/priority fields; keep title/detail/impact too).
 
 PILLAR CONTENT RULES (must follow):
@@ -651,12 +769,18 @@ PILLAR CONTENT RULES (must follow):
 - executiveSummary is exactly three sentences, in this order: Local SEO, then AEO, then GEO.
 - pillarComments.local_seo, pillarComments.aeo, and pillarComments.geo are each one sentence and stay inside that pillar.
 
+NEGATIVES-ONLY RULE (must follow, applies to the whole report):
+- Write only what is missing, failing, weak or risky, using the Failed checks. Never praise the business and never state a positive finding.
+- Forbidden in executiveSummary, overallVerdict, scoreComment, pillarComments, gbpNote, headline: words such as strong, solid, good, great, well optimised, verified, healthy, robust, maintains, and any "however" that follows a positive.
+- Each summary sentence and each pillar comment starts with what the business lacks or does not have, e.g. "Local SEO: the business lacks X and does not have Y". Never mention what the business already has, not even before a "but".
+- strengths must be an empty array [].
+
 CRITICAL ISSUES RULES (must follow):
 - criticalIssues must be REAL gaps from Failed checks only — never invent issues.
 - Include exactly 4 criticalIssues. When a pillar has a failed check, include at least one Local SEO issue, one AEO issue, and one GEO issue. Evidence for each issue comes only from that pillar.
 - NEVER list a Passed check (or positive GBP fact) as a critical issue. Forbidden titles include: "Photos present", "Business description present", "Opening hours present", "Categories present", "Services listed".
 - If photos/description/hours are present on GBP, do not claim they are missing.
-- strengths must come from Passed checks / positive measured facts only.
+- strengths must be an empty array [].
 - priorityFixes must address Failed checks only.
 
 EMOJI RULE (must follow):
@@ -723,7 +847,7 @@ Return ONLY JSON:
     "aeo": "one sentence on FAQ and direct answers for the measured question searches only",
     "geo": "one sentence on whether ChatGPT, Claude, and Perplexity name or cite this business only"
   },
-  "strengths": ["up to 4 strengths"],
+  "strengths": [],
   "criticalIssues": [
     { "title": "", "detail": "", "impact": "Critical|High|Medium", "area": "Local SEO|AEO|GEO", "evidence": "", "recommendation": "", "priority": "Critical|High|Medium" }
   ],
@@ -750,7 +874,7 @@ Return ONLY JSON:
   },
   "aeoFixes": {
     "title": "AEO: Answer Engine Optimisation",
-    "visualIntro": "one sentence about question / FAQ search readiness for this service and city — AEO Visual uses measured Google SERP screenshots (do not invent SERP cards)",
+    "visualIntro": "one sentence about question / FAQ search readiness — AEO shows People Also Ask and answer visibility, not screenshots",
     "priorities": [
       { "priority": "Critical|High|Medium", "title": "", "detail": "", "howTo": "concrete how-to steps", "issue": "", "evidence": "", "impact": "", "recommendation": "" }
     ],
@@ -787,7 +911,7 @@ Return ONLY JSON:
 
 For every criticalIssue, finding, priorityFix, and deck action/priority use Issue → Evidence → Impact → Recommendation → Priority (map title/detail/why/action into those fields; keep existing keys too).
 Include exactly 4 criticalIssues covering Local SEO, AEO, and GEO when those pillars have failed checks, 4-6 findings, exactly 3 priorityFixes, roadmap months 1–3,
-do NOT generate aeoFixes.queryCards / featuredSnippet / paaQuestions (AEO Visual uses measured Google SERP screenshots). geoFixes.queryCards may keep the single measured Maps query for the existing report layout; do not narrate that card as the GEO finding. 3-4 Local SEO actions on GBP, NAP, citations, or Maps. 3-4 GEO actions on AI mentions and citations. 3-4 AEO priorities on FAQ and direct answers.
+do NOT generate aeoFixes.queryCards / featuredSnippet / paaQuestions (AEO shows measured People Also Ask and answer visibility, not screenshots). geoFixes.queryCards may keep the single measured Maps query for the existing report layout; do not narrate that card as the GEO finding. 3-4 Local SEO actions on GBP, NAP, citations, or Maps. 3-4 GEO actions on AI mentions and citations. 3-4 AEO priorities on FAQ and direct answers.
 Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (you may refine titles only — never change phone/address facts or invent missing phones).`;
 
   let lastError;
@@ -842,7 +966,7 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
         priorities: Array.isArray(parsed.aeoFixes?.priorities)
           ? parsed.aeoFixes.priorities.slice(0, 4)
           : fallbacks.aeoFixes.priorities,
-        // Measured Google SERP screenshots only — never Gemini-invented snippet/PAA cards
+        // Measured answer visibility only — never Gemini-invented snippet cards
         queryCards: Array.isArray(fallbacks.aeoFixes.queryCards)
           ? fallbacks.aeoFixes.queryCards
           : []

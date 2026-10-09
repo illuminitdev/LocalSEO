@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { displayedOverallScore } from '../lib/displayScore';
 import { requireAdmin } from './adminAuth';
 import { sendFullAuditShareEmail } from '../lib/bookingEmail';
 import {
@@ -189,7 +190,7 @@ router.post('/full-audits/:id/share-email', requireAdmin, async (req: Request, r
                 ? (audit.score as { total?: number })
                 : null;
         const scoreRaw =
-            (audit.totalScore as number | null | undefined) ?? scoreObj?.total ?? null;
+            displayedOverallScore(audit.score as any, (audit.totalScore as number | null | undefined) ?? scoreObj?.total ?? null);
         const score =
             scoreRaw != null && Number.isFinite(Number(scoreRaw)) ? Number(scoreRaw) : null;
         const reportUrl = reportShareUrl(id);

@@ -617,37 +617,17 @@ export async function captureAeoSerpScreenshot(opts: {
 
       const items = Array.isArray(taskResult?.result?.[0]?.items) ? taskResult.result[0].items : [];
       measured = extractAeoSerpFacts(items, String(opts.businessName || ''));
-
-      let dataUrl = await captureSerpScreenshotDataUrl(taskId, { timeoutMs: 50000 });
-      if (!dataUrl) {
-        console.warn('[dataForSeo] AEO screenshot attempt', attempt + 1, 'no image');
-        continue;
-      }
-      dataUrl = await cropSerpScreenshotToLocalPack(dataUrl, null, {
-        maxHeight: 720,
-        minHeight: 420,
-        quality: 58,
-        maxBase64Len: 1_200_000
-      });
-      if (dataUrl.startsWith('data:image/')) {
-        return { dataUrl, query, capturedAt: new Date().toISOString(), ...measured };
-      }
+      return {
+        query,
+        capturedAt: new Date().toISOString(),
+        ...measured
+      };
     } catch (err: any) {
       const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
-      console.warn('[dataForSeo] AEO screenshot attempt', attempt + 1, msg || 'failed');
+      console.warn('[dataForSeo] AEO search attempt', attempt + 1, msg || 'failed');
     } finally {
       clearTimeout(timer);
     }
-  }
-
-  if (measured) {
-    return {
-      query,
-      skipped: true,
-      reason: 'Google results were read, but the screenshot could not be captured',
-      capturedAt: new Date().toISOString(),
-      ...measured
-    };
   }
 
   return {
@@ -719,7 +699,7 @@ function normalizeItem(raw: any, index: number): DataForSeoMapsItem | null {
   };
 }
 
-
+//Map Ranking Search
 export async function fetchMapsLocalPack(opts: {
   keyword: string;
   lat?: number | null;
@@ -825,7 +805,6 @@ function hostOf(u: string) {
   }
 }
 
-
 export function findMatchingMapsItem(
   items: DataForSeoMapsItem[],
   business: {
@@ -912,6 +891,43 @@ export function buildDeepLocalRank(opts: {
   };
 }
 
+type DeepLocalRank = ReturnType<typeof buildDeepLocalRank>;
+
+/** The least favourable result: a search where the business is missing beats any ranked one; otherwise the largest position. */
+export function pickWorstLocalRank<T extends { position: number | null }>(ranks: T[]): T | null {
+  let worst: T | null = null;
+  for (const r of ranks) {
+    if (!worst) {
+      worst = r;
+      continue;
+    }
+    const w = worst.position ?? Infinity;
+    const c = r.position ?? Infinity;
+    if (c > w) worst = r;
+  }
+  return worst;
+}
+
+/**
+ * Final rank for the report: the worst of several searches, with every search recorded.
+ * The business is never displayed at #1, so its row is dropped when it would be.
+ */
+export function finalizeWorstLocalRank(chosen: DeepLocalRank, all: DeepLocalRank[]) {
+  const out: DeepLocalRank & { queryRanks?: Array<{ query: string; position: number | null; found: boolean }> } = {
+    ...chosen
+  };
+  out.queryRanks = all.map((r) => ({ query: r.query, position: r.position, found: r.position != null }));
+  if (out.position === 1) {
+    out.topResults = out.topResults.filter((r) => !r.isProspect);
+    out.evidence = `Ranks first on Google Maps in every measured search, led by “${out.query}”`;
+  } else if (out.position != null) {
+    out.evidence = `Lowest Maps result across ${all.length} searches: appears at #${out.position} for “${out.query}”`;
+  } else {
+    out.evidence = `Not in the top ${out.totalChecked || 10} on Google Maps for “${out.query}”`;
+  }
+  return out;
+}
+
 export type GeoAiPromptKey = 'near' | 'best' | 'near_me';
 
 export type AiEngineCheckResult = {
@@ -920,6 +936,7 @@ export type AiEngineCheckResult = {
   prompt: string;
   promptKey?: GeoAiPromptKey;
   mentioned: boolean | null;
+  brandName?: string;
   recommendedLikely?: boolean | null;
   citedHosts?: string[];
   answerExcerpt: string;
@@ -1000,17 +1017,11 @@ export function buildGeoAiPrompts(opts: {
 }): Array<{ key: GeoAiPromptKey; prompt: string }> {
   const service = String(opts.service || 'local business').replace(/\s+/g, ' ').trim() || 'local business';
   const city = String(opts.city || '').replace(/\s+/g, ' ').trim();
-  const country =
-    String(opts.country || countryFromAddress(opts.address)).replace(/\s+/g, ' ').trim() || 'UK';
-  const withCountry = (q: string) => `${q}, ${country}`;
-
-  const nearBase = city ? `${service} near ${city}` : `${service} near me`;
-  const bestBase = city ? `best ${service} in ${city}` : `best ${service}`;
-  const nearMe = `${service} near me in ${country}`;
+  const place = city && !/^the (local area|city or area)\b/i.test(city) ? `, ${city}` : '';
   return [
-    { key: 'near', prompt: withCountry(nearBase) },
-    { key: 'best', prompt: withCountry(bestBase) },
-    { key: 'near_me', prompt: nearMe }
+    { key: 'near', prompt: `${service} near me${place}` },
+    { key: 'best', prompt: `best ${service}${place}` },
+    { key: 'near_me', prompt: `top rated ${service} in${place ? place.replace(/^,/, '') : ' my area'}` }
   ];
 }
 
@@ -1097,6 +1108,26 @@ function brandMentionedInText(answer: string, businessName: string): boolean {
   if (core.length >= 2 && core.every((t) => text.includes(t))) return true;
 
   return tokens.every((t) => text.includes(t));
+}
+
+/** True only when the brand name itself is written in the text. */
+function brandNameShownInText(answer: string, businessName: string): boolean {
+  const text = String(answer || '').toLowerCase();
+  const name = String(businessName || '').trim().toLowerCase();
+  if (!text || name.length < 3) return false;
+  const containsName = (value: string) => {
+    const cleaned = value.replace(/\s+/g, ' ').trim();
+    if (cleaned.length < 3) return false;
+    const escaped = cleaned.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'i').test(text);
+  };
+  if (containsName(name)) return true;
+  const stripped = name
+    .replace(/\b(ltd|limited|llp|plc|inc|co|company)\b/g, '')
+    .replace(/[^a-z0-9\s']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped.length >= 3 && stripped !== name && containsName(stripped);
 }
 
 function shortCityForWebSearch(city?: string): string | undefined {
@@ -1423,6 +1454,7 @@ export async function fetchGbpReviewsSample(opts: {
   timeoutMs?: number;
   replyRateYesThreshold?: number;
   recentDays?: number;
+  fallbackKeyword?: string;
 }): Promise<GbpReviewsSampleResult> {
   const unknown = (ev: string): GbpReviewsSampleResult => ({
     ok: false,
@@ -1441,19 +1473,27 @@ export async function fetchGbpReviewsSample(opts: {
   if (!keyword) return unknown('Missing place_id or keyword — reviews not measured');
 
   try {
-    const task: Record<string, unknown> = {
-      language_code: opts.languageCode || 'en',
-      keyword,
-      depth: opts.depth ?? 20,
-      sort_by: 'newest'
-    };
-    applyBusinessDataLocation(task, opts);
-    const ready = await postAndPollBusinessData(
-      'business_data/google/reviews/task_post',
-      'business_data/google/reviews/task_get',
-      task,
-      opts.timeoutMs ?? 60000
+    // Try the place_id first, then fall back to the business name + area when that fetch fails.
+    const keywords = [keyword, String(opts.fallbackKeyword || '').trim()].filter(
+      (k, i, all) => k && all.indexOf(k) === i
     );
+    let ready: any = null;
+    for (const kw of keywords) {
+      const task: Record<string, unknown> = {
+        language_code: opts.languageCode || 'en',
+        keyword: kw,
+        depth: opts.depth ?? 20,
+        sort_by: 'newest'
+      };
+      applyBusinessDataLocation(task, opts);
+      ready = await postAndPollBusinessData(
+        'business_data/google/reviews/task_post',
+        'business_data/google/reviews/task_get',
+        task,
+        opts.timeoutMs ?? 60000
+      );
+      if (ready) break;
+    }
     if (!ready) return unknown('Google reviews fetch failed or timed out — not measured');
 
     const result = Array.isArray(ready.result) ? ready.result[0] : ready.result;
@@ -2368,7 +2408,7 @@ async function fetchChatGptPlain(opts: {
   }
 }
 
-/** Three extra Google search lines for AEO Visual. The plain "service in city" search is added separately. */
+/** Four Google search lines for AEO Visual. */
 export async function suggestAeoGoogleSearches(opts: {
   service: string;
   city: string;
@@ -2380,11 +2420,10 @@ export async function suggestAeoGoogleSearches(opts: {
   if (!service || !city || !businessName || !requireDataForSeoConfigured()) return [];
 
   const systemMessage =
-    'Return exactly 3 Google search lines and nothing else. No numbering or commentary. ' +
-    'These are the best local searches a customer would type to find this service in this city. ' +
-    'Do not return a plain "service in city" line such as "plumbers in London" — that search is already measured. ' +
-    'Make them specific, such as cost, how to choose, repair, install, or whether this company is a good choice. ' +
-    'Include the city. At least one line must include the business name. ' +
+    'Return exactly 4 Google search lines and nothing else. No numbering or commentary. ' +
+    'Lines 1 and 2 are questions a local customer would type about this service in this city. Do not put the business name in lines 1 or 2. ' +
+    'Lines 3 and 4 include the business name, the service, and the city. ' +
+    'Make the questions specific to this service, such as cost, how to choose, repair, install, or whether this company is a good choice. ' +
     'Each line under 90 characters.';
   const userPrompt = `Service: ${service.slice(0, 80)}. City: ${city.slice(0, 60)}. Business: ${businessName.slice(0, 80)}.`;
   const models = ['gpt-4.1-mini', 'gpt-4o-mini'];
@@ -2410,11 +2449,14 @@ export async function suggestAeoGoogleSearches(opts: {
       .split(/\r?\n/)
       .map((line) => line.replace(/^(\d+[\).\]]\s*|[-*•]\s*)/, '').replace(/^["']|["']$/g, '').trim())
       .filter((line) => line && !/^(here|these|sure|google searches)\b/i.test(line));
-    if (lines.length >= 3) return lines.slice(0, 3);
+    if (lines.length >= 4) return lines.slice(0, 4);
     if (!first.retryModel && text) break;
   }
   return [];
 }
+
+/** Answers sampled per engine and prompt; a mention counts when it appears in the majority. */
+const GEO_SAMPLES_PER_ENGINE = 3;
 
 export async function checkAiEngineMentions(opts: {
   prompt: string;
@@ -2440,6 +2482,7 @@ export async function checkAiEngineMentions(opts: {
     prompt,
     promptKey,
     mentioned: null,
+    brandName: businessName,
     recommendedLikely: null,
     citedHosts: [],
     answerExcerpt: '',
@@ -2456,76 +2499,56 @@ export async function checkAiEngineMentions(opts: {
     ];
   }
 
+  // LLM answers vary from run to run, so each engine is asked several times and the result is the majority.
+  const sample = async (platform: 'chat_gpt' | 'claude' | 'perplexity', models: string[]) => {
+    const runs: Array<{ text: string; error?: string }> = [];
+    for (let i = 0; i < GEO_SAMPLES_PER_ENGINE; i++) {
+      runs.push(
+        await fetchLlmWithModelFallback({ platform, models, prompt, city, address, timeoutMs: 60000 })
+      );
+    }
+    return runs;
+  };
   const [gpt, claude, perplexity] = await Promise.all([
-    fetchLlmWithModelFallback({
-      platform: 'chat_gpt',
-      models: ['gpt-4.1-mini', 'gpt-4o-mini'],
-      prompt,
-      city,
-      address,
-      timeoutMs: 60000
-    }),
-    fetchLlmWithModelFallback({
-      platform: 'claude',
-      models: ['claude-sonnet-4-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
-      prompt,
-      city,
-      address,
-      timeoutMs: 60000
-    }),
-    fetchLlmWithModelFallback({
-      platform: 'perplexity',
-      models: ['sonar', 'sonar-pro'],
-      prompt,
-      city,
-      address,
-      timeoutMs: 60000
-    })
+    sample('chat_gpt', ['gpt-4.1-mini', 'gpt-4o-mini']),
+    sample('claude', ['claude-sonnet-4-5', 'claude-sonnet-4-6', 'claude-haiku-4-5']),
+    sample('perplexity', ['sonar', 'sonar-pro'])
   ]);
 
-  const toScraperRow = (
-    engine: AiEngineCheckResult['engine'],
-    label: string,
-    res: { text: string; top5: string; error?: string }
-  ): AiEngineCheckResult => {
-    if (!res.top5 && !res.text) {
-      return skippedRow(engine, label, res.error || 'No answer');
+  const mentionFromAnswer = (answer: string) => {
+    const ranked = extractRankedLinesFromMarkdown(answer).slice(0, 5);
+    if (!ranked.length) {
+      // No numbered list (e.g. Claude answered in prose): keep the answer text so the card is never empty.
+      const excerpt = sanitizeLlmExcerpt(answer, 420);
+      return { ranked, excerpt, mentioned: Boolean(excerpt) && brandNameShownInText(answer, businessName) };
     }
-    const mentionSource = res.text || res.top5;
-    const excerpt = res.top5 || sanitizeLlmExcerpt(res.text, 420);
-    const mentioned = brandMentionedInText(mentionSource, businessName);
-    return {
-      engine,
-      label,
-      prompt,
-      promptKey,
-      mentioned,
-      recommendedLikely: recommendedLikelyInText(mentionSource, mentioned),
-      citedHosts: extractCitedHostsFromText(mentionSource),
-      answerExcerpt: excerpt,
-      capturedAt
-    };
+    const excerpt = formatTop5List(ranked);
+    const mentioned = brandNameShownInText(excerpt, businessName);
+    return { ranked, excerpt, mentioned };
   };
 
   const toApiRow = (
     engine: AiEngineCheckResult['engine'],
     label: string,
-    res: { text: string; error?: string }
+    runs: Array<{ text: string; error?: string }>
   ): AiEngineCheckResult => {
-    if (!res.text) {
-      return skippedRow(engine, label, res.error || 'No answer');
+    const answered = runs.filter((r) => r.text).map((r) => ({ run: r, ...mentionFromAnswer(r.text) }));
+    if (!answered.length) {
+      return skippedRow(engine, label, runs.find((r) => r.error)?.error || 'No answer');
     }
-    const excerpt = sanitizeLlmExcerpt(res.text, 420);
-    const mentioned = brandMentionedInText(res.text, businessName);
+    const mentionedCount = answered.filter((a) => a.mentioned).length;
+    const mentioned = mentionedCount >= Math.ceil(answered.length / 2);
+    const shown = answered.find((a) => a.mentioned === mentioned) || answered[0];
     return {
       engine,
       label,
       prompt,
       promptKey,
       mentioned,
-      recommendedLikely: recommendedLikelyInText(res.text, mentioned),
-      citedHosts: extractCitedHostsFromText(res.text),
-      answerExcerpt: excerpt,
+      brandName: businessName,
+      recommendedLikely: recommendedLikelyInText(shown.excerpt, mentioned),
+      citedHosts: extractCitedHostsFromText(shown.excerpt),
+      answerExcerpt: shown.excerpt,
       capturedAt
     };
   };

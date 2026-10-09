@@ -9,11 +9,13 @@ import {
     Lightbulb,
     BookOpen,
     X,
-    Sparkles,
-    CheckCircle2
+    BadgeCheck,
+    CheckCircle2,
+    Clock
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
 import { downloadElementAsPdf } from '../../shared/downloadElementAsPdf';
+import { useOrgBrand } from '../../shared/OrgBrandContext';
 
 const REPORT_STORAGE_KEY = 'localpulse_strategy_report';
 
@@ -41,23 +43,67 @@ function saveReport(reportData: any, businessName: string, reportDate: string) {
 }
 
 export default function ReportGenerator() {
+    const { logoUrl: brandLogoUrl } = useOrgBrand();
     const [isGenerating, setIsGenerating] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [reportReady, setReportReady] = useState(false);
     const [reportData, setReportData] = useState<any>(null);
+    const [history, setHistory] = useState<any[]>([]);
     const [error, setError] = useState('');
     const [businessName, setBusinessName] = useState('');
     const [reportDate, setReportDate] = useState(() => new Date().toLocaleDateString());
     const [showHowItWorks, setShowHowItWorks] = useState(false);
 
-    useEffect(() => {
-        const saved = loadSavedReport();
-        if (!saved) return;
-        setReportData(saved.reportData);
-        setBusinessName(saved.businessName || '');
-        if (saved.reportDate) setReportDate(saved.reportDate);
+    const applyReportPayload = (item: any) => {
+        if (!item || !item.grade) return;
+        setReportData(item);
+        const name = item.businessName || businessName || '';
+        if (name) setBusinessName(name);
+        const dateStr = item.createdAt
+            ? new Date(item.createdAt).toLocaleString('en-GB', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+              })
+            : new Date().toLocaleDateString();
+        setReportDate(dateStr);
         setReportReady(true);
+        saveReport(item, name, dateStr);
+    };
+
+    useEffect(() => {
+        // First try local cached session
+        const saved = loadSavedReport();
+        if (saved) {
+            setReportData(saved.reportData);
+            setBusinessName(saved.businessName || '');
+            if (saved.reportDate) setReportDate(saved.reportDate);
+            setReportReady(true);
+        }
+
+        // Fetch persisted report & history from backend
+        apiGet('/api/ai/strategy-report')
+            .then((data: any) => {
+                const runs = Array.isArray(data?.history) ? data.history : [];
+                setHistory(runs);
+                const currentReport = data?.report || runs[0];
+                if (currentReport?.grade && !saved) {
+                    applyReportPayload(currentReport);
+                }
+            })
+            .catch(() => {});
     }, []);
+
+    const handleSelectHistory = (item: any) => {
+        applyReportPayload(item);
+        // Smooth scroll to report view
+        const el = document.getElementById('report-content');
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth' });
+        }
+    };
 
     const handleGenerate = async () => {
         setIsGenerating(true);
@@ -72,10 +118,21 @@ export default function ReportGenerator() {
             const name = stats.businessName || business.name || '';
             setBusinessName(name);
             const data = await apiPost('/api/ai/strategy-report', stats);
-            const dated = new Date().toLocaleDateString();
+            const dated = new Date().toLocaleString('en-GB', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
             setReportDate(dated);
             setReportData(data);
             setReportReady(true);
+            if (Array.isArray(data?.history)) {
+                setHistory(data.history);
+            } else {
+                setHistory((prev) => [data, ...prev.filter((p) => p.createdAt !== data.createdAt)].slice(0, 20));
+            }
             saveReport(data, name, dated);
             await logDashboardActivity({
                 type: 'report',
@@ -152,7 +209,7 @@ export default function ReportGenerator() {
                 {/* 2. Competitor activity */}
                 <div className="flex items-center gap-3.5 pt-3 md:pt-0 md:px-4">
                     <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center shrink-0">
-                        <Users className="w-5 h-5 text-[#FF8800]" />
+                        <Users className="w-5 h-5 text-[var(--brand-primary)]" />
                     </div>
                     <div>
                         <h3 className="font-bold text-sm text-[#0F172A]">Competitor activity</h3>
@@ -192,7 +249,7 @@ export default function ReportGenerator() {
                         type="button"
                         onClick={handleGenerate}
                         disabled={isGenerating}
-                        className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#FF8800] hover:bg-[#E67A00] text-white rounded-xl text-sm font-bold shadow-xs cursor-pointer transition-colors"
+                        className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-sm font-bold shadow-xs cursor-pointer transition-colors"
                     >
                         <FileText className="w-4 h-4" />
                         Generate your first report
@@ -202,7 +259,7 @@ export default function ReportGenerator() {
 
             {isGenerating && (
                 <div className="bg-white p-12 md:p-16 rounded-2xl border border-[#E2E8F0] text-center shadow-xs my-6">
-                    <div className="w-16 h-16 border-4 border-slate-100 border-t-[#FF8800] rounded-full animate-spin mx-auto mb-4"></div>
+                    <div className="w-16 h-16 border-4 border-slate-100 border-t-[var(--brand-primary)] rounded-full animate-spin mx-auto mb-4"></div>
                     <p className="text-base font-bold text-[#0F172A]">Aggregating LocalPulse Data...</p>
                     <p className="text-xs text-gray-500 mt-1">Analyzing local rankings, reviews, and competitors...</p>
                 </div>
@@ -216,18 +273,17 @@ export default function ReportGenerator() {
                     <div className="mb-6 pb-4 border-b border-[#E2E8F0]">
                         <div className="flex items-center justify-between gap-3 mb-3">
                             <img
-                                src="/localseo.png"
-                                alt="ZappSites Local SEO"
-                                width={120}
-                                height={28}
-                                className="block shrink-0"
+                                src={brandLogoUrl || '/localseo.png'}
+                                alt={brandLogoUrl ? (businessName || 'Business logo') : 'ZappSites Local SEO'}
+                                width={140}
+                                height={36}
+                                className="block shrink-0 object-contain object-left"
                                 style={{
-                                    height: 28,
+                                    height: brandLogoUrl ? 36 : 28,
                                     width: 'auto',
-                                    maxWidth: 120,
-                                    maxHeight: 28,
-                                    minWidth: 0,
-                                    objectFit: 'contain'
+                                    maxWidth: 160,
+                                    maxHeight: 40,
+                                    minWidth: 0
                                 }}
                             />
                             <div className="flex items-center gap-2 print:hidden">
@@ -265,7 +321,7 @@ export default function ReportGenerator() {
                                 Overall Grade
                             </span>
                             <div className="text-5xl font-black text-[#0F172A] mb-1">{reportData.grade}</div>
-                            <p className="text-xs text-[#0F172A] font-bold bg-[#FF8800]/10 px-3 py-1 rounded-full border border-[#FF8800]/20">
+                            <p className="text-xs text-[#0F172A] font-bold bg-[var(--brand-primary)]/10 px-3 py-1 rounded-full border border-[var(--brand-primary)]/20">
                                 {sourceLabel}
                             </p>
                         </div>
@@ -307,7 +363,7 @@ export default function ReportGenerator() {
                     </div>
 
                     <div className="mb-8">
-                        <h3 className="text-sm font-bold text-[#0F172A] border-b-2 border-[#FF8800] pb-1.5 mb-3 inline-block">
+                        <h3 className="text-sm font-bold text-[#0F172A] border-b-2 border-[var(--brand-primary)] pb-1.5 mb-3 inline-block">
                             Competitor Positioning
                         </h3>
                         <p className="text-gray-700 leading-relaxed text-xs">{reportData.positioningText}</p>
@@ -335,7 +391,7 @@ export default function ReportGenerator() {
                         <ul className="space-y-3">
                             {(reportData.roadmap || []).map((step: any) => (
                                 <li key={step.id} className="flex gap-3 p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
-                                    <div className="text-[#FF8800] font-bold text-base">{step.id}</div>
+                                    <div className="text-[var(--brand-primary)] font-bold text-base">{step.id}</div>
                                     <div>
                                         <h4 className="font-bold text-[#0F172A] text-xs">{step.title}</h4>
                                         <p className="text-xs text-gray-600 mt-0.5">{step.desc}</p>
@@ -344,6 +400,80 @@ export default function ReportGenerator() {
                             ))}
                         </ul>
                     </div>
+                </div>
+            )}
+
+            {/* Past Reports / History List */}
+            {history.length > 0 && (
+                <div className="mt-6 mb-6 bg-white rounded-2xl border border-[#E2E8F0] shadow-xs overflow-hidden print:hidden">
+                    <div className="p-4 border-b border-[#E2E8F0] flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-gray-700" />
+                            <h2 className="text-xs font-bold text-[#0F172A]">Past report history</h2>
+                        </div>
+                        <span className="text-[11px] text-gray-400 font-medium">{history.length} {history.length === 1 ? 'report' : 'reports'} saved</span>
+                    </div>
+                    <ul className="divide-y divide-[#E2E8F0]">
+                        {history.map((run, idx) => {
+                            const isCurrent = (reportData?.createdAt && run.createdAt === reportData.createdAt) ||
+                                (reportData && !reportData.createdAt && idx === 0);
+                            const when = run.createdAt
+                                ? new Date(run.createdAt).toLocaleString('en-GB', {
+                                      day: 'numeric',
+                                      month: 'short',
+                                      year: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                  })
+                                : 'Saved report';
+                            const gradeColor =
+                                run.grade?.startsWith('A')
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : run.grade?.startsWith('B')
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200';
+
+                            return (
+                                <li key={run.createdAt || idx}>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleSelectHistory(run)}
+                                        className={`w-full text-left px-4 py-3.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs transition-colors cursor-pointer ${
+                                            isCurrent ? 'bg-[var(--brand-primary-soft)]' : 'hover:bg-[#F8FAFC]'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <span className={`inline-flex items-center justify-center font-black px-2.5 py-0.5 rounded-lg text-xs border ${gradeColor}`}>
+                                                Grade {run.grade || '—'}
+                                            </span>
+                                            <div>
+                                                <span className="font-bold text-[#0F172A] block">{when}</span>
+                                                <span className="text-[11px] text-gray-500">
+                                                    {run.businessName || businessName || 'Listing'} • {run.source === 'fallback' ? 'Template report' : 'Gemini AI'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-3 text-xs text-gray-600">
+                                            {run.metrics?.localPackRank !== undefined && (
+                                                <span className="hidden sm:inline bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-[11px]">
+                                                    Rank #{run.metrics.localPackRank || '—'}
+                                                </span>
+                                            )}
+                                            {run.metrics?.completeness !== undefined && (
+                                                <span className="hidden sm:inline bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-[11px]">
+                                                    {run.metrics.completeness}% complete
+                                                </span>
+                                            )}
+                                            <span className={`text-[11px] font-bold ${isCurrent ? 'text-[var(--brand-primary)]' : 'text-gray-400'}`}>
+                                                {isCurrent ? 'Viewing' : 'View report →'}
+                                            </span>
+                                        </div>
+                                    </button>
+                                </li>
+                            );
+                        })}
+                    </ul>
                 </div>
             )}
 
@@ -391,8 +521,8 @@ export default function ReportGenerator() {
                         </button>
 
                         <div className="flex items-center gap-3 mb-4">
-                            <div className="w-10 h-10 rounded-xl bg-[#FF8800]/10 flex items-center justify-center text-[#FF8800]">
-                                <Sparkles className="w-5 h-5" />
+                            <div className="w-10 h-10 rounded-xl bg-[var(--brand-primary)]/10 flex items-center justify-center text-[var(--brand-primary)]">
+                                <BadgeCheck className="w-5 h-5" />
                             </div>
                             <div>
                                 <h3 className="text-lg font-bold text-[#0F172A]">How AI Insights Works</h3>
@@ -430,7 +560,7 @@ export default function ReportGenerator() {
                                 setShowHowItWorks(false);
                                 handleGenerate();
                             }}
-                            className="w-full py-2.5 px-4 bg-[#FF8800] hover:bg-[#E67A00] text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                            className="w-full py-2.5 px-4 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
                         >
                             Generate report now
                         </button>

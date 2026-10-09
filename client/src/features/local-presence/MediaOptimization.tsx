@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
     Image as ImageIcon,
-    Wand2,
+    BadgeCheck,
     MapPin,
     Tag as TagIcon,
     CheckCircle2,
@@ -9,8 +9,7 @@ import {
     Building,
     Home,
     Users,
-    Utensils,
-    Sparkles,
+    ShoppingBag,
     Loader2,
     Info,
     Download,
@@ -31,8 +30,8 @@ const CATEGORIES: CategoryStatus[] = [
     { id: 'Exterior', name: 'Exterior', icon: Building, count: 0, minRequired: 3 },
     { id: 'Interior', name: 'Interior', icon: Home, count: 0, minRequired: 3 },
     { id: 'Team', name: 'Team', icon: Users, count: 0, minRequired: 3 },
-    { id: 'Product', name: 'Product', icon: Utensils, count: 0, minRequired: 3 },
-    { id: 'Logo', name: 'Logo', icon: Sparkles, count: 0, minRequired: 1 }
+    { id: 'Product', name: 'Product', icon: ShoppingBag, count: 0, minRequired: 3 },
+    { id: 'Logo', name: 'Logo', icon: BadgeCheck, count: 0, minRequired: 1 }
 ];
 
 export default function MediaOptimization() {
@@ -57,7 +56,7 @@ export default function MediaOptimization() {
                 type: 'media',
                 message: `Generated ${activeTab} photo with SEO alt-text.`,
                 icon: 'CheckCircle',
-                color: 'text-[#FF8800]'
+                color: 'text-[var(--brand-primary)]'
             });
         } catch (err: any) {
             setError(err.message || 'Image generation failed');
@@ -100,7 +99,7 @@ export default function MediaOptimization() {
                     {isGenerating ? (
                         <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
                     ) : (
-                        <Wand2 className="w-4 h-4 text-amber-300" />
+                        <BadgeCheck className="w-4 h-4 text-emerald-400" />
                     )}
                     {isGenerating ? 'Generating Photo...' : 'AI Generate Photo'}
                 </button>
@@ -141,7 +140,7 @@ export default function MediaOptimization() {
                 {/* 3. Geotags & EXIF */}
                 <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4 flex items-center gap-3.5 shadow-xs">
                     <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center shrink-0">
-                        <MapPin className="w-5 h-5 text-[#FF8800]" />
+                        <MapPin className="w-5 h-5 text-[var(--brand-primary)]" />
                     </div>
                     <div>
                         <p className="text-xs text-gray-500 font-medium">Geotagging</p>
@@ -226,12 +225,12 @@ export default function MediaOptimization() {
                             type="button"
                             onClick={handleGenerateMedia}
                             disabled={isGenerating}
-                            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#FF8800] hover:bg-[#E67A00] text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-70"
+                            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-70"
                         >
                             {isGenerating ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             ) : (
-                                <Wand2 className="w-3.5 h-3.5" />
+                                <BadgeCheck className="w-3.5 h-3.5" />
                             )}
                             {isGenerating ? 'Generating...' : `Generate ${activeTab} Photo`}
                         </button>
@@ -253,7 +252,7 @@ export default function MediaOptimization() {
                                 disabled={isGenerating}
                                 className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
                             >
-                                <Wand2 className="w-3.5 h-3.5 text-amber-300" />
+                                <BadgeCheck className="w-3.5 h-3.5 text-emerald-400" />
                                 Generate first photo
                             </button>
                         </div>
@@ -292,7 +291,7 @@ export default function MediaOptimization() {
 
                                     <div className="p-4 space-y-2.5">
                                         <div className="flex items-start gap-2 text-xs text-gray-600 bg-white p-2.5 rounded-xl border border-[#E2E8F0]">
-                                            <TagIcon className="w-3.5 h-3.5 text-[#FF8800] shrink-0 mt-0.5" />
+                                            <TagIcon className="w-3.5 h-3.5 text-[var(--brand-primary)] shrink-0 mt-0.5" />
                                             <p className="text-[11px] leading-relaxed text-gray-700">
                                                 <strong className="text-[#0F172A] block text-[10px] uppercase tracking-wider">
                                                     SEO Alt-Text

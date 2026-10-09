@@ -458,7 +458,7 @@ export default function RestaurantMenuEditor({
                                         )}
                                         <div className="rounded-lg bg-[#F8FAFC] px-3 py-2">
                                             <p className="text-[10px] font-bold uppercase text-[#64748B]">Price</p>
-                                            <p className="text-xl font-black text-[#F59E0B]">
+                                            <p className="text-xl font-black text-[var(--brand-primary)]">
                                                 {formatCents(item.price_cents)}
                                             </p>
                                         </div>
@@ -530,7 +530,7 @@ export default function RestaurantMenuEditor({
                                         {item.description && (
                                             <p className="text-sm text-[#64748B] mt-0.5">{item.description}</p>
                                         )}
-                                        <p className="text-sm font-black text-[#F59E0B] mt-1">
+                                        <p className="text-sm font-black text-[var(--brand-primary)] mt-1">
                                             {formatCents(item.price_cents)}
                                         </p>
                                     </>
@@ -638,7 +638,7 @@ export default function RestaurantMenuEditor({
                         <button
                             type="submit"
                             disabled={busy}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#F59E0B] text-[#0F172A] px-4 py-2 text-sm font-bold sm:col-span-2"
+                            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[var(--brand-primary)] text-[#0F172A] px-4 py-2 text-sm font-bold sm:col-span-2"
                         >
                             <Plus className="w-4 h-4" /> Add item
                         </button>

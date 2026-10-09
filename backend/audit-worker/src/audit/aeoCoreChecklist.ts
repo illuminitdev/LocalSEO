@@ -67,6 +67,7 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
     ? audit.aiReport.localSeoFixes.inconsistencies
     : [];
 
+  const brand = String(business.businessName || '').trim() || 'The brand';
   const service =
     String(business.serviceLabel || business.service || '').trim() || 'local services';
   const city =
@@ -195,18 +196,18 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
   const snippetSe: StatusEv = !measuredShots.length
     ? { status: 'unknown', evidence: 'Not measured on this run' }
     : measuredShots.some((shot) => shot.businessInAnswerBox === true)
-      ? { status: 'yes', evidence: 'The business name appears in a Google answer box for these searches.' }
+      ? { status: 'yes', evidence: `${brand} is visible in a Google answer box for these questions.` }
       : {
           status: 'no',
-          evidence: 'These searches were measured, and the business name is not in the answer box.'
+          evidence: `These questions were measured, and ${brand} is not visible in the answer box.`
         };
   const paaSe: StatusEv = !measuredShots.length
     ? { status: 'unknown', evidence: 'Not measured on this run' }
     : measuredShots.some((shot) => shot.businessInPaa === true)
-      ? { status: 'yes', evidence: 'The business name appears in People Also Ask for these searches.' }
+      ? { status: 'yes', evidence: `${brand} is visible in People Also Ask for these questions.` }
       : {
           status: 'no',
-          evidence: 'These searches were measured, and the business name is not in People Also Ask.'
+          evidence: `These questions were measured, and ${brand} is not visible in People Also Ask.`
         };
 
   const faqCoverage = prefer(aeo2, onpageFaq, aeo1);

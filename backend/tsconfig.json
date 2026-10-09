@@ -10,7 +10,7 @@
     "skipLibCheck": true,
     "declaration": false,
     "sourceMap": true,
-    "moduleResolution": "node",
+    "moduleResolution": "node10",
     "allowJs": false,
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": false
@@ -25,7 +25,6 @@
   ],
   "exclude": [
     "node_modules",
-    "dist",
-    "infra"
+    "dist"
   ]
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ElementType } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     User,
     RefreshCw,
@@ -38,6 +38,7 @@ import {
     type StatusDateFilter
 } from './AdminGrowthAuditLeads';
 import { cn } from '../shared/utils';
+import { matchesEmailFilter } from './crmFilters';
 import { emailShareStatusLabel, emailShareStatusHint } from '../shared/emailShareStatus';
 import { getLeadStatusConfig } from '../sales-agent/SalesTasks';
 
@@ -91,26 +92,130 @@ const PAGE_SIZE = 10;
 
 type EmailOpenFilter = 'all' | 'sent' | 'opened' | 'not_opened' | 'not_sent';
 
+const CRM_TASK_FILTER_DEFAULTS = {
+    q: '',
+    agent: 'all',
+    type: 'all',
+    status: 'all',
+    priority: 'all',
+    business: 'all',
+    email: 'all' as EmailOpenFilter,
+    batch: 'all',
+    statusDate: 'all' as StatusDateFilter,
+    statusDateCustom: '',
+    page: '1'
+};
+
 export default function AdminCrmTasks() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [tasks, setTasks] = useState<LeadTask[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
     const [leads, setLeads] = useState<GrowthAuditLeadRef[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    const [page, setPage] = useState(1);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const defaults = CRM_TASK_FILTER_DEFAULTS;
+
+    const readFiltersFromUrl = useCallback((params: URLSearchParams) => {
+        const next = { ...defaults };
+        for (const key of Object.keys(defaults)) {
+            const raw = params.get(key);
+            if (raw != null && raw !== '') (next as Record<string, string>)[key] = raw;
+        }
+        return next;
+    }, []);
+
+    // UI source of truth — survives Refresh (which only reloads data).
+    const [filters, setFilters] = useState(() => readFiltersFromUrl(searchParams));
+    const filtersRef = useRef(filters);
+    filtersRef.current = filters;
+    const skipUrlToStateRef = useRef(false);
+
+    const writeFiltersToUrl = useCallback(
+        (next: typeof defaults) => {
+            const params = new URLSearchParams();
+            for (const [key, value] of Object.entries(next)) {
+                const def = (defaults as Record<string, string>)[key] ?? '';
+                const trimmed = String(value ?? '');
+                if (!trimmed || trimmed === def) continue;
+                if (key === 'page' && trimmed === '1') continue;
+                params.set(key, trimmed);
+            }
+            const nextQs = params.toString();
+            const currentQs = window.location.search.startsWith('?')
+                ? window.location.search.slice(1)
+                : window.location.search;
+            if (nextQs === currentQs) return;
+            skipUrlToStateRef.current = true;
+            setSearchParams(params, { replace: true });
+        },
+        [setSearchParams]
+    );
+
+    useEffect(() => {
+        writeFiltersToUrl(filters);
+    }, [filters, writeFiltersToUrl]);
+
+    useEffect(() => {
+        if (skipUrlToStateRef.current) {
+            skipUrlToStateRef.current = false;
+            return;
+        }
+        const fromUrl = readFiltersFromUrl(searchParams);
+        const same = Object.keys(defaults).every(
+            (k) => (filtersRef.current as Record<string, string>)[k] === (fromUrl as Record<string, string>)[k]
+        );
+        if (!same) setFilters(fromUrl);
+    }, [searchParams, readFiltersFromUrl]);
+
+    const setFilter = useCallback((key: string, value: string) => {
+        setFilters((prev) => {
+            const next = { ...prev, [key]: value } as typeof defaults;
+            if (key !== 'page' && key !== 'requestPage') (next as Record<string, string>).page = '1';
+            return next;
+        });
+    }, []);
+
+    const [draftQ, setDraftQ] = useState(filters.q);
+    useEffect(() => {
+        setDraftQ(filters.q);
+    }, [filters.q]);
+    const qDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    useEffect(() => {
+        return () => {
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+        };
+    }, []);
+    const setSearchQuery = useCallback(
+        (value: string) => {
+            setDraftQ(value);
+            if (qDebounceRef.current) clearTimeout(qDebounceRef.current);
+            qDebounceRef.current = setTimeout(() => setFilter('q', value), 300);
+        },
+        [setFilter]
+    );
+
+    const searchQuery = filters.q;
+    const selectedAgent = filters.agent;
+    const selectedType = filters.type;
+    const selectedStatus = filters.status;
+    const selectedPriority = filters.priority;
+    const selectedBusiness = filters.business;
+    const emailFilter = filters.email as EmailOpenFilter;
+    const excelBatchFilter = filters.batch;
+    const statusDateFilter = filters.statusDate as StatusDateFilter;
+    const statusCustomDate = filters.statusDateCustom;
+    const page = Math.max(1, Number(filters.page) || 1);
+    const setPage = useCallback(
+        (next: number | ((p: number) => number)) => {
+            const value = typeof next === 'function' ? next(page) : next;
+            setFilter('page', String(Math.max(1, value)));
+        },
+        [page, setFilter]
+    );
     const [excelBatches, setExcelBatches] = useState<ExcelImportBatch[]>([]);
-    const [excelBatchFilter, setExcelBatchFilter] = useState<string>('all');
-    const [selectedAgent, setSelectedAgent] = useState<string>('all');
-    const [selectedType, setSelectedType] = useState<string>('all');
-    const [selectedStatus, setSelectedStatus] = useState<string>('all');
-    const [selectedPriority, setSelectedPriority] = useState<string>('all');
-    const [selectedBusiness, setSelectedBusiness] = useState<string>('all');
-    const [emailFilter, setEmailFilter] = useState<EmailOpenFilter>('all');
-    const [statusDateFilter, setStatusDateFilter] = useState<StatusDateFilter>('all');
-    const [statusCustomDate, setStatusCustomDate] = useState<string>('');
-    const [searchQuery, setSearchQuery] = useState('');
     const [typeMenuOpen, setTypeMenuOpen] = useState(false);
     const typeMenuRef = useRef<HTMLDivElement>(null);
 
@@ -157,7 +262,11 @@ export default function AdminCrmTasks() {
 
     const openLeadPage = (task: LeadTask, focusSection?: string) => {
         navigate(`/admin/crm/leads/${encodeURIComponent(task.leadId)}${focusSection ? `#${focusSection}` : ''}`, {
-            state: { scrollTo: focusSection }
+            state: {
+                scrollTo: focusSection,
+                from: `${location.pathname}${location.search}`,
+                fromLabel: 'CRM tasks'
+            }
         });
     };
 
@@ -290,24 +399,7 @@ function isLeadAdded(lead: any) {
             }
 
             // 7. Email Status
-            if (emailFilter !== 'all') {
-                const isObsOpened = t.observationEmailShareStatus === 'opened';
-                const isAuditOpened = t.emailShareStatus === 'opened';
-                const isObsSent = t.observationEmailShareStatus === 'sent' || isObsOpened;
-                const isAuditSent = t.emailShareStatus === 'sent' || isAuditOpened;
-                const isAnySent = isObsSent || isAuditSent;
-                const isAnyOpened = isObsOpened || isAuditOpened;
-
-                if (emailFilter === 'sent') {
-                    if (!isAnySent) return false;
-                } else if (emailFilter === 'opened') {
-                    if (!isAnyOpened) return false;
-                } else if (emailFilter === 'not_opened') {
-                    if (!isAnySent || isAnyOpened) return false;
-                } else if (emailFilter === 'not_sent') {
-                    if (isAnySent) return false;
-                }
-            }
+            if (!matchesEmailFilter(t, emailFilter)) return false;
 
             // 8. Status Date
             const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
@@ -480,18 +572,21 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input
                             type="text"
-                            value={searchQuery}
-                            onChange={(e) => {
-                                setSearchQuery(e.target.value);
-                                setPage(1);
-                            }}
+                            value={draftQ}
+                            onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Search tasks, notes, or telecaller..."
                             className="w-full pl-9 pr-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                         />
                     </div>
 
                     <button
-                        onClick={loadData}
+                        type="button"
+                        onClick={() => {
+                            // Refresh = clear filters back to defaults, then reload
+                            setDraftQ('');
+                            setFilters({ ...CRM_TASK_FILTER_DEFAULTS });
+                            loadData();
+                        }}
                         disabled={loading}
                         className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all"
                     >
@@ -507,10 +602,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         </label>
                         <select
                             value={selectedBusiness}
-                            onChange={(e) => {
-                                setSelectedBusiness(e.target.value);
-                                setPage(1);
-                            }}
+                            onChange={(e) => setFilter('business', e.target.value)}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             title="Filter by business category"
                         >
@@ -529,10 +621,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         </label>
                         <select
                             value={selectedAgent}
-                            onChange={(e) => {
-                                setSelectedAgent(e.target.value);
-                                setPage(1);
-                            }}
+                            onChange={(e) => setFilter('agent', e.target.value)}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                         >
                             <option value="all">All Agents</option>
@@ -551,10 +640,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         </label>
                         <select
                             value={excelBatchFilter}
-                            onChange={(e) => {
-                                setExcelBatchFilter(e.target.value);
-                                setPage(1);
-                            }}
+                            onChange={(e) => setFilter('batch', e.target.value)}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             title="Filter by source or Excel import batch"
                         >
@@ -600,8 +686,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                                             key={opt.value}
                                             type="button"
                                             onClick={() => {
-                                                setSelectedType(opt.value);
-                                                setPage(1);
+                                                setFilter('type', opt.value);
                                                 setTypeMenuOpen(false);
                                             }}
                                             className={cn(
@@ -624,10 +709,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         </label>
                         <select
                             value={selectedStatus}
-                            onChange={(e) => {
-                                setSelectedStatus(e.target.value);
-                                setPage(1);
-                            }}
+                            onChange={(e) => setFilter('status', e.target.value)}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                         >
                             <option value="all">All Statuses</option>
@@ -645,10 +727,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         </label>
                         <select
                             value={emailFilter}
-                            onChange={(e) => {
-                                setEmailFilter(e.target.value as EmailOpenFilter);
-                                setPage(1);
-                            }}
+                            onChange={(e) => setFilter('email', e.target.value)}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             title="Filter tasks by email open status"
                         >
@@ -666,10 +745,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         </label>
                         <select
                             value={statusDateFilter}
-                            onChange={(e) => {
-                                setStatusDateFilter(e.target.value as StatusDateFilter);
-                                setPage(1);
-                            }}
+                            onChange={(e) => setFilter('statusDate', e.target.value)}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             title="Filter by status updated date"
                         >
@@ -684,10 +760,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             <input
                                 type="date"
                                 value={statusCustomDate}
-                                onChange={(e) => {
-                                    setStatusCustomDate(e.target.value);
-                                    setPage(1);
-                                }}
+                                onChange={(e) => setFilter('statusDateCustom', e.target.value)}
                                 className="w-full mt-1 px-2 py-1 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             />
                         )}
@@ -699,10 +772,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         </label>
                         <select
                             value={selectedPriority}
-                            onChange={(e) => {
-                                setSelectedPriority(e.target.value);
-                                setPage(1);
-                            }}
+                            onChange={(e) => setFilter('priority', e.target.value)}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                         >
                             <option value="all">All Priorities</option>

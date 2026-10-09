@@ -22,7 +22,58 @@ function mapRequestRow(row: any) {
         assignedAgentEmail: row.assigned_agent_email || null,
         completedAt: row.completed_at || null,
         notes: row.notes || '',
-        reportUrl: row.fulfilled_audit_id ? reportShareUrl(String(row.fulfilled_audit_id)) : null
+        reportUrl: row.fulfilled_audit_id ? reportShareUrl(String(row.fulfilled_audit_id)) : null,
+        ...leadPrefillFromRow(row)
+    };
+}
+
+function firstText(...values: unknown[]): string {
+    for (const value of values) {
+        const text = String(value || '').replace(/\s+/g, ' ').trim();
+        if (text) return text;
+    }
+    return '';
+}
+
+function submissionPayload(row: any): Record<string, unknown> {
+    const raw = row?.submission_payload;
+    if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
+    if (typeof raw === 'string') {
+        try {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+        } catch {
+            return {};
+        }
+    }
+    return {};
+}
+
+function leadPrefillFromRow(row: any) {
+    const payload = submissionPayload(row);
+    const customer =
+        payload.customer && typeof payload.customer === 'object'
+            ? (payload.customer as Record<string, unknown>)
+            : {};
+    const businessName = firstText(row.business_name, row.lead_name, payload.businessName, payload.name);
+    const contactName = firstText(payload.contactName, payload.contact_name, payload.fullName, customer.name);
+    const industry = firstText(
+        row.lead_industry,
+        payload.serviceLabel,
+        payload.industry,
+        payload.service,
+        payload.primaryService,
+        payload.businessType
+    );
+    return {
+        businessName,
+        address: firstText(row.lead_address, payload.address),
+        city: firstText(payload.city, payload.town, payload.area),
+        website: firstText(row.lead_website, payload.website),
+        phone: firstText(row.lead_phone, payload.phone, customer.phone),
+        email: firstText(row.to_email, row.lead_email, payload.email, customer.email),
+        contactName: contactName && contactName.toLowerCase() !== businessName.toLowerCase() ? contactName : '',
+        industry
     };
 }
 
@@ -87,9 +138,18 @@ router.get('/full-audit-requests', requireAdmin, async (req: Request, res: Respo
             SELECT
                 r.*,
                 u.name AS assigned_agent_name,
-                u.email AS assigned_agent_email
+                u.email AS assigned_agent_email,
+                sl.name AS lead_name,
+                sl.phone AS lead_phone,
+                sl.email AS lead_email,
+                sl.website AS lead_website,
+                sl.address AS lead_address,
+                sl.industry AS lead_industry,
+                sub.payload AS submission_payload
             FROM full_audit_requests r
             LEFT JOIN users u ON u.id = r.assigned_to_user_id
+            LEFT JOIN sales_leads sl ON sl.id::text = r.lead_id
+            LEFT JOIN submissions sub ON sub.id::text = r.lead_id
             ${where}
             ORDER BY
                 CASE r.status

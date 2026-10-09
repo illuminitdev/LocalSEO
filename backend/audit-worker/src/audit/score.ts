@@ -94,6 +94,12 @@ type ScoreContext = {
   aeoQueries?: any[] | null;
   localSeoChecklist?: { groups?: Array<{ items?: any[] }> } | null;
   geoChecklist?: { groups?: Array<{ items?: any[] }> } | null;
+  priorityActions?: {
+    local?: any[] | null;
+    aeo?: any[] | null;
+    geo?: any[] | null;
+  } | null;
+  criticalIssues?: any[] | null;
 };
 
 const MAP_POSITION_POINTS = [0, 100, 90, 80, 70, 60, 50, 40, 30, 20, 10];
@@ -121,17 +127,16 @@ function aeoRowsFromQueries(queries: any[] = []) {
   const out: Array<{ id: string; status: string; label: string; evidence: string }> = [];
   for (const row of queries) {
     if (!row || row.serpMeasured !== true) continue;
-    if (typeof row.dataUrl !== 'string' || !row.dataUrl.startsWith('data:image/')) continue;
     if (row.businessNamed !== true && row.businessNamed !== false) continue;
     const query = String(row.query || '').trim();
     const named = row.businessNamed === true;
     out.push({
       id: `aeo_query_${out.length + 1}`,
       status: named ? 'pass' : 'fail',
-      label: query ? `Google result for “${query}”` : 'Google result',
+      label: query ? `Answer visibility for “${query}”` : 'Answer visibility',
       evidence: named
-        ? 'The business name appears in the answer box, People Also Ask, or the organic results.'
-        : 'This search was measured, and the business name is not in the answer box, People Also Ask, or the organic results.'
+        ? 'The brand is visible in People Also Ask or the answer box.'
+        : 'This question was measured, and the brand is not visible in People Also Ask or the answer box.'
     });
   }
   return out;
@@ -175,6 +180,39 @@ function blendWeighted(
   };
 }
 
+function actionFailSlots(priority: string): number {
+  const label = String(priority || '').trim().toLowerCase();
+  if (label === 'critical') return 3;
+  if (label === 'high') return 2;
+  if (label === 'medium') return 1;
+  return 0;
+}
+
+/** Critical, High, and Medium actions are gaps. The slice scores 0 when any of them exist. */
+function actionGapSlice(actions: any[] | null | undefined) {
+  const rows = Array.isArray(actions) ? actions : [];
+  let slots = 0;
+  let assessed = 0;
+  for (const action of rows) {
+    const failSlots = actionFailSlots(action?.priority);
+    if (!failSlots) continue;
+    slots += failSlots;
+    assessed += 1;
+  }
+  if (!assessed || !slots) return { score: 0, assessed: 0, max: 100, incomplete: true };
+  return { score: 0, assessed, max: 100, incomplete: false };
+}
+
+function checklistNoCount(rows: Array<{ status?: string }> = []) {
+  return rows.filter((row) => row?.status === 'fail').length;
+}
+
+function applyNoPenalty(score: number, noCount: number) {
+  if (noCount <= 10) return score;
+  const drop = Math.min(20, (noCount - 10) * 2);
+  return Math.max(0, score - drop);
+}
+
 function mapRankSlice(rank: any) {
   const measured = Boolean(
     rank && (rank.measured === true || rank.query || (Array.isArray(rank.topResults) && rank.topResults.length))
@@ -194,13 +232,14 @@ function mentionChecksFromEngines(rows: any[] = []) {
     const prompt = String(row.prompt || '').trim();
     const quoted = prompt ? ` for “${prompt}”` : '';
     const mentioned = row.mentioned === true;
+    const brand = String(row.brandName || '').trim() || 'the brand';
     out.push({
       id: `llm_mention_${out.length + 1}`,
       status: mentioned ? 'pass' : 'fail',
       label: `${engine} mentioned${quoted}`,
       evidence: mentioned
-        ? `${engine} named the business${quoted}.`
-        : `${engine} did not name the business${quoted}.`
+        ? `${engine} named ${brand} in the top 5${quoted}.`
+        : `${engine} did not name ${brand} in the top 5${quoted}.`
     });
   }
   return out;
@@ -254,25 +293,37 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
   const checklistForScore = queryRows.length
     ? checklistRows.filter((row) => !AEO_VISIBILITY_IDS.has(row.id))
     : checklistRows;
-  const aeo = context.aeoChecklist
+  const aeoBlended = context.aeoChecklist
     ? blendWeighted([
-        { ...weightedCheckScore(checklistForScore, 2), weight: 80 },
-        { ...scoreChecks100(queryRows), weight: 20 }
+        { ...weightedCheckScore(checklistForScore, 2), weight: 92 },
+        { ...actionGapSlice(context.priorityActions?.aeo), weight: 4 },
+        { ...scoreChecks100(queryRows), weight: 4 }
       ])
     : scoreChecks100(aeoChecks);
+  const aeo = {
+    ...aeoBlended,
+    score: context.aeoChecklist ? applyNoPenalty(aeoBlended.score, checklistNoCount(checklistRows)) : aeoBlended.score
+  };
 
   const localChecklistRows = aeoRowsFromChecklist(context.localSeoChecklist);
   const gbpDetailRows = localChecklistRows.filter((row) => LOCAL_GBP_DETAIL_IDS.has(row.id));
   const localChecklistOnly = localChecklistRows.filter(
     (row) => !LOCAL_GBP_DETAIL_IDS.has(row.id) && !LOCAL_MAP_ROW_IDS.has(row.id)
   );
-  const local = context.localSeoChecklist
+  const localBlended = context.localSeoChecklist
     ? blendWeighted([
         { ...weightedCheckScore(localChecklistOnly, 2), weight: 94 },
-        { ...weightedCheckScore(gbpDetailRows, 3), weight: 3 },
-        { ...mapRankSlice(context.localRank), weight: 3 }
+        { ...actionGapSlice(context.priorityActions?.local), weight: 4 },
+        { ...weightedCheckScore(gbpDetailRows, 3), weight: 1 },
+        { ...mapRankSlice(context.localRank), weight: 1 }
       ])
     : scoreChecks100(localChecks);
+  const local = {
+    ...localBlended,
+    score: context.localSeoChecklist
+      ? applyNoPenalty(localBlended.score, checklistNoCount(localChecklistRows))
+      : localBlended.score
+  };
 
   const geoChecklistRows = aeoRowsFromChecklist(context.geoChecklist);
   const geoChecklistForScore = mentionChecks.length
@@ -281,15 +332,35 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
   const geoCrawl = mentionChecks.length
     ? geoChecks.filter((c) => !GEO_MENTION_ROLLUP_IDS.has(c.id))
     : geoChecks;
-  const geo = context.geoChecklist
-    ? scoreChecks100([...geoChecklistForScore, ...mentionChecks])
-    : scoreChecks100([...geoCrawl, ...mentionChecks]);
+  const geoBase = context.geoChecklist ? geoChecklistForScore : geoCrawl;
+  const geoBlended = blendWeighted([
+    { ...scoreChecks100(geoBase), weight: 92 },
+    { ...actionGapSlice(context.priorityActions?.geo), weight: 4 },
+    { ...scoreChecks100(mentionChecks), weight: 4 }
+  ]);
+  const geoNos = context.geoChecklist
+    ? checklistNoCount(geoChecklistRows)
+    : geoCrawl.filter((row) => row?.status === 'fail').length;
+  const geo = {
+    ...geoBlended,
+    score: applyNoPenalty(geoBlended.score, geoNos)
+  };
 
   const rank = context.localRank || null;
   const inPack = rank && typeof rank.position === 'number';
   const position = inPack ? Number(rank.position) : null;
 
-  const total = Math.round(local.score * 0.4 + aeo.score * 0.3 + geo.score * 0.3);
+  const capPillar = (value: number) => Math.min(70, Math.max(0, Math.round(Number(value) || 0)));
+  const localShown = capPillar(local.score);
+  const aeoShown = capPillar(aeo.score);
+  const geoShown = capPillar(geo.score);
+  const measuredTotal = Math.round(localShown * 0.4 + aeoShown * 0.3 + geoShown * 0.3);
+  const criticalIssueCount = Math.min(
+    4,
+    (Array.isArray(context.criticalIssues) ? context.criticalIssues : []).filter(Boolean).length
+  );
+  const criticalPenalty = criticalIssueCount * 8;
+  const total = Math.min(70, Math.max(0, measuredTotal - criticalPenalty));
 
   const triad = {
     local_seo: {
@@ -297,7 +368,7 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
       label: 'Local SEO',
       focus: 'GBP + Website + Citations + Maps Visibility',
       weight: 40,
-      score: local.score,
+      score: localShown,
       max: 100,
       assessed: local.assessed,
       incomplete: local.incomplete
@@ -308,7 +379,7 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
       focus:
         'Optimising content to appear as answers to user questions — e.g. Google People Also Ask, featured snippets, direct answers, and AI-generated answers.',
       weight: 30,
-      score: aeo.score,
+      score: aeoShown,
       max: 100,
       assessed: aeo.assessed,
       incomplete: aeo.incomplete
@@ -319,7 +390,7 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
       focus:
         'Optimising a business/entity to be mentioned or recommended in generative AI/search experiences such as Google AI Overviews, ChatGPT, Perplexity, etc.',
       weight: 30,
-      score: geo.score,
+      score: geoShown,
       max: 100,
       assessed: geo.assessed,
       incomplete: geo.incomplete
@@ -329,12 +400,15 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
   return {
     mode: 'deep-local-aeo-geo',
     total,
+    measuredTotal,
+    criticalIssueCount,
+    criticalPenalty,
     max: 100,
     band: deepBand(total),
     pillars: [triad.local_seo, triad.aeo, triad.geo],
     triad,
     note:
-      'Overall = Local SEO 40% + AEO 30% + GEO 30% (on-site checks). Unknown/N/A checks are excluded.',
+      'Overall = Local SEO 40% + AEO 30% + GEO 30%, shown out of 100. Each of up to four critical issues deducts 8 points, so the result stays below 71. Unknown/N/A checks are excluded.',
     localPack: inPack
       ? { listed: true, position }
       : rank

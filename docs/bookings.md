@@ -38,6 +38,10 @@ Plans: `booking-solo`, `booking-solo-plus`, `booking-pro`, `complete-growth-syst
 | Manage booking | same module — BookManage |
 | Client hub | `client/src/features/bookings/shared/ClientPortal.tsx` → `/book/portal/:token` |
 
+### Add to website (sharing)
+
+Schedule settings → **Add to website** tab (`BookingSettings.tsx`) gives hosts a copy-paste "Book now" HTML button linking to the public `/book/:hostSlug` page, plus paste steps for WordPress, Wix, Squarespace, Shopify and custom HTML. The host board (`/booking`) is never exposed. The button always opens the live page, so settings changes apply without re-pasting. No iframe/embed mode yet.
+
 ## Backend connection
 
 ### Host API — `/api/host` (`backend/routes/host.ts`)

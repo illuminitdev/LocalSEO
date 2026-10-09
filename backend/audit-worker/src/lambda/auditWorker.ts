@@ -5,7 +5,7 @@ import { applyWebsiteChecks } from '../audit/checksWebsite.js';
 import { runLighthouse } from '../audit/lighthouseRunner.js';
 import { captureHomepageScreenshot } from '../audit/homepageScreenshot.js';
 import { fallbackPillarDecks } from '../audit/pillarFixDecks.js';
-import { aeoSpecsFromSearchLines, buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
+import { buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
 import { buildGeoChecklist, applyGeoChecklistToChecks } from '../audit/geoChecklist.js';
 import { buildAeoCoreChecklist } from '../audit/aeoCoreChecklist.js';
 import { buildLocalSeoCoreChecklist } from '../audit/localSeoCoreChecklist.js';
@@ -16,11 +16,9 @@ import { updateAuditJob } from '../lib/auditJobs.js';
 import {
   buildDeepLocalRank,
   buildGeoAiPrompts,
-  captureAeoSerpScreenshot,
   captureMapsScreenshotFromTask,
   captureOrganicLocalPackScreenshot,
   checkAiEngineMentionsMulti,
-  suggestAeoGoogleSearches,
   detectDuplicateListings,
   fetchBacklinksSummary,
   fetchGbpMyBusinessInfo,
@@ -28,10 +26,12 @@ import {
   fetchGbpReviewsSample,
   fetchGbpUpdates,
   fetchMapsLocalPack,
+  finalizeWorstLocalRank,
   fetchOrganicBrandImages,
   fetchOrganicLocalRank,
   findMatchingMapsItem,
   measureGeoGridVisibility,
+  pickWorstLocalRank,
   requireDataForSeoConfigured,
   type DataForSeoMapsItem,
   type SerpScreenshotResult
@@ -42,7 +42,7 @@ import {
   gbpFieldsFromPlaceDetails,
   photoUrlsFromPlace
 } from '../lib/placesGbp.js';
-import { resolveSearchArea } from '../lib/searchArea.js';
+import { looksLikeStreet, resolveSearchArea } from '../lib/searchArea.js';
 
 async function staticMapDataUrl(lat: number, lng: number): Promise<string | null> {
   const key = String(process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '').trim();
@@ -265,11 +265,12 @@ async function enrichFromDataForSeo(audit: any) {
     else business.city = intakeCity;
     audit.business = business;
   }
+  const cityPlace = intakeCity && !looksLikeStreet(intakeCity) ? intakeCity : '';
   const nearPlace =
-    (searchArea && searchArea !== 'the local area' ? searchArea : '') ||
-    intakeCity ||
-    String(business.address || '').trim();
-  const formCity = intakeCity || String(business.city || '').trim();
+    (searchArea && searchArea !== 'the local area' && !looksLikeStreet(searchArea) ? searchArea : '') ||
+    cityPlace;
+  const formCityRaw = intakeCity || String(business.city || '').trim();
+  const formCity = formCityRaw && !looksLikeStreet(formCityRaw) ? formCityRaw : '';
   const businessName = String(business.businessName || '').trim();
 
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -281,28 +282,31 @@ async function enrichFromDataForSeo(audit: any) {
     (nearNorm === cityNorm || nearNorm.endsWith(` ${cityNorm}`) || nearNorm.includes(cityNorm));
 
   const locationLabel = nearPlace || formCity;
-  const brandQuery = [businessName, locationLabel || business.address]
+  const brandQuery = [businessName, locationLabel]
     .filter(Boolean)
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  const cityForQuery = formCity || nearPlace;
+  const cityForQuery = locationLabel;
   const packQueryVariants: string[] = [];
-  const pushQ = (q: string) => {
+  const packQueryPlace = new Map<string, string>();
+  const pushQ = (q: string, place = '') => {
     const cleaned = q.replace(/\s+/g, ' ').trim();
-    if (cleaned && !packQueryVariants.includes(cleaned)) packQueryVariants.push(cleaned);
+    if (cleaned && !packQueryVariants.some((q) => q.toLowerCase() === cleaned.toLowerCase())) {
+      packQueryVariants.push(cleaned);
+      packQueryPlace.set(cleaned, place);
+    }
   };
-  if (nearPlace && formCity && !cityAlreadyInNear) {
-    pushQ(`${service} near ${nearPlace} in ${formCity}`);
-    pushQ(`${service} in ${formCity}`);
-    pushQ(`${service} near ${nearPlace}`);
-  } else if (cityForQuery) {
-    pushQ(`${service} near ${cityForQuery}`);
-    pushQ(`${service} in ${cityForQuery}`);
-    pushQ(`${service} ${cityForQuery}`);
+  // The Maps ranking searches for the service in the city and area.
+  const rankCity = formCity || cityForQuery;
+  const rankArea = nearPlace && !looksLikeStreet(nearPlace) ? nearPlace : rankCity;
+  for (const place of [rankCity, rankArea]) {
+    if (place) pushQ(`${service} in ${place}`, place);
   }
-  if (brandQuery) pushQ(brandQuery);
+  for (const place of [rankCity, rankArea]) {
+    if (place) pushQ(`${service} near ${place}`, place);
+  }
 
   let packQuery = packQueryVariants[0] || '';
 
@@ -319,20 +323,53 @@ async function enrichFromDataForSeo(audit: any) {
 
   let packItems: DataForSeoMapsItem[] = [];
   let packTaskId: string | null = null;
-  for (const keyword of packQueryVariants) {
-    const pack = await fetchMapsLocalPack({
-      ...mapsOptsBase,
-      keyword
-    });
-    if (pack.items.length) {
-      packItems = pack.items;
-      packTaskId = pack.taskId;
-      packQuery = keyword;
-      break;
+  let measuredRank: ReturnType<typeof finalizeWorstLocalRank> | null = null;
+
+  /** Run every Maps search and keep the worst result. */
+  const measureWorstRank = async (opts: typeof mapsOptsBase) => {
+    const runs = await Promise.all(
+      packQueryVariants.map(async (keyword) => {
+        const place = packQueryPlace.get(keyword) || '';
+        let pack = await fetchMapsLocalPack({
+          ...opts,
+          keyword,
+          lat: null,
+          lng: null,
+          locationName: place || opts.locationName
+        });
+        if (!pack.items.length) pack = await fetchMapsLocalPack({ ...opts, keyword });
+        const rank = buildDeepLocalRank({
+          query: keyword,
+          items: pack.items,
+          businessName,
+          placeId: audit.gbpLookup?.placeId || '',
+          phone: business.phone,
+          website: business.website
+        });
+        return { keyword, pack, rank };
+      })
+    );
+    const withItems = runs.filter((r) => r.pack.items.length);
+    const pool = withItems.length ? withItems : runs;
+    const worstRank = pickWorstLocalRank(pool.map((r) => r.rank));
+    const worst = pool.find((r) => r.rank === worstRank) || pool[0];
+    if (!worst) return null;
+    return {
+      items: worst.pack.items,
+      taskId: worst.pack.taskId || null,
+      query: worst.keyword,
+      rank: finalizeWorstLocalRank(worst.rank, runs.map((r) => r.rank))
+    };
+  };
+
+  if (packQueryVariants.length) {
+    const first = await measureWorstRank(mapsOptsBase);
+    if (first) {
+      packItems = first.items;
+      packTaskId = first.taskId;
+      packQuery = first.query;
+      measuredRank = first.rank;
     }
-    
-    packQuery = keyword;
-    packTaskId = pack.taskId || packTaskId;
   }
 
   let brandItems: DataForSeoMapsItem[] = [];
@@ -379,30 +416,20 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  const attachLocalRank = (items: DataForSeoMapsItem[], query: string) => {
-    const q = String(query || '').trim();
-    if (!q) return;
-    const localRank = buildDeepLocalRank({
-      query: q,
-      items: Array.isArray(items) ? items : [],
-      businessName,
-      placeId: audit.gbpLookup?.placeId || '',
-      phone: business.phone,
-      website: business.website
-    });
+
+  const attachLocalRank = (rank: ReturnType<typeof finalizeWorstLocalRank>) => {
     audit.gbpLookup = {
       ...(audit.gbpLookup || {}),
-      localRank,
-      serviceQuery: q
+      localRank: rank,
+      serviceQuery: rank.query
     };
   };
 
-  const rankItems = packItems.length ? packItems : brandItems;
-  const rankQuery = packItems.length ? packQuery : brandQuery || packQuery;
-  if (rankQuery) {
-    attachLocalRank(rankItems, rankQuery);
-    if (!rankItems.length) {
-      console.warn('[auditWorker] DataForSEO Maps empty for', rankQuery, '— saved measured No');
+  // Ranking always comes from the service searches, never the brand-name search.
+  if (measuredRank) {
+    attachLocalRank(measuredRank);
+    if (!packItems.length) {
+      console.warn('[auditWorker] DataForSEO Maps empty for', packQuery, '— saved measured No');
     }
   } else {
     console.warn('[auditWorker] No Maps query could be built for', businessName);
@@ -511,6 +538,7 @@ async function enrichFromDataForSeo(audit: any) {
           fetchGbpReviewsSample({
             placeId: placeId || undefined,
             keyword: placeId ? undefined : String(keyword),
+            fallbackKeyword: [businessName || gbp.gbpName, locationLabel].filter(Boolean).join(' '),
             ...locOpts,
             depth: 20,
             recentDays: 90
@@ -651,25 +679,6 @@ async function enrichFromDataForSeo(audit: any) {
 
   lat = audit.gbpLookup?.latitude ?? audit.gbpLookup?.lat ?? null;
   lng = audit.gbpLookup?.longitude ?? audit.gbpLookup?.lng ?? null;
-  const hadCoordsBefore = typeof lat === 'number' && typeof lng === 'number';
-  if (hadCoordsBefore && packQuery) {
-    const refreshed = await fetchMapsLocalPack({
-      keyword: packQuery,
-      lat,
-      lng,
-      locationName: locationLabel || undefined,
-      depth: 10,
-      timeoutMs: 35000
-    });
-    if (refreshed.items.length) {
-      attachLocalRank(refreshed.items, packQuery);
-      packTaskId = refreshed.taskId || packTaskId;
-    } else if (!audit.gbpLookup?.localRank) {
-      attachLocalRank([], packQuery);
-    }
-  }
-
-  
   const localRank = audit.gbpLookup?.localRank as
     | { topResults?: Array<{ mainImage?: string; isProspect?: boolean }> }
     | undefined;
@@ -688,8 +697,7 @@ async function enrichFromDataForSeo(audit: any) {
   
   const measuredQuery =
     String((audit.gbpLookup?.localRank as { query?: string } | undefined)?.query || '').trim() ||
-    packQuery ||
-    brandQuery;
+    packQuery;
   if (measuredQuery) {
     try {
       const [localPackScreenshot, mapsScreenshot] = await Promise.all([
@@ -799,6 +807,7 @@ async function enrichFromDataForSeo(audit: any) {
             prompt,
             promptKey: key,
             mentioned: null,
+            brandName: businessName,
             recommendedLikely: null,
             citedHosts: [],
             answerExcerpt: '',
@@ -811,58 +820,9 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  // AEO Visual: one "{service}s in {city}" search, plus three ChatGPT searches, then Google screenshots all four.
-  let aeoSpecs = buildAeoQuerySpecs(audit);
-  try {
-    const lines = await suggestAeoGoogleSearches({
-      service,
-      city: locationLabel || String(business.city || business.searchAreaLabel || '').trim(),
-      businessName
-    });
-    aeoSpecs =
-      aeoSpecsFromSearchLines(lines, {
-        business: {
-          businessName,
-          service,
-          serviceLabel: service,
-          city: locationLabel || String(business.city || '').trim(),
-          searchAreaLabel: locationLabel || String(business.searchAreaLabel || '').trim()
-        }
-      }) || aeoSpecs;
-  } catch (aeoQueryErr) {
-    console.warn('[auditWorker] AEO search questions failed:', (aeoQueryErr as Error).message);
-  }
-  audit.aeoQuerySpecs = aeoSpecs;
-  try {
-    const aeoShots: SerpScreenshotResult[] = [];
-    const batchSize = 2;
-    for (let i = 0; i < aeoSpecs.length; i += batchSize) {
-      const batch = aeoSpecs.slice(i, i + batchSize);
-      const batchResults = await Promise.all(
-        batch.map((spec) =>
-          captureAeoSerpScreenshot({
-            keyword: spec.query,
-            lat: typeof lat === 'number' ? lat : null,
-            lng: typeof lng === 'number' ? lng : null,
-            locationName: locationLabel || undefined,
-            timeoutMs: 60000,
-            businessName
-          })
-        )
-      );
-      aeoShots.push(...batchResults);
-    }
-    audit.aeoSerpScreenshots = aeoShots;
-  } catch (aeoShotErr) {
-    const err = aeoShotErr as Error;
-    console.warn('[auditWorker] AEO SERP screenshots failed:', err.message);
-    audit.aeoSerpScreenshots = aeoSpecs.map((spec) => ({
-      query: spec.query,
-      skipped: true,
-      reason: err.message || 'AEO screenshot failed',
-      capturedAt: new Date().toISOString()
-    }));
-  }
+  // AEO questions come from the service and city. No ChatGPT prompts, Google search, or screenshots.
+  audit.aeoQuerySpecs = buildAeoQuerySpecs(audit);
+  audit.aeoSerpScreenshots = [];
 }
 
 export const main: SQSHandler = async (event: SQSEvent) => {
@@ -1068,6 +1028,40 @@ export const main: SQSHandler = async (event: SQSEvent) => {
           
         }
       }
+
+      const decksForScore = fallbackPillarDecks(audit);
+      const report = (audit.aiReport || {}) as {
+        localSeoFixes?: { actions?: unknown };
+        aeoFixes?: { priorities?: unknown };
+        geoFixes?: { actions?: unknown };
+        criticalIssues?: unknown;
+      };
+      const reportLocal = report.localSeoFixes?.actions;
+      const reportAeo = report.aeoFixes?.priorities;
+      const reportGeo = report.geoFixes?.actions;
+      audit.score = computeScore(audit.checklist.checks, {
+        localRank: audit.gbpLookup?.localRank || null,
+        aiEngineChecks: Array.isArray(audit.gbpLookup?.aiEngineChecks)
+          ? audit.gbpLookup.aiEngineChecks
+          : [],
+        aeoChecklist,
+        aeoQueries: Array.isArray(audit.aeoSerpScreenshots) ? audit.aeoSerpScreenshots : [],
+        localSeoChecklist,
+        geoChecklist,
+        priorityActions: {
+          local:
+            Array.isArray(reportLocal) && reportLocal.length
+              ? reportLocal
+              : decksForScore.localSeoFixes?.actions,
+          aeo:
+            Array.isArray(reportAeo) && reportAeo.length
+              ? reportAeo
+              : decksForScore.aeoFixes?.priorities,
+          geo:
+            Array.isArray(reportGeo) && reportGeo.length ? reportGeo : decksForScore.geoFixes?.actions
+        },
+        criticalIssues: Array.isArray(report.criticalIssues) ? report.criticalIssues : []
+      });
 
       await saveAudit(audit);
       await updateAuditJob(jobId, 'complete');

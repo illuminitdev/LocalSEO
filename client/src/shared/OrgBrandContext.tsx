@@ -3,6 +3,7 @@ import {
     useCallback,
     useContext,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useState,
     type CSSProperties,
@@ -11,11 +12,15 @@ import {
 import { apiGet } from './utils';
 import { getToken } from '../features/auth/auth';
 import {
+    applyDocumentBrandVars,
+    clearOrgBrandCache,
     DEFAULT_BRAND_PRIMARY,
     DEFAULT_BRAND_SECONDARY,
-    isDarkColor,
     normalizeBrandHex,
     orgBrandStyle,
+    preloadBrandLogo,
+    readOrgBrandCache,
+    writeOrgBrandCache,
     type OrgBrand
 } from './orgBrand';
 
@@ -24,6 +29,8 @@ export type OrgBrandState = {
     brandPrimary: string;
     brandSecondary: string;
     loading: boolean;
+    /** True once this session already knows the org brand (cache or /api/auth/me). */
+    resolved: boolean;
     refresh: () => Promise<void>;
     applyBrand: (next: OrgBrand) => void;
     brandStyle: CSSProperties;
@@ -45,22 +52,41 @@ function readBrand(org: any): { logoUrl: string; brandPrimary: string; brandSeco
     };
 }
 
+function initialBrand() {
+    return (
+        readOrgBrandCache(getToken()) || {
+            logoUrl: '',
+            brandPrimary: DEFAULT_BRAND_PRIMARY,
+            brandSecondary: DEFAULT_BRAND_SECONDARY
+        }
+    );
+}
+
 export function OrgBrandProvider({ children }: { children: ReactNode }) {
-    const [logoUrl, setLogoUrl] = useState('');
-    const [brandPrimary, setBrandPrimary] = useState(DEFAULT_BRAND_PRIMARY);
-    const [brandSecondary, setBrandSecondary] = useState(DEFAULT_BRAND_SECONDARY);
+    const [logoUrl, setLogoUrl] = useState(() => initialBrand().logoUrl);
+    const [brandPrimary, setBrandPrimary] = useState(() => initialBrand().brandPrimary);
+    const [brandSecondary, setBrandSecondary] = useState(() => initialBrand().brandSecondary);
     const [loading, setLoading] = useState(true);
+    const [resolved, setResolved] = useState(() => readOrgBrandCache(getToken()) !== null);
 
     const applyBrand = useCallback((next: OrgBrand) => {
-        const resolved = readBrand(next);
-        setLogoUrl(resolved.logoUrl || '');
-        setBrandPrimary(resolved.brandPrimary);
-        setBrandSecondary(resolved.brandSecondary);
+        const brand = readBrand(next);
+        setLogoUrl(brand.logoUrl || '');
+        setBrandPrimary(brand.brandPrimary);
+        setBrandSecondary(brand.brandSecondary);
+        const token = getToken();
+        if (token) {
+            writeOrgBrandCache(token, brand);
+            if (brand.logoUrl) preloadBrandLogo(brand.logoUrl);
+        } else {
+            clearOrgBrandCache();
+        }
     }, []);
 
     const refresh = useCallback(async () => {
         if (!getToken()) {
             applyBrand({});
+            setResolved(true);
             setLoading(false);
             return;
         }
@@ -70,6 +96,7 @@ export function OrgBrandProvider({ children }: { children: ReactNode }) {
         } catch {
             
         } finally {
+            setResolved(true);
             setLoading(false);
         }
     }, [applyBrand]);
@@ -78,15 +105,10 @@ export function OrgBrandProvider({ children }: { children: ReactNode }) {
         void refresh();
     }, [refresh]);
 
-    useEffect(() => {
-        const root = document.documentElement;
-        const primaryForeground = isDarkColor(brandPrimary) ? '#FFFFFF' : '#0F172A';
-        root.style.setProperty('--brand-primary', brandPrimary);
-        root.style.setProperty('--brand-primary-foreground', primaryForeground);
-        root.style.setProperty('--brand-secondary', brandSecondary);
-        root.style.setProperty('--color-orange', brandPrimary);
-        root.style.setProperty('--color-orange-dark', brandPrimary);
+    useLayoutEffect(() => {
+        applyDocumentBrandVars(brandPrimary, brandSecondary);
         return () => {
+            const root = document.documentElement;
             root.style.removeProperty('--brand-primary');
             root.style.removeProperty('--brand-primary-foreground');
             root.style.removeProperty('--brand-secondary');
@@ -101,11 +123,12 @@ export function OrgBrandProvider({ children }: { children: ReactNode }) {
             brandPrimary,
             brandSecondary,
             loading,
+            resolved,
             refresh,
             applyBrand,
             brandStyle: orgBrandStyle({ logoUrl, brandPrimary, brandSecondary })
         }),
-        [logoUrl, brandPrimary, brandSecondary, loading, refresh, applyBrand]
+        [logoUrl, brandPrimary, brandSecondary, loading, resolved, refresh, applyBrand]
     );
 
     return <OrgBrandContext.Provider value={value}>{children}</OrgBrandContext.Provider>;
@@ -119,10 +142,17 @@ export function useOrgBrand() {
             brandPrimary: DEFAULT_BRAND_PRIMARY,
             brandSecondary: DEFAULT_BRAND_SECONDARY,
             loading: false,
+            resolved: true,
             refresh: async () => {},
             applyBrand: () => {},
             brandStyle: orgBrandStyle({})
         } satisfies OrgBrandState;
     }
     return ctx;
+}
+
+const bootBrand = readOrgBrandCache(getToken());
+if (bootBrand) {
+    applyDocumentBrandVars(bootBrand.brandPrimary, bootBrand.brandSecondary);
+    if (bootBrand.logoUrl) preloadBrandLogo(bootBrand.logoUrl);
 }

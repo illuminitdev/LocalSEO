@@ -10,7 +10,7 @@ import {
     Image as ImageIcon,
     BookMarked,
     CalendarClock,
-    Wand2,
+    BadgeCheck,
     Settings,
     UserRound,
     Users,
@@ -36,6 +36,40 @@ import { useOrgBrand } from './OrgBrandContext';
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 380;
 const SIDEBAR_DEFAULT = 260;
+
+function BrandMark({
+    logoUrl,
+    pending,
+    style,
+    className
+}: {
+    logoUrl: string;
+    pending: boolean;
+    style: { height: number; maxWidth: number };
+    className?: string;
+}) {
+    if (logoUrl) {
+        return (
+            <img
+                src={logoUrl}
+                alt="Business logo"
+                className={cn('w-auto max-w-full object-contain object-left min-w-0', className)}
+                style={style}
+            />
+        );
+    }
+    if (pending) {
+        return <div aria-hidden className="shrink-0" style={{ height: style.height, width: style.maxWidth }} />;
+    }
+    return (
+        <img
+            src="/localseo.png"
+            alt="Local SEO"
+            className={cn('w-auto max-w-full object-contain object-left min-w-0', className)}
+            style={style}
+        />
+    );
+}
 
 type NavItem = {
     name: string;
@@ -128,7 +162,7 @@ export default function Layout() {
     const searchParams = new URLSearchParams(location.search);
     const bookingPanel = searchParams.get('panel');
     const { features, loading, entitlementsDisabled } = useEntitlements();
-    const { logoUrl: orgLogoUrl, brandStyle } = useOrgBrand();
+    const { logoUrl: orgLogoUrl, brandStyle, loading: brandLoading, resolved: brandResolved } = useOrgBrand();
     const [userName, setUserName] = useState('');
     const [userEmail, setUserEmail] = useState('');
     const [avatarUrl, setAvatarUrl] = useState('');
@@ -358,21 +392,11 @@ export default function Layout() {
     const sidebar = (
         <>
             <div className="min-h-14 px-4 py-2.5 shrink-0 flex items-center justify-between gap-2 min-w-0">
-                {orgLogoUrl ? (
-                    <img
-                        src={orgLogoUrl}
-                        alt="Business logo"
-                        className="w-auto max-w-full object-contain object-left min-w-0"
-                        style={{ height: logoH, maxWidth: logoMaxW }}
-                    />
-                ) : (
-                    <img
-                        src="/localseo.png"
-                        alt="Local SEO"
-                        className="w-auto max-w-full object-contain object-left min-w-0"
-                        style={{ height: logoH, maxWidth: logoMaxW }}
-                    />
-                )}
+                <BrandMark
+                    logoUrl={orgLogoUrl}
+                    pending={brandLoading && !brandResolved}
+                    style={{ height: logoH, maxWidth: logoMaxW }}
+                />
                 <button
                     type="button"
                     className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9] shrink-0"
@@ -444,7 +468,7 @@ export default function Layout() {
     );
 
     return (
-        <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden" style={brandStyle}>
+        <div className="portal-brand flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden" style={brandStyle}>
             {}
             <aside
                 className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden print:hidden min-w-0"
@@ -500,19 +524,11 @@ export default function Layout() {
                             <Menu className="w-5 h-5" />
                         </button>
                         <div className="min-w-0 lg:hidden">
-                            {orgLogoUrl ? (
-                                <img
-                                    src={orgLogoUrl}
-                                    alt="Business logo"
-                                    className="h-8 w-[140px] object-contain object-left"
-                                />
-                            ) : (
-                                <img
-                                    src="/localseo.png"
-                                    alt="Local SEO"
-                                    className="h-8 w-[140px] object-contain object-left"
-                                />
-                            )}
+                            <BrandMark
+                                logoUrl={orgLogoUrl}
+                                pending={brandLoading && !brandResolved}
+                                style={{ height: 32, maxWidth: 140 }}
+                            />
                         </div>
                     </div>
 
@@ -609,7 +625,7 @@ export default function Layout() {
                                                         : n.type === 'quote'
                                                         ? FileText
                                                         : n.type === 'rank'
-                                                        ? Wand2
+                                                        ? BadgeCheck
                                                         : n.type === 'security'
                                                         ? KeyRound
                                                         : CalendarClock;
