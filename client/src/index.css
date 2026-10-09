@@ -2,6 +2,7 @@
 
 :root {
   --brand-primary: #F59E0B;
+  --brand-primary-foreground: #0F172A;
   --brand-primary-hover: color-mix(in srgb, var(--brand-primary) 84%, #000);
   --brand-primary-active: color-mix(in srgb, var(--brand-primary) 72%, #000);
   --brand-primary-ink: color-mix(in srgb, var(--brand-primary) 70%, #000);
