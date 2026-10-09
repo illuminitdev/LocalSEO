@@ -151,7 +151,10 @@ router.patch('/settings/password', requireAdmin, async (req: Request, res: Respo
 router.get('/overview', requireAdmin, async (_req: Request, res: Response) => {
     try {
         const [usersRes, orgsRes, subsRes, bookingsRes, invitesRes] = await Promise.all([
-            query('SELECT COUNT(*)::int AS count FROM users'),
+            query(
+                `SELECT COUNT(*)::int AS count FROM users
+                 WHERE email NOT ILIKE '%@team.localpulse.local'`
+            ),
             query('SELECT COUNT(*)::int AS count FROM organizations'),
             query(
                 `SELECT s.plan_id, p.name AS plan_name, COUNT(*)::int AS count

@@ -74,6 +74,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
                  LIMIT 1
              ) sl ON TRUE
              LEFT JOIN users u_agent ON u_agent.id = sl.assigned_to
+             WHERE u.email NOT ILIKE '%@team.localpulse.local'
              ORDER BY u.id, s.created_at DESC NULLS LAST`
         );
 
@@ -173,6 +174,7 @@ router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Respon
                  LIMIT 1
              ) pi ON TRUE
              WHERE u.id = $1
+               AND u.email NOT ILIKE '%@team.localpulse.local'
              ORDER BY s.created_at DESC NULLS LAST
              LIMIT 1`,
             [userId]
@@ -353,6 +355,11 @@ router.delete('/users/user/:userId', requireAdmin, async (req: Request, res: Res
         if (!rows.length) return res.status(404).json({ error: 'Customer not found' });
 
         const user = rows[0];
+        if (String(user.email || '').toLowerCase().includes('@team.localpulse.local')) {
+            return res.status(400).json({
+                error: 'Booking team members are managed in the client Team section, not Admin Users.'
+            });
+        }
         const orgIds: string[] = Array.isArray(user.org_ids) ? user.org_ids.filter(Boolean) : [];
 
         await query(
