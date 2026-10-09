@@ -9,6 +9,7 @@ import { confirmBookingPayment } from '../lib/confirmBooking';
 import { deleteCalendarEvent } from '../lib/googleCalendar';
 import { loadOrgEntitlements, requireFeature } from '../middleware/entitlements';
 import { orgHasBookingTeams } from '../lib/planCatalog';
+import { resolveOrgTimezone } from '../lib/orgTimezone';
 import {
     connectStatusPayload,
     createConnectAccountLink,
@@ -178,7 +179,7 @@ async function loadDashboard(orgId: any) {
         [orgId]
     );
     return {
-        organization: org,
+        organization: { ...org, timezone: resolveOrgTimezone(org) },
         eventTypes,
         bookings,
         availabilityDateRules: dateRules,
@@ -864,7 +865,8 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
                     `UPDATE organizations SET timezone = COALESCE($1, timezone), min_notice_hours = COALESCE($2, min_notice_hours),
                      max_days_ahead = COALESCE($3, max_days_ahead), buffer_minutes = COALESCE($4, buffer_minutes) WHERE id = $5`,
                     [
-                        settings.timezone,
+                        // Booking hours are UK civil time for the business address.
+                        'Europe/London',
                         settings.minNoticeHours,
                         settings.maxDaysAhead,
                         settings.bufferMinutes,

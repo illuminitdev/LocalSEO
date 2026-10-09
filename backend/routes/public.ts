@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../lib/db';
 import { generateSlots, datesWithAvailability, mergeSlotsByStart } from '../lib/availability';
+import { resolveOrgTimezone } from '../lib/orgTimezone';
 import { newManageToken } from '../lib/authTokens';
 import { fetchBusyBlocks, updateCalendarEvent, deleteCalendarEvent } from '../lib/googleCalendar';
 import {
@@ -260,7 +261,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     const slots = generateSlots({
                         fromDate,
                         toDate,
-                        timezone: org.timezone,
+                        timezone: resolveOrgTimezone(org),
                         intersectWithOrg,
                         orgDateRules,
                         orgWeeklyRules,
@@ -314,7 +315,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         return generateSlots({
             fromDate,
             toDate,
-            timezone: org.timezone,
+            timezone: resolveOrgTimezone(org),
             dateRules,
             weeklyRules,
             durationMinutes,
@@ -1287,6 +1288,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 phone: org.phone,
                 email: org.email,
                 serviceArea: org.service_area,
+                timezone: resolveOrgTimezone(org),
                 ...orgBrandingFields(org),
                 eventTypes,
                 industry: industryPayload(org, menuItems),
@@ -1375,6 +1377,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                     phone: org.phone,
                     email: org.email,
                     serviceArea: org.service_area,
+                    timezone: resolveOrgTimezone(org),
                     ...orgBrandingFields(org)
                 },
                 eventType: {
@@ -1466,6 +1469,7 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                 hasAvailabilityRules: anyRules.length > 0,
                 maxDaysAhead: org.max_days_ahead,
                 teamsEnabled,
+                timezone: resolveOrgTimezone(org),
                 durationMinutes: durationOverride || eventType.duration_minutes
             });
         } catch (err: any) {

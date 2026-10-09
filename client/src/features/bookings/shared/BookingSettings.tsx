@@ -341,7 +341,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                 settings:
                     availScope === 'org'
                         ? {
-                              timezone: payload.settings.timezone,
+                              timezone: 'Europe/London',
                               minNoticeHours: payload.settings.minNoticeHours,
                               maxDaysAhead: payload.settings.maxDaysAhead,
                               bufferMinutes: payload.settings.bufferMinutes

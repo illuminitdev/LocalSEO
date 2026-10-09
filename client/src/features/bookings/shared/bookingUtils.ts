@@ -1,5 +1,36 @@
 const ORG_SLUG_KEY = 'localpulse_booking_org';
 
+/** UK civil time (GMT/BST) — booking hours follow the business UK address. */
+export const UK_BUSINESS_TIMEZONE = 'Europe/London';
+
+export function resolveBusinessTimezone(timezone?: string | null): string {
+    const tz = String(timezone || '').trim();
+    if (!tz || tz === 'UTC' || tz === 'Etc/UTC' || tz === 'GMT') return UK_BUSINESS_TIMEZONE;
+    if (tz === 'Europe/Belfast' || tz === 'GB' || tz === 'GB-Eire') return UK_BUSINESS_TIMEZONE;
+    return UK_BUSINESS_TIMEZONE;
+}
+
+export function formatInBusinessTime(
+    iso: string,
+    options: Intl.DateTimeFormatOptions,
+    timezone?: string | null
+): string {
+    const timeZone = resolveBusinessTimezone(timezone);
+    try {
+        return new Date(iso).toLocaleString('en-GB', { ...options, timeZone });
+    } catch {
+        return new Date(iso).toLocaleString('en-GB', options);
+    }
+}
+
+export function formatBusinessTimeOnly(iso: string, timezone?: string | null): string {
+    return formatInBusinessTime(
+        iso,
+        { hour: '2-digit', minute: '2-digit', hour12: false },
+        timezone
+    );
+}
+
 export function getBookingOrgSlug(): string | null {
     return localStorage.getItem(ORG_SLUG_KEY);
 }

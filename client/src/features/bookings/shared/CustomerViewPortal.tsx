@@ -19,7 +19,16 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../../shared/utils';
 import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
-import { monthDays, todayStr, readBookingDraft, writeBookingDraft, clearBookingDraft } from './bookingUtils';
+import {
+    monthDays,
+    todayStr,
+    readBookingDraft,
+    writeBookingDraft,
+    clearBookingDraft,
+    formatBusinessTimeOnly,
+    formatInBusinessTime,
+    resolveBusinessTimezone
+} from './bookingUtils';
 import {
     getBookingPreset,
     getBookingFlowConfig,
@@ -87,10 +96,34 @@ type HostBrand = {
     phone?: string;
     email?: string;
     serviceArea?: string;
+    timezone?: string;
     logoUrl?: string;
     brandPrimary?: string;
     brandSecondary?: string;
 };
+
+/** Prefer wall-clock label from API; else format ISO in UK business timezone. */
+function formatSlotTime(slot: Slot, timezone?: string) {
+    const fromLabel = String(slot.label || '')
+        .split(/\s*[–-]\s*/)[0]
+        ?.trim();
+    if (fromLabel && /^\d{1,2}:\d{2}/.test(fromLabel)) return fromLabel.slice(0, 5);
+    return formatBusinessTimeOnly(slot.startAt, timezone);
+}
+
+function formatSlotDateTime(iso: string, timezone?: string) {
+    return formatInBusinessTime(
+        iso,
+        {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit'
+        },
+        timezone
+    );
+}
 
 type IndustryConfig = {
     id?: string;
@@ -170,6 +203,8 @@ export default function CustomerViewPortal({
 
     const showCatalog =
         flowConfig.catalogMode === 'priceList' && menuItems.length > 0 && Boolean(slotEventSlug);
+
+    const businessTimezone = resolveBusinessTimezone(host.timezone);
 
     const catalogLabel = (m: ShellMenuItem) => {
         const cat = String(m.category || '').trim();
@@ -1100,13 +1135,7 @@ export default function CustomerViewPortal({
                                   minute: '2-digit'
                               })}`
                             : selectedSlot
-                              ? ` · ${new Date(selectedSlot.startAt).toLocaleString('en-GB', {
-                                    weekday: 'short',
-                                    day: 'numeric',
-                                    month: 'short',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                })}`
+                              ? ` · ${formatSlotDateTime(selectedSlot.startAt, businessTimezone)}`
                               : ''}
                     </p>
                     {stylist && !isRequestDone && (
@@ -1735,7 +1764,7 @@ export default function CustomerViewPortal({
                                                     </div>
                                                 </div>
                                                 <div className="rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-sm">
-                                                    <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm mb-3">
+                                                    <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm mb-1">
                                                         <Clock className="w-4 h-4 text-[var(--brand-primary)]" />
                                                         {selectedDate
                                                             ? new Date(
@@ -1747,6 +1776,12 @@ export default function CustomerViewPortal({
                                                               })
                                                             : 'Select a date'}
                                                     </h3>
+                                                    <p className="text-[11px] font-semibold text-[#64748B] mb-3">
+                                                        Times in UK
+                                                        {host.serviceArea
+                                                            ? ` · ${host.serviceArea}`
+                                                            : ''}
+                                                    </p>
                                                     {!selectedDate && (
                                                         <p className="text-sm text-[#64748B] py-8 text-center">
                                                             Choose a date on the calendar.
@@ -1789,12 +1824,7 @@ export default function CustomerViewPortal({
                                                                         : 'border-[#E2E8F0] hover:border-[var(--brand-primary)]'
                                                                 )}
                                                             >
-                                                                {new Date(
-                                                                    slot.startAt
-                                                                ).toLocaleTimeString('en-GB', {
-                                                                    hour: '2-digit',
-                                                                    minute: '2-digit'
-                                                                })}
+                                                                {formatSlotTime(slot, businessTimezone)}
                                                             </button>
                                                         ))}
                                                     </div>
@@ -2029,15 +2059,9 @@ export default function CustomerViewPortal({
                                             ) : null}
                                             <p>
                                                 <span className="font-bold text-[#0F172A]">When:</span>{' '}
-                                                {new Date(selectedSlot.startAt).toLocaleString(
-                                                    'en-GB',
-                                                    {
-                                                        weekday: 'short',
-                                                        day: 'numeric',
-                                                        month: 'short',
-                                                        hour: '2-digit',
-                                                        minute: '2-digit'
-                                                    }
+                                                {formatSlotDateTime(
+                                                    selectedSlot.startAt,
+                                                    businessTimezone
                                                 )}
                                                 {cartDuration
                                                     ? ` · ${formatDuration(cartDuration)}`

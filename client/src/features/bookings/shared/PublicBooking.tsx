@@ -259,6 +259,7 @@ export function PublicBookHost() {
                     phone: data.phone,
                     email: data.email,
                     serviceArea: data.serviceArea,
+                    timezone: data.timezone || data.host?.timezone || 'Europe/London',
                     logoUrl: data.logoUrl || data.logo_url || '',
                     brandPrimary: data.brandPrimary || data.brand_primary,
                     brandSecondary: data.brandSecondary || data.brand_secondary
@@ -308,7 +309,10 @@ export function PublicBookEvent() {
     return (
         <PublicCustomerPortal
             hostSlug={hostSlug!}
-            host={data.host}
+            host={{
+                ...data.host,
+                timezone: data.host?.timezone || data.timezone || 'Europe/London'
+            }}
             industry={data.industry || getBookingPreset(data.host?.bookingIndustryId || data.host?.tradeType)}
             mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
             eventTypes={[

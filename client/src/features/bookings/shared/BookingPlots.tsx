@@ -27,7 +27,13 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost, formatCents, cn, restrictPhoneInput } from '../../../shared/utils';
 import { useToast } from '../../../shared/Toast';
-import { setBookingOrgSlug } from './bookingUtils';
+import {
+    formatBusinessTimeOnly,
+    formatInBusinessTime,
+    resolveBusinessTimezone,
+    setBookingOrgSlug,
+    UK_BUSINESS_TIMEZONE
+} from './bookingUtils';
 import BookingSetupWizard, { type SetupForm } from './BookingSetupWizard';
 import BookingSettingsPanel from './BookingSettings';
 import FoodOrdersHostPanel from '../restaurants/FoodOrdersHostPanel';
@@ -99,46 +105,51 @@ function bookingStatusBadge(b: { status: string; deposit_paid?: boolean; job_sta
     return { label: (b.job_status || b.status || 'SCHEDULED').toUpperCase(), className: 'text-[#64748B] bg-[#F8FAFC] border-[#E2E8F0]' };
 }
 
-function formatTimeOnly(dateStr: string) {
+function formatTimeOnly(dateStr: string, timezone?: string) {
     try {
         const d = new Date(dateStr);
         if (isNaN(d.getTime())) return '--:--';
-        return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+        return formatBusinessTimeOnly(dateStr, timezone || UK_BUSINESS_TIMEZONE);
     } catch {
         return '--:--';
     }
 }
 
-function formatDayDate(dateStr: string) {
+function formatDayDate(dateStr: string, timezone?: string) {
     try {
         const d = new Date(dateStr);
         if (isNaN(d.getTime())) return '';
-        return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+        return formatInBusinessTime(
+            dateStr,
+            { weekday: 'short', day: 'numeric', month: 'short' },
+            timezone || UK_BUSINESS_TIMEZONE
+        );
     } catch {
         return '';
     }
 }
 
-function getGroupLabel(dateStr: string): string {
+function calendarDayKey(iso: string, timezone?: string): string {
+    return formatInBusinessTime(
+        iso,
+        { year: 'numeric', month: '2-digit', day: '2-digit' },
+        timezone || UK_BUSINESS_TIMEZONE
+    );
+}
+
+function getGroupLabel(dateStr: string, timezone?: string): string {
     try {
         const d = new Date(dateStr);
         if (isNaN(d.getTime())) return 'Today';
-        const now = new Date();
-        const isToday =
-            d.getDate() === now.getDate() &&
-            d.getMonth() === now.getMonth() &&
-            d.getFullYear() === now.getFullYear();
-        if (isToday) return 'Today';
-
-        const tomorrow = new Date(now);
-        tomorrow.setDate(now.getDate() + 1);
-        const isTomorrow =
-            d.getDate() === tomorrow.getDate() &&
-            d.getMonth() === tomorrow.getMonth() &&
-            d.getFullYear() === tomorrow.getFullYear();
-        if (isTomorrow) return 'Tomorrow';
-
-        return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+        const tz = timezone || UK_BUSINESS_TIMEZONE;
+        const dayKey = calendarDayKey(dateStr, tz);
+        const todayKey = calendarDayKey(new Date().toISOString(), tz);
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowKey = calendarDayKey(tomorrow.toISOString(), tz);
+        if (dayKey === todayKey) return 'Today';
+        if (dayKey === tomorrowKey) return 'Tomorrow';
+        return formatDayDate(dateStr, tz);
     } catch {
         return 'Today';
     }
@@ -216,6 +227,7 @@ export default function BookingPlots() {
 
     const ready = Boolean(data?.ready);
     const org = data?.organization;
+    const businessTimezone = resolveBusinessTimezone(org?.timezone);
     const isRestaurant = normalizeBookingIndustryId(org?.booking_industry_id) === 'restaurants';
     const isSalons = normalizeBookingIndustryId(org?.booking_industry_id) === 'salons';
     const eventTypes = data?.eventTypes || [];
@@ -319,16 +331,16 @@ export default function BookingPlots() {
         });
     }, [bookings, filter]);
 
-    // Group filtered bookings by section date
+    // Group filtered bookings by section date (UK business time)
     const groupedBookings = useMemo(() => {
         const groups: { [key: string]: any[] } = {};
         filtered.forEach((b: any) => {
-            const label = getGroupLabel(b.start_at);
+            const label = getGroupLabel(b.start_at, businessTimezone);
             if (!groups[label]) groups[label] = [];
             groups[label].push(b);
         });
         return groups;
-    }, [filtered]);
+    }, [filtered, businessTimezone]);
 
     const hostUrl = org?.slug ? `${window.location.origin}/book/${org.slug}` : '';
     const qrUrl = hostUrl ? `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(hostUrl)}` : '';
@@ -741,6 +753,11 @@ export default function BookingPlots() {
                             <span className="inline-flex items-center gap-1 text-white/75">
                                 <MapPin className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                                 {locationPart}
+                            </span>
+                            <span>·</span>
+                            <span className="inline-flex items-center gap-1 text-white/75">
+                                <Clock className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                                UK time
                             </span>
                         </p>
 
@@ -1294,8 +1311,8 @@ export default function BookingPlots() {
                                     {groupList.map((b: any) => {
                                         const badge = bookingStatusBadge(b);
                                         const customerInitial = (b.customer_name || 'M').charAt(0).toUpperCase();
-                                        const timeStr = formatTimeOnly(b.start_at);
-                                        const dayStr = formatDayDate(b.start_at);
+                                        const timeStr = formatTimeOnly(b.start_at, businessTimezone);
+                                        const dayStr = formatDayDate(b.start_at, businessTimezone);
                                         const intakeAnswers = intakeAnswersList(b.intake_answers);
                                         const depositAmount =
                                             Number(b.deposit_cents) > 0

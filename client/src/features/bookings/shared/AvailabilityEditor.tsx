@@ -550,6 +550,9 @@ export default function AvailabilityEditor({
         <div className="space-y-4">
             {/* Notice / buffer / timezone stay in org defaults — calendar is for hours only */}
             {error && <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{error}</p>}
+            <p className="text-xs font-semibold text-[#64748B] rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2.5">
+                Hours are UK time (Europe/London) for your business address — same times customers see when booking.
+            </p>
 
             {/* Global weekly template */}
             <div className="border border-[#E2E8F0] rounded-2xl overflow-hidden bg-white">

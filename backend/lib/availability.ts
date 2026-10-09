@@ -13,9 +13,52 @@ function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) {
     return aStart < bEnd && bStart < aEnd;
 }
 
-function toDateInTimezone(dateStr: string, timeStr: string, _timezone: any) {
-    const iso = `${dateStr}T${timeStr}:00`;
-    return new Date(iso);
+/** Wall-clock parts of an instant in a given IANA timezone. */
+function zonedParts(date: Date, timeZone: string) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    }).formatToParts(date);
+    const map: Record<string, string> = {};
+    for (const p of parts) {
+        if (p.type !== 'literal') map[p.type] = p.value;
+    }
+    const hour = Number(map.hour) === 24 ? 0 : Number(map.hour);
+    return {
+        year: Number(map.year),
+        month: Number(map.month),
+        day: Number(map.day),
+        hour,
+        minute: Number(map.minute),
+        second: Number(map.second)
+    };
+}
+
+/**
+ * Convert org wall-clock date+time to a UTC Date.
+ * Availability rules are always stored as wall times in org.timezone.
+ */
+function toDateInTimezone(dateStr: string, timeStr: string, timezone: any) {
+    const tz = String(timezone || 'Europe/London').trim() || 'Europe/London';
+    const [year, month, day] = String(dateStr).split('-').map(Number);
+    const [hour, minute] = String(timeStr).split(':').map(Number);
+    const desired = Date.UTC(year, month - 1, day, hour, minute || 0, 0);
+    // Iterate: guess UTC, read wall time in tz, correct by the delta.
+    let utcMs = desired;
+    for (let i = 0; i < 3; i++) {
+        const p = zonedParts(new Date(utcMs), tz);
+        const asWall = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+        const diff = asWall - desired;
+        if (diff === 0) break;
+        utcMs -= diff;
+    }
+    return new Date(utcMs);
 }
 
 function localDateStr(d: Date) {
@@ -184,12 +227,16 @@ function generateSlots({
             const windowEnd = win.end;
             let cursor = windowStart;
 
-            while (cursor + durationMinutes <= windowEnd) {
+            const duration = Math.max(1, Number(durationMinutes) || 60);
+            const buffer = Math.max(0, Number(bufferMinutes) || 0);
+            // Offer bookable blocks on the service duration (e.g. 09:00, 10:00…).
+            // Buffer only reserves gap after existing bookings / busy blocks.
+            while (cursor + duration <= windowEnd) {
                 const slotStart = toDateInTimezone(dateStr, minutesToTime(cursor), timezone);
-                const slotEnd = new Date(slotStart.getTime() + durationMinutes * 60 * 1000);
+                const slotEnd = new Date(slotStart.getTime() + duration * 60 * 1000);
 
                 if (slotStart < minStart) {
-                    cursor += durationMinutes + bufferMinutes;
+                    cursor += duration;
                     continue;
                 }
 
@@ -198,8 +245,8 @@ function generateSlots({
 
                 const bookingConflict = existingBookings.some((b: any) => {
                     const bStart = new Date(b.start_at).getTime();
-                    const bEnd = new Date(b.end_at).getTime() + bufferMinutes * 60 * 1000;
-                    return overlaps(slotStartMs, slotEndMs + bufferMinutes * 60 * 1000, bStart, bEnd);
+                    const bEnd = new Date(b.end_at).getTime() + buffer * 60 * 1000;
+                    return overlaps(slotStartMs, slotEndMs + buffer * 60 * 1000, bStart, bEnd);
                 });
 
                 const busyConflict = (busyBlocks || []).some((block: any) => {
@@ -213,11 +260,11 @@ function generateSlots({
                         startAt: slotStart.toISOString(),
                         endAt: slotEnd.toISOString(),
                         date: dateStr,
-                        label: `${minutesToTime(cursor)} – ${minutesToTime(cursor + durationMinutes)}`
+                        label: `${minutesToTime(cursor)} – ${minutesToTime(cursor + duration)}`
                     });
                 }
 
-                cursor += durationMinutes + bufferMinutes;
+                cursor += duration;
             }
         }
     }

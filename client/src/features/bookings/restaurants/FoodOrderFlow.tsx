@@ -119,7 +119,9 @@ export default function FoodOrderFlow({
                         s.label ||
                         new Date(s.startAt).toLocaleTimeString('en-GB', {
                             hour: '2-digit',
-                            minute: '2-digit'
+                            minute: '2-digit',
+                            hour12: false,
+                            timeZone: data.timezone || 'Europe/London'
                         })
                 }));
                 setPickupSlots(slots);
