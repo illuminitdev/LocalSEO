@@ -61,11 +61,15 @@ import {
     smsConfigured
 } from '../lib/inbox';
 import {
-    acceptOrgInvite,
+    createManualMember,
     createOrgInvite,
+    findMemberAvailabilityOverlaps,
+    listMemberWeeklySchedules,
     listPendingInvites,
     listTeamMembers,
-    updateMemberRole
+    removeTeamMember,
+    updateMemberRole,
+    updateTeamMemberDetails
 } from '../lib/team';
 import {
     addExpense,
@@ -794,13 +798,7 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         const ents = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
         const teamsEnabled = orgHasBookingTeams(ents.planId);
         const memberUserId = String(req.query.userId || '').trim() || null;
-        if (memberUserId && !teamsEnabled) {
-            return res.status(403).json({
-                error: 'Member schedules require Booking Pro',
-                code: 'upgrade_required',
-                teamsEnabled: false
-            });
-        }
+        // Member weekly hours are available on any bookings plan; bookable-on-page stays Pro-gated.
         const { rows: org } = await query(
             'SELECT timezone, min_notice_hours, max_days_ahead, buffer_minutes FROM organizations WHERE id = $1',
             [(req as any).orgId]
@@ -854,13 +852,6 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const ents = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
             const teamsEnabled = orgHasBookingTeams(ents.planId);
             const memberUserId = String(bodyUserId || '').trim() || null;
-            if (memberUserId && !teamsEnabled) {
-                return res.status(403).json({
-                    error: 'Member schedules require Booking Pro',
-                    code: 'upgrade_required',
-                    teamsEnabled: false
-                });
-            }
             if (memberUserId) {
                 const { rows: mem } = await query(
                     `SELECT user_id FROM memberships WHERE org_id = $1 AND user_id = $2::uuid LIMIT 1`,
@@ -1400,6 +1391,37 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         }
     });
 
+    router.get('/team/schedules', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            const ents = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
+            const teamsEnabled = orgHasBookingTeams(ents.planId);
+            const schedules = await listMemberWeeklySchedules((req as any).orgId);
+            res.json({ schedules, teamsEnabled, planId: ents.planId || null });
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message });
+        }
+    });
+
+    router.post('/team/members', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            const ents = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
+            const teamsEnabled = orgHasBookingTeams(ents.planId);
+            const wantsBookable = req.body?.bookable !== undefined ? Boolean(req.body.bookable) : true;
+            const result = await createManualMember({
+                orgId: (req as any).orgId,
+                name: req.body?.name || req.body?.displayName,
+                email: req.body?.email,
+                role: req.body?.role || 'tech',
+                bookable: teamsEnabled ? wantsBookable : false
+            });
+            res.status(201).json({ ...result, teamsEnabled });
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message });
+        }
+    });
+
     router.post('/team/invites', async (req: Request, res: Response) => {
         try {
             const result = await createOrgInvite({
@@ -1418,9 +1440,27 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
         try {
             const ents = await loadOrgEntitlements((req as any).orgId, (req as any).user?.email);
             const teamsEnabled = orgHasBookingTeams(ents.planId);
-            const wantsBookable =
-                req.body?.bookable !== undefined || req.body?.displayName !== undefined;
-            if (wantsBookable && !teamsEnabled) {
+            const body = req.body || {};
+            const isFullEdit =
+                body.name !== undefined ||
+                body.email !== undefined ||
+                body.displayName !== undefined ||
+                body.edit === true;
+
+            if (isFullEdit) {
+                // Name / email / role always editable; bookable only applied on Booking Pro.
+                const result = await updateTeamMemberDetails({
+                    orgId: (req as any).orgId,
+                    userId: String(req.params.membershipId),
+                    name: body.name ?? body.displayName,
+                    email: body.email,
+                    role: body.role,
+                    bookable: teamsEnabled && body.bookable !== undefined ? body.bookable : undefined
+                });
+                return res.json({ ...result, teamsEnabled });
+            }
+
+            if (body.bookable !== undefined && !teamsEnabled) {
                 return res.status(403).json({
                     error: 'Bookable team members require Booking Pro',
                     code: 'upgrade_required',
@@ -1430,16 +1470,40 @@ function createHostRouter({ stripeClient }: { stripeClient: any }) {
             const member = await updateMemberRole(
                 (req as any).orgId,
                 String(req.params.membershipId),
-                String(req.body?.role || 'tech'),
-                req.body?.active,
-                teamsEnabled
-                    ? {
-                          bookable: req.body?.bookable,
-                          displayName: req.body?.displayName
-                      }
-                    : undefined
+                String(body.role || 'tech'),
+                body.active,
+                {
+                    bookable: teamsEnabled ? body.bookable : undefined,
+                    displayName: body.displayName
+                }
             );
             res.json({ member, teamsEnabled });
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message });
+        }
+    });
+
+    router.delete('/team/members/:membershipId', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            const result = await removeTeamMember((req as any).orgId, String(req.params.membershipId));
+            res.json(result);
+        } catch (err: any) {
+            res.status(err.status || 500).json({ error: err.message });
+        }
+    });
+
+    router.post('/availability/check-overlaps', async (req: Request, res: Response) => {
+        try {
+            if (!(req as any).orgId) return res.status(400).json({ error: 'Complete setup first' });
+            const userId = String(req.body?.userId || '').trim();
+            if (!userId) return res.status(400).json({ error: 'userId required' });
+            const overlaps = await findMemberAvailabilityOverlaps(
+                (req as any).orgId,
+                userId,
+                Array.isArray(req.body?.weeklyRules) ? req.body.weeklyRules : []
+            );
+            res.json({ overlaps, hasOverlaps: overlaps.length > 0 });
         } catch (err: any) {
             res.status(err.status || 500).json({ error: err.message });
         }

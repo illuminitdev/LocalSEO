@@ -1067,7 +1067,7 @@ export default function CustomerViewPortal({
         const isRequestDone = flowConfig.requestMode && intakeMode === 'request';
         return (
             <div
-                className="min-h-screen flex flex-col items-center justify-center text-center py-12 px-4"
+                className="portal-brand min-h-screen flex flex-col items-center justify-center text-center py-12 px-4"
                 style={{
                     ...orgBrandStyle(host),
                     background:
@@ -1264,7 +1264,7 @@ export default function CustomerViewPortal({
 
     return (
         <div
-            className="min-h-screen"
+            className="portal-brand min-h-screen"
             style={{
                 ...orgBrandStyle(host),
                 background: '#F8FAFC',

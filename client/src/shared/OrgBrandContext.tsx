@@ -12,7 +12,6 @@ import {
 import { apiGet } from './utils';
 import { getToken } from '../features/auth/auth';
 import {
-    applyDocumentBrandVars,
     clearOrgBrandCache,
     DEFAULT_BRAND_PRIMARY,
     DEFAULT_BRAND_SECONDARY,
@@ -105,16 +104,15 @@ export function OrgBrandProvider({ children }: { children: ReactNode }) {
         void refresh();
     }, [refresh]);
 
+    // Clear any leftover document brand overrides so the host client portal stays on defaults.
+    // Customer booking UIs scope colors via orgBrandStyle() + .portal-brand on their root.
     useLayoutEffect(() => {
-        applyDocumentBrandVars(brandPrimary, brandSecondary);
-        return () => {
-            const root = document.documentElement;
-            root.style.removeProperty('--brand-primary');
-            root.style.removeProperty('--brand-secondary');
-            root.style.removeProperty('--color-orange');
-            root.style.removeProperty('--color-orange-dark');
-        };
-    }, [brandPrimary, brandSecondary]);
+        const root = document.documentElement;
+        root.style.removeProperty('--brand-primary');
+        root.style.removeProperty('--brand-secondary');
+        root.style.removeProperty('--color-orange');
+        root.style.removeProperty('--color-orange-dark');
+    }, []);
 
     const value = useMemo<OrgBrandState>(
         () => ({
@@ -125,7 +123,8 @@ export function OrgBrandProvider({ children }: { children: ReactNode }) {
             resolved,
             refresh,
             applyBrand,
-            brandStyle: orgBrandStyle({ logoUrl, brandPrimary, brandSecondary })
+            // Defaults only — host UI stays on LocalPulse amber; Account preview uses orgBrandStyle locally.
+            brandStyle: orgBrandStyle({})
         }),
         [logoUrl, brandPrimary, brandSecondary, loading, resolved, refresh, applyBrand]
     );
@@ -151,7 +150,6 @@ export function useOrgBrand() {
 }
 
 const bootBrand = readOrgBrandCache(getToken());
-if (bootBrand) {
-    applyDocumentBrandVars(bootBrand.brandPrimary, bootBrand.brandSecondary);
-    if (bootBrand.logoUrl) preloadBrandLogo(bootBrand.logoUrl);
+if (bootBrand?.logoUrl) {
+    preloadBrandLogo(bootBrand.logoUrl);
 }

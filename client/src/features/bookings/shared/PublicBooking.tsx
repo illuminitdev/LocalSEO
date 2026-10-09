@@ -125,7 +125,7 @@ export function PublicBookHost() {
     if (isRestaurantHost && path === 'choose') {
         return (
             <div
-                className="min-h-screen"
+                className="portal-brand min-h-screen"
                 style={{
                     ...orgBrandStyle({
                         logoUrl: data.logoUrl,
@@ -188,7 +188,7 @@ export function PublicBookHost() {
     if (isRestaurantHost && path === 'food') {
         return (
             <div
-                className="min-h-screen"
+                className="portal-brand min-h-screen"
                 style={{
                     ...orgBrandStyle({
                         logoUrl: data.logoUrl,
@@ -235,7 +235,7 @@ export function PublicBookHost() {
         <>
             {isRestaurantHost && (
                 <div
-                    className="bg-[#F8FAFC] px-4 pt-3"
+                    className="portal-brand bg-[#F8FAFC] px-4 pt-3"
                     style={orgBrandStyle({
                         logoUrl: data.logoUrl,
                         brandPrimary: data.brandPrimary,

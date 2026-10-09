@@ -133,6 +133,7 @@ export default function RestaurantMenuEditor({
         pricePounds: '',
         active: true
     });
+    const [showListAddForm, setShowListAddForm] = useState(false);
     const [delivery, setDelivery] = useState({
         foodDeliveryEnabled: org?.food_delivery_enabled !== false,
         foodPickupEnabled: org?.food_pickup_enabled !== false,
@@ -196,6 +197,7 @@ export default function RestaurantMenuEditor({
                 active: form.active
             });
             setForm({ category: '', name: '', description: '', pricePounds: '', active: true });
+            setShowListAddForm(false);
             await load();
         } catch (err: any) {
             setError(err.message || 'Could not add item');
@@ -336,24 +338,98 @@ export default function RestaurantMenuEditor({
         return <p className="text-sm text-[#64748B]">Loading {isPriceList ? 'treatments' : 'menu'}…</p>;
     }
 
+    const listAddForm = (
+        <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4 space-y-3">
+            <div>
+                <p className="text-xs font-bold uppercase text-[#64748B]">
+                    {isPriceList ? 'New treatment' : 'New menu item'}
+                </p>
+                <p className="text-sm text-[#64748B] mt-0.5">
+                    {isPriceList
+                        ? 'Name and price appear when guests choose Treatments on the booking page.'
+                        : 'Add a category, name, and price for the food menu.'}
+                </p>
+            </div>
+            <form onSubmit={addItem} className="grid sm:grid-cols-2 gap-3">
+                <input
+                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm bg-white"
+                    placeholder={
+                        isPriceList
+                            ? 'Category (e.g. Dental, Facial Aesthetics)'
+                            : 'Category (e.g. Mains)'
+                    }
+                    value={form.category}
+                    onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+                />
+                <input
+                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm bg-white"
+                    placeholder={isPriceList ? 'Treatment / item name *' : 'Item name *'}
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    required
+                />
+                <input
+                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm bg-white"
+                    placeholder="Price £ *"
+                    value={form.pricePounds}
+                    onChange={(e) => setForm((f) => ({ ...f, pricePounds: e.target.value }))}
+                    required
+                />
+                <input
+                    className="rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm bg-white sm:col-span-2"
+                    placeholder="Description"
+                    value={form.description}
+                    onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                />
+                <button
+                    type="submit"
+                    disabled={busy}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#0F172A] hover:bg-[#1E293B] text-white px-4 py-2.5 text-xs font-bold sm:col-span-2 disabled:opacity-50"
+                >
+                    <Plus className="w-4 h-4" />
+                    {isPriceList ? 'Add treatment' : 'Add item'}
+                </button>
+            </form>
+        </div>
+    );
+
     const listBlock = showList && (
         <div className={cn(showForm ? 'space-y-2' : 'space-y-4')}>
             {!showForm && (
-                <div>
-                    <h2 className="font-bold text-[#0F172A]">{isPriceList ? 'Treatments' : 'Menu items'}</h2>
-                    <p className="text-sm text-[#64748B] mt-1">
-                        {isPriceList
-                            ? 'Treatments guests pick on the booking start page. Add more under the Treatments tab.'
-                            : 'Items guests can order.'}
-                    </p>
-                </div>
+                <>
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                        <div className="min-w-0">
+                            <h2 className="font-bold text-[#0F172A]">
+                                {isPriceList ? 'Treatments' : 'Menu items'}
+                            </h2>
+                            <p className="text-sm text-[#64748B] mt-1">
+                                {isPriceList
+                                    ? 'Treatments guests pick on the booking start page.'
+                                    : 'Items guests can order.'}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setShowListAddForm((v) => !v)}
+                            className="inline-flex items-center justify-center gap-1.5 shrink-0 px-4 py-2.5 rounded-xl bg-[#0F172A] hover:bg-[#1E293B] text-white text-xs font-bold transition"
+                        >
+                            <Plus className="w-4 h-4" />
+                            {showListAddForm
+                                ? 'Close'
+                                : isPriceList
+                                  ? 'Add treatment'
+                                  : 'Add item'}
+                        </button>
+                    </div>
+                    {showListAddForm && listAddForm}
+                </>
             )}
             {items.length === 0 && (
                 <p className="text-sm text-[#64748B] border border-dashed border-[#E2E8F0] rounded-xl px-4 py-6 text-center">
                     {isPriceList
                         ? showForm
                             ? 'No treatments yet. Upload a spreadsheet or add one above.'
-                            : 'No treatments yet — add them under the Treatments tab.'
+                            : 'No treatments yet — use Add treatment (top right).'
                         : 'No menu items yet. Upload a spreadsheet or add one above.'}
                 </p>
             )}

@@ -162,7 +162,8 @@ export default function Layout() {
     const searchParams = new URLSearchParams(location.search);
     const bookingPanel = searchParams.get('panel');
     const { features, loading, entitlementsDisabled } = useEntitlements();
-    const { logoUrl: orgLogoUrl, brandStyle, loading: brandLoading, resolved: brandResolved } = useOrgBrand();
+    // Host portal always uses the ZappSites / Local SEO mark. Org logo is for customer booking only.
+    const { loading: brandLoading, resolved: brandResolved } = useOrgBrand();
     const [userName, setUserName] = useState('');
     const [userEmail, setUserEmail] = useState('');
     const [avatarUrl, setAvatarUrl] = useState('');
@@ -393,7 +394,7 @@ export default function Layout() {
         <>
             <div className="min-h-14 px-4 py-2.5 shrink-0 flex items-center justify-between gap-2 min-w-0">
                 <BrandMark
-                    logoUrl={orgLogoUrl}
+                    logoUrl=""
                     pending={brandLoading && !brandResolved}
                     style={{ height: logoH, maxWidth: logoMaxW }}
                 />
@@ -468,7 +469,7 @@ export default function Layout() {
     );
 
     return (
-        <div className="portal-brand flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden" style={brandStyle}>
+        <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden">
             {}
             <aside
                 className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden print:hidden min-w-0"
@@ -525,7 +526,7 @@ export default function Layout() {
                         </button>
                         <div className="min-w-0 lg:hidden">
                             <BrandMark
-                                logoUrl={orgLogoUrl}
+                                logoUrl=""
                                 pending={brandLoading && !brandResolved}
                                 style={{ height: 32, maxWidth: 140 }}
                             />

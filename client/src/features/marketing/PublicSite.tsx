@@ -41,7 +41,7 @@ export default function PublicSite() {
 
     return (
         <div
-            className="min-h-screen text-white"
+            className="portal-brand min-h-screen text-white"
             style={{
                 ...orgBrandStyle(brand),
                 background: `linear-gradient(to bottom, var(--brand-secondary), color-mix(in srgb, var(--brand-secondary) 85%, white), var(--brand-secondary))`

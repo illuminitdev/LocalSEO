@@ -56,7 +56,8 @@ body {
   color: var(--brand-secondary);
 }
 
-/* Customer portal accents follow the saved brand instead of the default orange. */
+/* Public customer booking only: remap orange/amber utilities to scoped --brand-* vars.
+   Do not put this class on the host client portal (Layout) or /book/portal client hub. */
 .portal-brand {
   --color-orange-50: var(--brand-primary-soft);
   --color-orange-100: var(--brand-primary-muted);

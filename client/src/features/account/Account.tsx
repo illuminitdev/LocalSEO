@@ -426,7 +426,7 @@ export default function Account() {
                 brandPrimary: updated.brand_primary || brandPrimary,
                 brandSecondary: updated.brand_secondary || brandSecondary
             });
-            show('Brand colors saved — sidebar and workspace updated.');
+            show('Branding saved — customer booking page updated.');
         } catch (err: any) {
             setBrandErr(err.message);
         } finally {
@@ -980,7 +980,7 @@ export default function Account() {
                     <div className="mb-4">
                         <h2 className="text-base font-black text-[#0F172A]">Branding</h2>
                         <p className="text-xs text-[#64748B] mt-0.5">
-                            Logo and colors for sidebar, booking page, and client hub.
+                            Logo and colors for your public customer booking page only. The host portal keeps the ZappSites logo.
                         </p>
                     </div>
 
