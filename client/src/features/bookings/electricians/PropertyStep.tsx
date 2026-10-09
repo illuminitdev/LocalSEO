@@ -100,7 +100,8 @@ export default function PropertyStep({
                     type="button"
                     disabled={continueDisabled}
                     onClick={onContinue}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40 text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40 bg-[var(--brand-primary)]"
+                    style={{ color: 'var(--brand-primary-foreground, #FFFFFF)' }}
                 >
                     {continueLabel} <ArrowRight className="w-4 h-4" />
                 </button>

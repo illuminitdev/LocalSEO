@@ -13,6 +13,7 @@ import { getToken } from '../features/auth/auth';
 import {
     DEFAULT_BRAND_PRIMARY,
     DEFAULT_BRAND_SECONDARY,
+    isDarkColor,
     normalizeBrandHex,
     orgBrandStyle,
     type OrgBrand
@@ -79,12 +80,15 @@ export function OrgBrandProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         const root = document.documentElement;
+        const primaryForeground = isDarkColor(brandPrimary) ? '#FFFFFF' : '#0F172A';
         root.style.setProperty('--brand-primary', brandPrimary);
+        root.style.setProperty('--brand-primary-foreground', primaryForeground);
         root.style.setProperty('--brand-secondary', brandSecondary);
         root.style.setProperty('--color-orange', brandPrimary);
         root.style.setProperty('--color-orange-dark', brandPrimary);
         return () => {
             root.style.removeProperty('--brand-primary');
+            root.style.removeProperty('--brand-primary-foreground');
             root.style.removeProperty('--brand-secondary');
             root.style.removeProperty('--color-orange');
             root.style.removeProperty('--color-orange-dark');

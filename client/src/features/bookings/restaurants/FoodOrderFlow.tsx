@@ -341,7 +341,8 @@ export default function FoodOrderFlow({
                         type="button"
                         disabled={stickyCta.disabled}
                         onClick={stickyCta.action}
-                        className="w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40 text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
+                        className="w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black disabled:opacity-40 bg-[var(--brand-primary)]"
+                        style={{ color: 'var(--brand-primary-foreground, #FFFFFF)' }}
                     >
                         {stickyCta.label}
                         <ArrowRight className="w-4 h-4" />
@@ -374,13 +375,20 @@ export default function FoodOrderFlow({
                             key={s.key}
                             className={cn(
                                 'inline-flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.06em]',
-                                active && 'text-[#0F172A] shadow-sm',
+                                active && 'shadow-sm',
                                 doneStep && !active && 'bg-[#E2E8F0] text-[#0F172A]',
                                 !active &&
                                     !doneStep &&
                                     'bg-white text-[#94A3B8] border border-[#E2E8F0]'
                             )}
-                            style={active ? { background: 'var(--brand-primary)' } : undefined}
+                            style={
+                                active
+                                    ? {
+                                          background: 'var(--brand-primary)',
+                                          color: 'var(--brand-primary-foreground, #FFFFFF)'
+                                      }
+                                    : undefined
+                            }
                         >
                             {i + 1}. {s.label}
                         </span>
@@ -882,7 +890,8 @@ export default function FoodOrderFlow({
                                         type="button"
                                         disabled={submitting}
                                         onClick={submit}
-                                        className="w-full max-w-lg rounded-xl px-4 py-3.5 text-sm font-black disabled:opacity-50 text-[var(--brand-secondary)] bg-[var(--brand-primary)]"
+                                        className="w-full max-w-lg rounded-xl px-4 py-3.5 text-sm font-black disabled:opacity-50 bg-[var(--brand-primary)]"
+                                        style={{ color: 'var(--brand-primary-foreground, #FFFFFF)' }}
                                     >
                                         {submitting
                                             ? 'Processing…'
