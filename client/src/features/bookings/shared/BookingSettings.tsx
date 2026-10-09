@@ -6,8 +6,11 @@ import {
     BookOpen,
     Calendar,
     Check,
+    Code2,
+    Copy,
     CreditCard,
     Droplets,
+    ExternalLink,
     Flame,
     LayoutGrid,
     ListOrdered,
@@ -50,7 +53,7 @@ function salonCategoryIcon(category: string): LucideIcon {
     return SALON_CATEGORY_ICONS[category] || LayoutGrid;
 }
 
-type Tab = 'events' | 'menu' | 'availability' | 'integrations' | 'profile' | 'reminders';
+type Tab = 'events' | 'menu' | 'availability' | 'integrations' | 'profile' | 'reminders' | 'website';
 
 type EventTemplateKey = 'standard' | 'emergency' | 'serious';
 
@@ -157,9 +160,25 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
         tabParam === 'integrations' ||
         tabParam === 'profile' ||
         tabParam === 'reminders' ||
+        tabParam === 'website' ||
         (tabParam === 'menu' && hasCatalogTab)
             ? (tabParam as Tab)
             : 'events';
+    const [siteCopied, setSiteCopied] = useState(false);
+    const siteUrl = org?.slug ? `${window.location.origin}/book/${org.slug}` : '';
+    const siteSnippet = siteUrl
+        ? `<a href="${siteUrl}" style="display:inline-block;padding:12px 20px;background:#0B1528;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Book now</a>`
+        : '';
+    const copySiteCode = async () => {
+        if (!siteSnippet) return;
+        try {
+            await navigator.clipboard.writeText(siteSnippet);
+            setSiteCopied(true);
+            setTimeout(() => setSiteCopied(false), 2000);
+        } catch {
+            show('Could not copy. Select the code and copy it manually.');
+        }
+    };
     const [googleConnected, setGoogleConnected] = useState(false);
     const [stripeStatus, setStripeStatus] = useState<{
         configured?: boolean;
@@ -665,7 +684,8 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                             ['availability', 'Availability', Calendar],
                             ['integrations', 'Integrations', CreditCard],
                             ['reminders', 'Reminders', Bell],
-                            ['profile', 'Profile', Wallet]
+                            ['profile', 'Profile', Wallet],
+                            ['website', 'Add to website', Code2]
                         ] as const
                     ).map(([key, label, Icon]) => (
                         <button
@@ -1461,6 +1481,77 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                         >
                             {savingProfile ? 'Saving…' : saved ? 'Saved' : 'Save reminder settings'}
                         </button>
+                    </div>
+                )}
+
+                {tab === 'website' && org && (
+                    <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-5">
+                        <div>
+                            <h2 className="font-bold text-[#0F172A]">Add booking to your website</h2>
+                            <p className="text-sm text-[#64748B] mt-1">
+                                Copy the code and paste it where customers should book. It adds a Book now button that opens your customer booking page.
+                            </p>
+                        </div>
+
+                        {siteSnippet ? (
+                            <pre className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3 text-xs font-mono text-[#0F172A] whitespace-pre-wrap break-all select-all">
+                                {siteSnippet}
+                            </pre>
+                        ) : (
+                            <p className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3 text-sm text-[#64748B]">
+                                Finish booking setup first
+                            </p>
+                        )}
+
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button
+                                type="button"
+                                disabled={!siteSnippet}
+                                onClick={copySiteCode}
+                                className={cn(
+                                    'inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-bold text-sm disabled:opacity-50',
+                                    siteCopied ? 'bg-emerald-600 text-white' : 'bg-[#0F172A] text-white'
+                                )}
+                            >
+                                {siteCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                {siteCopied ? 'Copied!' : 'Copy code'}
+                            </button>
+                            <button
+                                type="button"
+                                disabled={!siteUrl}
+                                onClick={() => window.open(siteUrl, '_blank', 'noopener,noreferrer')}
+                                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-bold text-[#64748B] disabled:opacity-50"
+                            >
+                                <ExternalLink className="w-4 h-4" /> Open live page
+                            </button>
+                        </div>
+
+                        <p className="text-xs text-[#94A3B8] leading-relaxed">
+                            The button always opens your live booking page, so changes to services, availability or branding show up automatically. You only paste the code once.
+                        </p>
+
+                        <div className="border-t border-[#E2E8F0] pt-4 space-y-2">
+                            <h3 className="text-sm font-bold text-[#0F172A]">How to paste</h3>
+                            <ol className="list-decimal pl-5 space-y-1 text-sm text-[#475569]">
+                                <li>Copy the code.</li>
+                                <li>Open your website editor.</li>
+                                <li>Go to the Book or Contact page (or create one).</li>
+                                <li>Add a Custom HTML, Embed or Code block.</li>
+                                <li>Paste the code and Publish or Save.</li>
+                                <li>Open the page and click the button to confirm booking works.</li>
+                            </ol>
+                        </div>
+
+                        <div className="border-t border-[#E2E8F0] pt-4 space-y-2">
+                            <h3 className="text-sm font-bold text-[#0F172A]">Where to paste it</h3>
+                            <ul className="space-y-1 text-sm text-[#475569]">
+                                <li><strong className="text-[#0F172A]">WordPress:</strong> Custom HTML block</li>
+                                <li><strong className="text-[#0F172A]">Wix:</strong> Embed code</li>
+                                <li><strong className="text-[#0F172A]">Squarespace:</strong> Code block</li>
+                                <li><strong className="text-[#0F172A]">Shopify:</strong> Custom HTML / Liquid section</li>
+                                <li><strong className="text-[#0F172A]">Custom site:</strong> paste the HTML anywhere in the page</li>
+                            </ul>
+                        </div>
                     </div>
                 )}
 
