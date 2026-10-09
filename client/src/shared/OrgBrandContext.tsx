@@ -110,6 +110,7 @@ export function OrgBrandProvider({ children }: { children: ReactNode }) {
         return () => {
             const root = document.documentElement;
             root.style.removeProperty('--brand-primary');
+            root.style.removeProperty('--brand-primary-foreground');
             root.style.removeProperty('--brand-secondary');
             root.style.removeProperty('--color-orange');
             root.style.removeProperty('--color-orange-dark');
