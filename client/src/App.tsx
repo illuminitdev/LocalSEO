@@ -8,9 +8,11 @@ import ProfileAudit from './features/local-presence/ProfileAudit';
 import PostAutomation from './features/local-presence/PostAutomation';
 import { ReviewManagement, QAAutoResponder } from './features/local-presence/ReviewsAndQA';
 import RankTracker from './features/visibility/RankTracker';
-import VisibilityAuditReport from './features/visibility/VisibilityAuditReport';
 import MediaOptimization from './features/local-presence/MediaOptimization';
 import ReportGenerator from './features/report/ReportGenerator';
+import VisibilityTracker from './features/visibility/VisibilityTracker';
+import PublicReview from './features/reviews/PublicReview';
+import LlmVisibility from './features/llm-visibility/LlmVisibility';
 import Citations from './features/local-presence/Citations';
 import BookingPlots from './features/bookings/shared/BookingPlots';
 import PublicBookHost, { PublicBookEvent, BookSuccess, BookManage } from './features/bookings/shared/PublicBooking';
@@ -102,6 +104,7 @@ export default function App() {
         <Route path="/book/portal/:token" element={<ClientPortal />} />
         <Route path="/quote/:token" element={<PublicQuote />} />
         <Route path="/request-full-audit/:token" element={<PublicRequestFullAudit />} />
+        <Route path="/r/:orgSlug" element={<PublicReview />} />
         <Route path="/s/:orgSlug" element={<PublicSite />} />
         <Route path="/team/accept" element={<RequireAuth><TeamAccept /></RequireAuth>} />
         <Route path="/book/:hostSlug/:eventSlug" element={<PublicBookEvent />} />
@@ -139,9 +142,10 @@ export default function App() {
           <Route path="/reviews" element={<FeatureGate feature="local_presence"><ReviewManagement /></FeatureGate>} />
           <Route path="/qa" element={<FeatureGate feature="local_presence"><QAAutoResponder /></FeatureGate>} />
           <Route path="/rank-tracker" element={<FeatureGate feature="local_growth"><RankTracker /></FeatureGate>} />
-          <Route path="/visibility-audit/report" element={<VisibilityAuditReport />} />
+          <Route path="/visibility-tracker" element={<FeatureGate feature="local_growth"><VisibilityTracker /></FeatureGate>} />
           <Route path="/media" element={<FeatureGate feature="local_presence"><MediaOptimization /></FeatureGate>} />
           <Route path="/report" element={<FeatureGate features={['local_growth', 'reporting']}><ReportGenerator /></FeatureGate>} />
+          <Route path="/llm-visibility" element={<FeatureGate features={['local_growth', 'reporting']}><LlmVisibility /></FeatureGate>} />
           <Route path="/citations" element={<FeatureGate feature="local_presence"><Citations /></FeatureGate>} />
           <Route path="/booking" element={<FeatureGate feature="bookings"><BookingPlots /></FeatureGate>} />
           <Route path="/clients" element={<FeatureGate feature="bookings"><ClientsListPage /></FeatureGate>} />

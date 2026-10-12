@@ -12,7 +12,6 @@ import {
     Loader2
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
-import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
 
 export default function Citations() {
     const [loading, setLoading] = useState(false);
@@ -105,8 +104,6 @@ export default function Citations() {
 
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
-            <VisibilityFixBanner />
-
             {/* Page Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <div>

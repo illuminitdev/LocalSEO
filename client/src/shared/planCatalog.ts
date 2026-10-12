@@ -43,7 +43,9 @@ export type RouteFeature = FeatureKey | FeatureKey[] | null;
 export const ROUTE_FEATURES: Record<string, RouteFeature> = {
     '/dashboard': null,
     '/rank-tracker': 'local_growth',
+    '/visibility-tracker': 'local_growth',
     '/report': ['local_growth', 'reporting'],
+    '/llm-visibility': ['local_growth', 'reporting'],
     '/profile': 'local_presence',
     '/citations': 'local_presence',
     '/posts': 'local_presence',

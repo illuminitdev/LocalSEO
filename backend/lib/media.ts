@@ -23,7 +23,7 @@ export async function createUploadPresign({
     orgId,
     userId
 }: {
-    kind: 'avatar' | 'job' | 'logo';
+    kind: 'avatar' | 'job' | 'logo' | 'post';
     contentType: string;
     orgId?: string;
     userId?: string;
@@ -37,9 +37,9 @@ export async function createUploadPresign({
         throw Object.assign(new Error('Only JPEG, PNG, WebP, or GIF images are allowed'), { status: 400 });
     }
     const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : type === 'image/gif' ? 'gif' : 'jpg';
-    const prefix = kind === 'avatar' ? 'avatars' : kind === 'logo' ? 'logos' : 'jobs';
+    const prefix = kind === 'avatar' ? 'avatars' : kind === 'logo' ? 'logos' : kind === 'post' ? 'posts' : 'jobs';
     const owner = kind === 'avatar' ? userId || 'user' : orgId || 'org';
-    if ((kind === 'job' || kind === 'logo') && !orgId) {
+    if ((kind === 'job' || kind === 'logo' || kind === 'post') && !orgId) {
         throw Object.assign(new Error('Organization required for this upload'), { status: 400 });
     }
     const key = `${prefix}/${owner}/${randomUUID()}.${ext}`;
@@ -52,6 +52,19 @@ export async function createUploadPresign({
     const uploadUrl = await getSignedUrl(s3Client(), command, { expiresIn: 300 });
     const publicUrl = `https://${bucket}.s3.amazonaws.com/${key}`;
     return { uploadUrl, publicUrl, key, maxBytes: MAX_BYTES };
+}
+
+export async function uploadPostImageDataUrl(dataUrl: string, orgId: string) {
+    const bucket = mediaBucket();
+    const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/.exec(dataUrl || '');
+    if (!bucket || !orgId || !m) return null;
+    const type = m[1];
+    const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : type === 'image/gif' ? 'gif' : 'jpg';
+    const key = `posts/${orgId}/${randomUUID()}.${ext}`;
+    await s3Client().send(
+        new PutObjectCommand({ Bucket: bucket, Key: key, Body: Buffer.from(m[2], 'base64'), ContentType: type })
+    );
+    return `https://${bucket}.s3.amazonaws.com/${key}`;
 }
 
 export function isAllowedMediaUrl(url: string) {

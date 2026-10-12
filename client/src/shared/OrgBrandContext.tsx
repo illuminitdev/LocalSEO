@@ -148,8 +148,3 @@ export function useOrgBrand() {
     }
     return ctx;
 }
-
-const bootBrand = readOrgBrandCache(getToken());
-if (bootBrand?.logoUrl) {
-    preloadBrandLogo(bootBrand.logoUrl);
-}

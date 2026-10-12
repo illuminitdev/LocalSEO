@@ -133,10 +133,16 @@ export class LocalSeoApiStack extends cdk.Stack {
         : 'https://ud9zl0ww6d.execute-api.us-east-1.amazonaws.com');
 
     
+    // Same paid key can live in either var; prefer stage-specific, then fall back.
     const geminiKey =
-      stage === 'prod'
-        ? process.env.GEMINI_API_KEY_PROD || ''
-        : process.env.GEMINI_API_KEY || '';
+      (stage === 'prod'
+        ? process.env.GEMINI_API_KEY_PROD || process.env.GEMINI_API_KEY
+        : process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_PROD) || '';
+    if (!String(geminiKey).trim()) {
+      throw new Error(
+        `Set GEMINI_API_KEY${stage === 'prod' ? '_PROD' : ''} (or the other Gemini key as fallback) in backend/.env before deploying LocalSeoApi-${stage}.`
+      );
+    }
 
     
     const stripeSecretKey =
@@ -207,6 +213,7 @@ export class LocalSeoApiStack extends cdk.Stack {
           `${mediaBucket.bucketArn}/avatars/*`,
           `${mediaBucket.bucketArn}/jobs/*`,
           `${mediaBucket.bucketArn}/logos/*`,
+          `${mediaBucket.bucketArn}/posts/*`,
         ],
         principals: [new iam.AnyPrincipal()],
       })

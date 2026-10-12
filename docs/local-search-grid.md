@@ -35,3 +35,17 @@ Implementation in `backend/server.ts`; may use `nearbyCompetitors` from `backend
 | Google Places | `GOOGLE_PLACES_API_KEY` | Nearby competitors when available |
 
 Best results with both keys + a connected business profile.
+
+## Local Rank Tracker (real grid scans)
+
+`/rank-tracker` now shows a keyword + grid-size (5x5 / 7x7 / 9x9) scan over the Google map, Competitor Map Share, AI Ranking Insights, Opportunity Finder and Keyword Optimization Health.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/api/rank/state` | Tracked keywords + saved scans |
+| `POST` | `/api/rank/scan-row` | Real Google Maps ranks for one grid row (DataForSEO `serp/google/maps/live/advanced`) |
+| `POST` | `/api/rank/scan-finish` | Save the assembled grid; computes avg rank, top-3 %, competitor share, health, change |
+| `POST` | `/api/ai/rank-insights` | Insights + opportunities (Gemini wording, computed facts) |
+
+The client scans row by row (2 rows in parallel) to stay inside API timeouts. Cost per scan: 25 / 49 / 81 DataForSEO live calls.
+Env: `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`. Without them, Run Scan falls back to the old estimated 3x3 grid (`/api/ai/gap-analysis`) with a notice.

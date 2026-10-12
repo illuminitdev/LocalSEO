@@ -67,7 +67,7 @@ export class CitationScanError extends Error {
     }
 }
 
-function dataForSeoConfigured() {
+export function dataForSeoConfigured() {
     return Boolean(
         String(process.env.DATAFORSEO_LOGIN || '').trim() &&
             String(process.env.DATAFORSEO_PASSWORD || '').trim()
@@ -188,7 +188,7 @@ function mapsLocation(business: CitationScanBusiness) {
     return { location_code: 2826 };
 }
 
-async function dfsTask(path: string, task: Record<string, unknown>, timeoutMs: number) {
+export async function dfsTask(path: string, task: Record<string, unknown>, timeoutMs: number) {
     const res = await fetch(`https://api.dataforseo.com/v3/${path}`, {
         method: 'POST',
         headers: {

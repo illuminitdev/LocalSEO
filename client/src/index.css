@@ -21,6 +21,8 @@
 }
 
 html {
+  /* App-wide scale: every rem-based size (text, spacing) shrinks together so all pages match. */
+  font-size: 87.5%;
   overflow-x: clip;
   -webkit-text-size-adjust: 100%;
 }
@@ -146,4 +148,11 @@ button:disabled,
 .brand-color-swatch::-moz-color-swatch {
   border: none;
   border-radius: 9999px;
+}
+
+/* Customer portal only: dark text on brand buttons so they stay readable on any brand colour. */
+.portal-brand .bg-\[var\(--brand-primary\)\].text-white,
+.portal-brand .bg-\[var\(--brand-primary\)\] .text-white,
+.portal-brand .bg-\[var\(--brand-primary-hover\)\].text-white {
+  color: #0F172A;
 }

@@ -1,1199 +1,904 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
-    Map,
+    Map as MapIcon,
     Users,
-    BadgeCheck,
-    TrendingUp,
-    TrendingDown,
-    Loader2,
-    X,
-    FileText,
+    Sparkles,
+    Target,
+    MapPin,
+    LocateFixed,
     Download,
-    RotateCw,
-    ListOrdered,
-    Search,
-    BarChart3,
+    Loader2,
+    ArrowUp,
+    ArrowDown,
+    Minus,
     AlertCircle,
-    Radar
+    Upload,
+    FileText,
+    MessageSquare,
+    Star,
+    TrendingUp,
+    MoreVertical,
+    BarChart3,
+    Play
 } from 'lucide-react';
-import { apiGet, apiPost, logDashboardActivity, updateDashboardStats } from '../../shared/utils';
-import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
-import PlacesMap, { geoGridMarkers, geocodeAddress, mapsJsConfigured, type MapMarker } from '../../shared/PlacesMap';
-import {
-    PRIMARY_SERVICES,
-    loadVisibilityAuditReport,
-    saveVisibilityAuditReport
-} from './visibilityAudit';
-
-const GAP_STORAGE_KEY = 'localpulse_gap_analysis';
-const KEYWORDS_STORAGE_KEY = 'localpulse_tracked_keywords';
+import { apiGet, apiPost, logDashboardActivity, updateDashboardStats, cn } from '../../shared/utils';
+import PlacesMap, {
+    geocodeAddress,
+    mapsJsConfigured,
+    reverseGeocode,
+    type MapMarker
+} from '../../shared/PlacesMap';
 
 type TrackedKeyword = {
     keyword: string;
     avgRank: number;
     top3Percentage: number;
     updatedAt: string;
+    previousAvgRank?: number | null;
+    health?: number;
 };
 
+type ShareRow = { name: string; sharePct: number; isYou?: boolean };
+
+type Place = { name: string; lat: number | null; lng: number | null; rating?: number; reviews?: number };
+
 type GapRun = {
+    competitors?: Place[];
     keyword: string;
-    gapAnalysis: string;
     grid: number[][];
-    competitors: any[];
+    gridSize?: number;
     center?: { lat: number; lng: number } | null;
+    competitorShare?: ShareRow[];
     avgRank?: number;
     top3Percentage?: number;
     updatedAt?: string;
 };
 
-type LastAuditSummary = {
-    total: number;
-    bandLabel: string;
-    createdAt: string;
-    query: string;
+type Insight = { type: string; title: string; body: string; action?: { label: string; to: string } };
+type Opportunity = { keyword: string; rank: number; action: { label: string; to: string } };
+
+// Hidden 3×3 sample around the center: used only to score rank / share, never drawn on the map.
+const SAMPLE_SIZE = 3;
+const SCAN_CONCURRENCY = 5;
+
+const insightIcon = (label?: string) => {
+    if (!label) return FileText;
+    if (/gallery|photo/i.test(label)) return Upload;
+    return FileText;
 };
 
-function loadGapAnalysis(): any | null {
-    try {
-        const raw = sessionStorage.getItem(GAP_STORAGE_KEY);
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        if (!parsed?.gapAnalysis || !Array.isArray(parsed?.grid)) return null;
-        return parsed;
-    } catch {
-        return null;
-    }
-}
+const opportunityIcon = (label: string) => (/review/i.test(label) ? Star : MessageSquare);
 
-function saveGapAnalysis(data: any) {
-    try {
-        sessionStorage.setItem(GAP_STORAGE_KEY, JSON.stringify(data));
-    } catch {
-        // ignore
-    }
+function healthTone(score: number) {
+    if (score >= 80) return 'bg-emerald-500';
+    if (score >= 60) return 'bg-[var(--brand-primary)]';
+    return 'bg-[#9A3A0A]';
 }
-
-function clearGapAnalysis() {
-    try {
-        sessionStorage.removeItem(GAP_STORAGE_KEY);
-    } catch {
-        // ignore
-    }
-}
-
-function loadTrackedKeywordsLocal(): TrackedKeyword[] {
-    try {
-        const raw = sessionStorage.getItem(KEYWORDS_STORAGE_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
-        return [];
-    }
-}
-
-function saveTrackedKeywordsLocal(list: TrackedKeyword[]) {
-    try {
-        sessionStorage.setItem(KEYWORDS_STORAGE_KEY, JSON.stringify(list));
-    } catch {
-        // ignore
-    }
-}
-
-function upsertTrackedKeyword(list: TrackedKeyword[], entry: TrackedKeyword): TrackedKeyword[] {
-    const key = entry.keyword.toLowerCase();
-    return [entry, ...list.filter((k) => k.keyword.toLowerCase() !== key)].slice(0, 12);
-}
-
-const AUDIT_STEPS = [
-    'Saving prospect details',
-    'Checking if the website is live',
-    'Researching Google Maps / GBP',
-    'Comparing NAP & listing gaps',
-    'Writing the shareable report'
-];
 
 export default function RankTracker() {
     const navigate = useNavigate();
-    const [searchParams] = useSearchParams();
-    const [isGeneratingGap, setIsGeneratingGap] = useState(false);
-    const [gapAnalysis, setGapAnalysis] = useState<string | null>(null);
-    const [gridData, setGridData] = useState<number[][]>([]);
+
     const [keyword, setKeyword] = useState('');
-    const [activeKeyword, setActiveKeyword] = useState('');
-    const [businessCategory, setBusinessCategory] = useState('');
-    const [competitors, setCompetitors] = useState<any[]>([]);
+    const gridSize = SAMPLE_SIZE;
+    const [places, setPlaces] = useState<Place[]>([]);
+    const [suggestions, setSuggestions] = useState<string[]>([]);
+    const [grid, setGrid] = useState<number[][]>([]);
+    const [share, setShare] = useState<ShareRow[]>([]);
     const [trackedKeywords, setTrackedKeywords] = useState<TrackedKeyword[]>([]);
     const [gapRuns, setGapRuns] = useState<GapRun[]>([]);
+    const [insights, setInsights] = useState<Insight[]>([]);
+    const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
     const [showAllKeywords, setShowAllKeywords] = useState(false);
-    const [lastAudit, setLastAudit] = useState<LastAuditSummary | null>(null);
-    const [hasAuditReport, setHasAuditReport] = useState(false);
-    const [showRankGrid, setShowRankGrid] = useState(false);
-    const [error, setError] = useState('');
 
-    const [showAuditForm, setShowAuditForm] = useState(false);
+    const [scanning, setScanning] = useState(false);
+    const [progress, setProgress] = useState({ done: 0, total: 0 });
+    const [error, setError] = useState('');
+    const [notice, setNotice] = useState('');
+
     const [businessName, setBusinessName] = useState('');
+    const [businessCategory, setBusinessCategory] = useState('');
     const [address, setAddress] = useState('');
-    const [city, setCity] = useState('');
-    const [service, setService] = useState('');
-    const [serviceOther, setServiceOther] = useState('');
-    const [website, setWebsite] = useState('');
-    const [phone, setPhone] = useState('');
-    const [placeId, setPlaceId] = useState('');
+    const [services, setServices] = useState<string[]>([]);
+    const [centerLabel, setCenterLabel] = useState('');
+    const [customCenter, setCustomCenter] = useState(false);
+    const [locating, setLocating] = useState(false);
+    const [businessCenter, setBusinessCenter] = useState<{ lat: number; lng: number } | null>(null);
     const [lat, setLat] = useState<number | null>(null);
     const [lng, setLng] = useState<number | null>(null);
-    const [auditError, setAuditError] = useState('');
-    const [auditRunning, setAuditRunning] = useState(false);
-    const [auditStep, setAuditStep] = useState(0);
 
-    useEffect(() => {
-        const saved = loadGapAnalysis();
-        if (saved) {
-            setGapAnalysis(saved.gapAnalysis);
-            setGridData(Array.isArray(saved.grid) ? saved.grid : []);
-            setCompetitors(Array.isArray(saved.competitors) ? saved.competitors : []);
-            if (saved.keyword) {
-                setKeyword(saved.keyword);
-                setActiveKeyword(saved.keyword);
-            }
-            if (saved.center && Number.isFinite(saved.center.lat) && Number.isFinite(saved.center.lng)) {
-                setLat(saved.center.lat);
-                setLng(saved.center.lng);
-            }
-        }
-        const localKeywords = loadTrackedKeywordsLocal();
-        if (localKeywords.length) {
-            setTrackedKeywords(localKeywords);
-        }
-        setHasAuditReport(Boolean(loadVisibilityAuditReport()));
-    }, []);
-
-    useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            try {
-                const [biz, stats] = await Promise.all([
-                    apiGet('/api/business').catch(() => null),
-                    apiGet('/api/dashboard/stats').catch(() => null)
-                ]);
-                if (cancelled) return;
-
-                if (biz) {
-                    if (biz.name) setBusinessName(biz.name);
-                    if (biz.category) setBusinessCategory(biz.category);
-                    if (biz.address) {
-                        setAddress(biz.address);
-                        const parts = String(biz.address)
-                            .split(',')
-                            .map((p: string) => p.trim())
-                            .filter(Boolean);
-                        if (parts.length >= 2) setCity(parts[parts.length - 2] || parts[0]);
-                        else if (parts[0]) setCity(parts[0]);
-                    }
-                    if (biz.website) setWebsite(biz.website);
-                    if (biz.phone) setPhone(biz.phone);
-                    if (biz.placeId) setPlaceId(biz.placeId);
-
-                    if (biz.category && PRIMARY_SERVICES.includes(biz.category as any)) {
-                        setService(biz.category);
-                    } else if (biz.category) {
-                        const match = PRIMARY_SERVICES.find(
-                            (s) =>
-                                s.toLowerCase() === biz.category.toLowerCase() ||
-                                s.toLowerCase().startsWith(biz.category.toLowerCase())
-                        );
-                        if (match) {
-                            setService(match);
-                        } else {
-                            setService('Other');
-                            setServiceOther(biz.category);
-                        }
-                    }
-
-                    let nextLat = typeof biz.lat === 'number' && Number.isFinite(biz.lat) ? biz.lat : null;
-                    let nextLng = typeof biz.lng === 'number' && Number.isFinite(biz.lng) ? biz.lng : null;
-                    if (nextLat == null || nextLng == null) {
-                        const query = [biz.name, biz.address].filter(Boolean).join(', ');
-                        const geo = await geocodeAddress(query || biz.address || '');
-                        if (geo) {
-                            nextLat = geo.lat;
-                            nextLng = geo.lng;
-                        }
-                    }
-                    if (!cancelled) {
-                        if (typeof nextLat === 'number') setLat(nextLat);
-                        if (typeof nextLng === 'number') setLng(nextLng);
-                    }
-                    if (biz.category && !activeKeyword) {
-                        setKeyword(`${biz.category} near me`);
-                        setActiveKeyword(`${biz.category} near me`);
-                    }
-                }
-
-                if (stats?.lastVisibilityAudit?.total != null) {
-                    setLastAudit(stats.lastVisibilityAudit);
-                } else {
-                    const report = loadVisibilityAuditReport();
-                    if (report?.score?.total != null) {
-                        setLastAudit({
-                            total: report.score.total,
-                            bandLabel: report.score.bandLabel || 'Strong local presence',
-                            createdAt: report.createdAt || new Date().toISOString(),
-                            query: report.gbpLookup?.localRank?.query || report.input?.service || ''
-                        });
-                    }
-                }
-                const serverRuns: GapRun[] = Array.isArray(stats?.gapAnalyses) ? stats.gapAnalyses : [];
-                if (serverRuns.length) {
-                    setGapRuns(serverRuns);
-                    const latest = serverRuns[0];
-                    if (latest?.gapAnalysis) {
-                        setGapAnalysis(latest.gapAnalysis);
-                        setGridData(Array.isArray(latest.grid) ? latest.grid : []);
-                        setCompetitors(Array.isArray(latest.competitors) ? latest.competitors : []);
-                        if (latest.keyword) {
-                            setKeyword(latest.keyword);
-                            setActiveKeyword(latest.keyword);
-                        }
-                        if (latest.center && Number.isFinite(latest.center.lat) && Number.isFinite(latest.center.lng)) {
-                            setLat(latest.center.lat);
-                            setLng(latest.center.lng);
-                        }
-                        saveGapAnalysis({ ...latest, savedAt: latest.updatedAt });
-                    }
-                }
-                if (Array.isArray(stats?.trackedKeywords) && stats.trackedKeywords.length) {
-                    setTrackedKeywords(stats.trackedKeywords);
-                    saveTrackedKeywordsLocal(stats.trackedKeywords);
-                } else if (serverRuns.length) {
-                    const fromRuns = serverRuns.map((run) => ({
-                        keyword: run.keyword,
-                        avgRank: Number(run.avgRank) || 0,
-                        top3Percentage: Number(run.top3Percentage) || 0,
-                        updatedAt: run.updatedAt || new Date().toISOString()
-                    }));
-                    setTrackedKeywords(fromRuns);
-                    saveTrackedKeywordsLocal(fromRuns);
-                }
-                setHasAuditReport(Boolean(loadVisibilityAuditReport()));
-            } catch {
-                // ignore
-            }
-        })();
-        return () => {
-            cancelled = true;
-        };
-    }, []);
-
-    useEffect(() => {
-        if (searchParams.get('from') === 'visibility-audit') {
-            setShowAuditForm(true);
-        }
-    }, [searchParams]);
-
-    useEffect(() => {
-        if (!gridData.length) return;
-        if (typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng)) return;
-        const query = [businessName, address, city].filter(Boolean).join(', ');
-        if (!query.trim()) return;
-        let cancelled = false;
-        (async () => {
-            const geo = await geocodeAddress(query);
-            if (cancelled || !geo) return;
-            setLat(geo.lat);
-            setLng(geo.lng);
-            const saved = loadGapAnalysis();
-            if (saved?.gapAnalysis) {
-                saveGapAnalysis({ ...saved, center: geo });
-            }
-        })();
-        return () => {
-            cancelled = true;
-        };
-    }, [gridData, businessName, address, city, lat, lng]);
-
-    const displayKeyword =
-        activeKeyword || keyword || (businessCategory ? `${businessCategory} near me` : '');
-
-    const mapMarkers = useMemo(() => {
-        const centerLat = typeof lat === 'number' && Number.isFinite(lat) ? lat : null;
-        const centerLng = typeof lng === 'number' && Number.isFinite(lng) ? lng : null;
-
-        const markers: MapMarker[] = [];
-        if (centerLat == null || centerLng == null) {
-            return markers;
-        }
-
-        const effectiveGrid = gridData.length === 3 ? gridData : [];
-
-        if (showRankGrid && effectiveGrid.length === 3) {
-            markers.push(...geoGridMarkers(centerLat, centerLng, effectiveGrid, 1));
-        }
-
-        // You (Red Marker)
-        markers.push({
-            lat: centerLat,
-            lng: centerLng,
-            label: 'You',
-            title: businessName ? `${businessName} (You)` : 'Your business',
-            highlight: true,
-            color: '#EF4444'
-        });
-
-        if (competitors.length > 0) {
-            let rivalIdx = 0;
-            for (const comp of competitors) {
-                const name = String(comp?.name || '');
-                if (!name || /\(You\)/i.test(name)) continue;
-                const cLat = Number(comp.lat);
-                const cLng = Number(comp.lng);
-                if (!Number.isFinite(cLat) || !Number.isFinite(cLng)) continue;
-                rivalIdx += 1;
-                if (rivalIdx > 5) break;
-                markers.push({
-                    lat: cLat,
-                    lng: cLng,
-                    label: `C${rivalIdx}`,
-                    title: `${name}${comp.rating ? ` · ${comp.rating}★` : ''}`,
-                    color: '#3B82F6'
-                });
-            }
-        }
-
-        return markers;
-    }, [lat, lng, gridData, competitors, businessName, showRankGrid]);
-
-    const mapCompetitors = useMemo(() => {
-        return competitors
-            .filter((c) => c?.name && !/\(You\)/i.test(String(c.name)))
-            .slice(0, 5)
-            .map((c, i) => ({
-                label: `C${i + 1}`,
-                name: c.name as string,
-                rating: c.rating,
-                reviews: c.reviews,
-                hasPin: Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng))
-            }));
-    }, [competitors]);
-
-    const resolveMapCenter = async (): Promise<{ lat: number; lng: number } | null> => {
-        if (typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng)) {
-            return { lat, lng };
-        }
-        const query = [businessName, address, city].filter(Boolean).join(', ');
-        const geo = await geocodeAddress(query);
-        if (geo) {
-            setLat(geo.lat);
-            setLng(geo.lng);
-            return geo;
-        }
-        return null;
-    };
-
-    const handleGenerateGap = async () => {
-        const effective =
-            keyword.trim() || (businessCategory ? `${businessCategory} near me` : '');
-        if (!effective) {
-            setError('Enter a ranking keyword (e.g. plumber near me) or set your business category.');
-            return;
-        }
-        if (!keyword.trim()) setKeyword(effective);
-
-        setIsGeneratingGap(true);
-        setError('');
-        try {
-            const data = await apiPost('/api/ai/gap-analysis', { keyword: effective });
-            const usedKeyword = data.keyword || effective;
-            const nextGap = data.gapAnalysis || '';
-            const nextGrid = Array.isArray(data.grid) ? data.grid : [];
-            const nextCompetitors = Array.isArray(data.competitors) ? data.competitors : [];
-            setGapAnalysis(nextGap);
-            setGridData(nextGrid);
-            setCompetitors(nextCompetitors);
-            setKeyword(usedKeyword);
-            setActiveKeyword(usedKeyword);
-
-            let center: { lat: number; lng: number } | null = null;
-            if (data?.center && Number.isFinite(data.center.lat) && Number.isFinite(data.center.lng)) {
-                center = { lat: Number(data.center.lat), lng: Number(data.center.lng) };
-                setLat(center.lat);
-                setLng(center.lng);
-            } else {
-                center = await resolveMapCenter();
-            }
-
-            if (nextGap) {
-                saveGapAnalysis({
-                    keyword: usedKeyword,
-                    gapAnalysis: nextGap,
-                    grid: nextGrid,
-                    competitors: nextCompetitors,
-                    center,
-                    savedAt: new Date().toISOString()
-                });
-            }
-
-            const ranks = nextGrid.flat().filter((n: any) => typeof n === 'number');
-            const avgRank = ranks.length
-                ? Number((ranks.reduce((a: number, b: number) => a + b, 0) / ranks.length).toFixed(1))
-                : Number(data.trackedKeywords?.[0]?.avgRank) || 0;
-            const top3Percentage = ranks.length
-                ? Math.round((ranks.filter((r: number) => r <= 3).length / ranks.length) * 100)
-                : Number(data.trackedKeywords?.[0]?.top3Percentage) || 0;
-
-            const entry: TrackedKeyword = {
-                keyword: usedKeyword,
-                avgRank,
-                top3Percentage,
-                updatedAt: new Date().toISOString()
-            };
-            const nextKeywords = Array.isArray(data.trackedKeywords) && data.trackedKeywords.length
-                ? data.trackedKeywords
-                : upsertTrackedKeyword(trackedKeywords, entry);
-            setTrackedKeywords(nextKeywords);
-            saveTrackedKeywordsLocal(nextKeywords);
-            const serverRuns: GapRun[] = Array.isArray(data.gapAnalyses) ? data.gapAnalyses : [];
-            if (serverRuns.length) {
-                setGapRuns(serverRuns);
-            } else if (nextGap) {
-                const localRun: GapRun = {
-                    keyword: usedKeyword,
-                    gapAnalysis: nextGap,
-                    grid: nextGrid,
-                    competitors: nextCompetitors,
-                    center,
-                    avgRank,
-                    top3Percentage,
-                    updatedAt: entry.updatedAt
-                };
-                setGapRuns((current) =>
-                    [localRun, ...current.filter((run) => run.keyword.toLowerCase() !== usedKeyword.toLowerCase())].slice(0, 12)
-                );
-            }
-            await updateDashboardStats({ trackedKeywords: nextKeywords });
-
-            if (nextGrid.length && !center) {
-                setError(
-                    'Gap analysis saved, but map pins need a location. Add a full address on Business Profile (or enable Geocoding on your Maps key), then reopen this page.'
-                );
-            }
-
-            await logDashboardActivity({
-                type: 'rank',
-                message: `GeoGrid analysis for "${usedKeyword}".`,
-                icon: 'TrendingUp',
-                color: 'text-[var(--brand-primary)]'
-            });
-        } catch (err: any) {
-            setError(err.message || 'Gap analysis failed');
-        } finally {
-            setIsGeneratingGap(false);
-        }
-    };
-
-    const applyGapRun = (run: GapRun) => {
+    const applyRun = (run: GapRun) => {
         setKeyword(run.keyword);
-        setActiveKeyword(run.keyword);
-        setGapAnalysis(run.gapAnalysis || null);
-        setGridData(Array.isArray(run.grid) ? run.grid : []);
-        setCompetitors(Array.isArray(run.competitors) ? run.competitors : []);
+        setGrid(Array.isArray(run.grid) ? run.grid : []);
+        setShare(Array.isArray(run.competitorShare) ? run.competitorShare : []);
+        setPlaces(Array.isArray(run.competitors) ? run.competitors : []);
         if (run.center && Number.isFinite(run.center.lat) && Number.isFinite(run.center.lng)) {
             setLat(run.center.lat);
             setLng(run.center.lng);
         }
-        saveGapAnalysis({ ...run, savedAt: run.updatedAt || new Date().toISOString() });
+    };
+
+    const loadInsights = async (refresh = false) => {
+        try {
+            const data = await apiPost('/api/ai/rank-insights', { refresh });
+            setInsights(Array.isArray(data?.insights) ? data.insights : []);
+            setOpportunities(Array.isArray(data?.opportunities) ? data.opportunities : []);
+        } catch {
+            // insights are optional
+        }
+    };
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            const [biz, state] = await Promise.all([
+                apiGet('/api/business').catch(() => null),
+                apiGet('/api/rank/state').catch(() => null)
+            ]);
+            if (cancelled) return;
+
+            let defaultKeyword = '';
+            if (biz) {
+                if (biz.name) setBusinessName(biz.name);
+                if (biz.category) {
+                    setBusinessCategory(biz.category);
+                    defaultKeyword = `${biz.category} near me`;
+                }
+                if (biz.address) {
+                    setAddress(biz.address);
+                    setCenterLabel(biz.address);
+                }
+                if (typeof biz.attributes === 'string') {
+                    setServices(
+                        biz.attributes
+                            .split(/[,;\n]/)
+                            .map((x: string) => x.trim())
+                            .filter((x: string) => x.length > 2 && x.length < 60)
+                            .slice(0, 6)
+                    );
+                }
+                let nextLat = typeof biz.lat === 'number' && Number.isFinite(biz.lat) ? biz.lat : null;
+                let nextLng = typeof biz.lng === 'number' && Number.isFinite(biz.lng) ? biz.lng : null;
+                if (nextLat == null || nextLng == null) {
+                    const geo = await geocodeAddress([biz.name, biz.address].filter(Boolean).join(', '));
+                    if (geo) {
+                        nextLat = geo.lat;
+                        nextLng = geo.lng;
+                    }
+                }
+                if (!cancelled) {
+                    if (nextLat != null) setLat(nextLat);
+                    if (nextLng != null) setLng(nextLng);
+                    if (nextLat != null && nextLng != null) setBusinessCenter({ lat: nextLat, lng: nextLng });
+                }
+            }
+
+            apiGet('/api/rank/suggestions')
+                .then((d) => !cancelled && setSuggestions(Array.isArray(d?.keywords) ? d.keywords : []))
+                .catch(() => {});
+            const runs: GapRun[] = Array.isArray(state?.gapAnalyses) ? state.gapAnalyses : [];
+            setGapRuns(runs);
+            setTrackedKeywords(Array.isArray(state?.trackedKeywords) ? state.trackedKeywords : []);
+            if (runs[0]) {
+                applyRun(runs[0]);
+                loadInsights(false);
+            } else if (defaultKeyword) {
+                setKeyword(defaultKeyword);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    const pickCenter = async (nextLat: number, nextLng: number, label?: string) => {
+        setLat(nextLat);
+        setLng(nextLng);
+        setCustomCenter(true);
+        setGrid([]);
+        setShare([]);
+        setError('');
+        setCenterLabel(label || `Pinned location (${nextLat.toFixed(4)}, ${nextLng.toFixed(4)})`);
+        if (!label) {
+            const found = await reverseGeocode(nextLat, nextLng);
+            if (found) setCenterLabel(found);
+        }
+    };
+
+    const applyTypedCenter = async () => {
+        const text = centerLabel.trim();
+        if (!text || (!customCenter && text === address)) return;
+        const geo = await geocodeAddress(text);
+        if (!geo) {
+            setError('Could not find that location. Try a fuller address, or click the map to drop a pin.');
+            return;
+        }
+        await pickCenter(geo.lat, geo.lng, text);
+    };
+
+    const useMyLocation = () => {
+        if (!navigator.geolocation) {
+            setError('Your browser does not support location access.');
+            return;
+        }
+        setLocating(true);
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                setLocating(false);
+                pickCenter(pos.coords.latitude, pos.coords.longitude);
+            },
+            () => {
+                setLocating(false);
+                setError('Location permission was denied. Type an address or click the map instead.');
+            },
+            { enableHighAccuracy: true, timeout: 10000 }
+        );
+    };
+
+    const resetCenter = () => {
+        if (!businessCenter) return;
+        setLat(businessCenter.lat);
+        setLng(businessCenter.lng);
+        setCustomCenter(false);
+        setCenterLabel(address);
+        setGrid([]);
+        setShare([]);
+    };
+
+    const hasCenter = typeof lat === 'number' && typeof lng === 'number';
+    const size = grid.length;
+
+    const mapMarkers = useMemo(() => {
+        const markers: MapMarker[] = [];
+        if (!hasCenter) return markers;
+        markers.push({
+            lat: lat as number,
+            lng: lng as number,
+            label: customCenter ? 'Center' : 'You',
+            title: customCenter ? 'Search center' : businessName ? `${businessName} (You)` : 'Your business',
+            highlight: true,
+            color: '#0F172A'
+        });
+        places
+            .filter((c) => c.lat != null && c.lng != null)
+            .slice(0, 8)
+            .forEach((c, i) => {
+                markers.push({
+                    lat: c.lat as number,
+                    lng: c.lng as number,
+                    label: `C${i + 1}`,
+                    title: `${c.name}${c.rating ? ` · ${c.rating}★` : ''}${c.reviews ? ` (${c.reviews})` : ''}`,
+                    color: '#3B82F6'
+                });
+            });
+        return markers;
+    }, [lat, lng, hasCenter, customCenter, businessName, places]);
+
+    const flat = grid.flat().filter((n) => Number.isFinite(n));
+    const avgRank = flat.length ? (flat.reduce((a, b) => a + b, 0) / flat.length).toFixed(1) : '—';
+
+    const shareRows = useMemo(() => {
+        const you = share.find((s) => s.isYou);
+        const rivals = share.filter((s) => !s.isYou).slice(0, 4);
+        return [{ name: 'Your Business', sharePct: you?.sharePct ?? 0, isYou: true }, ...rivals];
+    }, [share]);
+
+    const runEstimatedFallback = async (kw: string) => {
+        const data = await apiPost('/api/ai/gap-analysis', { keyword: kw });
+        const runs: GapRun[] = Array.isArray(data.gapAnalyses) ? data.gapAnalyses : [];
+        setGapRuns(runs);
+        setTrackedKeywords(Array.isArray(data.trackedKeywords) ? data.trackedKeywords : []);
+        if (Array.isArray(data.grid)) setGrid(data.grid);
+        setShare([]);
+        setPlaces(
+            (Array.isArray(data.competitors) ? data.competitors : [])
+                .filter((c: any) => c?.name && !/\(You\)/i.test(String(c.name)) && Number.isFinite(Number(c.lat)))
+                .map((c: any) => ({ name: c.name, lat: Number(c.lat), lng: Number(c.lng), rating: c.rating, reviews: c.reviews }))
+        );
+        if (data?.center) {
+            setLat(data.center.lat);
+            setLng(data.center.lng);
+        }
+        setNotice('DataForSEO is not configured, so this scan shows estimated ranks instead of real Google Maps data.');
+    };
+
+    const handleRunScan = async () => {
+        const kw = keyword.trim() || (businessCategory ? `${businessCategory} near me` : '');
+        if (!kw) {
+            setError('Enter a target keyword (e.g. plumber near me) or set your business category.');
+            return;
+        }
+        setKeyword(kw);
+        setScanning(true);
+        setError('');
+        setNotice('');
+        try {
+            const total = gridSize * gridSize;
+            const rows: number[][] = Array.from({ length: gridSize }, () => new Array(gridSize).fill(21));
+            const tally: Record<string, number> = {};
+            const seen = new Map<string, Place>();
+            let next = 0;
+            let done = 0;
+            let failed = 0;
+            let notConfigured = false;
+            let fatal: Error | null = null;
+            let lastError = '';
+            setProgress({ done: 0, total });
+
+            const scanCell = async (row: number, col: number) => {
+                const body = { keyword: kw, gridSize, row, col, center: hasCenter ? { lat, lng } : undefined };
+                for (let attempt = 0; attempt < 2; attempt++) {
+                    try {
+                        return await apiPost('/api/rank/scan-row', body);
+                    } catch (err: any) {
+                        if (err?.code === 'not_configured' || /need DataForSEO/i.test(err?.message || '')) throw err;
+                        if (/locate the grid center|Invalid grid|Keyword is required|Upgrade required/i.test(err?.message || '')) throw err;
+                        lastError = err?.message || lastError;
+                        if (attempt === 1) return null;
+                    }
+                }
+                return null;
+            };
+
+            const worker = async () => {
+                while (next < total && !notConfigured && !fatal) {
+                    const idx = next++;
+                    const row = Math.floor(idx / gridSize);
+                    const col = idx % gridSize;
+                    try {
+                        const data = await scanCell(row, col);
+                        if (data) {
+                            rows[row][col] = data.rank;
+                            for (const name of data.top3 || []) tally[name] = (tally[name] || 0) + 1;
+                            for (const pl of data.places || []) {
+                                if (!pl?.name || pl.isYou || pl.lat == null || pl.lng == null) continue;
+                                if (!seen.has(pl.name)) seen.set(pl.name, { name: pl.name, lat: pl.lat, lng: pl.lng, rating: pl.rating, reviews: pl.reviews });
+                            }
+                        } else {
+                            failed += 1;
+                        }
+                    } catch (err: any) {
+                        if (err?.code === 'not_configured' || /need DataForSEO/i.test(err?.message || '')) {
+                            notConfigured = true;
+                        } else {
+                            fatal = err;
+                        }
+                        return;
+                    }
+                    done += 1;
+                    setProgress({ done, total });
+                    if (done % gridSize === 0 || done === total) {
+                        setGrid(rows.map((r) => [...r]));
+                    }
+                }
+            };
+            await Promise.all(Array.from({ length: SCAN_CONCURRENCY }, worker));
+            if (fatal) throw fatal;
+            if (!notConfigured && failed > total / 2) {
+                throw new Error(
+                    /timeout|aborted/i.test(lastError)
+                        ? 'Google Maps data is responding slowly right now, so most grid points timed out. Please try again in a few minutes.'
+                        : `Most grid points failed to load from Google${lastError ? ` (${lastError})` : ''}. Please try again in a moment.`
+                );
+            }
+            if (!notConfigured && failed > 0) {
+                setNotice(`${failed} of ${total} points could not be checked and are shown as 20+.`);
+            }
+
+            if (notConfigured) {
+                setGrid([]);
+                await runEstimatedFallback(kw);
+                await loadInsights(true);
+                return;
+            }
+
+            const nearby = Array.from(seen.values())
+                .sort((a, b) => (tally[b.name] || 0) - (tally[a.name] || 0) || (b.reviews || 0) - (a.reviews || 0))
+                .slice(0, 8);
+            setPlaces(nearby);
+            const result = await apiPost('/api/rank/scan-finish', {
+                competitors: nearby,
+                keyword: kw,
+                gridSize,
+                grid: rows,
+                tally,
+                center: hasCenter ? { lat, lng } : undefined
+            });
+            setGapRuns(Array.isArray(result.gapAnalyses) ? result.gapAnalyses : []);
+            setTrackedKeywords(Array.isArray(result.trackedKeywords) ? result.trackedKeywords : []);
+            applyRun(result.run);
+            updateDashboardStats({ trackedKeywords: result.trackedKeywords }).catch(() => {});
+            await loadInsights(true);
+            await logDashboardActivity({
+                type: 'rank',
+                message: `Local rank scan for "${kw}".`,
+                icon: 'TrendingUp',
+                color: 'text-[var(--brand-primary)]'
+            });
+        } catch (err: any) {
+            setError(err.message || 'Scan failed');
+        } finally {
+            setScanning(false);
+        }
     };
 
     const loadKeyword = (row: TrackedKeyword) => {
         const run = gapRuns.find((item) => item.keyword.toLowerCase() === row.keyword.toLowerCase());
-        if (run?.gapAnalysis) {
-            applyGapRun(run);
-            return;
-        }
-        const saved = loadGapAnalysis();
-        if (saved?.keyword === row.keyword && saved.gapAnalysis) {
-            applyGapRun(saved);
-            return;
-        }
-        setKeyword(row.keyword);
-        setActiveKeyword(row.keyword);
-        setError(`No saved analysis for "${row.keyword}" yet. Run Generate Gap Analysis to store it.`);
-    };
-
-    const runVisibilityAudit = async () => {
-        const resolvedService = service === 'Other' ? serviceOther.trim() : service;
-        if (!businessName.trim() || !address.trim() || !resolvedService) {
-            setAuditError('Business name, address/town, and primary service are required.');
-            return;
-        }
-        setAuditError('');
-        setAuditRunning(true);
-        setAuditStep(0);
-        const timers = AUDIT_STEPS.map((_, i) => setTimeout(() => setAuditStep(i), i * 900));
-        try {
-            const data = await apiPost('/api/visibility-audit', {
-                businessName: businessName.trim(),
-                address: address.trim(),
-                city: city.trim() || undefined,
-                service: resolvedService,
-                website: website.trim() || undefined,
-                phone: phone.trim() || undefined,
-                placeId: placeId || undefined,
-                lat,
-                lng
-            });
-            setAuditStep(AUDIT_STEPS.length - 1);
-            saveVisibilityAuditReport(data);
-            setHasAuditReport(true);
-            const summary: LastAuditSummary = {
-                total: Number(data?.score?.total) || 0,
-                bandLabel: String(data?.score?.bandLabel || data?.score?.band || 'Visibility score'),
-                createdAt: String(data?.createdAt || new Date().toISOString()),
-                query: String(data?.gbpLookup?.localRank?.query || resolvedService || '')
-            };
-            setLastAudit(summary);
-            await updateDashboardStats({ lastVisibilityAudit: summary });
-            await logDashboardActivity({
-                type: 'audit',
-                message: `Local Visibility Audit scored ${data?.score?.total ?? '—'}/100.`,
-                icon: 'Radar',
-                color: 'text-[var(--brand-primary)]'
-            }).catch(() => undefined);
-            setShowAuditForm(false);
-            navigate('/visibility-audit/report');
-        } catch (err: any) {
-            setAuditError(err.message || 'Visibility audit failed');
-        } finally {
-            timers.forEach(clearTimeout);
-            setAuditRunning(false);
+        setError('');
+        if (run) {
+            applyRun(run);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+            setKeyword(row.keyword);
+            setGrid([]);
+            setShare([]);
         }
     };
 
-    const effectiveKeywords: TrackedKeyword[] = showAllKeywords ? trackedKeywords : trackedKeywords.slice(0, 4);
+    const handleExport = () => {
+        const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const lines: string[] = ['Keyword,Avg rank,Top 3 %,Health,Updated'];
+        for (const k of trackedKeywords) {
+            lines.push([k.keyword, k.avgRank, k.top3Percentage, k.health ?? '', k.updatedAt].map(esc).join(','));
+        }
+        if (grid.length) {
+            lines.push('', `Grid for "${keyword}" (${grid.length}x${grid.length}, row 1 = north)`);
+            for (const row of grid) lines.push(row.join(','));
+        }
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `rank-tracker-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const keywordOptions = useMemo(() => {
+        const set = new Set<string>(trackedKeywords.map((k) => k.keyword));
+        if (businessCategory) {
+            set.add(`${businessCategory} near me`);
+            set.add(`best ${businessCategory}`);
+        }
+        for (const svc of services) set.add(`${svc} near me`);
+        for (const kw of suggestions) set.add(kw);
+        return Array.from(set);
+    }, [trackedKeywords, businessCategory, services, suggestions]);
+
+    const keywordPlaceholder = `e.g. ${services[0] || businessCategory || 'your main service'} near me`;
+
+    const keywordRows = useMemo(() => {
+        const tracked = new Map(trackedKeywords.map((k) => [k.keyword.toLowerCase(), k]));
+        const rows: Array<TrackedKeyword & { scanned: boolean }> = trackedKeywords.map((k) => ({ ...k, scanned: true }));
+        for (const kw of suggestions) {
+            if (tracked.has(kw.toLowerCase())) continue;
+            rows.push({ keyword: kw, avgRank: 0, top3Percentage: 0, updatedAt: '', scanned: false });
+        }
+        return rows;
+    }, [trackedKeywords, suggestions]);
+
+    const visibleKeywords = showAllKeywords ? keywordRows : keywordRows.slice(0, 6);
+
+    const scanKeyword = (kw: string) => {
+        setKeyword(kw);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        setTimeout(() => document.getElementById('run-scan-btn')?.click(), 350);
+    };
+
+    const card = 'bg-white rounded-xl border border-[#E2E8F0] shadow-sm';
+    const miniLabel = 'block text-[10px] font-semibold text-gray-500 mb-1.5';
 
     return (
-        <div className="max-w-7xl mx-auto animate-in fade-in duration-500 pb-12">
-            <VisibilityFixBanner />
-
-            {/* Top Header Row */}
-            <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
+            {/* Header */}
+            <div className="mb-5 flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#0F172A]">Local Search Grid</h1>
-                    <p className="text-gray-500 text-sm mt-1">
-                        Local Pack ranks on a real map around your business — plus a free visibility audit.
-                    </p>
+                    <h1 className="text-3xl font-bold tracking-tight text-[#0F172A]">Local Rank Tracker</h1>
+                    <p className="text-sm text-gray-500 mt-1">Geographic visibility and competitor share across your service area.</p>
                 </div>
-
-                <div className="flex items-center gap-3 w-full md:w-auto">
-                    <div className="relative flex-1 md:w-80">
-                        <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                        <input
-                            value={keyword}
-                            onChange={(e) => setKeyword(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    setActiveKeyword(keyword);
-                                    handleGenerateGap();
-                                }
-                            }}
-                            className="w-full pl-9 pr-8 py-2 bg-white border border-[#E2E8F0] rounded-xl text-sm font-medium text-[#0F172A] shadow-xs focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)]"
-                            placeholder="your service near me"
-                        />
-                        {keyword && (
-                            <button
-                                type="button"
-                                onClick={() => setKeyword('')}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer p-0.5"
-                                aria-label="Clear keyword"
-                            >
-                                <X className="w-3.5 h-3.5" />
-                            </button>
-                        )}
-                    </div>
-
+                <div className="flex items-center gap-2">
                     <button
                         type="button"
-                        onClick={() => setShowAuditForm(true)}
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-sm font-bold cursor-pointer whitespace-nowrap shadow-xs transition-colors shrink-0"
+                        id="run-scan-btn"
+                        onClick={handleRunScan}
+                        disabled={scanning}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-ink)] text-white rounded-lg text-sm font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-70"
                     >
-                        <BarChart3 className="w-4 h-4" />
-                        Local Visibility Audit
+                        {scanning
+                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                            : <Play className="w-4 h-4 fill-current" />}
+                        {scanning ? `Scanning ${progress.done}/${progress.total}` : 'Run Scan'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleExport}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-[#E2E8F0] rounded-lg text-sm font-semibold text-[#0F172A] hover:bg-[#F8FAFC] cursor-pointer"
+                    >
+                        <Download className="w-4 h-4" /> Export
                     </button>
                 </div>
             </div>
 
-            {error && (
-                <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>
+            {error && <p className="mb-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>}
+            {notice && (
+                <p className="mb-4 flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" /> {notice}
+                </p>
             )}
 
-            {/* Row 1: Audit Score & Track + Ranking Keywords */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5 items-stretch">
-                {/* Left Card: Audit Score & Track */}
-                <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-xs flex flex-col justify-between">
-                    <div>
-                        <div className="flex items-start justify-between gap-3 mb-2">
-                            <div>
-                                <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400">AUDIT SCORE & TRACK</p>
-                                <h2 className="text-lg font-bold text-[#0F172A] flex items-center gap-2 mt-0.5">
-                                    <div className="w-5 h-5 rounded-full border-2 border-[var(--brand-primary)] flex items-center justify-center">
-                                        <div className="w-2 h-2 rounded-full bg-[var(--brand-primary)]"></div>
-                                    </div>
-                                    Local Visibility Audit
-                                </h2>
-                            </div>
+            {/* Controls */}
+            <div className={cn(card, 'p-4 mb-5 flex flex-col lg:flex-row lg:items-end gap-4')}>
+                <div className="flex-1">
+                    <label className={miniLabel}>Target Keyword</label>
+                    <div className="relative">
+                        <input
+                            list="rank-keywords"
+                            value={keyword}
+                            onChange={(e) => setKeyword(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && !scanning && handleRunScan()}
+                            placeholder={keywordPlaceholder}
+                            className="w-full px-3 py-2 bg-white border border-[#E2E8F0] rounded-lg text-sm appearance-none [&::-webkit-calendar-picker-indicator]:!hidden [&::-webkit-list-button]:!hidden focus:outline-none focus:border-[var(--brand-primary)]"
+                        />
+                        <datalist id="rank-keywords">
+                            {keywordOptions.map((k) => (
+                                <option key={k} value={k} />
+                            ))}
+                        </datalist>
+                    </div>
+                </div>
+                <div className="flex-1">
+                    <label className={miniLabel}>Location Center</label>
+                    <div className="relative">
+                        <MapPin className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                            value={centerLabel}
+                            onChange={(e) => setCenterLabel(e.target.value)}
+                            onBlur={applyTypedCenter}
+                            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                            disabled={scanning}
+                            placeholder="Type an address, use your location, or click the map"
+                            className="w-full pl-9 pr-10 py-2 bg-white border border-[#E2E8F0] rounded-lg text-sm text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)] truncate"
+                        />
+                        <button
+                            type="button"
+                            onClick={useMyLocation}
+                            disabled={scanning || locating}
+                            title="Use my current location"
+                            aria-label="Use my current location"
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-gray-500 hover:text-[var(--brand-primary)] hover:bg-[#F1F5F9] cursor-pointer disabled:opacity-50"
+                        >
+                            {locating ? <Loader2 className="w-4 h-4 animate-spin" /> : <LocateFixed className="w-4 h-4" />}
+                        </button>
+                    </div>
+                    {customCenter && businessCenter && (
+                        <button
+                            type="button"
+                            onClick={resetCenter}
+                            className="mt-1 text-[10px] font-semibold text-[var(--brand-primary)] hover:underline cursor-pointer"
+                        >
+                            Reset to business address
+                        </button>
+                    )}
+                </div>
+                <div className="lg:text-right lg:pl-4">
+                    <p className="text-xs text-gray-500">
+                        Avg. Rank: <span className="text-xl font-bold text-[var(--brand-primary)] ml-1">{avgRank}</span>
+                    </p>
+                </div>
+            </div>
 
-                            <div className="text-right shrink-0">
-                                <div className="text-3xl font-black text-[#0F172A] leading-none">
-                                    {lastAudit?.total != null ? lastAudit.total : '—'}
-                                    <span className="text-base font-bold text-gray-400">/100</span>
-                                </div>
-                                <p className="text-xs font-bold text-emerald-600 mt-1">
-                                    {lastAudit?.bandLabel || 'No audit yet'}
-                                </p>
-                            </div>
-                        </div>
-
-                        <p className="text-xs text-sky-600 font-medium mb-4">
-                            {lastAudit?.createdAt
-                                ? `Last run ${new Date(lastAudit.createdAt).toLocaleDateString()}${
-                                      lastAudit.query ? ` · ${lastAudit.query}` : ''
-                                  }`
-                                : 'Run a visibility audit to see your score here.'}
-                        </p>
-
-                        <div className="flex flex-wrap items-center gap-2 mb-3">
-                            <button
-                                type="button"
-                                onClick={() => navigate('/visibility-audit/report')}
-                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-white hover:bg-gray-50 border border-[#E2E8F0] text-[#0F172A] text-xs font-bold rounded-lg cursor-pointer shadow-xs transition-colors"
-                            >
-                                <FileText className="w-3.5 h-3.5 text-gray-500" /> View report
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => navigate('/visibility-audit/report?download=1')}
-                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-white hover:bg-gray-50 border border-[#E2E8F0] text-[#0F172A] text-xs font-bold rounded-lg cursor-pointer shadow-xs transition-colors"
-                            >
-                                <Download className="w-3.5 h-3.5 text-gray-500" /> Download PDF
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setShowAuditForm(true)}
-                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold rounded-lg cursor-pointer shadow-xs transition-colors"
-                            >
-                                <RotateCw className="w-3.5 h-3.5" /> Re-run audit
-                            </button>
+            {/* Map + share */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 mb-5 items-stretch">
+                <div className={cn(card, 'lg:col-span-7 p-4 flex flex-col')}>
+                    <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                        <h2 className="text-sm font-bold text-[#0F172A] flex items-center gap-2">
+                            <MapIcon className="w-4 h-4 text-[var(--brand-primary)]" /> Local Competitors Map
+                        </h2>
+                        <div className="flex items-center gap-3 text-[11px] font-medium text-gray-500">
+                            <span className="flex items-center gap-1.5">
+                                <i className="w-2.5 h-2.5 rounded-full bg-[#0F172A]" /> You
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                                <i className="w-2.5 h-2.5 rounded-full bg-[#3B82F6]" /> Competitors
+                            </span>
                         </div>
                     </div>
+                    <div className="relative">
+                        <PlacesMap
+                            markers={mapMarkers}
+                            height={320}
+                            title="Local competitors"
+                            onMapClick={scanning ? undefined : pickCenter}
+                            zoom={places.length ? undefined : 12}
+                            showPlaceholder
+                            placeholder={
+                                mapsJsConfigured()
+                                    ? hasCenter
+                                        ? 'Could not load Google Maps.'
+                                        : 'Add a full address on your Business Profile to place the map.'
+                                    : 'Map pins are unavailable in this environment.'
+                            }
+                        />
+                        {scanning && (
+                            <div className="absolute inset-x-3 bottom-3 bg-white/95 border border-[#E2E8F0] rounded-lg px-3 py-2 shadow-sm">
+                                <div className="flex items-center justify-between text-[11px] font-medium text-gray-600 mb-1.5">
+                                    <span>Scanning nearby rankings…</span>
+                                    <span>
+                                        {progress.done}/{progress.total}
+                                    </span>
+                                </div>
+                                <div className="h-1.5 bg-[#F1F5F9] rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-[var(--brand-primary)] transition-all"
+                                        style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <p className="mt-3 text-xs text-gray-500">
+                        {places.length
+                            ? `Showing your business and ${places.length} competitor${places.length === 1 ? '' : 's'} ranking for “${keyword}”. Click the map to move the search center.`
+                            : `Run a scan to pin the competitors ranking for “${keyword || 'your keyword'}”. Click the map to move the search center.`}
+                    </p>
+                </div>
 
-                    {!hasAuditReport && (
-                        <div className="mt-2 bg-amber-50/90 border border-amber-200/60 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-900">
-                            <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-                            <p className="leading-snug">
-                                Score is saved, but the full report is only in this browser session. Re-run the audit to regenerate the detailed report.
-                            </p>
+                <div className={cn(card, 'lg:col-span-5 p-6 flex flex-col')}>
+                    <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2 mb-1">
+                        <Target className="w-5 h-5 text-[var(--brand-primary)]" /> Competitor Map Share
+                    </h2>
+                    <p className="text-sm text-gray-500 mb-6">
+                        Percentage of top 3 spots owned by each business around your location.
+                    </p>
+                    {!size ? (
+                        <p className="text-sm text-gray-400 py-10 text-center my-auto">Run a scan to see who owns the top 3 spots.</p>
+                    ) : (
+                        <div className="space-y-5 my-auto">
+                            {shareRows.map((row) => (
+                                <div key={row.name}>
+                                    <div className="flex items-center justify-between text-sm mb-2">
+                                        <span className="flex items-center gap-2.5 font-semibold text-[#0F172A] min-w-0">
+                                            <i
+                                                className={cn(
+                                                    'w-2.5 h-2.5 rounded-full shrink-0',
+                                                    row.isYou ? 'bg-[var(--brand-primary)]' : 'bg-[#475569]'
+                                                )}
+                                            />
+                                            <span className="truncate">{row.name}</span>
+                                        </span>
+                                        <span className="font-bold text-[#0F172A] ml-3">{row.sharePct}%</span>
+                                    </div>
+                                    <div className="h-2.5 bg-[#F1F5F9] rounded-full overflow-hidden">
+                                        <div
+                                            className={cn('h-full rounded-full', row.isYou ? 'bg-[var(--brand-primary)]' : 'bg-[#475569]')}
+                                            style={{ width: `${Math.min(100, row.sharePct)}%` }}
+                                        />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Insights + opportunities */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 mb-5 items-start">
+                <div className={cn(card, 'lg:col-span-8 p-5')}>
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-[var(--brand-primary)]" /> AI Ranking Insights
+                        </h2>
+                        {insights.some((i) => i.type === 'drop') && (
+                            <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-bold uppercase tracking-wide">
+                                Action needed
+                            </span>
+                        )}
+                    </div>
+                    {insights.length === 0 ? (
+                        <p className="text-xs text-gray-400 py-6 text-center">
+                            Run a scan to get AI insights on your rankings and competitors.
+                        </p>
+                    ) : (
+                        <div className="space-y-3">
+                            {insights.map((item, i) => {
+                                const Icon = insightIcon(item.action?.label);
+                                const isDrop = item.type === 'drop';
+                                return (
+                                    <div
+                                        key={i}
+                                        className={cn(
+                                            'rounded-lg border p-4 border-l-4',
+                                            isDrop ? 'border-[#E2E8F0] border-l-red-500 bg-white' : 'border-[#E2E8F0] border-l-[#CBD5E1] bg-white'
+                                        )}
+                                    >
+                                        <p className={cn('text-sm font-bold mb-1', isDrop ? 'text-red-600' : 'text-[#0F172A]')}>{item.title}</p>
+                                        <p className="text-xs text-gray-600 leading-relaxed mb-3">{item.body}</p>
+                                        {item.action &&
+                                            (isDrop ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => navigate(item.action!.to)}
+                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#9A3A0A] hover:bg-[#7C2D12] text-white rounded-md text-xs font-semibold cursor-pointer"
+                                                >
+                                                    {item.action.label} <Icon className="w-3.5 h-3.5" />
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => navigate(item.action!.to)}
+                                                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--brand-primary)] hover:underline cursor-pointer"
+                                                >
+                                                    {item.action.label} <Icon className="w-3.5 h-3.5" />
+                                                </button>
+                                            ))}
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>
 
-                {/* Right Card: Ranking Keywords */}
-                <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-xs flex flex-col justify-between">
-                    <div>
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                            <h2 className="text-lg font-bold text-[#0F172A] flex items-center gap-2">
-                                <ListOrdered className="w-5 h-5 text-gray-700" />
-                                Ranking keywords
-                            </h2>
-                            <button
-                                type="button"
-                                onClick={() => setShowAllKeywords((open) => !open)}
-                                className="text-xs font-semibold text-[var(--brand-primary)] hover:underline cursor-pointer"
-                            >
-                                {showAllKeywords ? 'Show less' : 'View all'}
-                            </button>
-                        </div>
-                        <p className="text-xs text-gray-500 mb-4">
-                            Keywords you have run through Gap Analysis, with average pack rank and Local 3-Pack coverage.
-                        </p>
-
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left text-xs">
-                                <thead>
-                                    <tr className="border-b border-[#E2E8F0] text-gray-500">
-                                        <th className="py-2 font-semibold">Keyword</th>
-                                        <th className="py-2 font-semibold text-center">Avg rank</th>
-                                        <th className="py-2 font-semibold text-center">Top 3%</th>
-                                        <th className="py-2 font-semibold text-right"></th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {effectiveKeywords.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={4} className="py-6 text-center text-xs text-gray-400">
-                                                No keywords tracked yet. Enter a keyword and run Gap Analysis.
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        effectiveKeywords.map((row) => (
-                                        <tr key={row.keyword}>
-                                            <td className="py-3 font-semibold text-[#0F172A] max-w-[200px] truncate">
-                                                {row.keyword}
-                                            </td>
-                                            <td className="py-3 font-bold text-[var(--brand-primary)] text-center">
-                                                {row.avgRank != null ? row.avgRank : '—'}
-                                            </td>
-                                            <td className="py-3 text-gray-700 font-semibold text-center">
-                                                {row.top3Percentage != null ? `${row.top3Percentage}%` : '—'}
-                                            </td>
-                                            <td className="py-3 text-right">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => loadKeyword(row)}
-                                                    className="inline-flex items-center px-3 py-1 text-xs font-semibold text-[#0F172A] bg-white hover:bg-gray-50 border border-[#E2E8F0] rounded-lg cursor-pointer shadow-xs"
-                                                >
-                                                    Load
-                                                </button>
-                                            </td>
-                                        </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                        {showAllKeywords && gapRuns.length > 0 && (
-                            <div className="mt-4 space-y-3">
-                                {gapRuns.map((run) => (
-                                    <button
-                                        key={run.keyword}
-                                        type="button"
-                                        onClick={() => loadKeyword({
-                                            keyword: run.keyword,
-                                            avgRank: Number(run.avgRank) || 0,
-                                            top3Percentage: Number(run.top3Percentage) || 0,
-                                            updatedAt: run.updatedAt || ''
-                                        })}
-                                        className={`w-full text-left rounded-xl border px-3 py-3 ${
-                                            activeKeyword.toLowerCase() === run.keyword.toLowerCase()
-                                                ? 'border-[var(--brand-primary)] bg-[var(--brand-primary-soft)]'
-                                                : 'border-[#E2E8F0] bg-[#F8FAFC] hover:bg-white'
-                                        }`}
-                                    >
-                                        <p className="text-xs font-bold text-[#0F172A]">{run.keyword}</p>
-                                        <p className="text-[11px] text-gray-500 mt-0.5">
-                                            Avg rank {run.avgRank ?? '—'} · Top 3% {run.top3Percentage ?? '—'}%
-                                            {run.updatedAt
-                                                ? ` · ${new Date(run.updatedAt).toLocaleString('en-GB', {
-                                                      day: 'numeric',
-                                                      month: 'short',
-                                                      hour: '2-digit',
-                                                      minute: '2-digit'
-                                                  })}`
-                                                : ''}
-                                        </p>
-                                        <p className="text-xs text-gray-700 mt-2 leading-relaxed line-clamp-4">
-                                            {run.gapAnalysis}
-                                        </p>
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
-
-            {/* Row 2: Map Card + AI Gap Analysis */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5 items-stretch">
-                {/* Left: Map Preview */}
-                <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-xs flex flex-col justify-between">
-                    <div>
-                        <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
-                            <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
-                                <Map className="w-4 h-4 text-gray-700" />
-                                <span>Keyword: {displayKeyword}</span>
-                            </h2>
-
-                            <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-gray-700">
-                                <input
-                                    type="checkbox"
-                                    checked={showRankGrid}
-                                    onChange={(e) => setShowRankGrid(e.target.checked)}
-                                    className="w-3.5 h-3.5 rounded border-[#CBD5E1] text-[var(--brand-primary)] focus:ring-[var(--brand-primary)]"
-                                />
-                                Show rank grid
-                            </label>
-                        </div>
-
-                        {/* Map Legend */}
-                        <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-xs font-semibold text-gray-600 mb-3">
-                            <span className="flex items-center gap-1.5">
-                                <div className="w-2.5 h-2.5 rounded-full bg-[#EF4444]"></div> You
-                            </span>
-                            <span className="flex items-center gap-1.5">
-                                <div className="w-2.5 h-2.5 rounded-full bg-[#3B82F6]"></div> Competitors
-                            </span>
-                            <span className="flex items-center gap-1.5">
-                                <div className="w-2.5 h-2.5 rounded-full bg-[#94A3B8]"></div> Others
-                            </span>
-                            {showRankGrid && (
-                                <>
-                                    <span className="flex items-center gap-1.5">
-                                        <div className="w-2.5 h-2.5 rounded-full bg-[var(--brand-primary)]"></div> Rank 1-3
-                                    </span>
-                                    <span className="flex items-center gap-1.5">
-                                        <div className="w-2.5 h-2.5 rounded-full bg-[var(--brand-primary-ink)]"></div> Rank 4-5
-                                    </span>
-                                    <span className="flex items-center gap-1.5">
-                                        <div className="w-2.5 h-2.5 rounded-full bg-[#EF4444]"></div> Rank 6+
-                                    </span>
-                                </>
-                            )}
-                        </div>
-
-                        {/* Map Container */}
-                        <div className="rounded-xl overflow-hidden border border-[#E2E8F0]">
-                            <PlacesMap
-                                markers={mapMarkers}
-                                height={280}
-                                title="Local competitors and ranks"
-                                zoom={13}
-                                showPlaceholder
-                                placeholder={
-                                    mapsJsConfigured()
-                                        ? 'Could not load Google Maps.'
-                                        : 'Map pins are unavailable in this environment.'
-                                }
-                            />
-                        </div>
-                    </div>
-
-                    <div className="mt-3 flex items-start gap-1.5 text-xs text-gray-500">
-                        <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                        <p className="leading-tight">
-                            Map shows your business and same-service rivals at real locations. Turn on &quot;Show rank grid&quot; for the 3x3 Local Pack estimate.
-                        </p>
-                    </div>
-                </div>
-
-                {/* Right: AI Gap Analysis */}
-                <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-xs flex flex-col justify-between">
-                    <div>
-                        <h2 className="text-lg font-bold text-[#0F172A] flex items-center gap-2 mb-1">
-                            <BarChart3 className="w-5 h-5 text-[var(--brand-primary)]" />
-                            AI Gap Analysis
-                        </h2>
-                        <p className="text-xs text-gray-500 mb-4">
-                            Fills the map pins and competitor table for your keyword (same-service rivals only).
-                        </p>
-
-                        {!gapAnalysis ? (
-                            <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-6 md:p-8 flex flex-col items-center justify-center text-center my-auto">
-                                <div className="w-12 h-12 rounded-xl bg-white border border-[#E2E8F0] flex items-center justify-center text-gray-400 mb-3 shadow-xs">
-                                    <FileText className="w-6 h-6 text-gray-400" />
-                                </div>
-
-                                <h3 className="text-sm font-bold text-[#0F172A] mb-1">
-                                    Find opportunities to outrank your competitors
-                                </h3>
-                                <p className="text-xs text-gray-500 max-w-xs mb-6 leading-relaxed">
-                                    We&apos;ll analyse top ranking businesses, compare key factors and show what you can improve.
-                                </p>
-
-                                <button
-                                    type="button"
-                                    onClick={handleGenerateGap}
-                                    disabled={isGeneratingGap}
-                                    className="w-full max-w-sm py-2.5 px-4 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors disabled:opacity-70"
-                                >
-                                    {isGeneratingGap ? (
-                                        <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
-                                    ) : (
-                                        <BadgeCheck className="w-4 h-4 text-emerald-400" />
-                                    )}
-                                    {isGeneratingGap ? 'Analyzing Ecosystem...' : 'Generate Gap Analysis'}
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="bg-[#F8FAFC] p-5 rounded-xl border border-[var(--brand-primary)]/30 animate-in zoom-in duration-300">
-                                <h3 className="text-[#0F172A] font-bold mb-2 flex items-center gap-2 text-sm">
-                                    <BadgeCheck className="w-4 h-4 text-[var(--brand-primary)]" /> Executive Insight
-                                </h3>
-                                <p className="text-gray-700 leading-relaxed text-xs mb-4">{gapAnalysis}</p>
-
-                                {mapCompetitors.length > 0 && (
-                                    <div className="mb-4">
-                                        <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2">
-                                            Competitors on map
-                                        </p>
-                                        <ul className="space-y-1.5">
-                                            {mapCompetitors.map((c) => (
-                                                <li
-                                                    key={c.label}
-                                                    className="flex items-center justify-between gap-2 text-xs bg-white border border-[#E2E8F0] rounded-lg px-3 py-2"
-                                                >
-                                                    <span className="font-semibold text-[#0F172A]">
-                                                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[#3B82F6] text-white text-[10px] font-bold mr-2">
-                                                            {c.label}
-                                                        </span>
-                                                        {c.name}
-                                                    </span>
-                                                    <span className="text-gray-600 font-semibold shrink-0">
-                                                        {c.rating || '—'}★
-                                                    </span>
-                                                </li>
-                                            ))}
-                                        </ul>
+                <div className={cn(card, 'lg:col-span-4 p-5')}>
+                    <h2 className="text-sm font-bold text-[#0F172A] flex items-center gap-2 mb-1">
+                        <Target className="w-4 h-4 text-[var(--brand-primary)]" /> Opportunity Finder
+                    </h2>
+                    <p className="text-xs text-gray-500 mb-4">Keywords on the cusp of the Local Pack.</p>
+                    {opportunities.length === 0 ? (
+                        <p className="text-xs text-gray-400 py-4 text-center">No near-pack keywords yet.</p>
+                    ) : (
+                        <div className="space-y-3">
+                            {opportunities.map((o) => {
+                                const Icon = opportunityIcon(o.action.label);
+                                return (
+                                    <div key={o.keyword} className="rounded-lg border border-[#E2E8F0] p-3">
+                                        <div className="flex items-center justify-between gap-2 mb-2">
+                                            <span className="text-xs font-medium text-[#0F172A] truncate">{o.keyword}</span>
+                                            <span className="text-[10px] font-semibold bg-[#F1F5F9] text-gray-600 px-1.5 py-0.5 rounded shrink-0">
+                                                Rank {o.rank}
+                                            </span>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => navigate(o.action.to)}
+                                            className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 border border-[#E2E8F0] rounded-md text-xs font-semibold text-[#0F172A] hover:bg-[#F8FAFC] cursor-pointer"
+                                        >
+                                            <Icon className="w-3.5 h-3.5" /> {o.action.label}
+                                        </button>
                                     </div>
-                                )}
-
-                                <div className="flex gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => navigate('/posts')}
-                                        className="px-3.5 py-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold rounded-lg cursor-pointer"
-                                    >
-                                        Draft Required Post
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setGapAnalysis(null);
-                                            setGridData([]);
-                                            setCompetitors([]);
-                                            setActiveKeyword('');
-                                            setKeyword('');
-                                            clearGapAnalysis();
-                                        }}
-                                        className="px-3.5 py-1.5 bg-white hover:bg-gray-100 border border-[#E2E8F0] text-[#0F172A] text-xs font-bold rounded-lg cursor-pointer"
-                                    >
-                                        Reset
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             </div>
 
-            {/* Row 3: Competitor Intelligence Card */}
-            <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-xs overflow-hidden">
-                <div className="p-5 border-b border-[#E2E8F0] flex items-center justify-between bg-white">
-                    <div className="flex items-center gap-2">
-                        <Users className="w-5 h-5 text-[#0F172A]" />
-                        <h2 className="font-bold text-[#0F172A] text-base">Competitor Intelligence</h2>
+            {/* Keyword optimization health */}
+            <div className={cn(card, 'overflow-hidden')}>
+                <div className="flex items-start justify-between px-5 pt-5 pb-3 gap-3">
+                    <div>
+                        <h2 className="flex items-center gap-2 text-base font-bold text-[#0F172A]">
+                            <BarChart3 className="w-5 h-5 text-[var(--brand-primary)] shrink-0" />
+                            Keyword Optimization Health
+                        </h2>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                            {trackedKeywords.length} scanned · {keywordRows.length - trackedKeywords.length} suggested from your services and city.
+                        </p>
                     </div>
-                    <span className="text-xs text-gray-400 font-medium">Run analysis to see competitor data.</span>
+                    {keywordRows.length > 6 && (
+                        <button
+                            type="button"
+                            onClick={() => setShowAllKeywords((v) => !v)}
+                            className="text-xs font-semibold text-[var(--brand-primary)] hover:underline cursor-pointer shrink-0"
+                        >
+                            {showAllKeywords ? 'Show less' : `View All ${keywordRows.length} Keywords →`}
+                        </button>
+                    )}
                 </div>
-
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
-                        <thead className="bg-[#F8FAFC] text-gray-500 border-b border-[#E2E8F0]">
-                            <tr>
-                                <th className="px-6 py-3.5 font-semibold">Business Name</th>
-                                <th className="px-6 py-3.5 font-semibold">Rating</th>
-                                <th className="px-6 py-3.5 font-semibold">Review Vol</th>
-                                <th className="px-6 py-3.5 font-semibold">Posts / Wk</th>
-                                <th className="px-6 py-3.5 font-semibold">Total Photos</th>
-                                <th className="px-6 py-3.5 font-semibold">Momentum</th>
+                        <thead>
+                            <tr className="text-gray-500 border-y border-[#E2E8F0]">
+                                <th className="px-5 py-2.5 font-semibold">Keyword</th>
+                                <th className="px-5 py-2.5 font-semibold">Local Rank</th>
+                                <th className="px-5 py-2.5 font-semibold">Change</th>
+                                <th className="px-5 py-2.5 font-semibold">Optimization Health</th>
+                                <th className="px-5 py-2.5 font-semibold text-right">Action</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-[#E2E8F0]">
-                            {competitors.length > 0 ? (
-                                competitors.map((comp, idx) => (
-                                    <tr key={idx} className={idx === 0 ? 'bg-[#F8FAFC]/60 font-bold' : 'hover:bg-gray-50/50'}>
-                                        <td className="px-6 py-4 whitespace-nowrap text-[#0F172A]">
-                                            {comp.name}{' '}
-                                            {idx === 0 && (
-                                                <span className="ml-2 text-[10px] bg-[var(--brand-primary)] text-white px-2 py-0.5 rounded-full font-bold">
-                                                    You
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-4 font-bold text-[var(--brand-primary)]">{comp.rating}</td>
-                                        <td className="px-6 py-4 text-gray-600 font-medium">{comp.reviews}</td>
-                                        <td className="px-6 py-4 text-gray-600 font-medium">{comp.posts}</td>
-                                        <td className="px-6 py-4 text-gray-600 font-medium">{comp.photos}</td>
-                                        <td className="px-6 py-4">
-                                            {comp.trend === 'up' ? (
-                                                <TrendingUp className="w-4 h-4 text-emerald-600" />
-                                            ) : (
-                                                <TrendingDown className="w-4 h-4 text-red-500" />
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))
-                            ) : (
+                            {visibleKeywords.length === 0 && (
                                 <tr>
-                                    <td colSpan={6} className="px-6 py-12 text-center">
-                                        <div className="flex flex-col items-center justify-center">
-                                            <BarChart3 className="w-8 h-8 text-gray-300 mb-2" />
-                                            <p className="text-xs font-semibold text-gray-500">No competitor data until you run analysis.</p>
-                                            <p className="text-[11px] text-gray-400 mt-0.5">Click &quot;Generate Gap Analysis&quot; to see your top local competitors here.</p>
-                                        </div>
+                                    <td colSpan={5} className="px-5 py-8 text-center text-gray-400">
+                                        No keywords tracked yet. Enter a keyword and run a scan.
                                     </td>
                                 </tr>
                             )}
+                            {visibleKeywords.map((k) => {
+                                const hasPrev = typeof k.previousAvgRank === 'number' && k.previousAvgRank > 0;
+                                const delta = hasPrev ? Number(((k.previousAvgRank as number) - k.avgRank).toFixed(1)) : 0;
+                                const fallbackHealth = Math.round(
+                                    (((21 - Math.min(21, k.avgRank || 21)) / 20) * 100) * 0.6 + (k.top3Percentage || 0) * 0.4
+                                );
+                                const health = Math.max(0, Math.min(100, Math.round(k.health || fallbackHealth)));
+                                return (
+                                    <tr
+                                        key={k.keyword}
+                                        className={cn(
+                                            'hover:bg-[#F8FAFC]',
+                                            keyword.toLowerCase() === k.keyword.toLowerCase() && 'bg-[#FFF8F1]'
+                                        )}
+                                    >
+                                        <td className="px-5 py-3">
+                                            <button
+                                                type="button"
+                                                onClick={() => loadKeyword(k)}
+                                                className="font-medium text-[#0F172A] hover:underline cursor-pointer text-left"
+                                            >
+                                                {k.keyword}
+                                            </button>
+                                        </td>
+                                        <td className="px-5 py-3 font-semibold text-[#0F172A]">{k.scanned ? Math.round(k.avgRank) || '—' : '—'}</td>
+                                        <td className="px-5 py-3">
+                                            {!k.scanned ? (
+                                                <span className="text-gray-300">—</span>
+                                            ) : delta > 0 ? (
+                                                <span className="inline-flex items-center gap-0.5 font-semibold text-emerald-600">
+                                                    <ArrowUp className="w-3 h-3" /> {delta}
+                                                </span>
+                                            ) : delta < 0 ? (
+                                                <span className="inline-flex items-center gap-0.5 font-semibold text-red-600">
+                                                    <ArrowDown className="w-3 h-3" /> {Math.abs(delta)}
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-0.5 text-gray-400">
+                                                    <Minus className="w-3 h-3" /> 0
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-5 py-3">
+                                            {!k.scanned ? (
+                                                <span className="text-[11px] text-gray-400">Not scanned yet</span>
+                                            ) : (
+                                            <div className="flex items-center gap-3 min-w-[160px]">
+                                                <div className="flex-1 h-1.5 bg-[#F1F5F9] rounded-full overflow-hidden">
+                                                    <div className={cn('h-full rounded-full', healthTone(health))} style={{ width: `${health}%` }} />
+                                                </div>
+                                                <span className="text-[11px] font-medium text-gray-600 w-12 text-right">{health}/100</span>
+                                            </div>
+                                            )}
+                                        </td>
+                                        <td className="px-5 py-3 text-right">
+                                            {!k.scanned ? (
+                                                <button
+                                                    type="button"
+                                                    disabled={scanning}
+                                                    onClick={() => scanKeyword(k.keyword)}
+                                                    className="text-xs font-semibold text-[var(--brand-primary)] hover:underline cursor-pointer disabled:opacity-50"
+                                                >
+                                                    Scan
+                                                </button>
+                                            ) : health >= 80 ? (
+                                                <MoreVertical className="inline w-4 h-4 text-gray-300" />
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => navigate('/posts')}
+                                                    className="text-xs font-semibold text-[var(--brand-primary)] hover:underline cursor-pointer inline-flex items-center gap-1"
+                                                >
+                                                    <TrendingUp className="w-3 h-3" /> Optimize
+                                                </button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
             </div>
-
-            {/* Audit Modal */}
-            {showAuditForm && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="visibility-audit-title"
-                    onClick={(e) => {
-                        if (e.target === e.currentTarget && !auditRunning) setShowAuditForm(false);
-                    }}
-                >
-                    <section
-                        id="visibility-audit"
-                        className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-[#E2E8F0] bg-gradient-to-br from-[#0F172A] to-[#1e293b] text-white p-6 md:p-8 shadow-2xl"
-                    >
-                        <button
-                            type="button"
-                            disabled={auditRunning}
-                            onClick={() => setShowAuditForm(false)}
-                            className="absolute top-4 right-4 p-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10 cursor-pointer disabled:opacity-50"
-                            aria-label="Close"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
-
-                        <div className="flex items-start gap-3 mb-6 pr-10">
-                            <div className="p-2.5 rounded-xl bg-[var(--brand-primary)]/20 text-[var(--brand-primary)]">
-                                <Radar className="w-6 h-6 text-[var(--brand-primary)]" />
-                            </div>
-                            <div>
-                                <p className="text-xs font-bold uppercase tracking-wider text-[var(--brand-primary)]">
-                                    LocalPulse Visibility Score
-                                </p>
-                                <h2 id="visibility-audit-title" className="text-xl font-bold mt-0.5">
-                                    Free Local Visibility Audit
-                                </h2>
-                                <p className="text-xs text-white/70 mt-1">
-                                    GBP/Maps-first score out of 100 — website, NAP, reviews, and &quot;service near town&quot; Top 10.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="grid md:grid-cols-2 gap-3.5">
-                            <label className="text-xs">
-                                <span className="font-semibold text-white/80">Business name *</span>
-                                <input
-                                    value={businessName}
-                                    onChange={(e) => setBusinessName(e.target.value)}
-                                    className="mt-1 w-full px-3 py-2 rounded-xl bg-white text-[#0F172A] text-xs font-semibold focus:outline-none"
-                                    placeholder="Acme Plumbing"
-                                />
-                            </label>
-                            <label className="text-xs">
-                                <span className="font-semibold text-white/80">Address / town *</span>
-                                <input
-                                    value={address}
-                                    onChange={(e) => setAddress(e.target.value)}
-                                    className="mt-1 w-full px-3 py-2 rounded-xl bg-white text-[#0F172A] text-xs font-semibold focus:outline-none"
-                                    placeholder="12 High St, Manchester"
-                                />
-                            </label>
-                            <label className="text-xs">
-                                <span className="font-semibold text-white/80">Town / city</span>
-                                <input
-                                    value={city}
-                                    onChange={(e) => setCity(e.target.value)}
-                                    className="mt-1 w-full px-3 py-2 rounded-xl bg-white text-[#0F172A] text-xs font-semibold focus:outline-none"
-                                    placeholder="Manchester"
-                                />
-                            </label>
-                            <label className="text-xs">
-                                <span className="font-semibold text-white/80">Primary service *</span>
-                                <select
-                                    value={service}
-                                    onChange={(e) => setService(e.target.value)}
-                                    className="mt-1 w-full px-3 py-2 rounded-xl bg-white text-[#0F172A] text-xs font-semibold focus:outline-none"
-                                >
-                                    <option value="">Select service</option>
-                                    {PRIMARY_SERVICES.map((s) => (
-                                        <option key={s} value={s}>
-                                            {s}
-                                        </option>
-                                    ))}
-                                </select>
-                            </label>
-                            {service === 'Other' && (
-                                <label className="text-xs md:col-span-2">
-                                    <span className="font-semibold text-white/80">Other service *</span>
-                                    <input
-                                        value={serviceOther}
-                                        onChange={(e) => setServiceOther(e.target.value)}
-                                        className="mt-1 w-full px-3 py-2 rounded-xl bg-white text-[#0F172A] text-xs font-semibold focus:outline-none"
-                                        placeholder="e.g. drain clearance"
-                                    />
-                                </label>
-                            )}
-                            <label className="text-xs">
-                                <span className="font-semibold text-white/80">Website (optional)</span>
-                                <input
-                                    value={website}
-                                    onChange={(e) => setWebsite(e.target.value)}
-                                    className="mt-1 w-full px-3 py-2 rounded-xl bg-white text-[#0F172A] text-xs font-semibold focus:outline-none"
-                                    placeholder="https://"
-                                />
-                            </label>
-                            <label className="text-xs">
-                                <span className="font-semibold text-white/80">Phone (optional)</span>
-                                <input
-                                    value={phone}
-                                    onChange={(e) => setPhone(e.target.value)}
-                                    className="mt-1 w-full px-3 py-2 rounded-xl bg-white text-[#0F172A] text-xs font-semibold focus:outline-none"
-                                    placeholder="07…"
-                                />
-                            </label>
-                        </div>
-
-                        {auditError && (
-                            <p className="mt-4 text-xs text-red-200 bg-red-500/20 border border-red-400/30 rounded-xl px-3 py-2">
-                                {auditError}
-                            </p>
-                        )}
-
-                        {auditRunning && (
-                            <div className="mt-5 space-y-2">
-                                {AUDIT_STEPS.map((step, i) => (
-                                    <div
-                                        key={step}
-                                        className={`flex items-center gap-2 text-xs ${
-                                            i <= auditStep ? 'text-[var(--brand-primary)] font-semibold' : 'text-white/40'
-                                        }`}
-                                    >
-                                        {i === auditStep && auditRunning ? (
-                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                        ) : (
-                                            <span className="w-3.5 h-3.5 inline-flex items-center justify-center text-[10px]">
-                                                {i < auditStep ? '✓' : i + 1}
-                                            </span>
-                                        )}
-                                        {step}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-                        <button
-                            type="button"
-                            disabled={auditRunning}
-                            onClick={runVisibilityAudit}
-                            className="mt-6 inline-flex items-center justify-center gap-2 px-6 py-3 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold disabled:opacity-70 cursor-pointer shadow-md transition-colors"
-                        >
-                            {auditRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Radar className="w-4 h-4" />}
-                            {auditRunning ? 'Running audit…' : 'Run Free Local Visibility Audit'}
-                        </button>
-                    </section>
-                </div>
-            )}
+            <span className="sr-only">
+                <Users />
+            </span>
         </div>
     );
 }

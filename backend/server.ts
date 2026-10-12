@@ -5,7 +5,6 @@ import Stripe from 'stripe';
 import { GoogleGenAI } from '@google/genai';
 import * as store from './lib/store';
 import { requirePlacesConfigured, searchBusiness, nearbyCompetitors, geocodeAddress, getBusinessByPlaceId } from './lib/googlePlaces';
-import { runVisibilityAudit } from './lib/visibilityAudit';
 import { createStripeWebhookHandler } from './routes/webhooks';
 import { requireAuth } from './middleware/auth';
 import { requireFeature, requireAllFeatures } from './middleware/entitlements';
@@ -17,7 +16,67 @@ import adminRouter from './admin/routes';
 import salesRouter from './sales-agent/routes';
 import integrationsRouter from './routes/integrations';
 import { migrate } from './lib/db';
+import { sendSms } from './lib/inbox';
+import { fetchReviewTask, reviewSyncConfigured, startReviewTask } from './lib/googleReviewSync';
+import {
+    REVIEW_SOURCES,
+    createPublicReviewRouter,
+    emailReviewReply,
+    emailReviewRequest,
+    googleReviewUrl,
+    listSubmissions,
+    markRead,
+    orgSlugFor,
+    reviewLink,
+    saveReply,
+    sourceCounts
+} from './lib/reviewCollection';
+import { createUploadPresign, uploadPostImageDataUrl } from './lib/media';
+import {
+    competitorShare,
+    gridConfigured,
+    normalizeGridSize,
+    optimizationHealth,
+    rankGridCell,
+    rankGridRow,
+    summarizeGrid
+} from './lib/dataForSeoGrid';
+import {
+    MAX_TRACKED_KEYWORDS,
+    checkKeywordRank,
+    cleanKeyword,
+    fetchRelatedKeywords,
+    fetchSearchVolumes,
+    industryKeywordIdeas,
+    industryTerms,
+    makeRelevanceFilter,
+    trackerConfigured,
+    type TrackerKeyword
+} from './lib/visibilityTracker';
 import { ensureLocalSeoBusiness, getLocalSeoUpgradeChoice, loadOrgAppState, saveOrgAppState, setLocalSeoUpgradeChoice } from './lib/orgAppState';
+import {
+    analysisJobs,
+    askLlm,
+    LLM_PLATFORMS,
+    askGoogleOverview,
+    computeChanges,
+    summarizeTracker,
+    buildActions as buildInsightActions,
+    buildPrompts,
+    cityFromAddress,
+    suggestKeywords,
+    buildReport as buildVisibilityReport,
+    fetchPack,
+    fetchTrends,
+    planKeywords,
+    summarizeMarket,
+    dataForSeoReady,
+    fallbackRecommendation,
+    marketOpportunities,
+    marketProblems,
+    strategyPrompt,
+    weekStart as insightsWeekStart
+} from './lib/aiInsights';
 import { CitationScanError, collectCitationScan, startCitationScan } from './lib/dataForSeoCitations';
 
 dotenv.config({ override: true });
@@ -130,12 +189,6 @@ const emptyDashboard = () => ({
     weeklyPosts: 0,
     photoCount: 0,
     activities: [] as any[],
-    lastVisibilityAudit: null as null | {
-        total: number;
-        bandLabel: string;
-        createdAt: string;
-        query: string;
-    },
     trackedKeywords: [] as Array<{
         keyword: string;
         avgRank: number;
@@ -153,8 +206,10 @@ const emptyDashboard = () => ({
         startedAt: string;
     },
     gbpDrafts: [] as Record<string, any>[],
-    strategyReport: null as null | Record<string, any>,
-    strategyReportHistory: [] as Record<string, any>[]
+    llmVisibility: null as null | Record<string, any>,
+    llmVisibilityHistory: [] as Record<string, any>[],
+    aiInsights: null as null | Record<string, any>,
+    aiInsightsHistory: [] as Record<string, any>[]
 });
 
 let connectedBusiness = emptyBusiness();
@@ -618,86 +673,6 @@ function fallbackGapAnalysis(business: any, keyword: string, liveCompetitors: an
     return { gapAnalysis, grid, competitors };
 }
 
-function fallbackStrategyReport(business: any, stats: any, liveCompetitors: any[] = []) {
-    const completeness = Number(stats.completenessScore) || 0;
-    const rank = Number(stats.visibilityRank) || 0;
-    const top3 = Number(stats.top3Percentage) || 0;
-    const replyRate = Number(stats.reviewResponseRate) || 0;
-    const posts = Number(stats.weeklyPosts) || 0;
-    const photos = Number(stats.photoCount) || 0;
-    const audit = stats.lastVisibilityAudit;
-
-    let grade = 'C';
-    const score = Math.round(
-        completeness * 0.35 +
-            Math.max(0, 100 - rank * 8) * 0.25 +
-            top3 * 0.2 +
-            replyRate * 0.1 +
-            Math.min(100, posts * 20 + photos * 5) * 0.1
-    );
-    if (score >= 90) grade = 'A+';
-    else if (score >= 85) grade = 'A';
-    else if (score >= 80) grade = 'A-';
-    else if (score >= 75) grade = 'B+';
-    else if (score >= 70) grade = 'B';
-    else if (score >= 65) grade = 'B-';
-    else if (score >= 55) grade = 'C+';
-
-    const name = business?.name || 'Your business';
-    const category = business?.category || 'local business';
-    const rivalNames = liveCompetitors
-        .slice(0, 5)
-        .map((c: any) => c.name)
-        .filter(Boolean);
-    const rivalLine = rivalNames.length
-        ? `Closest same-service competitors: ${rivalNames.join(', ')}.`
-        : 'Run Local Search Grid gap analysis to lock in same-service competitor benchmarks.';
-    const auditLine =
-        audit && typeof audit.total === 'number'
-            ? ` Latest Local Visibility Audit scored ${audit.total}/100 (${audit.bandLabel || 'scored'}).`
-            : '';
-
-    return {
-        grade,
-        source: 'fallback',
-        competitors: liveCompetitors.slice(0, 5),
-        positioningText: `${name} (${category}) currently shows ${completeness}% profile completeness, GeoGrid average rank ${rank || 'n/a'}, and ${top3}% Local 3-Pack coverage. ${rivalLine}${auditLine} Focus this week on the gaps below — listing completeness, review replies, and consistent GBP posts move local visibility fastest.`,
-        roadmap: [
-            {
-                id: 1,
-                title: completeness < 90 ? 'Complete the GBP profile' : 'Keep NAP consistent',
-                desc:
-                    completeness < 90
-                        ? 'Fill missing hours, categories, description, and website on Business profile so Google trusts the listing.'
-                        : 'Re-check name, address, phone, and website match Google Maps exactly.'
-            },
-            {
-                id: 2,
-                title: replyRate < 80 ? 'Reply to recent reviews' : 'Ask for fresh reviews',
-                desc:
-                    replyRate < 80
-                        ? 'Use Reputation Agent to draft owner replies — response rate is a clear local ranking signal.'
-                        : 'Request short, specific reviews from recent customers mentioning your town and service.'
-            },
-            {
-                id: 3,
-                title: posts < 2 || photos < 5 ? 'Publish posts and photos' : 'Run a Local Search Grid scan',
-                desc:
-                    posts < 2 || photos < 5
-                        ? 'Add weekly GBP posts and more photos (exterior, team, work) via Posts and Media tools.'
-                        : 'Run Local Search Grid for your main service keyword and close the weakest geo cells.'
-            }
-        ],
-        metrics: {
-            localPackRank: rank,
-            completeness,
-            reviewResponseRate: replyRate,
-            missingMedia: photos ? `${photos} photos` : 'No photos yet',
-            visibilityAuditScore: audit?.total ?? null
-        }
-    };
-}
-
 function extractImage(response: any) {
     const parts = response.candidates?.[0]?.content?.parts || [];
     for (const part of parts) {
@@ -739,44 +714,6 @@ app.get('/api/status', (_req, res) => {
     });
 });
 
-
-app.post('/api/visibility-audit', requireAuth, hydrateOrgFromDb, async (req, res) => {
-    const started = Date.now();
-    try {
-        const body = req.body || {};
-        const result = await runVisibilityAudit(
-            {
-                businessName: body.businessName || connectedBusiness.name,
-                address: body.address || connectedBusiness.address,
-                city: body.city,
-                service: body.service || body.serviceId || connectedBusiness.category,
-                website: body.website ?? connectedBusiness.website,
-                phone: body.phone ?? connectedBusiness.phone,
-                contactName: body.contactName,
-                email: body.email,
-                notes: body.notes,
-                placeId: body.placeId || connectedBusiness.placeId,
-                lat: body.lat ?? connectedBusiness.lat,
-                lng: body.lng ?? connectedBusiness.lng
-            },
-            {
-                generateText: aiClient ? (prompt) => generateText(prompt) : undefined
-            }
-        );
-        console.log(`[visibility-audit] ok in ${Date.now() - started}ms score=${result.score?.total}`);
-        dashboardState.lastVisibilityAudit = {
-            total: Number(result.score?.total) || 0,
-            bandLabel: String(result.score?.bandLabel || result.score?.band || ''),
-            createdAt: String(result.createdAt || new Date().toISOString()),
-            query: String(result.gbpLookup?.localRank?.query || result.input?.service || '')
-        };
-        res.json(result);
-    } catch (err: any) {
-        const status = err?.status || 502;
-        console.error(`[visibility-audit] failed in ${Date.now() - started}ms:`, err);
-        res.status(status).json({ error: errMessage(err) || 'Visibility audit failed' });
-    }
-});
 
 app.get('/api/business/upgrade-choice', requireAuth, requireFeature('local_presence'), async (req, res) => {
     try {
@@ -1053,19 +990,79 @@ Keep under 120 words.`
 app.post('/api/ai/post-image', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     if (!requireGemini(res)) return;
     if (!requireBusiness(res)) return;
-    const { postType } = req.body || {};
+    const body = req.body || {};
+    const name = String(body.businessName || connectedBusiness.name || '').trim();
+    const category = String(connectedBusiness.category || 'local business').trim();
+    const address = String(connectedBusiness.address || '').trim();
+    if (!name || !address) {
+        return res.status(400).json({
+            error: 'Business name and address are required before generating a post image. Save your business profile first.'
+        });
+    }
+    const postType = String(body.postType || 'update').slice(0, 40);
+    const topic = String(body.topic || '').slice(0, 200);
+    const details = String(body.details || '').slice(0, 1000);
+    const eventTitle = String(body.eventTitle || '').slice(0, 200);
+    const date = String(body.date || '').slice(0, 40);
+    const time = String(body.time || '').slice(0, 40);
+    const detailLines = [
+        topic ? `Post topic: ${topic}` : '',
+        postType === 'offer' && details ? `Offer details (use as scene context only): ${details}` : '',
+        postType === 'event' && eventTitle ? `Event title: ${eventTitle}` : '',
+        postType === 'event' && details ? `Event details: ${details}` : '',
+        details && postType !== 'offer' && postType !== 'event' ? `Post details: ${details}` : '',
+        date ? `Date: ${date}` : '',
+        time ? `Time: ${time}` : ''
+    ]
+        .filter(Boolean)
+        .join('\n');
 
     try {
         const response = await aiClient.models.generateContent({
             model: IMAGE_MODEL,
-            contents: `Photorealistic promotional photo for ${connectedBusiness.name}, a ${connectedBusiness.category} at ${connectedBusiness.address}. Scene type: ${postType || 'update'}. Natural light, no text overlay, no logos, no fake people names.`
+            contents: `Create one photorealistic Google Business Profile promotional photo for this exact local business — not a random stock scene.
+Business name: ${name}
+Trade / category: ${category}
+Real address / area: ${address}
+GBP post type: ${postType}
+${detailLines ? `${detailLines}\n` : ''}
+Requirements:
+- The scene must clearly fit this business name, trade, and location (UK-realistic local business look when the address is in the UK).
+- Match the post type (${postType}): e.g. offer → service/work context; event → venue/community feel; update → day-to-day business activity.
+- Natural light, real-world setting for this trade at this area.
+- No text overlays, no logos, no readable storefront lettering, no watermarks, no invented brand names or fake people names.
+- Do not invent a different business, city, or unrelated industry.`
         });
         const imageUrl = extractImage(response);
         if (!imageUrl) return res.status(502).json({ error: 'Gemini did not return an image. Free image quota may be exhausted.' });
-        res.json({ imageUrl });
+        let stored: string | null = null;
+        try {
+            stored = await uploadPostImageDataUrl(imageUrl, String((req as any).orgId || ''));
+        } catch (uploadErr) {
+            console.error('Post image S3 upload failed:', uploadErr);
+        }
+        res.json({ imageUrl: stored || imageUrl });
     } catch (err: any) {
         console.error('Post image error:', err);
+        if (/RESOURCE_EXHAUSTED|"code":\s*429/.test(errMessage(err))) {
+            return res.status(429).json({
+                error: 'Image generation quota exhausted for the Gemini key. Make sure billing is active on the key\'s Google project (AI Studio shows Free tier for this key).'
+            });
+        }
         res.status(502).json({ error: `Gemini image failed: ${errMessage(err)}` });
+    }
+});
+
+app.post('/api/ai/post-image/presign', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    try {
+        const data = await createUploadPresign({
+            kind: 'post',
+            contentType: String(req.body?.contentType || 'image/jpeg'),
+            orgId: String((req as any).orgId || '')
+        });
+        res.json(data);
+    } catch (err: any) {
+        res.status(err.status || 500).json({ error: err.message || 'Presign failed' });
     }
 });
 
@@ -1114,6 +1111,137 @@ Do not invent policies, discounts, or staff names. Under 80 words.`
         console.error('Review reply error:', err);
         res.status(502).json({ error: `Gemini review reply failed: ${errMessage(err)}` });
     }
+});
+
+// ── Review Growth Engine: reviews collected via QR/NFC/email/SMS links ───────
+const reviewGate = [requireAuth, hydrateOrgFromDb, requireFeature('local_presence')] as const;
+
+app.get('/api/reviews/hub', ...reviewGate, async (req, res) => {
+    try {
+        const orgId = String((req as any).orgId || '');
+        const slug = await orgSlugFor(orgId);
+        const links: Record<string, string> = {};
+        for (const src of REVIEW_SOURCES) links[src] = slug ? reviewLink(slug, src) : '';
+        res.json({
+            businessName: connectedBusiness.name || '',
+            slug,
+            links,
+            googleReviewUrl: googleReviewUrl(connectedBusiness.placeId),
+            collected: await listSubmissions(orgId),
+            sources: await sourceCounts(orgId, 30),
+            googleReplies: (dashboardState as any).reviewReplies || {},
+            googleReviews: (dashboardState as any).googleReviews?.items || [],
+            googleSyncedAt: (dashboardState as any).googleReviews?.syncedAt || null,
+            googleTotal: (dashboardState as any).googleReviews?.total || null,
+            canSync: reviewSyncConfigured() && Boolean(connectedBusiness.placeId)
+        });
+    } catch (err: any) {
+        res.status(500).json({ error: errMessage(err) });
+    }
+});
+
+// Pulls the full list of existing Google reviews (async DataForSEO task: start, then poll).
+app.post('/api/reviews/sync', ...reviewGate, async (req, res) => {
+    if (!reviewSyncConfigured()) return res.status(503).json({ error: 'Google review sync needs DataForSEO.', code: 'not_configured' });
+    const placeId = String(connectedBusiness.placeId || '').trim();
+    if (!placeId) return res.status(400).json({ error: 'Connect your Google business on the Business profile page first.' });
+    const pending = (dashboardState as any).googleReviewSync;
+    if (pending?.taskId && Date.now() - new Date(pending.startedAt).getTime() < 10 * 60 * 1000) return res.json({ status: 'pending' });
+    try {
+        const taskId = await startReviewTask(placeId, { address: connectedBusiness.address, lat: connectedBusiness.lat, lng: connectedBusiness.lng });
+        (dashboardState as any).googleReviewSync = { taskId, startedAt: new Date().toISOString() };
+        await saveOrgToDb(req);
+        res.json({ status: 'pending' });
+    } catch (err: any) {
+        console.warn('[reviews] sync start failed:', errMessage(err));
+        res.status(502).json({ error: `Could not start the Google review sync: ${errMessage(err)}` });
+    }
+});
+
+app.get('/api/reviews/sync', ...reviewGate, async (req, res) => {
+    const pending = (dashboardState as any).googleReviewSync;
+    if (!pending?.taskId) return res.json({ status: 'idle' });
+    try {
+        const result = await fetchReviewTask(String(pending.taskId));
+        if (result.status === 'pending') return res.json({ status: 'pending' });
+        (dashboardState as any).googleReviews = { items: result.reviews, total: result.total, syncedAt: new Date().toISOString() };
+        (dashboardState as any).googleReviewSync = null;
+        await saveOrgToDb(req);
+        res.json({ status: 'done', count: result.reviews.length });
+    } catch (err: any) {
+        (dashboardState as any).googleReviewSync = null;
+        await saveOrgToDb(req).catch(() => undefined);
+        console.warn('[reviews] sync failed:', errMessage(err));
+        res.status(502).json({ error: `Google review sync failed: ${errMessage(err)}` });
+    }
+});
+
+app.post('/api/reviews/hub/:id/read', ...reviewGate, async (req, res) => {
+    await markRead(String((req as any).orgId || ''), String(req.params.id));
+    res.json({ ok: true });
+});
+
+app.post('/api/reviews/hub/:id/reply', ...reviewGate, async (req, res) => {
+    const text = String(req.body?.text || '').trim().slice(0, 2000);
+    if (!text) return res.status(400).json({ error: 'Write a reply first.' });
+    const saved = await saveReply(String((req as any).orgId || ''), String(req.params.id), text);
+    if (!saved) return res.status(404).json({ error: 'Review not found.' });
+    let emailed = false;
+    if (saved.email) {
+        try {
+            await emailReviewReply(saved.email, connectedBusiness.name || 'Our team', text);
+            emailed = true;
+        } catch (err: any) {
+            console.warn('[reviews] reply email failed:', errMessage(err));
+        }
+    }
+    res.json({ review: saved, emailed });
+});
+
+app.post('/api/reviews/google-reply', ...reviewGate, async (req, res) => {
+    const key = String(req.body?.key || '').slice(0, 120);
+    const text = String(req.body?.text || '').trim().slice(0, 2000);
+    if (!key || !text) return res.status(400).json({ error: 'Write a reply first.' });
+    const replies = { ...((dashboardState as any).reviewReplies || {}), [key]: { text, at: new Date().toISOString() } };
+    (dashboardState as any).reviewReplies = replies;
+    await saveOrgToDb(req);
+    res.json({ googleReplies: replies });
+});
+
+app.post('/api/reviews/campaign', ...reviewGate, async (req, res) => {
+    const orgId = String((req as any).orgId || '');
+    const slug = await orgSlugFor(orgId);
+    if (!slug) return res.status(400).json({ error: 'Your review page is not ready yet.' });
+    const split = (v: any) => String(v || '').split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+    const emails = Array.from(new Set(split(req.body?.emails).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)))).slice(0, 50);
+    const phones = Array.from(new Set(split(req.body?.phones).filter((p) => p.replace(/\D/g, '').length >= 9))).slice(0, 50);
+    if (!emails.length && !phones.length) return res.status(400).json({ error: 'Add at least one valid email address or phone number.' });
+    const name = connectedBusiness.name || 'our business';
+    const message = String(req.body?.message || '').slice(0, 500);
+    let emailed = 0;
+    let texted = 0;
+    let failed = 0;
+    for (const to of emails) {
+        try {
+            await emailReviewRequest(to, name, reviewLink(slug, 'email'), message);
+            emailed += 1;
+        } catch (err: any) {
+            failed += 1;
+            console.warn('[reviews] campaign email failed:', errMessage(err));
+        }
+    }
+    for (const to of phones) {
+        try {
+            const r: any = await sendSms(to, `${message || `Thanks for choosing ${name}! Could you leave us a quick review?`} ${reviewLink(slug, 'sms')}`);
+            if (r?.sent) texted += 1;
+            else failed += 1;
+        } catch {
+            failed += 1;
+        }
+    }
+    pushActivity({ type: 'review', message: `Sent review requests to ${emailed + texted} customer(s).`, icon: 'Send', color: 'text-[var(--brand-primary)]' });
+    await saveOrgToDb(req);
+    res.json({ emailed, texted, failed });
 });
 
 app.post('/api/ai/qa-answer', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
@@ -1313,6 +1441,444 @@ First competitors item must be "${connectedBusiness.name} (You)" with reviews=${
     }
 });
 
+function centerOverride(body: any) {
+    const lat = Number(body?.center?.lat);
+    const lng = Number(body?.center?.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+        return { lat, lng };
+    }
+    return null;
+}
+
+async function ensureBusinessCenter(req: any) {
+    const hasCoords =
+        typeof connectedBusiness.lat === 'number' &&
+        typeof connectedBusiness.lng === 'number' &&
+        Number.isFinite(connectedBusiness.lat) &&
+        Number.isFinite(connectedBusiness.lng);
+    if (!hasCoords && connectedBusiness.address && requirePlacesConfigured()) {
+        try {
+            const query = [connectedBusiness.name, connectedBusiness.address].filter(Boolean).join(', ');
+            const geo = await geocodeAddress(query || connectedBusiness.address);
+            if (geo) {
+                connectedBusiness.lat = geo.lat;
+                connectedBusiness.lng = geo.lng;
+                await saveOrgToDb(req).catch(() => undefined);
+            }
+        } catch (err: any) {
+            console.warn('Rank scan geocode failed:', err?.message || err);
+        }
+    }
+    if (typeof connectedBusiness.lat === 'number' && typeof connectedBusiness.lng === 'number') {
+        return { lat: connectedBusiness.lat, lng: connectedBusiness.lng };
+    }
+    return null;
+}
+
+app.get('/api/rank/state', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), (_req, res) => {
+    res.json({
+        trackedKeywords: Array.isArray(dashboardState.trackedKeywords) ? dashboardState.trackedKeywords : [],
+        gapAnalyses: Array.isArray(dashboardState.gapAnalyses) ? dashboardState.gapAnalyses : [],
+        realScansAvailable: gridConfigured()
+    });
+});
+
+app.get('/api/rank/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), (_req, res) => {
+    const category = String(connectedBusiness.category || '').trim().toLowerCase();
+    const city = cityFromAddress(String(connectedBusiness.address || '')).toLowerCase();
+    const services = String(connectedBusiness.attributes || '')
+        .split(/[,;\n]/)
+        .map((x: string) => x.trim().toLowerCase())
+        .filter((x: string) => x.length > 2 && x.length < 50 && x !== category)
+        .slice(0, 5);
+    const list = [...suggestKeywords(connectedBusiness as any)];
+    for (const svc of services) list.push(city ? `${svc} ${city}` : `${svc} near me`);
+    if (city) for (const svc of services.slice(0, 3)) list.push(`best ${svc} in ${city}`);
+    const seen = new Set<string>();
+    const keywords = list.filter((k) => {
+        const key = k.toLowerCase();
+        if (!k || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+    res.json({ keywords: keywords.slice(0, 12) });
+});
+
+app.post('/api/rank/scan-row', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+    if (!requireBusiness(res)) return;
+    if (!gridConfigured()) {
+        return res.status(503).json({ error: 'Real rank scans need DataForSEO.', code: 'not_configured' });
+    }
+    const keyword = String(req.body?.keyword || '').trim().slice(0, 120);
+    const size = normalizeGridSize(req.body?.gridSize);
+    const row = Number(req.body?.row);
+    if (!keyword) return res.status(400).json({ error: 'Keyword is required.' });
+    if (!Number.isInteger(row) || row < 0 || row >= size) return res.status(400).json({ error: 'Invalid grid row.' });
+    const center = centerOverride(req.body) || (await ensureBusinessCenter(req));
+    if (!center) {
+        return res.status(400).json({ error: 'Your business needs a full address so we can locate the grid center.' });
+    }
+    const col = req.body?.col;
+    if (col !== undefined) {
+        const c = Number(col);
+        if (!Number.isInteger(c) || c < 0 || c >= size) return res.status(400).json({ error: 'Invalid grid column.' });
+        try {
+            const cell = await rankGridCell({
+                keyword,
+                business: { name: connectedBusiness.name, placeId: connectedBusiness.placeId },
+                center,
+                size,
+                row,
+                col: c
+            });
+            return res.json({ row, col: c, size, center, ...cell });
+        } catch (err: any) {
+            console.error('Rank scan cell error:', errMessage(err));
+            return res.status(502).json({ error: `Rank scan failed: ${errMessage(err)}` });
+        }
+    }
+    try {
+        const data = await rankGridRow({
+            keyword,
+            business: { name: connectedBusiness.name, placeId: connectedBusiness.placeId },
+            center,
+            size,
+            row
+        });
+        res.json({ row, size, center, ...data });
+    } catch (err: any) {
+        console.error('Rank scan row error:', errMessage(err));
+        res.status(502).json({ error: `Rank scan failed: ${errMessage(err)}` });
+    }
+});
+
+app.post('/api/rank/scan-finish', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+    if (!requireBusiness(res)) return;
+    const keyword = String(req.body?.keyword || '').trim().slice(0, 120);
+    const size = normalizeGridSize(req.body?.gridSize);
+    const rawGrid = Array.isArray(req.body?.grid) ? req.body.grid : [];
+    const grid: number[][] = rawGrid.map((r: any) =>
+        (Array.isArray(r) ? r : []).map((n: any) => Math.max(1, Math.min(21, Math.round(Number(n)) || 21)))
+    );
+    if (!keyword || grid.length !== size || grid.some((r) => r.length !== size)) {
+        return res.status(400).json({ error: 'Incomplete scan results.' });
+    }
+    const tally: Record<string, number> = {};
+    for (const [name, count] of Object.entries(req.body?.tally || {})) {
+        const n = Number(count);
+        if (name && Number.isFinite(n) && n > 0) tally[String(name).slice(0, 160)] = Math.min(n, size * size);
+    }
+    const center = centerOverride(req.body) || (await ensureBusinessCenter(req));
+    const nearby = (Array.isArray(req.body?.competitors) ? req.body.competitors : [])
+        .slice(0, 12)
+        .map((c: any) => ({
+            name: String(c?.name || '').slice(0, 160),
+            lat: Number.isFinite(Number(c?.lat)) ? Number(c.lat) : null,
+            lng: Number.isFinite(Number(c?.lng)) ? Number(c.lng) : null,
+            rating: Number(c?.rating) || 0,
+            reviews: Number(c?.reviews) || 0
+        }))
+        .filter((c: any) => c.name && c.lat != null && c.lng != null);
+    const { avgRank, top3Percentage } = summarizeGrid(grid);
+    const business = { name: connectedBusiness.name, placeId: connectedBusiness.placeId };
+    const share = competitorShare(tally, business, size * size);
+    const health = optimizationHealth(avgRank, top3Percentage, scoreProfile(connectedBusiness));
+    const updatedAt = new Date().toISOString();
+
+    const existing: any[] = Array.isArray(dashboardState.trackedKeywords) ? dashboardState.trackedKeywords : [];
+    const prev = existing.find((k: any) => String(k?.keyword || '').toLowerCase() === keyword.toLowerCase());
+    const history = [
+        ...(Array.isArray(prev?.history) ? prev.history : []),
+        { avgRank, top3Percentage, updatedAt }
+    ].slice(-10);
+    const entry = {
+        keyword,
+        avgRank,
+        top3Percentage,
+        updatedAt,
+        previousAvgRank: typeof prev?.avgRank === 'number' && prev.avgRank > 0 ? prev.avgRank : null,
+        health,
+        history
+    };
+    dashboardState.trackedKeywords = [
+        entry,
+        ...existing.filter((k: any) => String(k?.keyword || '').toLowerCase() !== keyword.toLowerCase())
+    ].slice(0, 12);
+    dashboardState.visibilityRank = avgRank;
+    dashboardState.top3Percentage = top3Percentage;
+
+    const run = {
+        keyword,
+        gapAnalysis: '',
+        grid,
+        gridSize: size,
+        competitors: nearby,
+        competitorShare: share,
+        center,
+        avgRank,
+        top3Percentage,
+        updatedAt
+    };
+    const prior: any[] = Array.isArray(dashboardState.gapAnalyses) ? dashboardState.gapAnalyses : [];
+    dashboardState.gapAnalyses = [
+        run,
+        ...prior.filter((item: any) => String(item?.keyword || '').toLowerCase() !== keyword.toLowerCase())
+    ].slice(0, 12);
+    (dashboardState as any).rankInsights = null;
+    await saveOrgToDb(req);
+    res.json({ run, trackedKeywords: dashboardState.trackedKeywords, gapAnalyses: dashboardState.gapAnalyses });
+});
+
+app.post('/api/ai/rank-insights', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+    const tracked: any[] = Array.isArray(dashboardState.trackedKeywords) ? dashboardState.trackedKeywords : [];
+    const runs: any[] = Array.isArray(dashboardState.gapAnalyses) ? dashboardState.gapAnalyses : [];
+    const cached = (dashboardState as any).rankInsights;
+    if (cached && !req.body?.refresh) return res.json(cached);
+    if (!tracked.length) return res.json({ insights: [], opportunities: [], generatedAt: null });
+
+    const opportunities = tracked
+        .filter((k) => k.avgRank >= 4 && k.avgRank <= 10)
+        .sort((a, b) => a.avgRank - b.avgRank)
+        .slice(0, 3)
+        .map((k) => ({
+            keyword: k.keyword,
+            rank: Math.round(k.avgRank),
+            action: { label: k.avgRank <= 6 ? 'Request Review' : 'Add Q&A', to: k.avgRank <= 6 ? '/reviews' : '/qa' }
+        }));
+
+    const facts: any[] = [];
+    for (const k of tracked) {
+        if (typeof k.previousAvgRank === 'number' && k.avgRank - k.previousAvgRank >= 0.5) {
+            facts.push({
+                type: 'drop',
+                keyword: k.keyword,
+                from: k.previousAvgRank,
+                to: k.avgRank,
+                fix: { label: 'Upload project gallery', to: '/media' }
+            });
+        }
+    }
+    const lead = runs[0];
+    const rival = (lead?.competitorShare || []).find((c: any) => !c.isYou);
+    const you = (lead?.competitorShare || []).find((c: any) => c.isYou);
+    if (lead && rival) {
+        facts.push({
+            type: 'competitor',
+            keyword: lead.keyword,
+            rival: rival.name,
+            rivalShare: rival.sharePct,
+            yourShare: you?.sharePct || 0,
+            fix: { label: 'Generate Counter-Post', to: '/posts' }
+        });
+    }
+    if (!facts.length && lead) {
+        facts.push({
+            type: 'status',
+            keyword: lead.keyword,
+            avgRank: lead.avgRank,
+            top3Percentage: lead.top3Percentage,
+            fix: { label: 'Create a post', to: '/posts' }
+        });
+    }
+
+    const plain = facts.map((f) => {
+        if (f.type === 'drop') {
+            return {
+                type: 'drop',
+                title: `Rank Drop Detected: "${f.keyword}"`,
+                body: `Your average pack rank moved from ${f.from} to ${f.to}. Fresh photos, posts and reviews usually recover local visibility.`,
+                action: f.fix
+            };
+        }
+        if (f.type === 'competitor') {
+            return {
+                type: 'competitor',
+                title: `Competitor Movement: "${f.keyword}"`,
+                body: `${f.rival} holds ${f.rivalShare}% of top-3 spots across your grid versus your ${f.yourShare}%.`,
+                action: f.fix
+            };
+        }
+        return {
+            type: 'status',
+            title: `Current standing: "${f.keyword}"`,
+            body: `Average rank ${f.avgRank} with ${f.top3Percentage}% of the grid in the Local 3-Pack.`,
+            action: f.fix
+        };
+    });
+
+    let insights = plain;
+    if (aiClient && facts.length) {
+        try {
+            const text = await generateText(
+                `You are a local SEO analyst for "${connectedBusiness.name}" (${connectedBusiness.category || 'local business'}).
+Write one short insight (max 35 words, plain, no invented facts) for each fact below, in the same order.
+Facts: ${JSON.stringify(facts)}
+Return JSON only: {"bodies": ["..."]}`
+            );
+            const parsed = parseJsonFromText(text);
+            if (Array.isArray(parsed?.bodies) && parsed.bodies.length === plain.length) {
+                insights = plain.map((p, i) => ({ ...p, body: String(parsed.bodies[i] || p.body).slice(0, 280) }));
+            }
+        } catch (err: any) {
+            console.warn('[rank-insights] Gemini unavailable, using computed text:', errMessage(err));
+        }
+    }
+
+    const payload = { insights, opportunities, generatedAt: new Date().toISOString() };
+    (dashboardState as any).rankInsights = payload;
+    await saveOrgToDb(req);
+    res.json(payload);
+});
+
+// ── Visibility Tracker (keyword rank tracking at the business location) ─────
+function trackerList(): TrackerKeyword[] {
+    const raw = (dashboardState as any).visibilityTracker;
+    return Array.isArray(raw?.keywords) ? raw.keywords : [];
+}
+
+function setTrackerList(keywords: TrackerKeyword[]) {
+    (dashboardState as any).visibilityTracker = { keywords, updatedAt: new Date().toISOString() };
+}
+
+app.get('/api/visibility-tracker', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), (_req, res) => {
+    res.json({
+        keywords: trackerList(),
+        configured: trackerConfigured(),
+        business: {
+            name: connectedBusiness.name || '',
+            category: connectedBusiness.category || '',
+            city: cityFromAddress(String(connectedBusiness.address || '')),
+            connected: Boolean(connectedBusiness.connected && connectedBusiness.name)
+        },
+        max: MAX_TRACKED_KEYWORDS
+    });
+});
+
+app.get('/api/visibility-tracker/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+    const tracked = new Set(trackerList().map((k) => k.keyword));
+    const address = String(connectedBusiness.address || '');
+    const city = cleanKeyword(cityFromAddress(address));
+    const typed = cleanKeyword(req.query?.q);
+    if (typed.length >= 3) {
+        // Suggestions for whatever the user is typing (e.g. "facial"), independent of the profile category.
+        const geoQ = { address, lat: connectedBusiness.lat, lng: connectedBusiness.lng };
+        const related = await fetchRelatedKeywords(city ? [typed, `${typed} ${city}`] : [typed], geoQ);
+        const ideas = [typed, `${typed} near me`, `best ${typed} near me`, `${typed} cost`, `${typed} treatment`, ...(city ? [`${typed} ${city}`, `best ${typed} in ${city}`] : [])];
+        const missing = ideas.filter((k) => !(k in related));
+        const extra = await fetchSearchVolumes(missing, geoQ);
+        const all: Record<string, number | null> = { ...related };
+        for (const k of ideas) if (!(k in all)) all[k] = k in extra ? extra[k] : null;
+        const isRelevant = makeRelevanceFilter(typed, []);
+        const list = Object.entries(all)
+            .filter(([k]) => !tracked.has(k) && isRelevant(k))
+            .map(([keyword, volume]) => ({ keyword, volume }))
+            .filter((x) => x.volume == null || x.volume > 0)
+            .sort((x, y) => (y.volume ?? -1) - (x.volume ?? -1));
+        return res.json({ suggestions: list.slice(0, 16), query: typed });
+    }
+    const terms = industryTerms(String(connectedBusiness.category || ''));
+    const services = String(connectedBusiness.attributes || '')
+        .split(/[,;\n]/)
+        .map(cleanKeyword)
+        .filter((x: string) => x.length > 2 && x.length < 50)
+        .slice(0, 6);
+    const seeds = [...terms, ...services].flatMap((t) => (city ? [t, `${t} ${city}`] : [t]));
+
+    const geo = { address, lat: connectedBusiness.lat, lng: connectedBusiness.lng };
+    const related = await fetchRelatedKeywords(seeds, geo);
+    const templates = industryKeywordIdeas(connectedBusiness as any);
+    const missing = templates.filter((k) => !(k in related)).slice(0, 100);
+    const templateVolumes = await fetchSearchVolumes(missing, geo);
+    const all: Record<string, number | null> = { ...related };
+    for (const k of templates) if (!(k in all)) all[k] = k in templateVolumes ? templateVolumes[k] : null;
+
+    const isRelevant = makeRelevanceFilter(String(connectedBusiness.category || ''), services);
+    const suggestions = Object.entries(all)
+        .filter(([k]) => !tracked.has(k) && isRelevant(k))
+        .map(([keyword, volume]) => ({ keyword, volume }))
+        // real demand first; keywords with zero volume are not worth tracking
+        .filter((x) => x.volume == null || x.volume > 0)
+        .sort((x, y) => (y.volume ?? -1) - (x.volume ?? -1));
+    res.json({ suggestions: suggestions.slice(0, 24) });
+});
+
+app.post('/api/visibility-tracker/keywords', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+    const incoming: string[] = (Array.isArray(req.body?.keywords) ? req.body.keywords : [req.body?.keyword])
+        .map(cleanKeyword)
+        .filter((k: string) => k.length >= 2);
+    if (!incoming.length) return res.status(400).json({ error: 'Enter at least one keyword.' });
+    const current = trackerList();
+    const have = new Set(current.map((k) => k.keyword));
+    const fresh = Array.from(new Set(incoming)).filter((k) => !have.has(k));
+    if (current.length + fresh.length > MAX_TRACKED_KEYWORDS) {
+        return res.status(400).json({ error: `You can track up to ${MAX_TRACKED_KEYWORDS} keywords.` });
+    }
+    const volumes = await fetchSearchVolumes(fresh, { address: String(connectedBusiness.address || ''), lat: connectedBusiness.lat, lng: connectedBusiness.lng });
+    const now = new Date().toISOString();
+    const added: TrackerKeyword[] = fresh.map((keyword) => ({
+        keyword,
+        volume: keyword in volumes ? volumes[keyword] : null,
+        volumeUpdatedAt: keyword in volumes ? now : undefined,
+        history: [],
+        top: [],
+        addedAt: now
+    }));
+    setTrackerList([...added, ...current]);
+    await saveOrgToDb(req);
+    res.json({ keywords: trackerList(), added: added.length });
+});
+
+app.post('/api/visibility-tracker/remove', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+    const target = cleanKeyword(req.body?.keyword);
+    setTrackerList(trackerList().filter((k) => k.keyword !== target));
+    await saveOrgToDb(req);
+    res.json({ keywords: trackerList() });
+});
+
+app.post('/api/visibility-tracker/check', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+    if (!requireBusiness(res)) return;
+    if (!trackerConfigured()) {
+        return res.status(503).json({ error: 'Live rank checks need DataForSEO.', code: 'not_configured' });
+    }
+    const wanted = new Set<string>(
+        (Array.isArray(req.body?.keywords) ? req.body.keywords : []).map(cleanKeyword).filter(Boolean).slice(0, 5)
+    );
+    if (!wanted.size) return res.status(400).json({ error: 'No keywords to check.' });
+    const center = await ensureBusinessCenter(req);
+    if (!center) {
+        return res.status(400).json({ error: 'Your business needs a full address so we can locate it on the map.' });
+    }
+    const business = { name: connectedBusiness.name, placeId: connectedBusiness.placeId };
+    const list = trackerList();
+    const failed: string[] = [];
+    // Heal volumes that were stored as empty/0 (e.g. looked up for the wrong country earlier).
+    const stale = list.filter((k) => wanted.has(k.keyword) && !k.volume).map((k) => k.keyword);
+    if (stale.length) {
+        const fresh = await fetchSearchVolumes(stale, { address: String(connectedBusiness.address || ''), lat: connectedBusiness.lat, lng: connectedBusiness.lng });
+        for (const k of list) {
+            if (k.keyword in fresh) {
+                k.volume = fresh[k.keyword];
+                k.volumeUpdatedAt = new Date().toISOString();
+            }
+        }
+    }
+    const updated = await Promise.all(
+        list.map(async (entry) => {
+            if (!wanted.has(entry.keyword)) return entry;
+            try {
+                return await checkKeywordRank(entry, center, business);
+            } catch (err: any) {
+                console.warn('[visibility-tracker] check failed:', entry.keyword, errMessage(err));
+                failed.push(entry.keyword);
+                return entry;
+            }
+        })
+    );
+    setTrackerList(updated);
+    await saveOrgToDb(req);
+    res.json({ keywords: updated, failed });
+});
+
 function citationNorm(value: string) {
     return String(value || '')
         .toLowerCase()
@@ -1486,20 +2052,37 @@ app.post('/api/ai/citations', requireAuth, hydrateOrgFromDb, requireFeature('loc
 app.post('/api/ai/media-generate', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     if (!requireGemini(res)) return;
     if (!requireBusiness(res)) return;
-    const { category } = req.body;
+    const photoCategory = String(req.body?.category || 'storefront').trim().slice(0, 80) || 'storefront';
+    const name = String(connectedBusiness.name || '').trim();
+    const trade = String(connectedBusiness.category || 'local business').trim();
+    const address = String(connectedBusiness.address || '').trim();
+    if (!name || !address) {
+        return res.status(400).json({
+            error: 'Business name and address are required before generating media. Save your business profile first.'
+        });
+    }
 
     try {
         const response = await aiClient.models.generateContent({
             model: IMAGE_MODEL,
-            contents: `Photorealistic ${category} photo for ${connectedBusiness.name}, a ${connectedBusiness.category} at ${connectedBusiness.address}. Natural tones, no text, no watermarks.`
+            contents: `Create one photorealistic ${photoCategory} photo for this exact local business — not a random stock image.
+Business name: ${name}
+Trade / category: ${trade}
+Real address / area: ${address}
+Photo category: ${photoCategory}
+Requirements:
+- Scene must clearly belong to this business, trade, and location (UK-realistic when the address is in the UK).
+- Natural tones and lighting appropriate for a Google Business Profile photo.
+- No text overlays, no logos, no watermarks, no invented brand names or landmarks.
+- Do not invent a different business, city, or unrelated industry.`
         });
         const url = extractImage(response);
         if (!url) return res.status(502).json({ error: 'Gemini did not return an image. Free image quota may be exhausted.' });
 
-        let altText = `${category} photo of ${connectedBusiness.name} in ${connectedBusiness.address}`;
+        let altText = `${photoCategory} photo of ${name} in ${address}`;
         try {
             const generatedAlt = await generateText(
-                `Write one SEO alt-text under 25 words for a ${category} photo of ${connectedBusiness.name} (${connectedBusiness.category}) in ${connectedBusiness.address}. No quotes. Do not invent landmarks.`
+                `Write one SEO alt-text under 25 words for a ${photoCategory} photo of ${name} (${trade}) in ${address}. No quotes. Do not invent landmarks.`
             );
             if (generatedAlt) altText = generatedAlt.replace(/^"|"$/g, '');
         } catch {
@@ -1511,7 +2094,7 @@ app.post('/api/ai/media-generate', requireAuth, hydrateOrgFromDb, requireFeature
         res.json({
             photo: {
                 id: Date.now(),
-                category,
+                category: photoCategory,
                 url,
                 altText,
                 lat: '',
@@ -1524,120 +2107,275 @@ app.post('/api/ai/media-generate', requireAuth, hydrateOrgFromDb, requireFeature
     }
 });
 
-function strategyReportHistoryList() {
-    const history = Array.isArray(dashboardState.strategyReportHistory) ? dashboardState.strategyReportHistory : [];
-    if (history.length) return history.slice(0, 20);
-    const saved = dashboardState.strategyReport;
-    return saved?.createdAt ? [saved] : [];
-}
+// ── LLM Visibility Tracking ──────────────────────────────────────────────────
+// Three short requests (each under the ~30s gateway limit): the client asks ChatGPT and
+// Google AI Overviews in parallel, then posts the raw answers to /analyze for scoring.
+const growthReportingGate = [requireAuth, hydrateOrgFromDb, requireAllFeatures(['local_growth', 'reporting'])] as const;
 
-async function storeStrategyReport(req: any, reportData: any, businessName: string) {
-    const saved = {
-        ...reportData,
-        businessName: businessName || connectedBusiness.name || '',
-        createdAt: reportData?.createdAt || new Date().toISOString()
+function visibilityBusiness() {
+    return {
+        name: connectedBusiness.name,
+        address: connectedBusiness.address,
+        category: connectedBusiness.category,
+        website: connectedBusiness.website,
+        completenessScore: dashboardState.completenessScore
     };
-    const prior = strategyReportHistoryList().filter((item) => item?.createdAt !== saved.createdAt);
-    dashboardState.strategyReportHistory = [saved, ...prior].slice(0, 20);
-    dashboardState.strategyReport = saved;
-    await saveOrgToDb(req);
-    return { ...saved, history: dashboardState.strategyReportHistory };
 }
 
-app.get('/api/ai/strategy-report', requireAuth, hydrateOrgFromDb, requireAllFeatures(['local_growth', 'reporting']), (_req, res) => {
-    const history = strategyReportHistoryList();
-    const saved = dashboardState.strategyReport || history[0] || null;
-    res.json({ report: saved, history });
+function requireDataForSeo(res: Response) {
+    if (dataForSeoReady()) return true;
+    res.status(503).json({ error: 'DataForSEO login is missing. Add DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD to backend/.env and restart.' });
+    return false;
+}
+
+function llmVisibilityState(dash: any) {
+    const history = Array.isArray(dash?.llmVisibilityHistory)
+        ? dash.llmVisibilityHistory
+        : Array.isArray(dash?.aiVisibilityHistory)
+          ? dash.aiVisibilityHistory
+          : [];
+    const report = dash?.llmVisibility || dash?.aiVisibility || history[0] || null;
+    return { report, history };
+}
+
+app.get('/api/llm/visibility', ...growthReportingGate, (_req, res) => {
+    const dash: any = (_req as any).dashboardState || dashboardState;
+    res.json(llmVisibilityState(dash));
 });
 
-app.post('/api/ai/strategy-report', requireAuth, hydrateOrgFromDb, requireAllFeatures(['local_growth', 'reporting']), async (req, res) => {
-    if (!requireBusiness(res)) return;
-    const stats = { ...dashboardState, ...req.body };
-
-    let liveCompetitors: any[] = [];
-    if (requirePlacesConfigured() && connectedBusiness.lat != null && connectedBusiness.lng != null) {
-        try {
-            const keywordHint =
-                (Array.isArray(stats.trackedKeywords) && stats.trackedKeywords[0]?.keyword) ||
-                `${connectedBusiness.category || 'local business'} near me`;
-            liveCompetitors = await nearbyCompetitors({
-                lat: connectedBusiness.lat,
-                lng: connectedBusiness.lng,
-                keyword: keywordHint,
-                category: connectedBusiness.category || '',
-                excludeName: connectedBusiness.name,
-                excludePlaceId: connectedBusiness.placeId || ''
-            });
-        } catch (err: any) {
-            console.warn('Strategy report competitors lookup failed:', err.message);
-        }
-    }
-
-    const fallback = fallbackStrategyReport(connectedBusiness, stats, liveCompetitors);
-    const groundedMetrics = {
-        localPackRank: Number(stats.visibilityRank) || 0,
-        completeness: Number(stats.completenessScore) || 0,
-        reviewResponseRate: Number(stats.reviewResponseRate) || 0,
-        missingMedia: stats.photoCount ? `${stats.photoCount} photos` : 'No photos yet',
-        visibilityAuditScore: stats.lastVisibilityAudit?.total ?? null
-    };
-
-    if (!aiClient) {
-        const saved = await storeStrategyReport(req, fallback, connectedBusiness.name);
-        return res.json(saved);
-    }
-
-    try {
-        const audit = stats.lastVisibilityAudit;
-        const competitorBlock = liveCompetitors.length
-            ? `Same-service competitors (use these; do not invent):\n${JSON.stringify(liveCompetitors.slice(0, 5))}`
-            : 'No same-service competitor list available.';
-        const auditBlock =
-            audit && typeof audit.total === 'number'
-                ? `Last Local Visibility Audit: ${audit.total}/100 (${audit.bandLabel || 'scored'}) for "${audit.query || 'n/a'}" on ${audit.createdAt || 'n/a'}.`
-                : 'No Local Visibility Audit score saved yet.';
-
-        const text = await withTimeout(
-            generateText(
-                `Create an executive local SEO report for ${connectedBusiness.name} (${connectedBusiness.category || 'local business'}) at ${connectedBusiness.address}.
-Phone: ${connectedBusiness.phone || 'n/a'}
-Website: ${connectedBusiness.website || 'n/a'}
-Public rating: ${connectedBusiness.rating ?? 'n/a'} from ${connectedBusiness.reviewsCount || 0} reviews
-Use only these live metrics. Do not invent extra numbers.
-- Profile completeness: ${stats.completenessScore}%
-- Average GeoGrid rank: ${stats.visibilityRank}
-- Local 3-Pack coverage: ${stats.top3Percentage}%
-- Review response rate: ${stats.reviewResponseRate}%
-- Weekly posts: ${stats.weeklyPosts}
-- Photo count: ${stats.photoCount}
-${auditBlock}
-${competitorBlock}
-Write a practical report a trade-business owner can act on this week. Keep it concise. Competitor positioning must reference only the competitors listed above (same service type).
-Return JSON only:
-{"grade":"A+|A|A-|B+|B|B-|C+|C","positioningText":"2-3 sentences","roadmap":[{"id":1,"title":"","desc":""},{"id":2,"title":"","desc":""},{"id":3,"title":"","desc":""}],"metrics":{"localPackRank":${groundedMetrics.localPackRank},"completeness":${groundedMetrics.completeness},"reviewResponseRate":${groundedMetrics.reviewResponseRate},"missingMedia":"${groundedMetrics.missingMedia}"}}`
-            ),
-            18000,
-            'strategy-report'
+for (const platform of LLM_PLATFORMS) {
+    app.post(`/api/llm/visibility/${platform}`, ...growthReportingGate, async (_req, res) => {
+        if (!requireBusiness(res) || !requireDataForSeo(res)) return;
+        const business = visibilityBusiness();
+        let firstError = '';
+        const answers = await Promise.all(
+            buildPrompts(business).map((prompt) =>
+                askLlm(platform, prompt, business).catch((err: any) => {
+                    firstError = firstError || errMessage(err);
+                    console.warn(`[llm-visibility] ${platform} failed:`, errMessage(err));
+                    return { prompt, ok: false, text: '', present: false, sources: [] };
+                })
+            )
         );
-        const data = parseJsonFromText(text);
-        if (!data?.grade) {
-            console.warn('[strategy-report] unusable Gemini JSON — using fallback');
-            const saved = await storeStrategyReport(req, fallback, connectedBusiness.name);
-            return res.json(saved);
+        if (!answers.some((a) => a.present)) {
+            return res.status(502).json({ error: firstError || `${platform} returned no answers.` });
         }
-        const reportResult = {
-            ...data,
-            source: 'gemini',
-            competitors: liveCompetitors.slice(0, 5),
-            metrics: { ...groundedMetrics, ...(data.metrics || {}), ...groundedMetrics }
-        };
-        const saved = await storeStrategyReport(req, reportResult, connectedBusiness.name);
-        res.json(saved);
-    } catch (err: any) {
-        console.error('Strategy report error (serving fallback):', errMessage(err));
-        const saved = await storeStrategyReport(req, fallback, connectedBusiness.name);
-        res.json(saved);
+        res.json({ answers });
+    });
+}
+
+app.post('/api/llm/visibility/google', ...growthReportingGate, async (_req, res) => {
+    if (!requireBusiness(res) || !requireDataForSeo(res)) return;
+    const business = visibilityBusiness();
+    const answers = await Promise.all(
+        buildPrompts(business).map((prompt) =>
+            askGoogleOverview(prompt, { address: connectedBusiness.address, lat: connectedBusiness.lat, lng: connectedBusiness.lng }).catch((err: any) => {
+                console.warn('[llm-visibility] google failed:', err?.message || err);
+                return { prompt, ok: false, text: '', present: false, sources: [] };
+            })
+        )
+    );
+    res.json({ answers });
+});
+
+app.post('/api/llm/visibility/analyze', ...growthReportingGate, async (req, res) => {
+    if (!requireBusiness(res)) return;
+    const dash: any = (req as any).dashboardState || dashboardState;
+    const business = visibilityBusiness();
+    const body = req.body || {};
+    const input: Record<string, any> = { google: Array.isArray(body.google) ? body.google : [] };
+    for (const p of LLM_PLATFORMS) input[p] = Array.isArray(body[p]) ? body[p] : [];
+    if (!LLM_PLATFORMS.some((p) => input[p].length)) return res.status(400).json({ error: 'No LLM answers to analyse.' });
+    let analysis: any = { rows: [], opportunities: [] };
+    if (aiClient) {
+        const results = await Promise.all(
+            analysisJobs(business, input).map(async (job) => {
+                try {
+                    return parseJsonFromText(
+                        await withTimeout(generateText(job.prompt, { responseMimeType: 'application/json' }), 16000, 'llm-visibility analysis')
+                    );
+                } catch (err: any) {
+                    console.warn('[llm-visibility] analysis group failed (using text matching):', errMessage(err));
+                    return null;
+                }
+            })
+        );
+        for (const r of results) {
+            if (Array.isArray(r?.rows)) analysis.rows.push(...r.rows);
+            if (Array.isArray(r?.opportunities) && !analysis.opportunities.length) analysis.opportunities = r.opportunities;
+        }
     }
+    const { report: previous, history } = llmVisibilityState(dash);
+    const report = buildVisibilityReport(business, input, analysis, previous);
+    dash.llmVisibility = report;
+    dash.llmVisibilityHistory = [report, ...history].slice(0, 20);
+    delete dash.aiVisibility;
+    delete dash.aiVisibilityHistory;
+    await saveOrgToDb(req);
+    res.json({ report, history: dash.llmVisibilityHistory });
+});
+
+app.delete('/api/llm/visibility/history', ...growthReportingGate, async (req, res) => {
+    const id = String(req.query.createdAt || '');
+    const dash: any = (req as any).dashboardState || dashboardState;
+    const { history: existing } = llmVisibilityState(dash);
+    const history = existing.filter((h: any) => h?.createdAt !== id);
+    dash.llmVisibilityHistory = history;
+    dash.llmVisibility = history[0] || null;
+    delete dash.aiVisibility;
+    delete dash.aiVisibilityHistory;
+    await saveOrgToDb(req);
+    res.json({ report: dash.llmVisibility, history });
+});
+
+// ── AI Insights overview (prioritized actions, growth strategy, pack share vs competitors) ──
+// Everything the AI Insights page needs in one shape; used by every route that returns the page data.
+function insightsPayload(dash: any) {
+    const state = dash.insightActionState || {};
+    const now = Date.now();
+    const all = buildInsightActions(connectedBusiness, dash);
+    const actions = all.filter((a) => {
+        const entry = state[a.id];
+        if (!entry) return true;
+        const days = entry.status === 'dismissed' ? 14 : 30;
+        return now - new Date(entry.at).getTime() > days * 86400000;
+    });
+    const history = Array.isArray(dash.aiInsightsHistory) ? dash.aiInsightsHistory : [];
+    return {
+        actions,
+        hiddenActions: all.length - actions.length,
+        latest: dash.aiInsights || null,
+        history,
+        ...computeChanges(history),
+        trackerMoves: summarizeTracker(dash.visibilityTracker?.keywords).moves
+    };
+}
+
+app.get('/api/ai/insights', ...growthReportingGate, (_req, res) => {
+    res.json(insightsPayload((_req as any).dashboardState || dashboardState));
+});
+
+app.post('/api/ai/insights/action', ...growthReportingGate, async (req, res) => {
+    const dash: any = (req as any).dashboardState || dashboardState;
+    const id = String(req.body?.id || '').slice(0, 40);
+    const status = String(req.body?.status || '');
+    if (!id || !['done', 'dismissed', 'reset'].includes(status)) return res.status(400).json({ error: 'Invalid action.' });
+    const next = { ...(dash.insightActionState || {}) };
+    if (status === 'reset') delete next[id];
+    else next[id] = { status, at: new Date().toISOString() };
+    dash.insightActionState = next;
+    await saveOrgToDb(req);
+    res.json(insightsPayload(dash));
+});
+
+// The Map Pack check is split into short requests (one per keyword) so each stays under the ~30s gateway limit.
+function insightsPlan() {
+    const tracked = (Array.isArray(dashboardState.trackedKeywords) ? dashboardState.trackedKeywords : [])
+        .map((k: any) => String(k?.keyword || '').trim())
+        .filter(Boolean)
+        .slice(0, 3);
+    return planKeywords(connectedBusiness as any, tracked);
+}
+
+app.post('/api/ai/insights/plan', ...growthReportingGate, (_req, res) => {
+    if (!requireBusiness(res) || !requireDataForSeo(res)) return;
+    const keywords = insightsPlan();
+    if (!keywords.length) return res.status(400).json({ error: 'Add a business category on the Business profile page first.' });
+    res.json({ keywords });
+});
+
+app.post('/api/ai/insights/pack', ...growthReportingGate, async (req, res) => {
+    if (!requireBusiness(res) || !requireDataForSeo(res)) return;
+    const keyword = String(req.body?.keyword || '').trim();
+    if (!insightsPlan().some((k) => k.toLowerCase() === keyword.toLowerCase())) {
+        return res.status(400).json({ error: 'Unknown keyword.' });
+    }
+    try {
+        res.json({ keyword, top3: await fetchPack(keyword, connectedBusiness as any) });
+    } catch (err: any) {
+        console.warn('[ai-insights] pack failed:', keyword, errMessage(err));
+        res.status(502).json({ error: errMessage(err) });
+    }
+});
+
+app.post('/api/ai/insights/trends', ...growthReportingGate, async (_req, res) => {
+    if (!requireBusiness(res) || !requireDataForSeo(res)) return;
+    res.json({ trendRows: await fetchTrends(insightsPlan(), { address: connectedBusiness.address, lat: connectedBusiness.lat, lng: connectedBusiness.lng }) });
+});
+
+app.post('/api/ai/insights/finish', ...growthReportingGate, async (req, res) => {
+    if (!requireBusiness(res)) return;
+    // Other requests replace the global dashboardState while this one awaits Gemini, so keep this request's own object.
+    const dash: any = (req as any).dashboardState || dashboardState;
+    try {
+        const plan = insightsPlan();
+        const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+        const packs = plan.map((_, i) =>
+            (Array.isArray(req.body?.packs?.[i]) ? req.body.packs[i] : []).slice(0, 3).map((r: any) => ({
+                title: String(r?.title || '').slice(0, 160),
+                reviews: num(r?.reviews),
+                rating: num(r?.rating)
+            }))
+        );
+        const trendRows = (Array.isArray(req.body?.trendRows) ? req.body.trendRows : [])
+            .slice(0, 5)
+            .map((r: any) => ({
+                keyword: String(r?.keyword || '').slice(0, 160),
+                volume: num(r?.volume),
+                trendPct: r?.trendPct == null ? null : num(r.trendPct)
+            }));
+        const errors: string[] = Array.isArray(req.body?.errors) ? req.body.errors.map((e: any) => String(e).slice(0, 200)) : [];
+        const market = summarizeMarket(connectedBusiness as any, plan, packs, trendRows, errors);
+
+        let strategy = fallbackRecommendation(market);
+        if (aiClient) {
+            try {
+                const data = parseJsonFromText(
+                    await withTimeout(generateText(strategyPrompt(connectedBusiness, market, dashboardState, summarizeTracker(dash.visibilityTracker?.keywords))), 12000, 'ai-insights strategy')
+                );
+                if (data?.recommendation) {
+                    strategy = {
+                        recommendation: String(data.recommendation).slice(0, 300),
+                        keyword: String(data.keyword || strategy.keyword).slice(0, 120)
+                    };
+                }
+            } catch (err: any) {
+                console.warn('[ai-insights] strategy fell back:', errMessage(err));
+            }
+        }
+
+        const now = new Date();
+        const latest = {
+            createdAt: now.toISOString(),
+            weekStart: insightsWeekStart(now),
+            recommendation: strategy.recommendation,
+            keyword: strategy.keyword,
+            opportunities: marketOpportunities(connectedBusiness, market),
+            share: market.share,
+            packs: market.packs,
+            problems: marketProblems(connectedBusiness, market),
+            youSlots: market.youSlots,
+            totalSlots: market.packSlotsChecked
+        };
+        const history = Array.isArray(dash.aiInsightsHistory) ? dash.aiInsightsHistory : [];
+        dash.aiInsights = latest;
+        dash.aiInsightsHistory = [latest, ...history].slice(0, 30);
+        await saveOrgToDb(req);
+        res.json(insightsPayload(dash));
+    } catch (err: any) {
+        console.error('AI insights finish error:', errMessage(err));
+        res.status(502).json({ error: errMessage(err) });
+    }
+});
+
+app.delete('/api/ai/insights/history', ...growthReportingGate, async (req, res) => {
+    const id = String(req.query.createdAt || '');
+    const dash: any = (req as any).dashboardState || dashboardState;
+    const history = (Array.isArray(dash.aiInsightsHistory) ? dash.aiInsightsHistory : []).filter((h: any) => h?.createdAt !== id);
+    dash.aiInsightsHistory = history;
+    dash.aiInsights = history.find((h: any) => h?.share) || null;
+    await saveOrgToDb(req);
+    res.json(insightsPayload(dash));
 });
 
 app.get('/api/dashboard/stats', requireAuth, hydrateOrgFromDb, requireFeature('reporting'), (_req, res) => {
@@ -1661,7 +2399,6 @@ app.post('/api/dashboard/update-stats', requireAuth, hydrateOrgFromDb, requireFe
         'reviewResponseRate',
         'weeklyPosts',
         'photoCount',
-        'lastVisibilityAudit',
         'trackedKeywords'
     ];
     for (const key of allowed) {
@@ -1678,6 +2415,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/sales', salesRouter);
 app.use('/api/host', createHostRouter({ stripeClient }));
+app.use('/api/public/review', createPublicReviewRouter());
 app.use('/api/public', createPublicRouter({ stripeClient }));
 app.use('/api/integrations', integrationsRouter);
 
