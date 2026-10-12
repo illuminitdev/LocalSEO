@@ -75,6 +75,8 @@ const DAY_OPTIONS = [
     { day: 0, label: 'Sun', short: 'Sunday' }
 ] as const;
 
+type TimeWindow = { startTime: string; endTime: string };
+
 function normalizeWeekly(rules: WeeklyRuleInput[]) {
     return (rules || [])
         .map((r) => ({
@@ -94,22 +96,199 @@ function normalizeWeekly(rules: WeeklyRuleInput[]) {
         );
 }
 
+function formatWindowsLabel(windows: TimeWindow[]) {
+    return windows.map((w) => `${w.startTime}–${w.endTime}`).join(', ');
+}
+
+function validateWindows(windows: TimeWindow[]): string | null {
+    if (!windows.length) return 'Add at least one time window.';
+    for (const w of windows) {
+        if (parseTimeToMinutes(w.endTime) <= parseTimeToMinutes(w.startTime)) {
+            return 'End time must be after start time for every window.';
+        }
+    }
+    const sorted = [...windows].sort(
+        (a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime)
+    );
+    for (let i = 1; i < sorted.length; i++) {
+        if (parseTimeToMinutes(sorted[i].startTime) < parseTimeToMinutes(sorted[i - 1].endTime)) {
+            return 'Time windows cannot overlap.';
+        }
+    }
+    return null;
+}
+
+/** Split outer open span around a lunch/break gap (e.g. 09–17 with 12–13 → 09–12 + 13–17). */
+function applyLunchToWindows(
+    windows: TimeWindow[],
+    lunchStart: string,
+    lunchEnd: string
+): TimeWindow[] {
+    const base =
+        windows.length > 0
+            ? windows
+            : [{ startTime: '09:00', endTime: '17:00' }];
+    const start = base.reduce(
+        (min, w) =>
+            parseTimeToMinutes(w.startTime) < parseTimeToMinutes(min) ? w.startTime : min,
+        base[0].startTime
+    );
+    const end = base.reduce(
+        (max, w) => (parseTimeToMinutes(w.endTime) > parseTimeToMinutes(max) ? w.endTime : max),
+        base[0].endTime
+    );
+    const s = parseTimeToMinutes(start);
+    const e = parseTimeToMinutes(end);
+    const ls = parseTimeToMinutes(lunchStart);
+    const le = parseTimeToMinutes(lunchEnd);
+    if (le <= ls) return base;
+    const out: TimeWindow[] = [];
+    if (ls > s) out.push({ startTime: start, endTime: lunchStart });
+    if (le < e) out.push({ startTime: lunchEnd, endTime: end });
+    return out.length ? out : base;
+}
+
+function windowsToWeeklyRules(days: Iterable<number>, windows: TimeWindow[]) {
+    const rules: { dayOfWeek: number; startTime: string; endTime: string; enabled: boolean }[] =
+        [];
+    for (const dayOfWeek of [...days].sort((a, b) => a - b)) {
+        for (const w of windows) {
+            rules.push({
+                dayOfWeek,
+                startTime: w.startTime,
+                endTime: w.endTime,
+                enabled: true
+            });
+        }
+    }
+    return rules;
+}
+
+function replaceDowWindows(
+    applied: { dayOfWeek: number; startTime: string; endTime: string; enabled: boolean }[],
+    dow: number,
+    windows: TimeWindow[]
+) {
+    const kept = applied
+        .filter((r) => r.dayOfWeek !== dow)
+        .map((r) => ({
+            dayOfWeek: r.dayOfWeek,
+            startTime: r.startTime,
+            endTime: r.endTime,
+            enabled: true as const
+        }));
+    const added = windows.map((w) => ({
+        dayOfWeek: dow,
+        startTime: w.startTime,
+        endTime: w.endTime,
+        enabled: true as const
+    }));
+    return [...kept, ...added].sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startTime.localeCompare(b.startTime));
+}
+
 function initialFromWeekly(rules: WeeklyRuleInput[], defaultWeekdays: boolean) {
     const normalized = normalizeWeekly(rules).filter((r) => r.enabled);
     if (!normalized.length) {
         return {
             days: defaultWeekdays ? new Set([1, 2, 3, 4, 5, 6]) : new Set<number>(),
-            startTime: '09:00',
-            endTime: '17:00',
+            windows: [{ startTime: '09:00', endTime: '17:00' }] as TimeWindow[],
             applied: false
         };
     }
+    const firstDow = normalized[0].dayOfWeek;
+    const dayWindows = normalized
+        .filter((r) => r.dayOfWeek === firstDow)
+        .map((r) => ({ startTime: r.startTime, endTime: r.endTime }));
     return {
         days: new Set(normalized.map((r) => r.dayOfWeek)),
-        startTime: normalized[0].startTime,
-        endTime: normalized[0].endTime,
+        windows: dayWindows.length
+            ? dayWindows
+            : [{ startTime: normalized[0].startTime, endTime: normalized[0].endTime }],
         applied: true
     };
+}
+
+function TimeWindowsEditor({
+    windows,
+    onChange,
+    compact
+}: {
+    windows: TimeWindow[];
+    onChange: (next: TimeWindow[]) => void;
+    compact?: boolean;
+}) {
+    const pad = compact ? 'px-2 py-2 text-xs' : 'px-3 py-2.5 text-sm';
+    return (
+        <div className="space-y-2">
+            {windows.map((w, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                    <input
+                        type="time"
+                        value={w.startTime}
+                        onChange={(e) => {
+                            const next = windows.map((row, i) =>
+                                i === idx ? { ...row, startTime: e.target.value } : row
+                            );
+                            onChange(next);
+                        }}
+                        className={cn(
+                            'flex-1 rounded-xl border border-[#E2E8F0] font-bold bg-white',
+                            pad
+                        )}
+                    />
+                    <span className="text-[#94A3B8] text-xs font-bold shrink-0">to</span>
+                    <input
+                        type="time"
+                        value={w.endTime}
+                        onChange={(e) => {
+                            const next = windows.map((row, i) =>
+                                i === idx ? { ...row, endTime: e.target.value } : row
+                            );
+                            onChange(next);
+                        }}
+                        className={cn(
+                            'flex-1 rounded-xl border border-[#E2E8F0] font-bold bg-white',
+                            pad
+                        )}
+                    />
+                    {windows.length > 1 ? (
+                        <button
+                            type="button"
+                            onClick={() => onChange(windows.filter((_, i) => i !== idx))}
+                            className="shrink-0 px-2 py-2 rounded-lg border border-[#E2E8F0] text-[11px] font-bold text-[#64748B] hover:bg-slate-50"
+                            aria-label="Remove window"
+                        >
+                            −
+                        </button>
+                    ) : null}
+                    {idx === windows.length - 1 ? (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const last = windows[windows.length - 1];
+                                const lastEnd = parseTimeToMinutes(last.endTime);
+                                const nextStart = Math.min(lastEnd + 60, 22 * 60);
+                                const nextEnd = Math.min(nextStart + 60, 23 * 60);
+                                const h = (m: number) =>
+                                    `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+                                onChange([
+                                    ...windows,
+                                    { startTime: h(nextStart), endTime: h(Math.max(nextEnd, nextStart + 30)) }
+                                ]);
+                            }}
+                            className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-xl bg-[var(--brand-primary)] text-white"
+                            aria-label="Add time window"
+                            title="Add another time window"
+                        >
+                            <Plus className="w-4 h-4" />
+                        </button>
+                    ) : (
+                        <span className="w-9 shrink-0" />
+                    )}
+                </div>
+            ))}
+        </div>
+    );
 }
 
 function dayOfWeekFromDate(dateStr: string) {
@@ -180,12 +359,12 @@ export default function AvailabilityEditor({
         []
     );
     const [selectedDays, setSelectedDays] = useState<Set<number>>(() => seed.days);
-    /** Top “Global working hours” — always applies to the full weekly template. */
-    const [templateStart, setTemplateStart] = useState(seed.startTime);
-    const [templateEnd, setTemplateEnd] = useState(seed.endTime);
+    /** Top “Global working hours” — one or more windows applied to selected weekdays. */
+    const [templateWindows, setTemplateWindows] = useState<TimeWindow[]>(() => seed.windows);
+    const [lunchStart, setLunchStart] = useState('12:00');
+    const [lunchEnd, setLunchEnd] = useState('13:00');
     /** Right-side day panel — asks this date only vs every weekday. */
-    const [dayStart, setDayStart] = useState(seed.startTime);
-    const [dayEnd, setDayEnd] = useState(seed.endTime);
+    const [dayWindows, setDayWindows] = useState<TimeWindow[]>(() => seed.windows);
     const [appliedWeekly, setAppliedWeekly] = useState(() =>
         normalizeWeekly(initialWeeklyRules).filter((r) => r.enabled)
     );
@@ -197,17 +376,13 @@ export default function AvailabilityEditor({
         return { year: n.getFullYear(), month: n.getMonth() };
     });
     const [selectedDate, setSelectedDate] = useState('');
-    const [scopePrompt, setScopePrompt] = useState<{
-        startTime: string;
-        endTime: string;
-    } | null>(null);
+    const [scopePrompt, setScopePrompt] = useState<{ windows: TimeWindow[] } | null>(null);
     const [memberSchedules, setMemberSchedules] = useState<MemberSchedule[]>([]);
     const [loadingMembers, setLoadingMembers] = useState(false);
     const [memberForm, setMemberForm] = useState<{
         userId: string;
         name: string;
-        startTime: string;
-        endTime: string;
+        windows: TimeWindow[];
     } | null>(null);
     const [memberBusy, setMemberBusy] = useState(false);
     const [memberError, setMemberError] = useState('');
@@ -287,8 +462,8 @@ export default function AvailabilityEditor({
     const summary = useMemo(() => {
         const names = DAY_OPTIONS.filter((d) => selectedDays.has(d.day)).map((d) => d.label);
         if (!names.length) return 'No working days selected';
-        return `${names.join(', ')} · ${templateStart}–${templateEnd}`;
-    }, [selectedDays, templateStart, templateEnd]);
+        return `${names.join(', ')} · ${formatWindowsLabel(templateWindows)}`;
+    }, [selectedDays, templateWindows]);
 
     const selectedHours = selectedDate
         ? hoursForDate(selectedDate, weeklyByDay, closedDates, dateOverrides)
@@ -348,11 +523,9 @@ export default function AvailabilityEditor({
     const syncHoursFromDate = (date: string) => {
         const hours = hoursForDate(date, weeklyByDay, closedDates, dateOverrides);
         if (hours.length) {
-            setDayStart(hours[0].startTime);
-            setDayEnd(hours[0].endTime);
+            setDayWindows(hours.map((h) => ({ startTime: h.startTime, endTime: h.endTime })));
         } else {
-            setDayStart(templateStart);
-            setDayEnd(templateEnd);
+            setDayWindows(templateWindows.map((w) => ({ ...w })));
         }
     };
 
@@ -362,21 +535,15 @@ export default function AvailabilityEditor({
             setError('Select at least one working day.');
             return;
         }
-        if (parseTimeToMinutes(templateEnd) <= parseTimeToMinutes(templateStart)) {
-            setError('End time must be after start time.');
+        const winErr = validateWindows(templateWindows);
+        if (winErr) {
+            setError(winErr);
             return;
         }
         setError('');
         setScopePrompt(null);
 
-        const weeklyRules = [...selectedDays]
-            .sort((a, b) => a - b)
-            .map((dayOfWeek) => ({
-                dayOfWeek,
-                startTime: templateStart,
-                endTime: templateEnd,
-                enabled: true
-            }));
+        const weeklyRules = windowsToWeeklyRules(selectedDays, templateWindows);
 
         await onSave({
             settings,
@@ -386,13 +553,12 @@ export default function AvailabilityEditor({
         setAppliedWeekly(weeklyRules);
         setDateOverrides(new Map());
         setClosedDates(new Set());
+        const copy = templateWindows.map((w) => ({ ...w }));
         if (selectedDate) {
-            setDayStart(templateStart);
-            setDayEnd(templateEnd);
+            setDayWindows(copy);
         } else {
             setSelectedDate(todayStr());
-            setDayStart(templateStart);
-            setDayEnd(templateEnd);
+            setDayWindows(copy);
         }
     };
 
@@ -402,24 +568,28 @@ export default function AvailabilityEditor({
             setError('Select a day on the calendar first.');
             return;
         }
-        if (parseTimeToMinutes(dayEnd) <= parseTimeToMinutes(dayStart)) {
-            setError('End time must be after start time.');
+        const winErr = validateWindows(dayWindows);
+        if (winErr) {
+            setError(winErr);
             return;
         }
         setError('');
-        setScopePrompt({ startTime: dayStart, endTime: dayEnd });
+        setScopePrompt({ windows: dayWindows.map((w) => ({ ...w })) });
     };
 
     const confirmScopeApply = async (scope: 'date_only' | 'weekday_global') => {
         if (!scopePrompt || !selectedDate) return;
-        const { startTime: st, endTime: et } = scopePrompt;
+        const windows = scopePrompt.windows;
         const dow = dayOfWeekFromDate(selectedDate);
         const dayName = DAY_OPTIONS.find((d) => d.day === dow)?.short || 'that day';
 
         try {
             if (scope === 'date_only') {
                 const nextOverrides = new Map(dateOverrides);
-                nextOverrides.set(selectedDate, [{ startTime: st, endTime: et }]);
+                nextOverrides.set(
+                    selectedDate,
+                    windows.map((w) => ({ startTime: w.startTime, endTime: w.endTime }))
+                );
                 const nextClosed = new Set(closedDates);
                 nextClosed.delete(selectedDate);
 
@@ -431,12 +601,7 @@ export default function AvailabilityEditor({
                               endTime: r.endTime,
                               enabled: true as const
                           }))
-                        : [...selectedDays].map((dayOfWeek) => ({
-                              dayOfWeek,
-                              startTime: st,
-                              endTime: et,
-                              enabled: true as const
-                          }));
+                        : windowsToWeeklyRules(selectedDays, windows);
 
                 await onSave({
                     settings,
@@ -447,25 +612,12 @@ export default function AvailabilityEditor({
                 setClosedDates(nextClosed);
                 if (!appliedWeekly.length) setAppliedWeekly(weeklyRules);
             } else {
-                const byDay = new Map<number, { dayOfWeek: number; startTime: string; endTime: string; enabled: boolean }>();
-                for (const r of appliedWeekly) {
-                    byDay.set(r.dayOfWeek, {
-                        dayOfWeek: r.dayOfWeek,
-                        startTime: r.startTime,
-                        endTime: r.endTime,
-                        enabled: true
-                    });
-                }
-                byDay.set(dow, { dayOfWeek: dow, startTime: st, endTime: et, enabled: true });
-                // Keep other template days if weekly was empty
+                let weeklyRules = replaceDowWindows(appliedWeekly, dow, windows);
                 if (!appliedWeekly.length) {
-                    for (const d of selectedDays) {
-                        if (!byDay.has(d)) {
-                            byDay.set(d, { dayOfWeek: d, startTime: st, endTime: et, enabled: true });
-                        }
-                    }
+                    const days = new Set(selectedDays);
+                    days.add(dow);
+                    weeklyRules = windowsToWeeklyRules(days, windows);
                 }
-                const weeklyRules = [...byDay.values()].sort((a, b) => a.dayOfWeek - b.dayOfWeek);
 
                 const nextOverrides = new Map(dateOverrides);
                 nextOverrides.delete(selectedDate);
@@ -481,12 +633,9 @@ export default function AvailabilityEditor({
                 setSelectedDays(new Set(weeklyRules.map((r) => r.dayOfWeek)));
                 setDateOverrides(nextOverrides);
                 setClosedDates(nextClosed);
-                // Keep top template times in sync when updating that weekday globally
-                setTemplateStart(st);
-                setTemplateEnd(et);
+                setTemplateWindows(windows.map((w) => ({ ...w })));
             }
-            setDayStart(st);
-            setDayEnd(et);
+            setDayWindows(windows.map((w) => ({ ...w })));
             setScopePrompt(null);
         } catch (e: any) {
             setError(e.message || `Could not apply hours for ${dayName}`);
@@ -495,26 +644,17 @@ export default function AvailabilityEditor({
 
     const saveMemberForDay = async (force = false) => {
         if (!memberForm || !selectedDate) return;
-        if (parseTimeToMinutes(memberForm.endTime) <= parseTimeToMinutes(memberForm.startTime)) {
-            setMemberError('End time must be after start time.');
+        const winErr = validateWindows(memberForm.windows);
+        if (winErr) {
+            setMemberError(winErr);
             return;
         }
         const existing = memberSchedules.find((m) => m.userId === memberForm.userId);
-        const kept = (existing?.weeklyRules || []).filter((r) => r.dayOfWeek !== selectedDow);
-        const weeklyRules = [
-            ...kept.map((r) => ({
-                dayOfWeek: r.dayOfWeek,
-                startTime: r.startTime,
-                endTime: r.endTime,
-                enabled: true
-            })),
-            {
-                dayOfWeek: selectedDow,
-                startTime: memberForm.startTime,
-                endTime: memberForm.endTime,
-                enabled: true
-            }
-        ];
+        const weeklyRules = replaceDowWindows(
+            existing?.weeklyRules || [],
+            selectedDow,
+            memberForm.windows
+        );
 
         setMemberBusy(true);
         setMemberError('');
@@ -601,29 +741,61 @@ export default function AvailabilityEditor({
                         })}
                     </div>
 
-                    <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-                        <div className="flex-1">
-                            <p className="text-xs font-bold text-[#64748B] mb-2">Hours (applies globally)</p>
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="time"
-                                    value={templateStart}
-                                    onChange={(e) => {
-                                        setTemplateStart(e.target.value);
+                    <div className="space-y-3">
+                        <div>
+                            <p className="text-xs font-bold text-[#64748B] mb-2">
+                                Hours (applies globally) — use + for another block (e.g. after lunch)
+                            </p>
+                            <TimeWindowsEditor
+                                windows={templateWindows}
+                                onChange={(next) => {
+                                    setTemplateWindows(next);
+                                    setError('');
+                                }}
+                            />
+                        </div>
+                        <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3 space-y-2">
+                            <p className="text-xs font-bold text-[#0F172A]">Lunch / break (optional)</p>
+                            <p className="text-[11px] text-[#64748B]">
+                                Splits open hours around a break, then Apply globally so customers cannot book
+                                during lunch.
+                            </p>
+                            <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                                <div className="flex items-center gap-2 flex-1">
+                                    <input
+                                        type="time"
+                                        value={lunchStart}
+                                        onChange={(e) => setLunchStart(e.target.value)}
+                                        className="flex-1 rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm font-bold bg-white"
+                                    />
+                                    <span className="text-[#94A3B8] text-xs font-bold">to</span>
+                                    <input
+                                        type="time"
+                                        value={lunchEnd}
+                                        onChange={(e) => setLunchEnd(e.target.value)}
+                                        className="flex-1 rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm font-bold bg-white"
+                                    />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const next = applyLunchToWindows(
+                                            templateWindows,
+                                            lunchStart,
+                                            lunchEnd
+                                        );
+                                        const err = validateWindows(next);
+                                        if (err) {
+                                            setError(err);
+                                            return;
+                                        }
+                                        setTemplateWindows(next);
                                         setError('');
                                     }}
-                                    className="flex-1 rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-bold bg-white"
-                                />
-                                <span className="text-[#94A3B8] text-xs font-bold shrink-0">to</span>
-                                <input
-                                    type="time"
-                                    value={templateEnd}
-                                    onChange={(e) => {
-                                        setTemplateEnd(e.target.value);
-                                        setError('');
-                                    }}
-                                    className="flex-1 rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm font-bold bg-white"
-                                />
+                                    className="shrink-0 px-4 py-2 rounded-xl border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:border-[var(--brand-primary)]"
+                                >
+                                    Apply lunch break
+                                </button>
                             </div>
                         </div>
                         <button
@@ -631,7 +803,7 @@ export default function AvailabilityEditor({
                             disabled={saving}
                             onClick={() => void applyFullTemplate()}
                             className={cn(
-                                'inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white font-bold text-sm disabled:opacity-60 shrink-0',
+                                'inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white font-bold text-sm disabled:opacity-60 w-full sm:w-auto',
                                 saved ? 'bg-emerald-600' : 'bg-[var(--brand-primary)]'
                             )}
                         >
@@ -783,27 +955,14 @@ export default function AvailabilityEditor({
                                         {DAY_OPTIONS.find((d) => d.day === selectedDow)?.short || 'weekday'}.
                                     </p>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="time"
-                                        value={dayStart}
-                                        onChange={(e) => {
-                                            setDayStart(e.target.value);
-                                            setError('');
-                                        }}
-                                        className="flex-1 rounded-lg border border-[#E2E8F0] px-2 py-2 text-sm font-bold bg-white"
-                                    />
-                                    <span className="text-[#94A3B8] text-xs font-bold">to</span>
-                                    <input
-                                        type="time"
-                                        value={dayEnd}
-                                        onChange={(e) => {
-                                            setDayEnd(e.target.value);
-                                            setError('');
-                                        }}
-                                        className="flex-1 rounded-lg border border-[#E2E8F0] px-2 py-2 text-sm font-bold bg-white"
-                                    />
-                                </div>
+                                <TimeWindowsEditor
+                                    compact
+                                    windows={dayWindows}
+                                    onChange={(next) => {
+                                        setDayWindows(next);
+                                        setError('');
+                                    }}
+                                />
                                 <button
                                     type="button"
                                     disabled={saving}
@@ -882,9 +1041,18 @@ export default function AvailabilityEditor({
                                                                 setMemberForm({
                                                                     userId: m.userId,
                                                                     name: m.displayName,
-                                                                    startTime:
-                                                                        selectedHours[0]?.startTime || '09:00',
-                                                                    endTime: selectedHours[0]?.endTime || '17:00'
+                                                                    windows:
+                                                                        selectedHours.length > 0
+                                                                            ? selectedHours.map((h) => ({
+                                                                                  startTime: h.startTime,
+                                                                                  endTime: h.endTime
+                                                                              }))
+                                                                            : [
+                                                                                  {
+                                                                                      startTime: '09:00',
+                                                                                      endTime: '17:00'
+                                                                                  }
+                                                                              ]
                                                                 });
                                                                 setMemberError('');
                                                                 setOverlapWarn(null);
@@ -901,8 +1069,10 @@ export default function AvailabilityEditor({
                                                                 setMemberForm({
                                                                     userId: m.userId,
                                                                     name: m.displayName,
-                                                                    startTime: m.slots[0].startTime,
-                                                                    endTime: m.slots[0].endTime
+                                                                    windows: m.slots.map((s) => ({
+                                                                        startTime: s.startTime,
+                                                                        endTime: s.endTime
+                                                                    }))
                                                                 });
                                                                 setMemberError('');
                                                                 setOverlapWarn(null);
@@ -928,31 +1098,15 @@ export default function AvailabilityEditor({
                                             {memberError && (
                                                 <p className="text-xs text-red-600">{memberError}</p>
                                             )}
-                                            <div className="flex items-center gap-2">
-                                                <input
-                                                    type="time"
-                                                    value={memberForm.startTime}
-                                                    onChange={(e) =>
-                                                        setMemberForm((prev) =>
-                                                            prev
-                                                                ? { ...prev, startTime: e.target.value }
-                                                                : prev
-                                                        )
-                                                    }
-                                                    className="flex-1 rounded-lg border border-[#E2E8F0] px-2 py-2 text-xs font-bold bg-white"
-                                                />
-                                                <span className="text-[10px] text-slate-400 font-bold">to</span>
-                                                <input
-                                                    type="time"
-                                                    value={memberForm.endTime}
-                                                    onChange={(e) =>
-                                                        setMemberForm((prev) =>
-                                                            prev ? { ...prev, endTime: e.target.value } : prev
-                                                        )
-                                                    }
-                                                    className="flex-1 rounded-lg border border-[#E2E8F0] px-2 py-2 text-xs font-bold bg-white"
-                                                />
-                                            </div>
+                                            <TimeWindowsEditor
+                                                compact
+                                                windows={memberForm.windows}
+                                                onChange={(next) =>
+                                                    setMemberForm((prev) =>
+                                                        prev ? { ...prev, windows: next } : prev
+                                                    )
+                                                }
+                                            />
                                             <div className="flex gap-2 justify-end">
                                                 <button
                                                     type="button"
@@ -988,7 +1142,7 @@ export default function AvailabilityEditor({
                         <div>
                             <h3 className="font-black text-slate-900 text-lg">Apply these hours?</h3>
                             <p className="text-xs text-slate-500 mt-1">
-                                {scopePrompt.startTime}–{scopePrompt.endTime} for{' '}
+                                {formatWindowsLabel(scopePrompt.windows)} for{' '}
                                 <span className="font-bold text-slate-700">{formatDateLabel(selectedDate)}</span>
                             </p>
                         </div>

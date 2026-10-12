@@ -473,11 +473,7 @@ export default function CustomerViewPortal({
     const searchResultCount = searchedAppointments.length + searchedTreatments.length;
 
     useEffect(() => {
-        if (flowConfig.staffStep !== 'team') {
-            setTeamsEnabled(false);
-            setTeamMembers([]);
-            return;
-        }
+        // Load bookable team for any industry when Booking Pro teams are enabled.
         apiGet(`/api/public/${hostSlug}/team`)
             .then((data) => {
                 setTeamsEnabled(Boolean(data.teamsEnabled));
@@ -492,7 +488,7 @@ export default function CustomerViewPortal({
                 setTeamsEnabled(false);
                 setTeamMembers([]);
             });
-    }, [hostSlug, flowConfig.staffStep]);
+    }, [hostSlug]);
 
     useEffect(() => {
         if (done) {
@@ -579,7 +575,11 @@ export default function CustomerViewPortal({
         const qs = new URLSearchParams({ from: selectedDate, to: selectedDate });
         qs.set('serviceSlugs', cart.map((s) => s.slug).join(','));
         if (cartDuration > 0) qs.set('durationMinutes', String(cartDuration));
-        if (flowConfig.staffStep === 'team' && teamsEnabled) {
+        // Date-then-team: always load union of member slots; filter by member on the client.
+        const teamUnion = teamsEnabled && teamMembers.length > 0;
+        if (teamUnion) {
+            qs.set('firstAvailable', 'true');
+        } else if (flowConfig.staffStep === 'team' && teamsEnabled) {
             if (stylistUserId) qs.set('userId', stylistUserId);
             else qs.set('firstAvailable', 'true');
         }
@@ -604,7 +604,11 @@ export default function CustomerViewPortal({
         primaryService?.slug,
         selectedDate,
         teamsEnabled,
-        stylistUserId,
+        teamMembers.length,
+        // Only refetch when member filter hits the API (non–team-union mode).
+        flowConfig.staffStep === 'team' && teamsEnabled && teamMembers.length === 0
+            ? stylistUserId
+            : null,
         cartSlugsKey,
         cartDuration,
         cart.length,
@@ -625,9 +629,11 @@ export default function CustomerViewPortal({
         const qs = new URLSearchParams({ from, to });
         qs.set('serviceSlugs', cart.map((s) => s.slug).join(','));
         if (cartDuration > 0) qs.set('durationMinutes', String(cartDuration));
-        if (flowConfig.staffStep === 'team' && teamsEnabled) {
-            if (stylistUserId) qs.set('userId', stylistUserId);
-            else qs.set('firstAvailable', 'true');
+        // Calendar open days = any bookable member (union), not one selected stylist.
+        if (teamsEnabled && teamMembers.length > 0) {
+            qs.set('firstAvailable', 'true');
+        } else if (flowConfig.staffStep === 'team' && teamsEnabled) {
+            qs.set('firstAvailable', 'true');
         }
         let cancelled = false;
         setMonthAvailabilityLoaded(false);
@@ -653,11 +659,10 @@ export default function CustomerViewPortal({
         month.year,
         month.month,
         teamsEnabled,
-        stylistUserId,
+        teamMembers.length,
         cartSlugsKey,
         cartDuration,
         cart.length,
-        intakeMode,
         flowConfig.staffStep
     ]);
 
@@ -675,8 +680,11 @@ export default function CustomerViewPortal({
         setDaySlots([]);
     }, [selectedDate, monthAvailabilityLoaded, hasAvailabilityRules, availableDates]);
 
+    /** Real team calendars (Booking Pro) — pick date first, then member. */
+    const useTeamBooking = teamsEnabled && teamMembers.length > 0;
+
     const stylistOptions = useMemo(() => {
-        if (flowConfig.staffStep === 'team' && teamsEnabled && teamMembers.length) {
+        if (useTeamBooking) {
             return [
                 { id: '', label: 'First Available' },
                 ...teamMembers.map((m) => ({ id: m.id, label: m.displayName }))
@@ -687,14 +695,39 @@ export default function CustomerViewPortal({
             id: '',
             label: opt
         }));
-    }, [flowConfig.staffStep, teamsEnabled, teamMembers, stylistField?.options]);
+    }, [useTeamBooking, flowConfig.staffStep, teamMembers, stylistField?.options]);
 
-    const needsStylist =
-        flowConfig.staffStep === 'team'
-            ? Boolean(teamsEnabled || stylistField?.options?.length)
-            : flowConfig.staffStep === 'field'
-              ? Boolean(stylistField?.options?.length)
-              : false;
+    /** Separate stylist step only when there is no live team calendar (label prefs). */
+    const needsStylist = useTeamBooking
+        ? false
+        : flowConfig.staffStep === 'team'
+          ? Boolean(stylistField?.options?.length)
+          : flowConfig.staffStep === 'field'
+            ? Boolean(stylistField?.options?.length)
+            : false;
+
+    const availableTeamToday = useMemo(() => {
+        if (!useTeamBooking || !selectedDate) return [];
+        const ids = new Set(
+            daySlots.map((s) => s.assignedUserId).filter((id): id is string => Boolean(id))
+        );
+        return teamMembers.filter((m) => ids.has(m.id));
+    }, [useTeamBooking, selectedDate, daySlots, teamMembers]);
+
+    const displayedDaySlots = useMemo(() => {
+        if (!useTeamBooking || !stylistUserId) return daySlots;
+        return daySlots.filter((s) => s.assignedUserId === stylistUserId);
+    }, [daySlots, useTeamBooking, stylistUserId]);
+
+    useEffect(() => {
+        if (!useTeamBooking || !stylistUserId || !selectedDate || loadingSlots) return;
+        const stillAvailable = daySlots.some((s) => s.assignedUserId === stylistUserId);
+        if (!stillAvailable) {
+            setStylistUserId(null);
+            setStylist('First Available');
+            setSelectedSlot(null);
+        }
+    }, [useTeamBooking, stylistUserId, selectedDate, daySlots, loadingSlots]);
 
     useEffect(() => {
         if (step === 'stylist' && !needsStylist) {
@@ -778,8 +811,11 @@ export default function CustomerViewPortal({
     const buildIntakeAnswers = () => {
         const answers = {
             ...intakeAnswers,
-            ...(stylistField && needsStylist
-                ? { [stylistField.id]: stylist || stylistOptions[0]?.label || 'First Available' }
+            ...((stylistField && needsStylist) || useTeamBooking
+                ? {
+                      [stylistField?.id || 'practitionerPref']:
+                          stylist || stylistOptions[0]?.label || 'First Available'
+                  }
                 : {})
         };
         if (flowConfig.propertyStep && propertyType) {
@@ -1074,7 +1110,7 @@ export default function CustomerViewPortal({
         try {
             const answers = buildIntakeAnswers();
             const { email: bookEmail, phone: bookPhone } = contactPayload();
-            const useTeamAssign = flowConfig.staffStep === 'team' && teamsEnabled;
+            const useTeamAssign = useTeamBooking;
             const assignedFromSlot =
                 useTeamAssign && !stylistUserId ? selectedSlot.assignedUserId || null : stylistUserId;
             const result = await apiPost(`/api/public/${hostSlug}/${primaryService.slug}/book`, {
@@ -1191,6 +1227,70 @@ export default function CustomerViewPortal({
                         <ArrowRight className="w-4 h-4" />
                     </button>
                 )}
+                {useTeamBooking && step === 'when' && selectedDate ? (
+                    <div className="rounded-xl border border-[#E2E8F0] bg-white p-3 space-y-2">
+                        <div>
+                            <p className="text-xs font-black text-[#0F172A]">Who would you like?</p>
+                            <p className="text-[11px] text-[#64748B] mt-0.5">
+                                Optional — pick someone free today, or leave as anyone.
+                            </p>
+                        </div>
+                        <div className="space-y-1.5">
+                            <button
+                                type="button"
+                                disabled={loadingSlots}
+                                onClick={() => {
+                                    setStylistUserId(null);
+                                    setStylist('First Available');
+                                    setSelectedSlot(null);
+                                    setError('');
+                                }}
+                                className={cn(
+                                    'w-full text-left rounded-lg border px-3 py-2.5 transition disabled:opacity-50',
+                                    !stylistUserId
+                                        ? 'border-[#0F172A] bg-[#F8FAFC]'
+                                        : 'border-[#E2E8F0] hover:border-[var(--brand-primary)]'
+                                )}
+                            >
+                                <span className="block text-sm font-bold text-[#0F172A]">
+                                    Anyone available
+                                </span>
+                                <span className="block text-[11px] text-[#64748B] mt-0.5">
+                                    First free person at your time
+                                </span>
+                            </button>
+                            {availableTeamToday.map((m) => {
+                                const selected = stylistUserId === m.id;
+                                return (
+                                    <button
+                                        key={m.id}
+                                        type="button"
+                                        disabled={loadingSlots}
+                                        onClick={() => {
+                                            setStylistUserId(m.id);
+                                            setStylist(m.displayName);
+                                            setSelectedSlot(null);
+                                            setError('');
+                                        }}
+                                        className={cn(
+                                            'w-full text-left rounded-lg border px-3 py-2.5 transition disabled:opacity-50',
+                                            selected
+                                                ? 'border-[#0F172A] bg-[#F8FAFC]'
+                                                : 'border-[#E2E8F0] hover:border-[var(--brand-primary)]'
+                                        )}
+                                    >
+                                        <span className="block text-sm font-bold text-[#0F172A] uppercase tracking-wide">
+                                            {m.displayName}
+                                        </span>
+                                        <span className="block text-[11px] text-[#64748B] mt-0.5">
+                                            Free this date
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ) : null}
             </div>
         </aside>
     ) : null;
@@ -1913,7 +2013,13 @@ export default function CustomerViewPortal({
                                             <p className="text-sm text-[#64748B] mt-1">
                                                 {cart.length} service{cart.length === 1 ? '' : 's'} ·{' '}
                                                 {formatDuration(cartDuration)}
-                                                {stylist ? ` · ${stylist}` : ''}
+                                                {useTeamBooking
+                                                    ? stylistUserId && stylist
+                                                        ? ` · ${stylist}`
+                                                        : ' · Anyone available'
+                                                    : stylist
+                                                      ? ` · ${stylist === 'First Available' ? 'Anyone available' : stylist}`
+                                                      : ''}
                                             </p>
                                         </div>
 
@@ -2047,6 +2153,12 @@ export default function CustomerViewPortal({
                                                                     onClick={() => {
                                                                         setSelectedDate(d.date);
                                                                         setSelectedSlot(null);
+                                                                        if (useTeamBooking) {
+                                                                            setStylistUserId(null);
+                                                                            setStylist(
+                                                                                'First Available'
+                                                                            );
+                                                                        }
                                                                         if (intakeMode === 'request') {
                                                                             setPreferredAt('');
                                                                         }
@@ -2111,13 +2223,26 @@ export default function CustomerViewPortal({
                                                     {selectedDate &&
                                                         !loadingSlots &&
                                                         hasAvailabilityRules &&
-                                                        daySlots.length === 0 && (
+                                                        displayedDaySlots.length === 0 && (
                                                             <p className="text-sm text-[#64748B] py-8 text-center">
-                                                                No times — try another date.
+                                                                No times — try another date
+                                                                {stylistUserId
+                                                                    ? ' or another person'
+                                                                    : ''}
+                                                                .
+                                                            </p>
+                                                        )}
+                                                    {selectedDate &&
+                                                        !loadingSlots &&
+                                                        displayedDaySlots.length > 0 && (
+                                                            <p className="text-xs font-bold text-[#64748B] mb-2">
+                                                                {stylistUserId
+                                                                    ? `Times with ${stylist}`
+                                                                    : 'Pick a time'}
                                                             </p>
                                                         )}
                                                     <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-                                                        {daySlots.map((slot) => {
+                                                        {displayedDaySlots.map((slot) => {
                                                             const isSelected =
                                                                 intakeMode === 'request'
                                                                     ? preferredAt === slot.startAt
@@ -2376,7 +2501,7 @@ export default function CustomerViewPortal({
                                                     ))}
                                                 </ul>
                                             </div>
-                                            {needsStylist && stylist ? (
+                                            {(needsStylist || useTeamBooking) && stylist ? (
                                                 <p>
                                                     <span className="font-bold text-[#0F172A]">
                                                         {flowConfig.labels.staff}:
