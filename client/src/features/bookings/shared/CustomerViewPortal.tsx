@@ -12,9 +12,11 @@ import {
     Paintbrush,
     Palette,
     Scissors,
+    Search,
     Syringe,
     Trash2,
     User,
+    X,
     type LucideIcon
 } from 'lucide-react';
 import { apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../../shared/utils';
@@ -339,6 +341,7 @@ export default function CustomerViewPortal({
     const [catalogTab, setCatalogTab] = useState<CatalogBrowseTab>(
         () => draft?.catalogTab || 'appointments'
     );
+    const [serviceSearch, setServiceSearch] = useState('');
     const [cart, setCart] = useState<ShellEventType[]>(() => restoredCart);
     const [selectedCatalog, setSelectedCatalog] = useState<ShellMenuItem | null>(() => {
         if (!draft?.selectedCatalog?.id) return null;
@@ -433,6 +436,12 @@ export default function CustomerViewPortal({
         return set;
     }, [cart]);
 
+    const serviceSearchQuery = serviceSearch.trim().toLowerCase();
+    const isServiceSearch = serviceSearchQuery.length > 0;
+
+    const matchesServiceSearch = (parts: Array<string | undefined | null>) =>
+        parts.some((p) => String(p || '').toLowerCase().includes(serviceSearchQuery));
+
     const visibleServices = useMemo(() => {
         if (!flowConfig.categories || activeCategory === 'All') return categorizedEventTypes;
         return categorizedEventTypes.filter((et) => {
@@ -446,6 +455,22 @@ export default function CustomerViewPortal({
         if (activeCategory === 'All') return priceListByCategory;
         return priceListByCategory.filter(([cat]) => cat === activeCategory);
     }, [priceListByCategory, activeCategory]);
+
+    const searchedAppointments = useMemo(() => {
+        if (!isServiceSearch) return [];
+        return categorizedEventTypes.filter((et) =>
+            matchesServiceSearch([et.name, et.category, et.description])
+        );
+    }, [categorizedEventTypes, isServiceSearch, serviceSearchQuery]);
+
+    const searchedTreatments = useMemo(() => {
+        if (!isServiceSearch || !showCatalog) return [];
+        return menuItems.filter((item) =>
+            matchesServiceSearch([item.name, item.category, item.description])
+        );
+    }, [menuItems, showCatalog, isServiceSearch, serviceSearchQuery]);
+
+    const searchResultCount = searchedAppointments.length + searchedTreatments.length;
 
     useEffect(() => {
         if (flowConfig.staffStep !== 'team') {
@@ -1523,7 +1548,33 @@ export default function CustomerViewPortal({
                                     ) : null}
                                 </div>
 
-                                {showCatalog && (
+                                <div className="relative max-w-xl">
+                                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
+                                    <input
+                                        type="search"
+                                        value={serviceSearch}
+                                        onChange={(e) => setServiceSearch(e.target.value)}
+                                        placeholder={
+                                            showCatalog
+                                                ? 'Search treatments or appointments…'
+                                                : 'Search services…'
+                                        }
+                                        className="w-full rounded-xl border border-[#E2E8F0] bg-white py-2.5 pl-10 pr-10 text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:border-[var(--brand-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-primary)]"
+                                        autoComplete="off"
+                                    />
+                                    {isServiceSearch && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setServiceSearch('')}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-[#94A3B8] hover:bg-[#F1F5F9] hover:text-[#0F172A]"
+                                            aria-label="Clear search"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    )}
+                                </div>
+
+                                {!isServiceSearch && showCatalog && (
                                     <div className="flex gap-2 p-1 rounded-xl bg-[#F1F5F9] w-fit">
                                         <button
                                             type="button"
@@ -1558,7 +1609,8 @@ export default function CustomerViewPortal({
                                     </div>
                                 )}
 
-                                {flowConfig.categories &&
+                                {!isServiceSearch &&
+                                    flowConfig.categories &&
                                     !(showCatalog && catalogTab === 'treatments'
                                         ? treatmentCategories.length === 0
                                         : categories.length === 0) && (
@@ -1622,9 +1674,186 @@ export default function CustomerViewPortal({
                                     </div>
                                 )}
 
-                                {showCatalog && catalogTab === 'treatments'
-                                    ? renderTreatmentList()
-                                    : renderServiceList(visibleServices)}
+                                {isServiceSearch ? (
+                                    <div className="space-y-3">
+                                        <p className="text-xs font-semibold text-[#64748B]">
+                                            {searchResultCount === 0
+                                                ? `No matches for “${serviceSearch.trim()}”`
+                                                : `${searchResultCount} result${searchResultCount === 1 ? '' : 's'} across ${showCatalog ? 'appointments & treatments' : 'services'}`}
+                                        </p>
+                                        {searchResultCount === 0 ? (
+                                            <div className="rounded-2xl border border-[#E2E8F0] bg-white px-6 py-12 text-center shadow-sm">
+                                                <p className="text-sm text-[#64748B]">
+                                                    Try another word, or{' '}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setServiceSearch('')}
+                                                        className="font-bold underline-offset-2 hover:underline"
+                                                        style={{ color: 'var(--brand-primary)' }}
+                                                    >
+                                                        clear search
+                                                    </button>
+                                                    .
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <div className="rounded-2xl border border-[#E2E8F0] bg-white overflow-hidden shadow-sm">
+                                                <ul className="divide-y divide-[#F1F5F9]">
+                                                    {searchedAppointments.map((et) => {
+                                                        const inCart =
+                                                            !selectedCatalog &&
+                                                            cart.some((s) => s.slug === et.slug);
+                                                        const price =
+                                                            Number(et.totalCents ?? et.depositCents) ||
+                                                            0;
+                                                        return (
+                                                            <li
+                                                                key={`appt-${et.slug}`}
+                                                                className="px-5 py-5 sm:px-6"
+                                                            >
+                                                                <div className="flex items-start justify-between gap-6">
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className="text-[10px] font-bold uppercase tracking-wide text-[#94A3B8]">
+                                                                            {showCatalog
+                                                                                ? 'Appointment'
+                                                                                : et.category ||
+                                                                                  'Service'}
+                                                                        </p>
+                                                                        <p className="text-base font-bold text-[#0F172A]">
+                                                                            {et.name}
+                                                                        </p>
+                                                                        <p className="mt-1.5 text-sm text-[#64748B]">
+                                                                            {formatDuration(
+                                                                                et.durationMinutes
+                                                                            )}
+                                                                            {et.description
+                                                                                ? ` · ${et.description}`
+                                                                                : ''}
+                                                                        </p>
+                                                                    </div>
+                                                                    <div className="flex shrink-0 flex-col items-end gap-2.5">
+                                                                        <p className="text-base font-black text-[#0F172A]">
+                                                                            {price > 0
+                                                                                ? formatCents(price)
+                                                                                : 'Free'}
+                                                                        </p>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() =>
+                                                                                toggleService(et)
+                                                                            }
+                                                                            className={cn(
+                                                                                'min-w-[96px] rounded-lg border px-4 py-2 text-sm font-bold transition',
+                                                                                inCart
+                                                                                    ? 'border-transparent'
+                                                                                    : 'bg-white'
+                                                                            )}
+                                                                            style={
+                                                                                inCart
+                                                                                    ? {
+                                                                                          background:
+                                                                                              'var(--brand-primary)',
+                                                                                          color: brand.brandPrimaryForeground
+                                                                                      }
+                                                                                    : {
+                                                                                          borderColor:
+                                                                                              'var(--brand-primary)',
+                                                                                          color: 'var(--brand-primary)'
+                                                                                      }
+                                                                            }
+                                                                        >
+                                                                            {inCart
+                                                                                ? 'Selected'
+                                                                                : 'Select'}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </li>
+                                                        );
+                                                    })}
+                                                    {searchedTreatments.map((item) => {
+                                                        const inCart =
+                                                            selectedCatalog?.id === item.id;
+                                                        const price = Number(item.priceCents) || 0;
+                                                        const cat =
+                                                            String(item.category || '').trim() ||
+                                                            'Treatments';
+                                                        return (
+                                                            <li
+                                                                key={`tx-${item.id}`}
+                                                                className="px-5 py-5 sm:px-6"
+                                                            >
+                                                                <div className="flex items-start justify-between gap-6">
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className="text-[10px] font-bold uppercase tracking-wide text-[#94A3B8]">
+                                                                            Treatment · {cat}
+                                                                        </p>
+                                                                        <p className="text-base font-bold text-[#0F172A]">
+                                                                            {item.name}
+                                                                        </p>
+                                                                        {item.description ? (
+                                                                            <p className="mt-1.5 text-sm text-[#64748B] leading-relaxed max-w-2xl">
+                                                                                {item.description}
+                                                                            </p>
+                                                                        ) : null}
+                                                                    </div>
+                                                                    <div className="flex shrink-0 flex-col items-end gap-2.5">
+                                                                        <p className="text-base font-black text-[#0F172A]">
+                                                                            {price > 0
+                                                                                ? formatCents(price)
+                                                                                : 'Free'}
+                                                                        </p>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                if (inCart) {
+                                                                                    removeFromCart(
+                                                                                        slotEventSlug
+                                                                                    );
+                                                                                } else {
+                                                                                    selectTreatment(
+                                                                                        item
+                                                                                    );
+                                                                                }
+                                                                            }}
+                                                                            className={cn(
+                                                                                'min-w-[96px] rounded-lg border px-4 py-2 text-sm font-bold transition',
+                                                                                inCart
+                                                                                    ? 'border-transparent'
+                                                                                    : 'bg-white'
+                                                                            )}
+                                                                            style={
+                                                                                inCart
+                                                                                    ? {
+                                                                                          background:
+                                                                                              'var(--brand-primary)',
+                                                                                          color: brand.brandPrimaryForeground
+                                                                                      }
+                                                                                    : {
+                                                                                          borderColor:
+                                                                                              'var(--brand-primary)',
+                                                                                          color: 'var(--brand-primary)'
+                                                                                      }
+                                                                            }
+                                                                        >
+                                                                            {inCart
+                                                                                ? 'Selected'
+                                                                                : 'Select'}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </li>
+                                                        );
+                                                    })}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : showCatalog && catalogTab === 'treatments' ? (
+                                    renderTreatmentList()
+                                ) : (
+                                    renderServiceList(visibleServices)
+                                )}
                             </div>
                         )}
 
