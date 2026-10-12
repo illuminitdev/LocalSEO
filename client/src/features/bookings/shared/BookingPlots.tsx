@@ -55,7 +55,8 @@ function intakeAnswersList(raw: unknown): { key: string; label: string; value: s
         propertyType: 'Property',
         propertyOther: 'Other property',
         fuseboxType: 'Consumer Unit / Fusebox',
-        propertySize: 'Property Size'
+        propertySize: 'Property Size',
+        preferredTimeNote: 'Preferred time note'
     };
     return Object.entries(raw as Record<string, unknown>)
         .map(([key, value]) => ({

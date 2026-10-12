@@ -366,6 +366,7 @@ export default function CustomerViewPortal({
         () => draft?.intakeMode || 'instant'
     );
     const [preferredAt, setPreferredAt] = useState(() => String(draft?.preferredAt || ''));
+    const [requestNote, setRequestNote] = useState(() => String(draft?.requestNote || ''));
     const [month, setMonth] = useState(() => {
         if (draft?.month?.year != null && draft?.month?.month != null) {
             return { year: draft.month.year, month: draft.month.month };
@@ -389,6 +390,8 @@ export default function CustomerViewPortal({
     const [loadingSlots, setLoadingSlots] = useState(false);
     const [maxDaysAhead, setMaxDaysAhead] = useState(60);
     const [hasAvailabilityRules, setHasAvailabilityRules] = useState(false);
+    const [availableDates, setAvailableDates] = useState<Set<string>>(() => new Set());
+    const [monthAvailabilityLoaded, setMonthAvailabilityLoaded] = useState(false);
     const [paymentsMode, setPaymentsMode] = useState<'stripe' | 'simulated'>('stripe');
     const [stripePaymentsReady, setStripePaymentsReady] = useState(true);
     const [customerName, setCustomerName] = useState(() => String(draft?.customerName || ''));
@@ -490,6 +493,7 @@ export default function CustomerViewPortal({
             intakeAnswers,
             intakeMode,
             preferredAt,
+            requestNote,
             selectedDate,
             selectedSlot,
             customerName,
@@ -515,6 +519,7 @@ export default function CustomerViewPortal({
         intakeAnswers,
         intakeMode,
         preferredAt,
+        requestNote,
         selectedDate,
         selectedSlot,
         customerName,
@@ -540,14 +545,9 @@ export default function CustomerViewPortal({
     }, [hostSlug, primaryService?.slug]);
 
     useEffect(() => {
-        if (
-            intakeMode !== 'instant' ||
-            !primaryService?.slug ||
-            !selectedDate ||
-            !cart.length
-        ) {
+        if (!primaryService?.slug || !selectedDate || !cart.length) {
             setDaySlots([]);
-            setHasAvailabilityRules(false);
+            if (intakeMode === 'instant') setHasAvailabilityRules(false);
             return;
         }
         setLoadingSlots(true);
@@ -568,10 +568,12 @@ export default function CustomerViewPortal({
             .catch((e: any) => {
                 setDaySlots([]);
                 setHasAvailabilityRules(false);
-                setError(e?.message || 'Could not load available times.');
+                if (intakeMode === 'instant') {
+                    setError(e?.message || 'Could not load available times.');
+                }
             })
             .finally(() => setLoadingSlots(false));
-        setSelectedSlot(null);
+        if (intakeMode === 'instant') setSelectedSlot(null);
     }, [
         hostSlug,
         primaryService?.slug,
@@ -584,6 +586,69 @@ export default function CustomerViewPortal({
         intakeMode,
         flowConfig.staffStep
     ]);
+
+    // Month-range availability for closed / holiday day highlighting on the calendar.
+    useEffect(() => {
+        if (!primaryService?.slug || !cart.length) {
+            setAvailableDates(new Set());
+            setMonthAvailabilityLoaded(false);
+            return;
+        }
+        const from = `${month.year}-${String(month.month + 1).padStart(2, '0')}-01`;
+        const lastDay = new Date(month.year, month.month + 1, 0).getDate();
+        const to = `${month.year}-${String(month.month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        const qs = new URLSearchParams({ from, to });
+        qs.set('serviceSlugs', cart.map((s) => s.slug).join(','));
+        if (cartDuration > 0) qs.set('durationMinutes', String(cartDuration));
+        if (flowConfig.staffStep === 'team' && teamsEnabled) {
+            if (stylistUserId) qs.set('userId', stylistUserId);
+            else qs.set('firstAvailable', 'true');
+        }
+        let cancelled = false;
+        setMonthAvailabilityLoaded(false);
+        apiGet(`/api/public/${hostSlug}/${primaryService.slug}/availability?${qs.toString()}`)
+            .then((data) => {
+                if (cancelled) return;
+                setAvailableDates(new Set((data.availableDates || []).map(String)));
+                setHasAvailabilityRules(Boolean(data.hasAvailabilityRules));
+                if (data.maxDaysAhead) setMaxDaysAhead(data.maxDaysAhead);
+                setMonthAvailabilityLoaded(true);
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setAvailableDates(new Set());
+                setMonthAvailabilityLoaded(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        hostSlug,
+        primaryService?.slug,
+        month.year,
+        month.month,
+        teamsEnabled,
+        stylistUserId,
+        cartSlugsKey,
+        cartDuration,
+        cart.length,
+        intakeMode,
+        flowConfig.staffStep
+    ]);
+
+    useEffect(() => {
+        if (
+            !selectedDate ||
+            !monthAvailabilityLoaded ||
+            !hasAvailabilityRules ||
+            availableDates.has(selectedDate)
+        ) {
+            return;
+        }
+        setSelectedDate('');
+        setSelectedSlot(null);
+        setDaySlots([]);
+    }, [selectedDate, monthAvailabilityLoaded, hasAvailabilityRules, availableDates]);
 
     const stylistOptions = useMemo(() => {
         if (flowConfig.staffStep === 'team' && teamsEnabled && teamMembers.length) {
@@ -701,6 +766,9 @@ export default function CustomerViewPortal({
         if (selectedCatalog) {
             answers.catalogItemId = selectedCatalog.id;
             answers.catalogLabel = catalogLabel(selectedCatalog);
+        }
+        if (intakeMode === 'request' && requestNote.trim()) {
+            answers.preferredTimeNote = requestNote.trim();
         }
         return answers;
     };
@@ -1075,6 +1143,15 @@ export default function CustomerViewPortal({
                         style={{ color: 'var(--brand-primary)' }}
                     >
                         + Add or change services
+                    </button>
+                )}
+                {step !== 'services' && step !== 'property' && (
+                    <button
+                        type="button"
+                        onClick={goBack}
+                        className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm font-bold text-[#0F172A] hover:border-[var(--brand-primary)] transition"
+                    >
+                        <ArrowLeft className="w-4 h-4" /> Back
                     </button>
                 )}
                 {stickyCta && (
@@ -1557,9 +1634,9 @@ export default function CustomerViewPortal({
                                 <button
                                     type="button"
                                     onClick={goBack}
-                                    className="inline-flex items-center gap-1 text-xs font-bold text-[#64748B]"
+                                    className="inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-xs font-bold text-[#0F172A] hover:border-[var(--brand-primary)] hover:bg-white transition"
                                 >
-                                    <ArrowLeft className="w-3.5 h-3.5" /> Back
+                                    <ArrowLeft className="w-3.5 h-3.5" /> Back to previous step
                                 </button>
 
                                 {step === 'stylist' && needsStylist && (
@@ -1617,6 +1694,7 @@ export default function CustomerViewPortal({
                                                     type="button"
                                                     onClick={() => {
                                                         setIntakeMode('instant');
+                                                        setPreferredAt('');
                                                         setError('');
                                                     }}
                                                     className={cn(
@@ -1633,6 +1711,7 @@ export default function CustomerViewPortal({
                                                     onClick={() => {
                                                         setIntakeMode('request');
                                                         setSelectedSlot(null);
+                                                        setPreferredAt('');
                                                         setError('');
                                                     }}
                                                     className={cn(
@@ -1647,28 +1726,14 @@ export default function CustomerViewPortal({
                                             </div>
                                         )}
 
-                                        {flowConfig.requestMode && intakeMode === 'request' ? (
-                                            <label className="block max-w-md">
-                                                <span className="text-xs font-bold text-[#64748B]">
-                                                    Preferred date & time *
-                                                </span>
-                                                <input
-                                                    type="datetime-local"
-                                                    value={preferredAt}
-                                                    onChange={(e) => {
-                                                        setPreferredAt(e.target.value);
-                                                        setError('');
-                                                    }}
-                                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
-                                                />
-                                            </label>
-                                        ) : (
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <div className="rounded-2xl border border-[#E2E8F0] bg-[#FAFBFC] p-4 shadow-sm">
                                                     <div className="flex items-center justify-between mb-3">
                                                         <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
                                                             <Calendar className="w-4 h-4 text-[var(--brand-primary)]" />{' '}
-                                                            Pick a date
+                                                            {intakeMode === 'request'
+                                                                ? 'Preferred date'
+                                                                : 'Pick a date'}
                                                         </h3>
                                                         <div className="flex gap-1">
                                                             <button
@@ -1733,11 +1798,18 @@ export default function CustomerViewPortal({
                                                             if (!d.inMonth || !d.date) {
                                                                 return <div key={`pad-${i}`} />;
                                                             }
-                                                            const selectable =
+                                                            const inWindow =
                                                                 isDateSelectable(
                                                                     d.date,
                                                                     maxDaysAhead
                                                                 ) && d.date >= todayStr();
+                                                            const isClosedDay =
+                                                                monthAvailabilityLoaded &&
+                                                                hasAvailabilityRules &&
+                                                                inWindow &&
+                                                                !availableDates.has(d.date);
+                                                            const selectable =
+                                                                inWindow && !isClosedDay;
                                                             return (
                                                                 <button
                                                                     key={d.date}
@@ -1746,14 +1818,20 @@ export default function CustomerViewPortal({
                                                                     onClick={() => {
                                                                         setSelectedDate(d.date);
                                                                         setSelectedSlot(null);
+                                                                        if (intakeMode === 'request') {
+                                                                            setPreferredAt('');
+                                                                        }
                                                                         setError('');
                                                                     }}
                                                                     className={cn(
                                                                         'aspect-square rounded-lg text-sm font-bold transition',
                                                                         selectable
                                                                             ? 'hover:bg-[var(--brand-secondary)] hover:text-white border border-[#E2E8F0] bg-white'
-                                                                            : 'text-[#CBD5E1] cursor-not-allowed',
+                                                                            : isClosedDay
+                                                                              ? 'text-red-500 cursor-not-allowed'
+                                                                              : 'text-[#CBD5E1] cursor-not-allowed',
                                                                         selectedDate === d.date &&
+                                                                            selectable &&
                                                                             'bg-[var(--brand-secondary)] text-white border-[var(--brand-secondary)]'
                                                                     )}
                                                                 >
@@ -1777,7 +1855,9 @@ export default function CustomerViewPortal({
                                                             : 'Select a date'}
                                                     </h3>
                                                     <p className="text-[11px] font-semibold text-[#64748B] mb-3">
-                                                        Times in UK
+                                                        {intakeMode === 'request'
+                                                            ? 'Preferred times in UK'
+                                                            : 'Times in UK'}
                                                         {host.serviceArea
                                                             ? ` · ${host.serviceArea}`
                                                             : ''}
@@ -1808,28 +1888,62 @@ export default function CustomerViewPortal({
                                                             </p>
                                                         )}
                                                     <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-                                                        {daySlots.map((slot) => (
-                                                            <button
-                                                                key={slot.startAt}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setSelectedSlot(slot);
-                                                                    setError('');
-                                                                }}
-                                                                className={cn(
-                                                                    'py-2.5 rounded-xl border text-sm font-bold transition',
-                                                                    selectedSlot?.startAt ===
-                                                                        slot.startAt
-                                                                        ? 'bg-[var(--brand-secondary)] text-white border-[var(--brand-secondary)]'
-                                                                        : 'border-[#E2E8F0] hover:border-[var(--brand-primary)]'
-                                                                )}
-                                                            >
-                                                                {formatSlotTime(slot, businessTimezone)}
-                                                            </button>
-                                                        ))}
+                                                        {daySlots.map((slot) => {
+                                                            const isSelected =
+                                                                intakeMode === 'request'
+                                                                    ? preferredAt === slot.startAt
+                                                                    : selectedSlot?.startAt ===
+                                                                      slot.startAt;
+                                                            return (
+                                                                <button
+                                                                    key={slot.startAt}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        if (
+                                                                            intakeMode === 'request'
+                                                                        ) {
+                                                                            setPreferredAt(
+                                                                                slot.startAt
+                                                                            );
+                                                                            setSelectedSlot(null);
+                                                                        } else {
+                                                                            setSelectedSlot(slot);
+                                                                        }
+                                                                        setError('');
+                                                                    }}
+                                                                    className={cn(
+                                                                        'py-2.5 rounded-xl border text-sm font-bold transition',
+                                                                        isSelected
+                                                                            ? 'bg-[var(--brand-secondary)] text-white border-[var(--brand-secondary)]'
+                                                                            : 'border-[#E2E8F0] hover:border-[var(--brand-primary)]'
+                                                                    )}
+                                                                >
+                                                                    {formatSlotTime(
+                                                                        slot,
+                                                                        businessTimezone
+                                                                    )}
+                                                                </button>
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
                                             </div>
+                                        {intakeMode === 'request' && (
+                                            <label className="block">
+                                                <span className="text-xs font-bold text-[#64748B]">
+                                                    Note about preferred date & time (optional)
+                                                </span>
+                                                <textarea
+                                                    value={requestNote}
+                                                    onChange={(e) => {
+                                                        setRequestNote(e.target.value);
+                                                        setError('');
+                                                    }}
+                                                    placeholder="e.g. Mornings work best, or I can do Tue/Thu after 2pm if this slot is full"
+                                                    rows={3}
+                                                    className="mt-1 w-full max-w-2xl rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
+                                                />
+                                            </label>
                                         )}
                                     </div>
                                 )}
@@ -1960,7 +2074,7 @@ export default function CustomerViewPortal({
                                                     className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
                                                 />
                                             </label>
-                                            {mediaUploadsEnabled && (
+                                            {mediaUploadsEnabled && industryId !== 'dentists' && (
                                                 <label className="block">
                                                     <span className="text-xs font-bold text-[#64748B]">
                                                         {industry.uploadPrompt || 'Inspiration photo'}
@@ -2072,19 +2186,29 @@ export default function CustomerViewPortal({
                                                 {cartDeposit > 0 ? formatCents(cartDeposit) : '£0'}
                                             </p>
                                         </div>
-                                        <button
-                                            type="button"
-                                            disabled={submitting}
-                                            onClick={submit}
-                                            className="w-full max-w-lg rounded-xl px-4 py-3.5 text-sm font-black disabled:opacity-50 bg-[var(--brand-primary)]"
-                                            style={{ color: brand.brandPrimaryForeground }}
-                                        >
-                                            {submitting
-                                                ? 'Processing…'
-                                                : cartDeposit > 0
-                                                  ? `Pay ${formatCents(cartDeposit)} deposit`
-                                                  : 'Confirm appointment'}
-                                        </button>
+                                        <div className="flex flex-col sm:flex-row gap-2 max-w-lg">
+                                            <button
+                                                type="button"
+                                                onClick={goBack}
+                                                disabled={submitting}
+                                                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-4 py-3.5 text-sm font-bold text-[#0F172A] hover:border-[var(--brand-primary)] transition disabled:opacity-50"
+                                            >
+                                                <ArrowLeft className="w-4 h-4" /> Back
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={submitting}
+                                                onClick={submit}
+                                                className="w-full flex-1 rounded-xl px-4 py-3.5 text-sm font-black disabled:opacity-50 bg-[var(--brand-primary)]"
+                                                style={{ color: brand.brandPrimaryForeground }}
+                                            >
+                                                {submitting
+                                                    ? 'Processing…'
+                                                    : cartDeposit > 0
+                                                      ? `Pay ${formatCents(cartDeposit)} deposit`
+                                                      : 'Confirm appointment'}
+                                            </button>
+                                        </div>
                                         <p className="text-[11px] text-[#94A3B8] max-w-lg">
                                             {paymentsMode === 'stripe' && stripePaymentsReady
                                                 ? 'You will be redirected to Stripe Checkout to pay securely.'

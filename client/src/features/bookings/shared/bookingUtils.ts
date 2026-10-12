@@ -124,6 +124,8 @@ export type PublicBookingDraft = {
     intakeAnswers?: Record<string, string>;
     intakeMode?: 'instant' | 'request';
     preferredAt?: string;
+    /** Optional note about preferred request date/time */
+    requestNote?: string;
     selectedDate?: string;
     selectedSlot?: { startAt: string; endAt: string; date: string; label: string; assignedUserId?: string | null } | null;
     customerName?: string;
