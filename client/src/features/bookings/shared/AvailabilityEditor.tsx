@@ -168,20 +168,20 @@ function replaceDowWindows(
     applied: { dayOfWeek: number; startTime: string; endTime: string; enabled: boolean }[],
     dow: number,
     windows: TimeWindow[]
-) {
+): { dayOfWeek: number; startTime: string; endTime: string; enabled: boolean }[] {
     const kept = applied
         .filter((r) => r.dayOfWeek !== dow)
         .map((r) => ({
             dayOfWeek: r.dayOfWeek,
             startTime: r.startTime,
             endTime: r.endTime,
-            enabled: true as const
+            enabled: true
         }));
     const added = windows.map((w) => ({
         dayOfWeek: dow,
         startTime: w.startTime,
         endTime: w.endTime,
-        enabled: true as const
+        enabled: true
     }));
     return [...kept, ...added].sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startTime.localeCompare(b.startTime));
 }
@@ -593,13 +593,18 @@ export default function AvailabilityEditor({
                 const nextClosed = new Set(closedDates);
                 nextClosed.delete(selectedDate);
 
-                const weeklyRules =
+                const weeklyRules: {
+                    dayOfWeek: number;
+                    startTime: string;
+                    endTime: string;
+                    enabled: boolean;
+                }[] =
                     appliedWeekly.length > 0
                         ? appliedWeekly.map((r) => ({
                               dayOfWeek: r.dayOfWeek,
                               startTime: r.startTime,
                               endTime: r.endTime,
-                              enabled: true as const
+                              enabled: true
                           }))
                         : windowsToWeeklyRules(selectedDays, windows);
 
@@ -612,7 +617,12 @@ export default function AvailabilityEditor({
                 setClosedDates(nextClosed);
                 if (!appliedWeekly.length) setAppliedWeekly(weeklyRules);
             } else {
-                let weeklyRules = replaceDowWindows(appliedWeekly, dow, windows);
+                let weeklyRules: {
+                    dayOfWeek: number;
+                    startTime: string;
+                    endTime: string;
+                    enabled: boolean;
+                }[] = replaceDowWindows(appliedWeekly, dow, windows);
                 if (!appliedWeekly.length) {
                     const days = new Set(selectedDays);
                     days.add(dow);
