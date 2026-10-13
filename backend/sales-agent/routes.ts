@@ -1000,6 +1000,7 @@ router.get('/leads/:id/crm', async (req: Request, res: Response) => {
             lead.address = s.address || lead.address;
             lead.industry = s.industry || lead.industry;
             lead.notes = s.notes || lead.notes;
+            (lead as any).salesNotes = s.notes || (lead as any).salesNotes || '';
             lead.status = s.status || lead.status;
             lead.gbpObservation = s.gbp_observation || lead.gbpObservation || '';
             lead.aiVisibilityObservation =
@@ -1706,6 +1707,7 @@ router.post('/leads', async (req: Request, res: Response) => {
 function normalizeSpreadsheetStatus(rawStatus: any): string {
     const s = String(rawStatus || '').toLowerCase().trim().replace(/[-_]/g, ' ');
     if (!s) return 'new';
+    if (s.includes('not contacted') || s.includes('uncontacted') || s.includes('never contacted') || s.includes('yet to contact') || s.includes('to be contacted') || s.includes('to contact')) return 'new';
     if (s.includes('convert') || s.includes('won') || s.includes('closed') || s.includes('customer') || s.includes('paid')) return 'converted';
     if (s.includes('not interested') || s.includes('lost') || s.includes('rejected') || s.includes('declined') || s.includes('dnc') || s.includes('cold') || s.includes('wrong number')) return 'not_interested';
     if (s.includes('callback') || s.includes('call back') || s.includes('follow') || s.includes('call later')) return 'callback';
@@ -2080,9 +2082,12 @@ router.post('/leads/:id/calls', async (req: Request, res: Response) => {
 
 router.patch('/leads/:id', async (req: Request, res: Response) => {
     try {
-        const patch: { status?: string; notes?: string; nextFollowUpAt?: string | null } = {};
+        const patch: { status?: string; notes?: string; nextFollowUpAt?: string | null; createdAt?: string } = {};
         if (req.body?.status != null) patch.status = String(req.body.status);
         if (req.body?.notes != null) patch.notes = String(req.body.notes);
+        if (req.body?.createdAt != null || req.body?.activityDate != null) {
+            patch.createdAt = String(req.body.createdAt || req.body.activityDate);
+        }
         if (req.body?.nextFollowUpAt !== undefined) {
             patch.nextFollowUpAt =
                 req.body.nextFollowUpAt == null || req.body.nextFollowUpAt === ''

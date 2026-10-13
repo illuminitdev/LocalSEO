@@ -97,6 +97,7 @@ const CRM_TASK_FILTER_DEFAULTS = {
     agent: 'all',
     type: 'all',
     status: 'all',
+    leadStatus: 'all',
     priority: 'all',
     business: 'all',
     email: 'all' as EmailOpenFilter,
@@ -201,6 +202,7 @@ export default function AdminCrmTasks() {
     const selectedAgent = filters.agent;
     const selectedType = filters.type;
     const selectedStatus = filters.status;
+    const selectedLeadStatus = (filters as any).leadStatus || 'all';
     const selectedPriority = filters.priority;
     const selectedBusiness = filters.business;
     const emailFilter = filters.email as EmailOpenFilter;
@@ -398,6 +400,30 @@ function isLeadAdded(lead: any) {
                 if (t.status !== selectedStatus) return false;
             }
 
+            // 6b. Lead Status
+            if (selectedLeadStatus !== 'all') {
+                const stat = String(t.leadStatus || 'new').toLowerCase().trim().replace(/[-\s]/g, '_');
+                const target = selectedLeadStatus.toLowerCase().trim().replace(/[-\s]/g, '_');
+                if (target === 'new') {
+                    const isNew = stat === 'new' || stat === 'pending' || stat === 'submitted' || !stat;
+                    if (!isNew) return false;
+                } else if (target === 'follow_up' || target === 'callback') {
+                    if (!stat.includes('follow') && !stat.includes('callback')) return false;
+                } else if (target === 'interested') {
+                    if (!stat.includes('interested') || stat.includes('not_interested')) return false;
+                } else if (target === 'not_interested') {
+                    if (!stat.includes('not_interested') && !stat.includes('rejected') && !stat.includes('declined')) return false;
+                } else if (target === 'contacted') {
+                    if (!stat.includes('contacted') && !stat.includes('called') && !stat.includes('connected')) return false;
+                } else if (target === 'converted') {
+                    if (!stat.includes('converted') && !stat.includes('won')) return false;
+                } else if (target === 'completed') {
+                    if (!stat.includes('complete') && !stat.includes('done')) return false;
+                } else if (stat !== target && !stat.includes(target)) {
+                    return false;
+                }
+            }
+
             // 7. Email Status
             if (!matchesEmailFilter(t, emailFilter)) return false;
 
@@ -423,6 +449,7 @@ function isLeadAdded(lead: any) {
         excelBatchFilter,
         selectedType,
         selectedStatus,
+        selectedLeadStatus,
         emailFilter,
         statusDateFilter,
         statusCustomDate,
@@ -514,6 +541,35 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
     const pendingCount = filteredTasks.filter((t) => t.status !== 'completed').length;
     const completedCount = filteredTasks.filter((t) => t.status === 'completed').length;
 
+    const newLeadsCount = useMemo(() => tasks.filter((t) => {
+        const s = String(t.leadStatus || 'new').toLowerCase().trim();
+        return s === 'new' || s === 'pending' || s === 'submitted' || !s;
+    }).length, [tasks]);
+
+    const contactedCount = useMemo(() => tasks.filter((t) =>
+        String(t.leadStatus || '').toLowerCase().includes('contacted')
+    ).length, [tasks]);
+
+    const followUpCount = useMemo(() => tasks.filter((t) => {
+        const s = String(t.leadStatus || '').toLowerCase();
+        return s.includes('follow') || s.includes('callback');
+    }).length, [tasks]);
+
+    const interestedCount = useMemo(() => tasks.filter((t) => {
+        const s = String(t.leadStatus || '').toLowerCase();
+        return s.includes('interested') && !s.includes('not_interested');
+    }).length, [tasks]);
+
+    const convertedCount = useMemo(() => tasks.filter((t) => {
+        const s = String(t.leadStatus || '').toLowerCase();
+        return s.includes('converted') || s.includes('won');
+    }).length, [tasks]);
+
+    const notInterestedCount = useMemo(() => tasks.filter((t) => {
+        const s = String(t.leadStatus || '').toLowerCase();
+        return s.includes('not_interested') || s.includes('rejected') || s.includes('declined');
+    }).length, [tasks]);
+
     const selectedTypeOption = TASK_TYPE_OPTIONS.find((o) => o.value === selectedType) || TASK_TYPE_OPTIONS[0];
     const SelectedTypeIcon = selectedTypeOption.icon;
 
@@ -595,7 +651,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                     </button>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 pt-2 border-t border-slate-100">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2.5 pt-2 border-t border-slate-100">
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Business Category
@@ -658,6 +714,26 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                                     </option>
                                 );
                             })}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                            Lead Status
+                        </label>
+                        <select
+                            value={selectedLeadStatus}
+                            onChange={(e) => setFilter('leadStatus', e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500 font-medium"
+                            title="Filter by CRM lead status"
+                        >
+                            <option value="all">All Lead Statuses ({tasks.length})</option>
+                            <option value="new">New ({newLeadsCount})</option>
+                            <option value="contacted">Contacted ({contactedCount})</option>
+                            <option value="follow_up">Follow Up ({followUpCount})</option>
+                            <option value="interested">Interested ({interestedCount})</option>
+                            <option value="converted">Converted ({convertedCount})</option>
+                            <option value="not_interested">Not Interested ({notInterestedCount})</option>
                         </select>
                     </div>
 
@@ -1044,9 +1120,10 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                     leadId={selectedStatusTask.leadId}
                     leadName={selectedStatusTask.leadBusinessName || getLeadName(selectedStatusTask.leadId, selectedStatusTask)}
                     currentStatus={selectedStatusTask.leadStatus || 'new'}
-                    initialNote={selectedStatusTask.notes}
+                    initialNote={undefined}
                     initialDate={selectedStatusTask.updatedAt || selectedStatusTask.createdAt}
                     authorName={selectedStatusTask.assignedToName || undefined}
+                    defaultTab="task_status"
                     onClose={() => setSelectedStatusTask(null)}
                     onStatusUpdated={async () => {
                         await loadData();
