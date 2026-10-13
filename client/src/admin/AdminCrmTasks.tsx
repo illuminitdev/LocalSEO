@@ -395,12 +395,7 @@ function isLeadAdded(lead: any) {
                 if (t.taskType !== selectedType) return false;
             }
 
-            // 6. Task Status
-            if (selectedStatus !== 'all') {
-                if (t.status !== selectedStatus) return false;
-            }
-
-            // 6b. Lead Status
+            // 6. Lead Status
             if (selectedLeadStatus !== 'all') {
                 const stat = String(t.leadStatus || 'new').toLowerCase().trim().replace(/[-\s]/g, '_');
                 const target = selectedLeadStatus.toLowerCase().trim().replace(/[-\s]/g, '_');
@@ -651,7 +646,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                     </button>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2.5 pt-2 border-t border-slate-100">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-8 gap-2.5 pt-2 border-t border-slate-100">
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Business Category
@@ -779,22 +774,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         )}
                     </div>
 
-                    <div>
-                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                            Task Status
-                        </label>
-                        <select
-                            value={selectedStatus}
-                            onChange={(e) => setFilter('status', e.target.value)}
-                            className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
-                        >
-                            <option value="all">All Statuses</option>
-                            <option value="pending">Pending</option>
-                            <option value="in_progress">In Progress</option>
-                            <option value="completed">Completed</option>
-                            <option value="cancelled">Cancelled</option>
-                        </select>
-                    </div>
+
 
                     <div>
                         <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-1">
@@ -1123,7 +1103,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                     initialNote={undefined}
                     initialDate={selectedStatusTask.updatedAt || selectedStatusTask.createdAt}
                     authorName={selectedStatusTask.assignedToName || undefined}
-                    defaultTab="task_status"
+                    defaultTab="lead_status"
                     onClose={() => setSelectedStatusTask(null)}
                     onStatusUpdated={async () => {
                         await loadData();
