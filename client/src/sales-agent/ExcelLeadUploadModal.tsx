@@ -393,6 +393,15 @@ function parseWorkbookSheet(
             const sLower = raw.toLowerCase().trim().replace(/[-_]/g, ' ');
             if (!sLower) return 'new';
             if (
+                sLower.includes('not contacted') ||
+                sLower.includes('uncontacted') ||
+                sLower.includes('never contacted') ||
+                sLower.includes('yet to contact') ||
+                sLower.includes('to be contacted') ||
+                sLower.includes('to contact')
+            )
+                return 'new';
+            if (
                 sLower.includes('convert') ||
                 sLower.includes('won') ||
                 sLower.includes('closed') ||

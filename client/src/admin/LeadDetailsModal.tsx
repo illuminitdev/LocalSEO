@@ -56,9 +56,19 @@ export default function LeadDetailsModal({
     const oppLevel = String(lead.opportunityLevel || '').toLowerCase();
     const conclusion = lead.notes || (lead as any).conclusion || (lead as any).auditConclusion || '';
 
-    const latestNote = (lead as any).salesNotes || (lead as any).latestActivity?.note || '';
+    const rawNote = String((lead as any).salesNotes || (lead as any).latestActivity?.note || '').trim();
+    const actType = (lead as any).latestActivity?.activityType || (lead as any).latestActivity?.activity_type;
+    const isTaskOrAssigned = actType === 'task_event' ||
+        rawNote.toLowerCase().includes('task') ||
+        rawNote.toLowerCase().includes('assigned') ||
+        rawNote.toLowerCase().includes('unassigned') ||
+        rawNote.toLowerCase().startsWith('status updated to') ||
+        rawNote.toLowerCase().startsWith('status changed to') ||
+        rawNote.toLowerCase().startsWith('lead status set to') ||
+        rawNote.toLowerCase().startsWith('lead imported');
+    const latestNote = isTaskOrAssigned ? '' : rawNote;
     const statusDate = formatDetailTimestamp((lead as any).latestActivity?.createdAt || (lead as any).updatedAt);
-    const authorName = (lead as any).latestActivity?.authorName || (lead as any).assignedAgentName || '';
+    const authorName = latestNote ? ((lead as any).latestActivity?.authorName || (lead as any).assignedAgentName || '') : '';
 
     return (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
@@ -199,7 +209,7 @@ export default function LeadDetailsModal({
                                         <Clock className="w-3.5 h-3.5" />
                                     </div>
                                     <span className="font-bold text-amber-950 uppercase tracking-wider text-[11px]">
-                                        Current Status & Telecaller Remark
+                                        Current Status & Sales Notes
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2">
