@@ -464,32 +464,33 @@ export default function AdminLeadDetail() {
                 {(hasSheetStatuses || showCrmPill || activeNote) && (
                     <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-300/80 text-xs text-amber-950 space-y-2.5 shadow-2xs">
                         <div className="flex items-center justify-between flex-wrap gap-2">
-                            <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center font-bold">
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <div className="w-6 h-6 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center font-bold shrink-0">
                                     <Clock className="w-3.5 h-3.5" />
                                 </div>
                                 <span className="font-bold text-amber-950 uppercase tracking-wider text-[11px]">
                                     Current Status & Sales Notes
                                 </span>
-                            </div>
-                            <div className="flex items-center gap-2">
                                 {showCrmPill && (
                                     <button
                                         type="button"
                                         onClick={() => setShowLeadHistoryModal(true)}
                                         className={cn(
-                                            'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border shadow-2xs cursor-pointer hover:scale-105 transition-all group/badge',
+                                            'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border shadow-2xs cursor-pointer hover:scale-105 transition-all group/badge shrink-0',
                                             crmStatus.includes('convert')
                                                 ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
                                                 : crmStatus.includes('progress')
                                                   ? 'bg-amber-100 text-amber-900 border-amber-300'
                                                   : 'bg-white text-slate-800 border-slate-300'
                                         )}
+                                        title="Click to view full lead status history timeline"
                                     >
                                         <span>{crmStatus.replace(/_/g, ' ')}</span>
                                         <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100" />
                                     </button>
                                 )}
+                            </div>
+                            <div className="flex items-center gap-2 ml-auto">
                                 {activeDate && (
                                     <span className="text-[11px] text-slate-600 font-medium flex items-center gap-1">
                                         <Calendar className="w-3 h-3 text-slate-400" />

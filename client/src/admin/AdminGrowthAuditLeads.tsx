@@ -1272,7 +1272,7 @@ export default function AdminGrowthAuditLeads() {
                                                      key={lead.id}
                                                      onClick={(e) => {
                                                          if ((e.target as HTMLElement).closest('a, button, input')) return;
-                                                         setViewingLeadDetails(lead);
+                                                         openLeadProfile(lead.id);
                                                      }}
                                                      className={cn(
                                                          "group cursor-pointer transition-colors",
@@ -1317,9 +1317,9 @@ export default function AdminGrowthAuditLeads() {
                                                          <div className="w-full min-w-0 pr-1.5">
                                                              <button
                                                                  type="button"
-                                                                 onClick={() => setViewingLeadDetails(lead)}
+                                                                 onClick={() => openLeadProfile(lead.id)}
                                                                  title={title !== '—' ? title : undefined}
-                                                                 className="block text-left truncate w-full group-hover:font-bold hover:text-[#D97706]"
+                                                                 className="block text-left truncate w-full font-semibold text-[#0F172A] hover:text-indigo-600 hover:underline transition-colors cursor-pointer"
                                                              >
                                                                  {title}
                                                              </button>
@@ -1502,7 +1502,7 @@ export default function AdminGrowthAuditLeads() {
                                                          <div className="flex items-center justify-end gap-1.5">
                                                              <button
                                                                  type="button"
-                                                                 onClick={() => setViewingLeadDetails(lead)}
+                                                                 onClick={() => openLeadProfile(lead.id)}
                                                                  className="inline-flex items-center justify-center p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg transition-colors shadow-2xs shrink-0"
                                                                  title="View Details"
                                                                  aria-label="View Details"
@@ -1579,12 +1579,16 @@ export default function AdminGrowthAuditLeads() {
                                             return (
                                                 <tr
                                                     key={lead.id}
+                                                    onClick={(e) => {
+                                                        if ((e.target as HTMLElement).closest('a, button, input')) return;
+                                                        openLeadProfile(lead.id);
+                                                    }}
                                                     className={cn(
-                                                        "group transition-colors",
+                                                        "group cursor-pointer transition-colors",
                                                         isSelected ? "bg-amber-50/60 hover:bg-amber-50/90" : "hover:bg-slate-50/80"
                                                     )}
                                                 >
-                                                    <td className="px-3 py-2.5 align-middle">
+                                                    <td className="px-3 py-2.5 align-middle" onClick={(e) => e.stopPropagation()}>
                                                         <input
                                                             type="checkbox"
                                                             checked={isSelected}
@@ -1594,12 +1598,14 @@ export default function AdminGrowthAuditLeads() {
                                                     </td>
                                                     <td className="px-3 py-2.5 text-sm font-semibold text-[#0F172A] overflow-hidden">
                                                         <div className="w-full min-w-0 pr-1.5">
-                                                            <span
-                                                                className="block truncate w-full"
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openLeadProfile(lead.id)}
                                                                 title={title !== '—' ? title : undefined}
+                                                                className="block text-left truncate w-full font-semibold text-[#0F172A] hover:text-indigo-600 hover:underline transition-colors cursor-pointer"
                                                             >
                                                                 {title}
-                                                            </span>
+                                                            </button>
                                                             {lead.address ? (
                                                                 <div className="text-[11px] font-normal text-[#64748B] truncate w-full mt-0.5" title={lead.address}>
                                                                     {lead.address}
@@ -1968,31 +1974,6 @@ export default function AdminGrowthAuditLeads() {
                     onClose={() => setSelectedStatusLead(null)}
                     onStatusUpdated={async () => {
                         await load();
-                    }}
-                />
-            )}
-
-            {/* Lead CRM Drawer (Task Assignment & CRM history) */}
-            {activeLead && (
-                <LeadCrmDrawer
-                    lead={activeLead}
-                    salesAgents={salesAgents}
-                    onClose={() => setActiveLead(null)}
-                    onTaskUpdated={async () => {
-                        await load();
-                    }}
-                />
-            )}
-
-            {/* Lead Details Modal */}
-            {viewingLeadDetails && (
-                <LeadDetailsModal
-                    isOpen={Boolean(viewingLeadDetails)}
-                    lead={viewingLeadDetails}
-                    onClose={() => setViewingLeadDetails(null)}
-                    onOpenManageTasks={(l: GrowthAuditLeadRef) => {
-                        setViewingLeadDetails(null);
-                        setActiveLead(l);
                     }}
                 />
             )}
