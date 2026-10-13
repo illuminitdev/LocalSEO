@@ -845,7 +845,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                 <div className="p-4 border-b border-slate-100 flex items-center justify-between">
                     <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                         <CheckSquare className="w-4 h-4 text-amber-500" />
-                        Task Queue ({dedupedTasks.length})
+                        Lead Tasks ({dedupedTasks.length})
                     </h2>
                 </div>
 
