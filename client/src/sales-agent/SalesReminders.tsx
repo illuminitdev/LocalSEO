@@ -1022,7 +1022,7 @@ export default function SalesReminders() {
                     initialDate={selectedHistoryTask.updatedAt || selectedHistoryTask.createdAt}
                     authorName={(selectedHistoryTask as any).assignedToName || undefined}
                     readOnly={true}
-                    defaultTab="task_status"
+                    defaultTab="lead_status"
                     onClose={() => setSelectedHistoryTask(null)}
                     onStatusUpdated={async () => {
                         await loadData();
