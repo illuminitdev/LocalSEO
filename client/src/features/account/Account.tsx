@@ -182,6 +182,7 @@ export default function Account() {
     const [simBusy, setSimBusy] = useState(false);
     const showSimulate = entitlementsDisabled;
     const hasLocalPresence = hasFeature('local_presence');
+    const hasBookings = hasFeature('bookings');
 
     const formatPeriod = (value: string | null | undefined) =>
         value
@@ -275,11 +276,19 @@ export default function Account() {
         if (forcePassword) selectSection('password');
     }, [forcePassword]);
 
-    const visibleNav = ACCOUNT_NAV.filter((item) => item.id !== 'location' || hasLocalPresence);
+    const visibleNav = ACCOUNT_NAV.filter((item) => {
+        if (item.id === 'location') return hasLocalPresence;
+        if (item.id === 'branding') return hasBookings;
+        return true;
+    });
 
     useEffect(() => {
         if (activeSection === 'location' && !hasLocalPresence) selectSection('profile');
     }, [activeSection, hasLocalPresence]);
+
+    useEffect(() => {
+        if (activeSection === 'branding' && !hasBookings) selectSection('profile');
+    }, [activeSection, hasBookings]);
 
     const saveProfile = async (e: FormEvent) => {
         e.preventDefault();
@@ -426,7 +435,7 @@ export default function Account() {
                 brandPrimary: updated.brand_primary || brandPrimary,
                 brandSecondary: updated.brand_secondary || brandSecondary
             });
-            show('Brand colors saved — sidebar and workspace updated.');
+            show('Branding saved — customer booking page updated.');
         } catch (err: any) {
             setBrandErr(err.message);
         } finally {
@@ -971,7 +980,7 @@ export default function Account() {
                 </SectionCard>
                 )}
 
-                {activeSection === 'branding' && (
+                {activeSection === 'branding' && hasBookings && (
                 <div
                     id="branding"
                     className="rounded-3xl border border-[#E2E8F0] bg-white p-6 shadow-sm animate-in fade-in duration-300"
@@ -980,7 +989,7 @@ export default function Account() {
                     <div className="mb-4">
                         <h2 className="text-base font-black text-[#0F172A]">Branding</h2>
                         <p className="text-xs text-[#64748B] mt-0.5">
-                            Logo and colors for sidebar, booking page, and client hub.
+                            Logo and colors for your public booking page and customer portal. The host portal keeps the Local SEO logo.
                         </p>
                     </div>
 

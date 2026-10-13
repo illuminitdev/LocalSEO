@@ -11,6 +11,7 @@
     "declaration": false,
     "sourceMap": true,
     "moduleResolution": "node10",
+    "types": ["node"],
     "allowJs": false,
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": false

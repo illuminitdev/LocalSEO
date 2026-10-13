@@ -1,401 +1,519 @@
 import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
+    MessageSquareWarning,
+    Camera,
     FileText,
-    Download,
+    UserCheck,
+    Sparkles,
+    TrendingUp,
+    RefreshCw,
+    Trash2,
     Loader2,
-    BarChart2,
-    Users,
-    Calendar,
     Lightbulb,
-    BookOpen,
-    X,
-    BadgeCheck,
-    CheckCircle2,
-    Clock
+    Clock,
+    ArrowUpRight,
+    ArrowUp,
+    ArrowDown,
+    Star,
+    Download,
+    Check,
+    X
 } from 'lucide-react';
-import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
+import { apiDelete, apiGet, apiPost } from '../../shared/utils';
 import { downloadElementAsPdf } from '../../shared/downloadElementAsPdf';
-import { useOrgBrand } from '../../shared/OrgBrandContext';
 
-const REPORT_STORAGE_KEY = 'localpulse_strategy_report';
+const ACTION_ICONS: Record<string, any> = {
+    review: MessageSquareWarning,
+    clock: Clock,
+    photo: Camera,
+    post: FileText,
+    profile: UserCheck,
+    rank: TrendingUp,
+    gap: Star
+};
+const ACTION_TONES: Record<string, string> = {
+    review: 'bg-rose-50 text-rose-500',
+    clock: 'bg-orange-500 text-white',
+    photo: 'bg-[#0F172A] text-white',
+    post: 'bg-blue-50 text-blue-600',
+    profile: 'bg-emerald-50 text-emerald-600',
+    rank: 'bg-violet-50 text-violet-600',
+    gap: 'bg-amber-50 text-amber-600'
+};
 
-function loadSavedReport(): { reportData: any; businessName: string; reportDate?: string } | null {
-    try {
-        const raw = sessionStorage.getItem(REPORT_STORAGE_KEY);
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        if (!parsed?.reportData?.grade) return null;
-        return parsed;
-    } catch {
-        return null;
-    }
+function weekLabelBuckets(history: any[]) {
+    // Last 4 calendar weeks (Mon start); each bucket uses the newest snapshot saved in that week.
+    const now = new Date();
+    const day = now.getUTCDay() || 7;
+    const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - day + 1));
+    return [3, 2, 1, 0].map((back, i) => {
+        const d = new Date(monday);
+        d.setUTCDate(d.getUTCDate() - back * 7);
+        const key = d.toISOString().slice(0, 10);
+        const snap = history.find((h) => h?.weekStart === key && h?.share);
+        return { label: `W${i + 1}`, key, share: snap?.share || null };
+    });
 }
 
-function saveReport(reportData: any, businessName: string, reportDate: string) {
-    try {
-        sessionStorage.setItem(
-            REPORT_STORAGE_KEY,
-            JSON.stringify({ reportData, businessName, reportDate, savedAt: new Date().toISOString() })
-        );
-    } catch {
-        // ignore
-    }
-}
-
-export default function ReportGenerator() {
-    const { logoUrl: brandLogoUrl } = useOrgBrand();
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [isExporting, setIsExporting] = useState(false);
-    const [reportReady, setReportReady] = useState(false);
-    const [reportData, setReportData] = useState<any>(null);
-    const [history, setHistory] = useState<any[]>([]);
-    const [error, setError] = useState('');
-    const [businessName, setBusinessName] = useState('');
-    const [reportDate, setReportDate] = useState(() => new Date().toLocaleDateString());
-    const [showHowItWorks, setShowHowItWorks] = useState(false);
-
-    const applyReportPayload = (item: any) => {
-        if (!item || !item.grade) return;
-        setReportData(item);
-        const name = item.businessName || businessName || '';
-        if (name) setBusinessName(name);
-        const dateStr = item.createdAt
-            ? new Date(item.createdAt).toLocaleString('en-GB', {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit'
-              })
-            : new Date().toLocaleDateString();
-        setReportDate(dateStr);
-        setReportReady(true);
-        saveReport(item, name, dateStr);
-    };
+function InsightsOverview() {
+    const navigate = useNavigate();
+    const [data, setData] = useState<any>(null);
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState('');
+    const [viewing, setViewing] = useState<any>(null);
+    const [showAll, setShowAll] = useState(false);
+    const [progress, setProgress] = useState('');
+    const [exporting, setExporting] = useState(false);
 
     useEffect(() => {
-        // First try local cached session
-        const saved = loadSavedReport();
-        if (saved) {
-            setReportData(saved.reportData);
-            setBusinessName(saved.businessName || '');
-            if (saved.reportDate) setReportDate(saved.reportDate);
-            setReportReady(true);
-        }
-
-        // Fetch persisted report & history from backend
-        apiGet('/api/ai/strategy-report')
-            .then((data: any) => {
-                const runs = Array.isArray(data?.history) ? data.history : [];
-                setHistory(runs);
-                const currentReport = data?.report || runs[0];
-                if (currentReport?.grade && !saved) {
-                    applyReportPayload(currentReport);
-                }
-            })
+        apiGet('/api/ai/insights')
+            .then(setData)
             .catch(() => {});
     }, []);
 
-    const handleSelectHistory = (item: any) => {
-        applyReportPayload(item);
-        // Smooth scroll to report view
-        const el = document.getElementById('report-content');
-        if (el) {
-            el.scrollIntoView({ behavior: 'smooth' });
-        }
-    };
-
-    const handleGenerate = async () => {
-        setIsGenerating(true);
-        setError('');
+    const deleteCheck = async (createdAt: string) => {
+        if (!window.confirm('Delete this check? This cannot be undone.')) return;
         try {
-            const business = await apiGet('/api/business');
-            if (!business?.name?.trim()) {
-                throw new Error('Save your business profile first (required fields on Business profile page).');
-            }
-
-            const stats = await apiGet('/api/dashboard/stats');
-            const name = stats.businessName || business.name || '';
-            setBusinessName(name);
-            const data = await apiPost('/api/ai/strategy-report', stats);
-            const dated = new Date().toLocaleString('en-GB', {
-                day: 'numeric',
-                month: 'short',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-            setReportDate(dated);
-            setReportData(data);
-            setReportReady(true);
-            if (Array.isArray(data?.history)) {
-                setHistory(data.history);
-            } else {
-                setHistory((prev) => [data, ...prev.filter((p) => p.createdAt !== data.createdAt)].slice(0, 20));
-            }
-            saveReport(data, name, dated);
-            await logDashboardActivity({
-                type: 'report',
-                message: `Generated strategy report. Grade: ${data.grade}.`,
-                icon: 'CheckCircle',
-                color: 'text-[#0F172A]'
-            });
-        } catch (err: any) {
-            setError(err.message || 'Report failed');
-            setReportReady(false);
-        } finally {
-            setIsGenerating(false);
+            setViewing(null);
+            setData(await apiDelete(`/api/ai/insights/history?createdAt=${encodeURIComponent(createdAt)}`));
+        } catch (e: any) {
+            setErr(e?.message || 'Could not delete the check');
         }
     };
 
-    const handleExport = async () => {
-        setIsExporting(true);
-        setError('');
+    const markAction = async (id: string, status: 'done' | 'dismissed' | 'reset') => {
         try {
-            const safeName = (businessName || 'report').replace(/[^\w\-]+/g, '-').slice(0, 40);
-            await downloadElementAsPdf('report-content', `zappsites-local-seo-${safeName}`);
-        } catch (err: any) {
-            setError(err?.message || 'PDF export failed');
-        } finally {
-            setIsExporting(false);
+            setData(await apiPost('/api/ai/insights/action', { id, status }));
+        } catch (e: any) {
+            setErr(e?.message || 'Could not update the action');
         }
     };
 
-    const sourceLabel = reportData?.source === 'fallback' ? 'Template report' : 'Gemini report';
+    const exportPdf = async () => {
+        setExporting(true);
+        try {
+            await downloadElementAsPdf('insights-content', `ai-insights-${new Date().toISOString().slice(0, 10)}`);
+        } catch (e: any) {
+            setErr(e?.message || 'PDF export failed');
+        } finally {
+            setExporting(false);
+        }
+    };
+
+    const refresh = async () => {
+        const savedAt = data?.latest?.createdAt ? new Date(data.latest.createdAt).getTime() : 0;
+        if (savedAt && Date.now() - savedAt < 24 * 3600 * 1000) {
+            const hours = Math.max(1, Math.round((Date.now() - savedAt) / 3600000));
+            if (!window.confirm(`You checked ${hours} hour${hours === 1 ? '' : 's'} ago. A new check runs paid Google Maps lookups. Run it again?`)) return;
+        }
+        setBusy(true);
+        setErr('');
+        setProgress('Planning keywords…');
+        try {
+            setViewing(null);
+            // One short request per keyword (in parallel) so each stays under the gateway time limit.
+            const plan = await apiPost('/api/ai/insights/plan', {});
+            const keywords: string[] = plan?.keywords || [];
+            const errors: string[] = [];
+            let finished = 0;
+            setProgress(`Checking keyword 0 of ${keywords.length}…`);
+            const withRetry = async (fn: () => Promise<any>) => {
+                try {
+                    return await fn();
+                } catch {
+                    return fn();
+                }
+            };
+            const [packs, trendRows] = await Promise.all([
+                Promise.all(
+                    keywords.map((keyword) =>
+                        withRetry(() => apiPost('/api/ai/insights/pack', { keyword }))
+                            .then((r: any) => {
+                                setProgress(`Checking keyword ${++finished} of ${keywords.length}…`);
+                                return (r?.top3 || []) as any[];
+                            })
+                            .catch((e: any) => {
+                                errors.push(e?.message || 'failed');
+                                setProgress(`Checking keyword ${++finished} of ${keywords.length}…`);
+                                return [] as any[];
+                            })
+                    )
+                ),
+                apiPost('/api/ai/insights/trends', {})
+                    .then((r: any) => r?.trendRows || [])
+                    .catch(() => [])
+            ]);
+            if (!packs.some((p) => p.length)) {
+                throw new Error(`Google Maps lookup failed: ${errors[0] || 'no results returned'}`);
+            }
+            setProgress('Writing your recommendation…');
+            setData(await apiPost('/api/ai/insights/finish', { packs, trendRows, errors }));
+        } catch (e: any) {
+            setErr(e?.message || 'Could not refresh insights');
+        } finally {
+            setBusy(false);
+            setProgress('');
+        }
+    };
+
+    const actions: any[] = data?.actions || [];
+    const visibleActions = showAll ? actions : actions.slice(0, 3);
+    const changes: any[] = data?.changes || [];
+    const moves = data?.trackerMoves;
+    const latestSaved = data?.latest;
+    const latest = viewing || latestSaved;
+    const pastChecks: any[] = (data?.history || []).filter((h: any) => h?.share);
+    const buckets = weekLabelBuckets(data?.history || []);
+    const hasChart = buckets.some((b) => b.share);
+    const names = latest?.share || buckets.slice().reverse().find((b) => b.share)?.share;
 
     return (
-        <div className="max-w-5xl mx-auto animate-in fade-in duration-500 pb-12">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6 print:hidden">
-                <div>
-                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#0F172A]">AI Insights</h1>
-                    <p className="text-gray-500 text-sm mt-1">
-                        Turn rankings, listings, and reviews into a prioritized 30-day action plan.
-                    </p>
-                </div>
-                <button
-                    onClick={handleGenerate}
-                    disabled={isGenerating}
-                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-70 shadow-xs cursor-pointer shrink-0"
-                >
-                    {isGenerating ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
-                    ) : (
-                        <FileText className="w-4 h-4" />
+        <div id="insights-content" className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Prioritized Actions */}
+                <div className="lg:col-span-2 rounded-2xl border border-[#E2E8F0] bg-white p-5">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold text-[#0F172A]">Prioritized Actions</h3>
+                        <span className="px-2.5 py-1 rounded-md bg-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                            High impact
+                        </span>
+                    </div>
+                    {actions.length > 3 && (
+                        <button
+                            type="button"
+                            onClick={() => setShowAll((v) => !v)}
+                            className="mb-3 text-xs font-bold text-[var(--brand-primary)] hover:underline cursor-pointer"
+                        >
+                            {showAll ? 'Show top 3' : `View all (${actions.length})`}
+                        </button>
                     )}
-                    {isGenerating ? 'Compiling Data...' : 'Generate New Report'}
-                </button>
-            </div>
-
-            {error && (
-                <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5 print:hidden">
-                    {error}
-                </p>
-            )}
-
-            {/* 3 Pillar Summary Bar */}
-            <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-xs p-4 md:p-5 grid grid-cols-1 md:grid-cols-3 gap-4 divide-y md:divide-y-0 md:divide-x divide-[#E2E8F0] mb-6 print:hidden">
-                {/* 1. Local rankings */}
-                <div className="flex items-center gap-3.5 md:pr-4">
-                    <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
-                        <BarChart2 className="w-5 h-5 text-blue-500" />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-sm text-[#0F172A]">Local rankings</h3>
-                        <p className="text-xs text-gray-500">Analyse your keyword positions</p>
-                    </div>
+                    {data?.hiddenActions > 0 && (
+                        <p className="mb-3 text-[11px] text-gray-400">{data.hiddenActions} hidden (done or dismissed). They return automatically if still relevant.</p>
+                    )}
+                    {actions.length ? (
+                        <ul className="space-y-3">
+                            {visibleActions.map((a) => {
+                                const Icon = ACTION_ICONS[a.icon] || Lightbulb;
+                                return (
+                                    <li key={a.id} className="flex items-start gap-3 rounded-xl border border-[#E2E8F0] p-4">
+                                        <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${ACTION_TONES[a.icon] || ACTION_TONES.profile}`}>
+                                            <Icon className="w-4 h-4" />
+                                        </span>
+                                        <div className="min-w-0">
+                                            <h4 className="text-sm font-bold text-[#0F172A]">{a.title}</h4>
+                                            <p className="text-xs text-gray-500 mt-0.5">{a.desc}</p>
+                                            <div className="flex flex-wrap items-center gap-3 mt-2">
+                                                <Link to={a.to} className="inline-flex items-center gap-1 text-xs font-bold text-[var(--brand-primary)] hover:underline">
+                                                    {a.cta} <ArrowUpRight className="w-3 h-3" />
+                                                </Link>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => markAction(a.id, 'done')}
+                                                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-400 hover:text-emerald-600 cursor-pointer"
+                                                >
+                                                    <Check className="w-3 h-3" /> Done
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => markAction(a.id, 'dismissed')}
+                                                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-400 hover:text-red-500 cursor-pointer"
+                                                >
+                                                    <X className="w-3 h-3" /> Dismiss
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    ) : (
+                        <p className="text-sm text-gray-500">{data ? 'Nothing urgent right now. Your profile is in good shape.' : 'Loading…'}</p>
+                    )}
                 </div>
 
-                {/* 2. Competitor activity */}
-                <div className="flex items-center gap-3.5 pt-3 md:pt-0 md:px-4">
-                    <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center shrink-0">
-                        <Users className="w-5 h-5 text-[var(--brand-primary)]" />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-sm text-[#0F172A]">Competitor activity</h3>
-                        <p className="text-xs text-gray-500">See what your competitors are doing</p>
-                    </div>
-                </div>
-
-                {/* 3. 30-day action plan */}
-                <div className="flex items-center gap-3.5 pt-3 md:pt-0 md:pl-4">
-                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
-                        <Calendar className="w-5 h-5 text-emerald-500" />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-sm text-[#0F172A]">30-day action plan</h3>
-                        <p className="text-xs text-gray-500">Get AI-powered recommendations</p>
-                    </div>
-                </div>
-            </div>
-
-            {/* Empty State / Loading State / Generated Report */}
-            {!reportReady && !isGenerating && (
-                <div className="bg-white rounded-2xl border border-dashed border-[#CBD5E1] p-12 md:p-16 flex flex-col items-center justify-center text-center shadow-xs my-6">
-                    <div className="w-16 h-16 rounded-2xl bg-white border border-[#E2E8F0] shadow-xs flex items-center justify-center text-slate-400 mb-4">
-                        <svg className="w-10 h-10 text-slate-400" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 8C12 5.79086 13.7909 4 16 4H28L36 12V40C36 42.2091 34.2091 44 32 44H16C13.7909 44 12 42.2091 12 40V8Z" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M28 4V12H36" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M19 32V26" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                            <path d="M24 32V21" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                            <path d="M29 32V17" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                        </svg>
-                    </div>
-                    <h2 className="text-xl md:text-2xl font-bold text-[#0F172A] mb-2">No reports yet</h2>
-                    <p className="text-xs md:text-sm text-gray-500 max-w-md mb-6 leading-relaxed">
-                        Generate a report to get insights from your local SEO metrics, competitor activity and a personalized 30-day action plan.
-                    </p>
-                    <button
-                        type="button"
-                        onClick={handleGenerate}
-                        disabled={isGenerating}
-                        className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-sm font-bold shadow-xs cursor-pointer transition-colors"
-                    >
-                        <FileText className="w-4 h-4" />
-                        Generate your first report
-                    </button>
-                </div>
-            )}
-
-            {isGenerating && (
-                <div className="bg-white p-12 md:p-16 rounded-2xl border border-[#E2E8F0] text-center shadow-xs my-6">
-                    <div className="w-16 h-16 border-4 border-slate-100 border-t-[var(--brand-primary)] rounded-full animate-spin mx-auto mb-4"></div>
-                    <p className="text-base font-bold text-[#0F172A]">Aggregating LocalPulse Data...</p>
-                    <p className="text-xs text-gray-500 mt-1">Analyzing local rankings, reviews, and competitors...</p>
-                </div>
-            )}
-
-            {reportReady && reportData && (
-                <div
-                    id="report-content"
-                    className="bg-white p-6 md:p-8 rounded-2xl border border-[#E2E8F0] shadow-sm animate-in slide-in-from-bottom-4 duration-500 mb-6"
-                >
-                    <div className="mb-6 pb-4 border-b border-[#E2E8F0]">
-                        <div className="flex items-center justify-between gap-3 mb-3">
-                            <img
-                                src={brandLogoUrl || '/localseo.png'}
-                                alt={brandLogoUrl ? (businessName || 'Business logo') : 'ZappSites Local SEO'}
-                                width={140}
-                                height={36}
-                                className="block shrink-0 object-contain object-left"
-                                style={{
-                                    height: brandLogoUrl ? 36 : 28,
-                                    width: 'auto',
-                                    maxWidth: 160,
-                                    maxHeight: 40,
-                                    minWidth: 0
-                                }}
-                            />
-                            <div className="flex items-center gap-2 print:hidden">
+                {/* (view all / restore handled inside the actions card above) */}
+                {/* Growth Strategy */}
+                <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 flex flex-col">
+                    <h3 className="text-lg font-bold text-[#0F172A] flex items-center gap-2 mb-3">
+                        <Sparkles className="w-4 h-4 text-[var(--brand-primary)]" />
+                        Growth Strategy
+                    </h3>
+                    {latest ? (
+                        <>
+                            <div className="rounded-xl bg-[#0F172A] p-4 text-white">
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-300 mb-2">AI Recommendation</div>
+                                <p className="text-xs leading-relaxed">&ldquo;{latest.recommendation}&rdquo;</p>
                                 <button
-                                    onClick={handleExport}
-                                    disabled={isExporting}
-                                    className="pdf-hide flex items-center gap-1.5 px-3 py-1.5 bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#E2E8F0] text-[#0F172A] text-xs font-bold rounded-lg transition-colors cursor-pointer disabled:opacity-70 shrink-0"
+                                    type="button"
+                                    onClick={() => navigate('/posts')}
+                                    className="mt-3 w-full py-2 rounded-lg bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold cursor-pointer"
                                 >
-                                    {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                                    {isExporting ? 'Building…' : 'Export PDF'}
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setReportReady(false);
-                                        setReportData(null);
-                                        sessionStorage.removeItem(REPORT_STORAGE_KEY);
-                                    }}
-                                    className="px-3 py-1.5 bg-white hover:bg-gray-100 border border-[#E2E8F0] text-gray-600 text-xs font-bold rounded-lg cursor-pointer"
-                                >
-                                    Reset
+                                    Apply Optimization
                                 </button>
                             </div>
-                        </div>
-                        <h2 className="text-xl font-black text-[#0F172A] uppercase tracking-tight leading-tight">
-                            Local SEO Audit Report
-                        </h2>
-                        <p className="text-gray-500 mt-1 text-xs font-semibold">
-                            {businessName || 'No listing'} • {reportDate}
-                        </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                        <div className="col-span-1 bg-[#F8FAFC] p-5 rounded-xl border border-[#E2E8F0] flex flex-col items-center justify-center text-center">
-                            <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                                Overall Grade
-                            </span>
-                            <div className="text-5xl font-black text-[#0F172A] mb-1">{reportData.grade}</div>
-                            <p className="text-xs text-[#0F172A] font-bold bg-[var(--brand-primary)]/10 px-3 py-1 rounded-full border border-[var(--brand-primary)]/20">
-                                {sourceLabel}
-                            </p>
-                        </div>
-
-                        <div className="col-span-2 grid grid-cols-2 gap-3">
-                            <div className="border border-[#E2E8F0] rounded-xl p-3.5">
-                                <div className="text-xs font-semibold text-gray-500 mb-1">Local Pack Rank</div>
-                                <div className="text-xl font-bold text-[#0F172A]">
-                                    {reportData.metrics?.localPackRank ?? '—'}
-                                </div>
-                            </div>
-                            <div className="border border-[#E2E8F0] rounded-xl p-3.5">
-                                <div className="text-xs font-semibold text-gray-500 mb-1">Profile Completeness</div>
-                                <div className="text-xl font-bold text-[#0F172A]">
-                                    {reportData.metrics?.completeness ?? 0}%
-                                </div>
-                            </div>
-                            <div className="border border-[#E2E8F0] rounded-xl p-3.5">
-                                <div className="text-xs font-semibold text-gray-500 mb-1">Review Response Rate</div>
-                                <div className="text-xl font-bold text-[#0F172A]">
-                                    {reportData.metrics?.reviewResponseRate ?? 0}%
-                                </div>
-                            </div>
-                            <div className="border border-[#E2E8F0] rounded-xl p-3.5">
-                                <div className="text-xs font-semibold text-gray-500 mb-1">Missing Media</div>
-                                <div className="text-xl font-bold text-[#0F172A]">
-                                    {reportData.metrics?.missingMedia ?? '—'}
-                                </div>
-                            </div>
-                            {reportData.metrics?.visibilityAuditScore != null && (
-                                <div className="border border-[#E2E8F0] rounded-xl p-3.5 col-span-2">
-                                    <div className="text-xs font-semibold text-gray-500 mb-1">Visibility Audit Score</div>
-                                    <div className="text-xl font-bold text-[#0F172A]">
-                                        {reportData.metrics.visibilityAuditScore}/100
-                                    </div>
+                            {latest.opportunities?.length > 0 && (
+                                <div className="mt-4">
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Market Opportunities</div>
+                                    <ul className="space-y-2">
+                                        {latest.opportunities.map((o: string, i: number) => (
+                                            <li key={i} className="flex gap-2 text-xs text-gray-700">
+                                                <TrendingUp className="w-3.5 h-3.5 text-[var(--brand-primary)] shrink-0 mt-0.5" />
+                                                {o}
+                                            </li>
+                                        ))}
+                                    </ul>
                                 </div>
                             )}
+                        </>
+                    ) : (
+                        <div className="flex-1 flex flex-col items-start justify-center gap-3">
+                            <p className="text-xs text-gray-500">
+                                Get an AI growth recommendation and live market opportunities based on your keywords and local competitors.
+                            </p>
+                            <p className="text-[11px] text-gray-400">
+                                It works best with a category on your <Link to="/profile" className="font-semibold text-[var(--brand-primary)] hover:underline">business profile</Link> and a few{' '}
+                                <Link to="/visibility-tracker" className="font-semibold text-[var(--brand-primary)] hover:underline">tracked keywords</Link>.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={refresh}
+                                disabled={busy}
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0F172A] text-white text-xs font-bold cursor-pointer disabled:opacity-70"
+                            >
+                                {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                                {busy ? progress || 'Analysing market…' : 'Generate strategy'}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {(changes.length > 0 || moves?.total > 0) && (
+                <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <h3 className="text-base font-bold text-[#0F172A]">What changed since last check</h3>
+                        {data?.since && (
+                            <span className="text-[11px] text-gray-400">
+                                vs {new Date(data.since).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                            </span>
+                        )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {changes.map((c: any) => {
+                            const good = c.delta === 0 ? null : c.delta > 0 === c.goodWhenUp;
+                            return (
+                                <div key={c.label} className="rounded-xl border border-[#E2E8F0] p-3">
+                                    <div className="text-[11px] text-gray-500">{c.label}</div>
+                                    <div className="mt-1 flex items-end gap-2">
+                                        <span className="text-xl font-black text-[#0F172A]">
+                                            {c.to}
+                                            {c.unit}
+                                        </span>
+                                        {c.delta !== 0 ? (
+                                            <span className={`inline-flex items-center gap-0.5 text-xs font-bold ${good ? 'text-emerald-600' : 'text-red-500'}`}>
+                                                {c.delta > 0 ? <ArrowUp className="w-3 h-3" strokeWidth={3} /> : <ArrowDown className="w-3 h-3" strokeWidth={3} />}
+                                                {Math.abs(c.delta)}
+                                                {c.unit}
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs font-semibold text-gray-400">No change</span>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        {moves?.total > 0 && (
+                            <div className="rounded-xl border border-[#E2E8F0] p-3">
+                                <div className="text-[11px] text-gray-500">Tracked keywords (Visibility Tracker)</div>
+                                <div className="mt-1 flex items-center gap-3 text-sm font-bold">
+                                    <span className="inline-flex items-center gap-0.5 text-emerald-600">
+                                        <ArrowUp className="w-3 h-3" strokeWidth={3} /> {moves.up} up
+                                    </span>
+                                    <span className="inline-flex items-center gap-0.5 text-red-500">
+                                        <ArrowDown className="w-3 h-3" strokeWidth={3} /> {moves.down} down
+                                    </span>
+                                    <span className="text-xs font-semibold text-gray-400">of {moves.total}</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {err && (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                    <p className="font-bold">The Map Pack check could not finish</p>
+                    <p className="mt-0.5 text-xs">{err}</p>
+                </div>
+            )}
+
+            {/* How it works */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                    ['1', 'Run the check', 'We search Google Maps for your 5 main keywords from your business location.'],
+                    ['2', 'See who holds the top 3', 'The Map Pack is the 3 businesses Google shows first. We count which spots are yours and which are competitors’.'],
+                    ['3', 'Repeat weekly', 'Each run saves a snapshot. After a few weeks the chart shows whether you are gaining or losing ground.']
+                ].map(([n, t, d]) => (
+                    <div key={n} className="flex gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3.5">
+                        <span className="w-6 h-6 rounded-full bg-[var(--brand-primary)] text-white text-xs font-bold flex items-center justify-center shrink-0">{n}</span>
+                        <div>
+                            <div className="text-xs font-bold text-[#0F172A]">{t}</div>
+                            <p className="text-[11px] text-gray-500 mt-0.5">{d}</p>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Visibility Share vs Competitors */}
+            <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                    <div>
+                        <h3 className="text-lg font-bold text-[#0F172A]">Visibility Share vs. Competitors</h3>
+                        <p className="text-[11px] text-gray-500">
+                            Share of the Google Map Pack (top 3 spots) held by you and your two strongest competitors.
+                        </p>
+                        {latestSaved?.createdAt && (
+                            <p className="text-[11px] text-gray-400 mt-0.5">
+                                Last checked{' '}
+                                {new Date(latestSaved.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1.5">
+                            {[
+                                ['You', 'bg-[var(--brand-primary)]'],
+                                [names?.compA?.name || 'Competitor A', 'bg-[#BEC6DB]'],
+                                [names?.compB?.name || 'Competitor B', 'bg-[#4B5563]']
+                            ].map(([label, dot]) => (
+                                <span key={label} className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-slate-100 text-[10px] font-bold text-slate-600 max-w-[150px]">
+                                    <span className={`w-2 h-2 rounded-sm shrink-0 ${dot}`} />
+                                    <span className="truncate">{label}</span>
+                                </span>
+                            ))}
+                        </div>
+                        {latest && (
+                            <button
+                                type="button"
+                                onClick={exportPdf}
+                                disabled={exporting}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-[#E2E8F0] bg-white text-[11px] font-bold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-70"
+                            >
+                                {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                                Export PDF
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={refresh}
+                            disabled={busy}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0F172A] text-white text-[11px] font-bold hover:bg-[#1E293B] cursor-pointer disabled:opacity-70"
+                        >
+                            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                            {busy ? progress || 'Checking Google Maps…' : hasChart ? 'Refresh' : 'Run Map Pack check'}
+                        </button>
+                    </div>
+                </div>
+                <div className="relative flex gap-3">
+                    <div className="flex flex-col justify-between h-56 text-[10px] text-gray-400 pt-0.5 pb-6">
+                        <span>100%</span>
+                        <span>50%</span>
+                        <span>0%</span>
+                    </div>
+                    <div className="flex-1 grid grid-cols-4 gap-6 items-end h-56 border-b border-[#E2E8F0]">
+                        {buckets.map((b) => (
+                            <div key={b.key} className="flex flex-col items-center justify-end h-full">
+                                <div className="w-14 sm:w-20 h-[calc(100%-1.5rem)] flex flex-col justify-end">
+                                    {b.share ? (
+                                        <>
+                                            {[
+                                                [b.share.compB, 'bg-[#4B5563] text-white rounded-t-sm'],
+                                                [b.share.compA, 'bg-[#BEC6DB] text-slate-700'],
+                                                [{ name: 'You', pct: b.share.you }, 'bg-[var(--brand-primary)] text-white']
+                                            ].map(([seg, cls]: any, i) => (
+                                                <div
+                                                    key={i}
+                                                    className={`flex items-center justify-center text-[10px] font-bold overflow-hidden ${cls}`}
+                                                    style={{ height: `${seg?.pct || 0}%` }}
+                                                    title={`${seg?.name}: ${seg?.pct}%`}
+                                                >
+                                                    {(seg?.pct || 0) >= 12 ? `${seg.pct}%` : ''}
+                                                </div>
+                                            ))}
+                                        </>
+                                    ) : (
+                                        <div className="h-full rounded-t-sm border border-dashed border-[#E2E8F0]" />
+                                    )}
+                                </div>
+                                <span className="text-[10px] text-gray-500 mt-1.5 h-4">{b.label === 'W4' ? 'This week' : `${4 - Number(b.label.slice(1))} wk ago`}</span>
+                            </div>
+                        ))}
+                    </div>
+                    {!hasChart && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <p className="max-w-sm text-center text-xs text-gray-600 bg-white/90 border border-[#E2E8F0] rounded-xl px-4 py-3 shadow-sm">
+                                No data yet. Click <strong>Run Map Pack check</strong> to see who holds the top 3 spots for your keywords.
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {latest?.share && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    {/* Who is in the Map Pack */}
+                    <div className="lg:col-span-2 rounded-2xl border border-[#E2E8F0] bg-white p-5">
+                        <h3 className="text-base font-bold text-[#0F172A]">Who holds the top 3 for your keywords</h3>
+                        <p className="text-[11px] text-gray-500 mb-3">
+                            Checked {new Date(latest.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} from your business location.
+                        </p>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr className="text-left text-[10px] uppercase tracking-wider text-gray-400">
+                                        <th className="pb-2 font-bold">Keyword</th>
+                                        <th className="pb-2 font-bold">#1</th>
+                                        <th className="pb-2 font-bold">#2</th>
+                                        <th className="pb-2 font-bold">#3</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#E2E8F0]">
+                                    {(latest.packs || []).map((p: any) => (
+                                        <tr key={p.keyword} className="align-top">
+                                            <td className="py-2.5 pr-3 font-semibold text-[#0F172A]">{p.keyword}</td>
+                                            {[0, 1, 2].map((i) => {
+                                                const r = p.top3?.[i];
+                                                return (
+                                                    <td key={i} className="py-2.5 pr-3">
+                                                        {r ? (
+                                                            <div className={r.isYou ? 'font-bold text-[var(--brand-primary)]' : 'text-gray-700'}>
+                                                                {r.isYou ? 'You' : r.name}
+                                                                <div className="text-[10px] font-normal text-gray-400">
+                                                                    {r.rating ? `${r.rating}★` : ''} {r.reviews ? `· ${r.reviews.toLocaleString()} reviews` : ''}
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-gray-300">—</span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
 
-                    <div className="mb-8">
-                        <h3 className="text-sm font-bold text-[#0F172A] border-b-2 border-[var(--brand-primary)] pb-1.5 mb-3 inline-block">
-                            Competitor Positioning
-                        </h3>
-                        <p className="text-gray-700 leading-relaxed text-xs">{reportData.positioningText}</p>
-                        {Array.isArray(reportData.competitors) && reportData.competitors.length > 0 && (
-                            <ul className="mt-3 space-y-1.5">
-                                {reportData.competitors.map((c: any, i: number) => (
-                                    <li
-                                        key={`${c.name}-${i}`}
-                                        className="flex flex-wrap items-center justify-between gap-2 text-xs border border-[#E2E8F0] rounded-lg px-3 py-2 bg-white"
-                                    >
-                                        <span className="font-semibold text-[#0F172A]">{c.name}</span>
-                                        <span className="text-gray-600 font-semibold">
-                                            {c.rating || '—'}★ · {c.reviews || 0} reviews
-                                        </span>
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
-                    </div>
-
-                    <div>
-                        <h3 className="text-sm font-bold text-[#0F172A] border-b-2 border-[#0F172A] pb-1.5 mb-3 inline-block">
-                            30-Day AI Roadmap
-                        </h3>
-                        <ul className="space-y-3">
-                            {(reportData.roadmap || []).map((step: any) => (
-                                <li key={step.id} className="flex gap-3 p-3.5 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
-                                    <div className="text-[var(--brand-primary)] font-bold text-base">{step.id}</div>
-                                    <div>
-                                        <h4 className="font-bold text-[#0F172A] text-xs">{step.title}</h4>
-                                        <p className="text-xs text-gray-600 mt-0.5">{step.desc}</p>
-                                    </div>
+                    {/* Problems found */}
+                    <div className="rounded-2xl border border-[#E2E8F0] border-t-4 border-t-[var(--brand-primary)] bg-white p-5">
+                        <h3 className="text-base font-bold text-[#0F172A] mb-3">What this means for you</h3>
+                        <ul className="space-y-2.5">
+                            {(latest.problems || []).map((p: string, i: number) => (
+                                <li key={i} className="flex gap-2 text-xs text-gray-700">
+                                    <ArrowUpRight className="w-3.5 h-3.5 text-[var(--brand-primary)] shrink-0 mt-0.5" />
+                                    {p}
                                 </li>
                             ))}
                         </ul>
@@ -403,72 +521,41 @@ export default function ReportGenerator() {
                 </div>
             )}
 
-            {/* Past Reports / History List */}
-            {history.length > 0 && (
-                <div className="mt-6 mb-6 bg-white rounded-2xl border border-[#E2E8F0] shadow-xs overflow-hidden print:hidden">
-                    <div className="p-4 border-b border-[#E2E8F0] flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <Clock className="w-4 h-4 text-gray-700" />
-                            <h2 className="text-xs font-bold text-[#0F172A]">Past report history</h2>
-                        </div>
-                        <span className="text-[11px] text-gray-400 font-medium">{history.length} {history.length === 1 ? 'report' : 'reports'} saved</span>
+            {/* Past checks (every run is saved) */}
+            {pastChecks.length > 0 && (
+                <div className="rounded-2xl border border-[#E2E8F0] bg-white overflow-hidden">
+                    <div className="px-5 py-3.5 border-b border-[#E2E8F0] flex items-center justify-between">
+                        <h3 className="text-sm font-bold text-[#0F172A]">Past Map Pack checks</h3>
+                        <span className="text-[11px] text-gray-400">Latest {Math.min(5, pastChecks.length)} of {pastChecks.length}</span>
                     </div>
                     <ul className="divide-y divide-[#E2E8F0]">
-                        {history.map((run, idx) => {
-                            const isCurrent = (reportData?.createdAt && run.createdAt === reportData.createdAt) ||
-                                (reportData && !reportData.createdAt && idx === 0);
-                            const when = run.createdAt
-                                ? new Date(run.createdAt).toLocaleString('en-GB', {
-                                      day: 'numeric',
-                                      month: 'short',
-                                      year: 'numeric',
-                                      hour: '2-digit',
-                                      minute: '2-digit'
-                                  })
-                                : 'Saved report';
-                            const gradeColor =
-                                run.grade?.startsWith('A')
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : run.grade?.startsWith('B')
-                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                    : 'bg-amber-50 text-amber-700 border-amber-200';
-
+                        {pastChecks.slice(0, 5).map((h: any) => {
+                            const isShown = h.createdAt === latest?.createdAt;
                             return (
-                                <li key={run.createdAt || idx}>
+                                <li key={h.createdAt} className={`flex items-center ${isShown ? 'bg-[var(--brand-primary-soft)]' : 'hover:bg-[#F8FAFC]'}`}>
                                     <button
                                         type="button"
-                                        onClick={() => handleSelectHistory(run)}
-                                        className={`w-full text-left px-4 py-3.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs transition-colors cursor-pointer ${
-                                            isCurrent ? 'bg-[var(--brand-primary-soft)]' : 'hover:bg-[#F8FAFC]'
-                                        }`}
+                                        onClick={() => setViewing(h.createdAt === latestSaved?.createdAt ? null : h)}
+                                        className="flex-1 min-w-0 text-left px-5 py-3 flex flex-wrap items-center justify-between gap-2 text-xs cursor-pointer"
                                     >
-                                        <div className="flex items-center gap-3">
-                                            <span className={`inline-flex items-center justify-center font-black px-2.5 py-0.5 rounded-lg text-xs border ${gradeColor}`}>
-                                                Grade {run.grade || '—'}
-                                            </span>
-                                            <div>
-                                                <span className="font-bold text-[#0F172A] block">{when}</span>
-                                                <span className="text-[11px] text-gray-500">
-                                                    {run.businessName || businessName || 'Listing'} • {run.source === 'fallback' ? 'Template report' : 'Gemini AI'}
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center gap-3 text-xs text-gray-600">
-                                            {run.metrics?.localPackRank !== undefined && (
-                                                <span className="hidden sm:inline bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-[11px]">
-                                                    Rank #{run.metrics.localPackRank || '—'}
-                                                </span>
-                                            )}
-                                            {run.metrics?.completeness !== undefined && (
-                                                <span className="hidden sm:inline bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-[11px]">
-                                                    {run.metrics.completeness}% complete
-                                                </span>
-                                            )}
-                                            <span className={`text-[11px] font-bold ${isCurrent ? 'text-[var(--brand-primary)]' : 'text-gray-400'}`}>
-                                                {isCurrent ? 'Viewing' : 'View report →'}
-                                            </span>
-                                        </div>
+                                        <span className="font-bold text-[#0F172A]">
+                                            {new Date(h.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                        <span className="text-gray-600">
+                                            You hold {h.youSlots ?? 0} of {h.totalSlots ?? 0} top-3 spots ({h.share?.you ?? 0}% share)
+                                        </span>
+                                        <span className={`font-bold ${isShown ? 'text-[#0F172A]' : 'text-gray-400'}`}>
+                                            {isShown ? 'Viewing' : 'View →'}
+                                        </span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        title="Delete this check"
+                                        aria-label="Delete this check"
+                                        onClick={() => deleteCheck(h.createdAt)}
+                                        className="p-2.5 mr-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                                    >
+                                        <Trash2 className="w-4 h-4" />
                                     </button>
                                 </li>
                             );
@@ -476,97 +563,18 @@ export default function ReportGenerator() {
                     </ul>
                 </div>
             )}
+        </div>
+    );
+}
 
-            {/* Bottom Help Banner */}
-            <div className="bg-[#F8FAFC] rounded-2xl border border-[#E2E8F0] p-4 md:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs print:hidden">
-                <div className="flex items-center gap-3.5">
-                    <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0 text-blue-500">
-                        <Lightbulb className="w-5 h-5 text-blue-500" />
-                    </div>
-                    <div>
-                        <h4 className="font-bold text-sm text-[#0F172A]">Not sure where to start?</h4>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                            Our AI analyses your local presence and gives practical, prioritized recommendations to help you get more customers.
-                        </p>
-                    </div>
-                </div>
-
-                <button
-                    type="button"
-                    onClick={() => setShowHowItWorks(true)}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-gray-50 border border-[#E2E8F0] text-[#0F172A] rounded-xl text-xs font-bold shrink-0 shadow-xs cursor-pointer transition-colors"
-                >
-                    <BookOpen className="w-4 h-4 text-gray-600" />
-                    Learn how it works
-                </button>
+export default function ReportGenerator() {
+    return (
+        <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
+            <div className="mb-6">
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#0F172A]">AI Insights</h1>
+                <p className="text-gray-500 text-sm mt-1">Data-driven analysis and actionable recommendations to dominate your local market.</p>
             </div>
-
-            {/* "Learn how it works" Modal */}
-            {showHowItWorks && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
-                    role="dialog"
-                    aria-modal="true"
-                    onClick={(e) => {
-                        if (e.target === e.currentTarget) setShowHowItWorks(false);
-                    }}
-                >
-                    <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 md:p-8 shadow-2xl border border-[#E2E8F0]">
-                        <button
-                            type="button"
-                            onClick={() => setShowHowItWorks(false)}
-                            className="absolute top-4 right-4 p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 cursor-pointer"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
-
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="w-10 h-10 rounded-xl bg-[var(--brand-primary)]/10 flex items-center justify-center text-[var(--brand-primary)]">
-                                <BadgeCheck className="w-5 h-5" />
-                            </div>
-                            <div>
-                                <h3 className="text-lg font-bold text-[#0F172A]">How AI Insights Works</h3>
-                                <p className="text-xs text-gray-500">Your automated 30-day growth engine</p>
-                            </div>
-                        </div>
-
-                        <div className="space-y-3.5 my-6 text-xs text-gray-600">
-                            <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
-                                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                                <div>
-                                    <strong className="text-[#0F172A] block mb-0.5">1. Multi-signal audit</strong>
-                                    We analyze your Google Business Profile completeness, review velocity, local citations, and map rankings.
-                                </div>
-                            </div>
-                            <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
-                                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                                <div>
-                                    <strong className="text-[#0F172A] block mb-0.5">2. Competitor benchmarking</strong>
-                                    We inspect rival businesses in your exact service area to find gaps you can exploit.
-                                </div>
-                            </div>
-                            <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
-                                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                                <div>
-                                    <strong className="text-[#0F172A] block mb-0.5">3. Prioritized 30-day action roadmap</strong>
-                                    You receive concrete, step-by-step tasks to boost Local Pack visibility and convert more searchers.
-                                </div>
-                            </div>
-                        </div>
-
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setShowHowItWorks(false);
-                                handleGenerate();
-                            }}
-                            className="w-full py-2.5 px-4 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                        >
-                            Generate report now
-                        </button>
-                    </div>
-                </div>
-            )}
+            <InsightsOverview />
         </div>
     );
 }

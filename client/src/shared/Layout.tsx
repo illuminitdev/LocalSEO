@@ -25,42 +25,26 @@ import {
     MessageSquarePlus,
     CheckCheck,
     Truck,
-    KeyRound
+    KeyRound,
+    Bot,
+    LineChart
 } from 'lucide-react';
 import { apiGet, cn } from './utils';
 import { clearToken, getMustChangePassword } from '../features/auth/auth';
 import { hasRouteAccess, routeRequiresFeatures } from './planCatalog';
 import { useEntitlements } from './EntitlementsContext';
-import { useOrgBrand } from './OrgBrandContext';
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 380;
 const SIDEBAR_DEFAULT = 260;
 
 function BrandMark({
-    logoUrl,
-    pending,
     style,
     className
 }: {
-    logoUrl: string;
-    pending: boolean;
     style: { height: number; maxWidth: number };
     className?: string;
 }) {
-    if (logoUrl) {
-        return (
-            <img
-                src={logoUrl}
-                alt="Business logo"
-                className={cn('w-auto max-w-full object-contain object-left min-w-0', className)}
-                style={style}
-            />
-        );
-    }
-    if (pending) {
-        return <div aria-hidden className="shrink-0" style={{ height: style.height, width: style.maxWidth }} />;
-    }
     return (
         <img
             src="/localseo.png"
@@ -116,7 +100,9 @@ const NAV: NavSection[] = [
         group: 'Track visibility',
         items: [
             { name: 'Local Search Grid', to: '/rank-tracker', icon: MapPin, featurePath: '/rank-tracker' },
+            { name: 'Visibility Tracker', to: '/visibility-tracker', icon: LineChart, featurePath: '/visibility-tracker' },
             { name: 'AI Insights', to: '/report', icon: AiInsightsIcon, featurePath: '/report' },
+            { name: 'LLM Visibility', to: '/llm-visibility', icon: Bot, featurePath: '/llm-visibility' },
         ]
     },
     {
@@ -162,7 +148,6 @@ export default function Layout() {
     const searchParams = new URLSearchParams(location.search);
     const bookingPanel = searchParams.get('panel');
     const { features, loading, entitlementsDisabled } = useEntitlements();
-    const { logoUrl: orgLogoUrl, brandStyle, loading: brandLoading, resolved: brandResolved } = useOrgBrand();
     const [userName, setUserName] = useState('');
     const [userEmail, setUserEmail] = useState('');
     const [avatarUrl, setAvatarUrl] = useState('');
@@ -392,11 +377,7 @@ export default function Layout() {
     const sidebar = (
         <>
             <div className="min-h-14 px-4 py-2.5 shrink-0 flex items-center justify-between gap-2 min-w-0">
-                <BrandMark
-                    logoUrl={orgLogoUrl}
-                    pending={brandLoading && !brandResolved}
-                    style={{ height: logoH, maxWidth: logoMaxW }}
-                />
+                <BrandMark style={{ height: logoH, maxWidth: logoMaxW }} />
                 <button
                     type="button"
                     className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9] shrink-0"
@@ -468,7 +449,7 @@ export default function Layout() {
     );
 
     return (
-        <div className="portal-brand flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden" style={brandStyle}>
+        <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden">
             {}
             <aside
                 className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden print:hidden min-w-0"
@@ -524,11 +505,7 @@ export default function Layout() {
                             <Menu className="w-5 h-5" />
                         </button>
                         <div className="min-w-0 lg:hidden">
-                            <BrandMark
-                                logoUrl={orgLogoUrl}
-                                pending={brandLoading && !brandResolved}
-                                style={{ height: 32, maxWidth: 140 }}
-                            />
+                            <BrandMark style={{ height: 32, maxWidth: 140 }} />
                         </div>
                     </div>
 

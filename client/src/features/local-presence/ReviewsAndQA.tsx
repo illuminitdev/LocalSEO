@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ComponentType } from 'react';
+import QRCode from 'qrcode';
 import {
     CheckCircle2,
     Database,
@@ -6,41 +7,26 @@ import {
     BadgeCheck,
     Star,
     MessageSquare,
-    FileText,
     Search,
     ChevronDown,
-    MoreVertical,
-    Eye,
-    Pencil,
-    Send,
     X,
     Info,
     Loader2,
     SlidersHorizontal,
     MessageCircle,
-    Lightbulb
+    Lightbulb,
+    Sparkles,
+    Inbox,
+    Download,
+    Link2,
+    QrCode,
+    Mail,
+    Receipt,
+    Nfc,
+    RefreshCw
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
 import { useToast } from '../../shared/Toast';
-import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
-
-interface Review {
-    id: number;
-    author: string;
-    rating: number;
-    date: string;
-    text: string;
-    sentiment: 'positive' | 'negative' | 'neutral';
-    draft?: string;
-    status: 'pending' | 'drafted' | 'published';
-    isDrafting?: boolean;
-}
-
-function sentimentFromRating(rating: number): Review['sentiment'] {
-    if (rating >= 4) return 'positive';
-    if (rating <= 2) return 'negative';
-    return 'neutral';
-}
 
 function getInitials(name: string): string {
     if (!name) return 'U';
@@ -51,13 +37,6 @@ function getInitials(name: string): string {
     return name.slice(0, 2).toUpperCase();
 }
 
-const AVATAR_COLORS = [
-    'bg-purple-100 text-purple-700',
-    'bg-emerald-100 text-emerald-700',
-    'bg-blue-100 text-blue-700',
-    'bg-amber-100 text-amber-700',
-    'bg-rose-100 text-rose-700'
-];
 
 function GoogleLogo({ className = 'w-4 h-4' }: { className?: string }) {
     return (
@@ -82,619 +61,777 @@ function GoogleLogo({ className = 'w-4 h-4' }: { className?: string }) {
     );
 }
 
+type InboxItem = {
+    key: string;
+    kind: 'google' | 'direct';
+    id?: string;
+    author: string;
+    rating: number;
+    text: string;
+    when: string;
+    sortTime: number;
+    sourceKey: string;
+    reply: string;
+    unread: boolean;
+    email?: string;
+    ownerReplied?: boolean;
+};
+
+type Hub = {
+    businessName: string;
+    slug: string;
+    links: Record<string, string>;
+    googleReviewUrl: string;
+    collected: Array<{
+        id: string;
+        source: string;
+        rating: number;
+        name: string;
+        email: string;
+        comment: string;
+        isRead: boolean;
+        replyText: string;
+        repliedAt: string | null;
+        createdAt: string;
+    }>;
+    sources: Record<string, number>;
+    googleReviews: Array<{ author: string; rating: number; text: string; when: string; ownerReply: string; ownerRepliedAt: string }>;
+    googleSyncedAt: string | null;
+    googleTotal: number | null;
+    canSync: boolean;
+    googleReplies: Record<string, { text: string; at: string }>;
+};
+
+const SOURCE_META: Record<string, { label: string; icon: ComponentType<{ className?: string }> }> = {
+    nfc: { label: 'In-Store NFC', icon: Nfc },
+    qr: { label: 'In-Store QR', icon: QrCode },
+    email: { label: 'Email Campaign', icon: Mail },
+    receipt: { label: 'Receipt QR', icon: Receipt },
+    sms: { label: 'SMS Request', icon: MessageSquare },
+    link: { label: 'Direct Link', icon: Link2 }
+};
+
+function hashKey(s: string) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return `g:${(h >>> 0).toString(36)}`;
+}
+
+function ago(iso: string) {
+    const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.round(hours / 24);
+    return days < 30 ? `${days}d ago` : new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function Stars({ rating, className = 'w-3 h-3' }: { rating: number; className?: string }) {
+    return (
+        <span className="inline-flex gap-0.5">
+            {[1, 2, 3, 4, 5].map((n) => (
+                <Star key={n} className={`${className} ${n <= rating ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
+            ))}
+        </span>
+    );
+}
+
 export function ReviewManagement() {
-    const [reviews, setReviews] = useState<Review[]>([]);
-    const [businessName, setBusinessName] = useState('');
-    const [businessLocation, setBusinessLocation] = useState('');
-    const [businessRating, setBusinessRating] = useState<number | null>(null);
-    const [businessReviewsCount, setBusinessReviewsCount] = useState<number>(0);
-    const [globalTone, setGlobalTone] = useState('warm');
-    const [isDraftingBatch, setIsDraftingBatch] = useState(false);
-    const [activeTab, setActiveTab] = useState<'all' | 'needs_reply' | 'drafts' | 'replied'>('all');
-    const [searchQuery, setSearchQuery] = useState('');
-    const [sortBy, setSortBy] = useState<'newest' | 'highest' | 'lowest'>('newest');
-    const [selectedReviewId, setSelectedReviewId] = useState<number | null>(null);
-    const [isEditingDraft, setIsEditingDraft] = useState(false);
+    const { show } = useToast();
+    const [googleReviews, setGoogleReviews] = useState<Array<{ author: string; rating: number; text: string; date: string }>>([]);
+    const [business, setBusiness] = useState<{ name: string; rating: number | null; count: number; mapsUrl: string }>({ name: '', rating: null, count: 0, mapsUrl: '' });
+    const [hub, setHub] = useState<Hub | null>(null);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [tab, setTab] = useState<'all' | 'needs' | 'replied'>('all');
+    const [search, setSearch] = useState('');
+    const [selectedKey, setSelectedKey] = useState('');
+    const [drafts, setDrafts] = useState<Record<string, string>>({});
+    const [tone, setTone] = useState('warm');
+    const [drafting, setDrafting] = useState(false);
+    const [posting, setPosting] = useState(false);
+    const [linkSource, setLinkSource] = useState('qr');
+    const [qrSvg, setQrSvg] = useState('');
+    const [campaignOpen, setCampaignOpen] = useState(false);
+    const [campaign, setCampaign] = useState({ emails: '', phones: '', message: '' });
+    const [sending, setSending] = useState(false);
+    const [syncing, setSyncing] = useState(false);
 
     useEffect(() => {
-        apiGet('/api/business')
-            .then((b) => {
-                if (b?.name) setBusinessName(b.name);
-                if (b?.rating != null) setBusinessRating(Number(b.rating));
-                if (b?.reviewsCount || b?.review_count) setBusinessReviewsCount(Number(b.reviewsCount || b.review_count));
-                if (b?.address) {
-                    const parts = String(b.address).split(',').map((p: string) => p.trim()).filter(Boolean);
-                    setBusinessLocation(parts.slice(-2).join(', ') || b.address);
-                }
-                const incoming = Array.isArray(b?.reviews) ? b.reviews : [];
-                const mapped = incoming
-                    .map((r: any, i: number) => ({
-                        id: i + 1,
-                        author: r.author || 'Customer',
-                        rating: Number(r.rating) || 5,
-                        date: r.date || 'Recent',
-                        text: r.text || (typeof r === 'string' ? r : ''),
-                        sentiment: sentimentFromRating(Number(r.rating) || 5),
-                        status: 'pending' as const
-                    }))
-                    .filter((r: Review) => r.text);
-
-                setReviews(mapped);
-                if (mapped.length > 0) {
-                    setSelectedReviewId(mapped[0].id);
-                }
+        Promise.all([
+            apiGet('/api/business').catch(() => null),
+            apiGet('/api/reviews/hub').catch((err: any) => {
+                setError(err?.message || 'Could not load collected reviews.');
+                return null;
             })
-            .catch((err) => setError(err.message));
+        ])
+            .then(([b, h]) => {
+                if (b) {
+                    setBusiness({
+                        name: b.name || '',
+                        rating: b.rating != null ? Number(b.rating) : null,
+                        count: Number(b.reviewsCount || b.review_count || 0),
+                        mapsUrl: b.mapsUrl || ''
+                    });
+                    setGoogleReviews(
+                        (Array.isArray(b.reviews) ? b.reviews : [])
+                            .map((r: any) => ({
+                                author: r.author || 'Customer',
+                                rating: Number(r.rating) || 5,
+                                text: r.text || (typeof r === 'string' ? r : ''),
+                                date: r.date || 'Recent'
+                            }))
+                            .filter((r: any) => r.text)
+                    );
+                }
+                if (h) setHub(h);
+            })
+            .finally(() => setLoading(false));
     }, []);
 
-    const fetchDraft = async (review: Review) => {
-        const data = await apiPost('/api/ai/review-reply', {
-            reviewText: review.text,
-            rating: review.rating,
-            author: review.author,
-            tone: globalTone
-        });
-        return (
-            data.reply ||
-            `Hi ${review.author.split(' ')[0] || 'there'},\n\nThank you so much for your wonderful review! We're thrilled to hear you had a great experience with our team. We look forward to welcoming you back to ${businessName} soon!\n\n– The ${businessName} Team`
-        );
-    };
-
-    const handleDraftSingle = async (id: number) => {
+    const syncGoogle = async () => {
+        setSyncing(true);
         setError('');
-        setSelectedReviewId(id);
-        setReviews((prev) => prev.map((r) => (r.id === id ? { ...r, isDrafting: true } : r)));
-        const targetReview = reviews.find((r) => r.id === id);
-        if (!targetReview) return;
         try {
-            const response = await fetchDraft(targetReview);
-            setReviews((prev) =>
-                prev.map((r) => (r.id === id ? { ...r, status: 'drafted', draft: response, isDrafting: false } : r))
-            );
+            await apiPost('/api/reviews/sync');
+            for (let i = 0; i < 40; i++) {
+                await new Promise((r) => setTimeout(r, 4000));
+                const res = await apiGet('/api/reviews/sync');
+                if (res.status === 'done') {
+                    setHub(await apiGet('/api/reviews/hub'));
+                    show(`Synced ${res.count} Google review${res.count === 1 ? '' : 's'}.`);
+                    return;
+                }
+                if (res.status === 'idle') break;
+            }
+            setError('Google is still collecting your reviews. Try Sync again in a minute.');
         } catch (err: any) {
-            setError(err.message || 'Draft failed');
-            setReviews((prev) => prev.map((r) => (r.id === id ? { ...r, isDrafting: false } : r)));
+            setError(err?.message || 'Could not sync Google reviews.');
+        } finally {
+            setSyncing(false);
         }
     };
 
-    const handleApproveAndPublish = async (id: number) => {
-        setReviews((prev) => prev.map((r) => (r.id === id ? { ...r, status: 'published' } : r)));
-        const targetReview = reviews.find((r) => r.id === id);
-        if (!targetReview) return;
-        await logDashboardActivity({
-            type: 'review',
-            message: `Published reply for review by ${targetReview.author}.`,
-            icon: 'CheckCircle',
-            color: 'text-[var(--brand-primary)]'
+    // First visit: pull existing Google reviews automatically (once). After that it is the Sync button.
+    const [autoSynced, setAutoSynced] = useState(false);
+    useEffect(() => {
+        if (autoSynced || !hub || !hub.canSync || hub.googleSyncedAt) return;
+        setAutoSynced(true);
+        syncGoogle();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [hub, autoSynced]);
+
+    const items: InboxItem[] = useMemo(() => {
+        const direct: InboxItem[] = (hub?.collected || []).map((c) => ({
+            key: `d:${c.id}`,
+            kind: 'direct',
+            id: c.id,
+            author: c.name || 'Anonymous customer',
+            rating: c.rating,
+            text: c.comment || '(No comment left, rating only)',
+            when: ago(c.createdAt),
+            sortTime: new Date(c.createdAt).getTime(),
+            sourceKey: c.source,
+            reply: c.replyText,
+            unread: !c.isRead && !c.replyText,
+            email: c.email
+        }));
+        const syncedList = hub?.googleReviews || [];
+        const source = syncedList.length
+            ? syncedList
+            : googleReviews.map((r) => ({ ...r, when: '', ownerReply: '', ownerRepliedAt: '' }));
+        const google: InboxItem[] = source.map((r: any) => {
+            const key = hashKey(`${r.author}|${r.text}`);
+            const saved = hub?.googleReplies?.[key]?.text || '';
+            const whenIso = r.when && /^\d{4}-/.test(r.when) ? r.when : '';
+            return {
+                key,
+                kind: 'google',
+                author: r.author,
+                rating: r.rating,
+                text: r.text || '(Rating only, no written review)',
+                when: whenIso ? ago(whenIso) : r.when || 'Recent',
+                sortTime: whenIso ? new Date(whenIso).getTime() : 0,
+                sourceKey: 'google',
+                reply: saved || r.ownerReply || '',
+                ownerReplied: !saved && Boolean(r.ownerReply),
+                unread: false
+            };
         });
+        return [...direct, ...google].sort((a, b) => b.sortTime - a.sortTime);
+    }, [hub, googleReviews]);
+
+    const filtered = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        return items.filter((i) => {
+            if (tab === 'needs' && i.reply) return false;
+            if (tab === 'replied' && !i.reply) return false;
+            return !q || i.author.toLowerCase().includes(q) || i.text.toLowerCase().includes(q);
+        });
+    }, [items, tab, search]);
+
+    const selected = items.find((i) => i.key === selectedKey) || filtered[0] || null;
+    const unreadCount = items.filter((i) => i.unread).length;
+    const needsReplyCount = items.filter((i) => !i.reply).length;
+
+    // Show the saved reply (if any) when a review is opened.
+    const draftFor = (i: InboxItem | null) => (i ? (drafts[i.key] ?? i.reply) : '');
+
+    const openItem = (i: InboxItem) => {
+        setSelectedKey(i.key);
+        if (i.kind === 'direct' && i.unread && i.id) {
+            apiPost(`/api/reviews/hub/${i.id}/read`).catch(() => {});
+            setHub((h) => (h ? { ...h, collected: h.collected.map((c) => (c.id === i.id ? { ...c, isRead: true } : c)) } : h));
+        }
     };
 
-    const handleBatchDraft = async () => {
-        setIsDraftingBatch(true);
+    const aiDraft = async () => {
+        if (!selected) return;
+        setDrafting(true);
         setError('');
         try {
-            const updated = [...reviews];
-            for (const r of updated) {
-                if (r.status === 'pending') {
-                    r.isDrafting = true;
-                    setReviews([...updated]);
-                    r.draft = await fetchDraft(r);
-                    r.status = 'drafted';
-                    r.isDrafting = false;
-                    setReviews([...updated]);
+            const data = await apiPost('/api/ai/review-reply', {
+                reviewText: selected.text,
+                rating: selected.rating,
+                author: selected.author,
+                tone
+            });
+            setDrafts((d) => ({ ...d, [selected.key]: data.reply || '' }));
+        } catch (err: any) {
+            setError(err?.message || 'Could not draft a reply.');
+        } finally {
+            setDrafting(false);
+        }
+    };
+
+    const postReply = async () => {
+        if (!selected) return;
+        const text = draftFor(selected).trim();
+        if (!text) {
+            setError('Write a reply first, or click AI Draft Reply.');
+            return;
+        }
+        setPosting(true);
+        setError('');
+        try {
+            if (selected.kind === 'direct' && selected.id) {
+                const res = await apiPost(`/api/reviews/hub/${selected.id}/reply`, { text });
+                setHub((h) =>
+                    h
+                        ? {
+                              ...h,
+                              collected: h.collected.map((c) =>
+                                  c.id === selected.id ? { ...c, replyText: res.review.replyText, repliedAt: res.review.repliedAt, isRead: true } : c
+                              )
+                          }
+                        : h
+                );
+                show(res.emailed ? 'Reply saved and emailed to the customer.' : 'Reply saved (no email address on file to send it to).');
+            } else {
+                const res = await apiPost('/api/reviews/google-reply', { key: selected.key, text });
+                setHub((h) => (h ? { ...h, googleReplies: res.googleReplies } : h));
+                try {
+                    await navigator.clipboard.writeText(text);
+                } catch {
+                    /* clipboard is optional */
                 }
+                show('Reply saved and copied. Paste it under the review in your Google Business Profile.');
             }
-            if (updated.length > 0 && !selectedReviewId) {
-                setSelectedReviewId(updated[0].id);
-            }
+            setDrafts((d) => {
+                const next = { ...d };
+                delete next[selected.key];
+                return next;
+            });
             await logDashboardActivity({
                 type: 'review',
-                message: 'Generated AI replies for pending reviews.',
-                icon: 'TrendingUp',
+                message: `Replied to review by ${selected.author}.`,
+                icon: 'CheckCircle',
                 color: 'text-[var(--brand-primary)]'
             });
         } catch (err: any) {
-            setError(err.message || 'Batch draft failed');
+            setError(err?.message || 'Could not save the reply.');
         } finally {
-            setIsDraftingBatch(false);
+            setPosting(false);
         }
     };
 
-    // Filtered reviews
-    const filteredReviews = useMemo(() => {
-        return reviews
-            .filter((r) => {
-                if (activeTab === 'needs_reply') return r.status === 'pending';
-                if (activeTab === 'drafts') return r.status === 'drafted';
-                if (activeTab === 'replied') return r.status === 'published';
-                return true;
-            })
-            .filter((r) => {
-                if (!searchQuery.trim()) return true;
-                const query = searchQuery.toLowerCase();
-                return r.author.toLowerCase().includes(query) || r.text.toLowerCase().includes(query);
-            })
-            .sort((a, b) => {
-                if (sortBy === 'highest') return b.rating - a.rating;
-                if (sortBy === 'lowest') return a.rating - b.rating;
-                return b.id - a.id;
-            });
-    }, [reviews, activeTab, searchQuery, sortBy]);
+    // QR code for the review page (always the "qr" source so scans are attributed correctly).
+    const qrLink = hub?.links?.qr || '';
+    useEffect(() => {
+        if (!qrLink) {
+            setQrSvg('');
+            return;
+        }
+        QRCode.toString(qrLink, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#0F172A', light: '#FFFFFF' } })
+            .then(setQrSvg)
+            .catch(() => setQrSvg(''));
+    }, [qrLink]);
 
-    const selectedReview = reviews.find((r) => r.id === selectedReviewId) || filteredReviews[0] || null;
+    const downloadQr = () => {
+        if (!qrSvg) return;
+        const url = URL.createObjectURL(new Blob([qrSvg], { type: 'image/svg+xml' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `review-qr-${(business.name || 'business').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.svg`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
 
-    // Counts
-    const totalCount = reviews.length;
-    const effectiveReviewCount = businessReviewsCount || totalCount;
-    const needsReplyCount = reviews.filter((r) => r.status === 'pending').length;
-    const draftsCount = reviews.filter((r) => r.status === 'drafted').length;
-    const repliedCount = reviews.filter((r) => r.status === 'published').length;
-    const computedAvg = totalCount
-        ? Number((reviews.reduce((acc, r) => acc + r.rating, 0) / totalCount).toFixed(1))
-        : null;
-    const effectiveRating = businessRating != null ? businessRating : computedAvg;
-    const effectiveRatingLabel = effectiveRating != null ? String(effectiveRating) : null;
-    const effectiveRatingNum = effectiveRating != null ? Number(effectiveRating) : 0;
+    const copyLink = async () => {
+        const link = hub?.links?.[linkSource];
+        if (!link) return;
+        try {
+            await navigator.clipboard.writeText(link);
+            show(`${SOURCE_META[linkSource]?.label || 'Review'} link copied.`);
+        } catch {
+            setError('Could not copy automatically. Select the link below and copy it.');
+        }
+    };
+
+    const sendCampaign = async () => {
+        setSending(true);
+        setError('');
+        try {
+            const res = await apiPost('/api/reviews/campaign', campaign);
+            const sent = (res.emailed || 0) + (res.texted || 0);
+            show(`Review request sent to ${sent} customer${sent === 1 ? '' : 's'}${res.failed ? `, ${res.failed} failed` : ''}.`);
+            if (sent > 0) {
+                setCampaignOpen(false);
+                setCampaign({ emails: '', phones: '', message: '' });
+            }
+        } catch (err: any) {
+            setError(err?.message || 'Could not send the campaign.');
+        } finally {
+            setSending(false);
+        }
+    };
+
+    const generateReport = () => {
+        const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+        const total = items.length;
+        const avg = total ? (items.reduce((a, i) => a + i.rating, 0) / total).toFixed(2) : '';
+        const replied = items.filter((i) => i.reply).length;
+        const lines = [
+            [`${business.name || 'Business'} review report`, new Date().toLocaleDateString('en-GB')].map(esc).join(','),
+            ['Reviews in inbox', total, 'Average rating', avg, 'Replied', `${replied} of ${total}`].map(esc).join(','),
+            ['Google rating', business.rating ?? '', 'Google review count', business.count || ''].map(esc).join(','),
+            '',
+            ['Source', 'Author', 'Rating', 'When', 'Review', 'Reply'].map(esc).join(','),
+            ...items.map((i) => [SOURCE_META[i.sourceKey]?.label || 'Google', i.author, i.rating, i.when, i.text, i.reply].map(esc).join(','))
+        ];
+        const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `review-report-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const sourceRows = useMemo(() => {
+        const counts = hub?.sources || {};
+        const total = Object.values(counts).reduce((a, b) => a + b, 0);
+        return {
+            total,
+            rows: Object.keys(SOURCE_META)
+                .map((k) => ({ key: k, n: counts[k] || 0, pct: total ? Math.round(((counts[k] || 0) / total) * 100) : 0 }))
+                .filter((r) => r.n > 0)
+                .sort((a, b) => b.n - a.n)
+        };
+    }, [hub]);
+
+    const shownLink = hub?.links?.[linkSource] || '';
 
     return (
-        <div className="max-w-7xl mx-auto animate-in fade-in duration-500 pb-12">
-            <VisibilityFixBanner />
-
-            {/* Top Header Bar */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
+        <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <div>
-                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#0F172A]">Reputation Agent</h1>
-                    <p className="text-gray-500 text-xs md:text-sm mt-1">
-                        Draft thoughtful replies to customer reviews.
-                    </p>
+                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#0F172A]">Review Growth Engine</h1>
+                    <p className="text-gray-500 text-sm mt-1">Manage reputation, respond to reviews, and collect new ones with a scannable review card.</p>
                 </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                    {/* Connected Business Pill */}
-                    <div className="bg-white border border-[#E2E8F0] rounded-xl px-3 py-1.5 flex items-center gap-2.5 shadow-xs">
-                        <div className="w-6 h-6 rounded-full flex items-center justify-center bg-white border border-gray-100 shadow-xs shrink-0">
-                            <GoogleLogo className="w-3.5 h-3.5" />
-                        </div>
-                        <div className="text-left leading-tight">
-                            <p className="text-xs font-bold text-[#0F172A]">
-                                {businessName || 'Connect your business'}
-                            </p>
-                            <p className="text-[10px] text-gray-400 font-medium">
-                                {businessLocation || 'Add a profile to sync reviews'}
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Tone Selector */}
-                    <div className="relative">
-                        <select
-                            value={globalTone}
-                            onChange={(e) => setGlobalTone(e.target.value)}
-                            className="appearance-none bg-white border border-[#E2E8F0] rounded-xl px-3.5 py-2 pr-8 text-xs font-semibold text-[#0F172A] shadow-xs cursor-pointer focus:outline-none"
-                        >
-                            <option value="warm">Professional & Warm</option>
-                            <option value="apologetic">Apologetic & Resolution-Focused</option>
-                            <option value="enthusiastic">Enthusiastic & Friendly</option>
-                        </select>
-                        <ChevronDown className="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    </div>
-
-                    {/* Draft Replies Batch CTA */}
+                <div className="flex items-center gap-2">
                     <button
-                        onClick={handleBatchDraft}
-                        disabled={isDraftingBatch || totalCount === 0}
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-xs font-bold transition-colors disabled:opacity-60 shadow-xs cursor-pointer shrink-0"
+                        type="button"
+                        onClick={generateReport}
+                        disabled={!items.length}
+                        className="px-4 py-2 rounded-xl border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
                     >
-                        {isDraftingBatch ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-300" />
-                        ) : (
-                            <BadgeCheck className="w-3.5 h-3.5 text-emerald-400" />
-                        )}
-                        {isDraftingBatch ? 'Drafting All...' : 'Draft replies'}
+                        Generate Report
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setCampaignOpen(true)}
+                        className="px-4 py-2 rounded-xl bg-[var(--brand-primary)] text-xs font-bold text-white hover:opacity-90 cursor-pointer"
+                    >
+                        Launch Campaign
                     </button>
                 </div>
             </div>
 
-            {error && (
-                <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5">
-                    {error}
-                </p>
-            )}
+            {error && <p className="mb-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5">{error}</p>}
 
-            {/* Top 4 KPI Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                {/* 1. Reviews to reply */}
-                <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4 flex flex-col justify-between shadow-xs">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
-                            <MessageSquare className="w-5 h-5 text-blue-500" />
-                        </div>
-                        <div>
-                            <p className="text-xs text-gray-500 font-medium">Reviews to reply</p>
-                            <p className="text-2xl font-bold text-[#0F172A]">{needsReplyCount}</p>
-                        </div>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('needs_reply')}
-                        className="text-[11px] font-semibold text-[var(--brand-primary)] hover:underline text-right mt-2 self-end cursor-pointer"
-                    >
-                        View all →
-                    </button>
-                </div>
-
-                {/* 2. Drafts ready */}
-                <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4 flex flex-col justify-between shadow-xs">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
-                            <FileText className="w-5 h-5 text-blue-500" />
-                        </div>
-                        <div>
-                            <p className="text-xs text-gray-500 font-medium">Drafts ready</p>
-                            <p className="text-2xl font-bold text-[#0F172A]">{draftsCount}</p>
-                        </div>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('drafts')}
-                        className="text-[11px] font-semibold text-[var(--brand-primary)] hover:underline text-right mt-2 self-end cursor-pointer"
-                    >
-                        View drafts →
-                    </button>
-                </div>
-
-                {/* 3. Replied this month */}
-                <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4 flex flex-col justify-between shadow-xs">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
-                            <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                        </div>
-                        <div>
-                            <p className="text-xs text-gray-500 font-medium">Replied this month</p>
-                            <p className="text-2xl font-bold text-[#0F172A]">{repliedCount}</p>
-                        </div>
-                    </div>
-                </div>
-
-                {/* 4. Average rating */}
-                <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4 flex items-center gap-3 shadow-xs">
-                    <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center shrink-0">
-                        <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
-                    </div>
-                    <div>
-                        <p className="text-xs text-gray-500 font-medium">Average rating</p>
-                        <div className="flex items-center gap-1.5">
-                            <span className="text-2xl font-bold text-[#0F172A]">{effectiveRatingLabel ?? '—'}</span>
-                            {effectiveRatingLabel != null && (
-                                <div className="flex text-amber-400">
-                                    {[...Array(5)].map((_, i) => (
-                                        <Star
-                                            key={i}
-                                            className={`w-3.5 h-3.5 ${
-                                                i < Math.round(effectiveRatingNum) ? 'fill-current' : 'text-gray-200'
-                                            }`}
-                                        />
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                        <p className="text-[10px] text-gray-400">
-                            {effectiveReviewCount > 0 ? `Based on ${effectiveReviewCount} reviews` : 'No reviews recorded'}
-                        </p>
-                    </div>
-                </div>
-            </div>
-
-            {/* Filter Tabs & Search Row */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-                {/* Tabs */}
-                <div className="flex items-center gap-6 border-b border-[#E2E8F0] pb-1">
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('all')}
-                        className={`text-xs font-semibold pb-2.5 transition-colors cursor-pointer ${
-                            activeTab === 'all'
-                                ? 'border-b-2 border-[var(--brand-primary)] text-[#0F172A] font-bold'
-                                : 'text-gray-500 hover:text-[#0F172A]'
-                        }`}
-                    >
-                        All reviews ({totalCount})
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('needs_reply')}
-                        className={`text-xs font-semibold pb-2.5 transition-colors cursor-pointer ${
-                            activeTab === 'needs_reply'
-                                ? 'border-b-2 border-[var(--brand-primary)] text-[#0F172A] font-bold'
-                                : 'text-gray-500 hover:text-[#0F172A]'
-                        }`}
-                    >
-                        Needs reply ({needsReplyCount})
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('drafts')}
-                        className={`text-xs font-semibold pb-2.5 transition-colors cursor-pointer ${
-                            activeTab === 'drafts'
-                                ? 'border-b-2 border-[var(--brand-primary)] text-[#0F172A] font-bold'
-                                : 'text-gray-500 hover:text-[#0F172A]'
-                        }`}
-                    >
-                        Drafts ({draftsCount})
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('replied')}
-                        className={`text-xs font-semibold pb-2.5 transition-colors cursor-pointer ${
-                            activeTab === 'replied'
-                                ? 'border-b-2 border-[var(--brand-primary)] text-[#0F172A] font-bold'
-                                : 'text-gray-500 hover:text-[#0F172A]'
-                        }`}
-                    >
-                        Replied ({repliedCount})
-                    </button>
-                </div>
-
-                {/* Search & Sort Controls */}
-                <div className="flex items-center gap-3">
-                    <div className="relative flex-1 md:w-64">
-                        <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                            type="text"
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search reviews by name or keyword..."
-                            className="w-full pl-8 pr-3 py-1.5 bg-white border border-[#E2E8F0] rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)]"
-                        />
-                    </div>
-
-                    <div className="relative">
-                        <select
-                            value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value as any)}
-                            className="appearance-none bg-white border border-[#E2E8F0] rounded-xl px-3 py-1.5 pr-7 text-xs font-semibold text-[#0F172A] shadow-xs cursor-pointer focus:outline-none"
-                        >
-                            <option value="newest">⇅ Newest first</option>
-                            <option value="highest">★ Highest rating</option>
-                            <option value="lowest">★ Lowest rating</option>
-                        </select>
-                        <ChevronDown className="w-3 h-3 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    </div>
-                </div>
-            </div>
-
-            {/* Main Two-Column Layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                {/* Left Column: Reviews List */}
-                <div className="lg:col-span-7 space-y-3.5">
-                    {filteredReviews.length === 0 ? (
-                        <div className="bg-white rounded-2xl border border-dashed border-[#CBD5E1] p-12 text-center shadow-xs">
-                            <MessageSquare className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                            <h3 className="font-bold text-sm text-[#0F172A] mb-1">No reviews yet</h3>
-                            <p className="text-xs text-gray-500 max-w-sm mx-auto leading-relaxed">
-                                Reviews from your connected Google Business Profile will appear here automatically with one-click AI reply drafting.
-                            </p>
-                        </div>
-                    ) : (
-                        filteredReviews.map((review, idx) => {
-                            const isSelected = selectedReview?.id === review.id;
-                            const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
-
-                            return (
-                                <div
-                                    key={review.id}
-                                    onClick={() => setSelectedReviewId(review.id)}
-                                    className={`rounded-2xl border p-4 transition-all cursor-pointer ${
-                                        isSelected
-                                            ? 'bg-white border-[var(--brand-primary)] ring-2 ring-[var(--brand-primary)]/20 shadow-xs'
-                                            : 'bg-white border-[#E2E8F0] hover:border-gray-300 shadow-xs'
-                                    }`}
-                                >
-                                    <div className="flex items-start justify-between gap-3 mb-2.5">
-                                        <div className="flex items-center gap-3">
-                                            <div
-                                                className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs ${avatarColor}`}
-                                            >
-                                                {getInitials(review.author)}
-                                            </div>
-                                            <div>
-                                                <h3 className="font-bold text-xs text-[#0F172A]">{review.author}</h3>
-                                                <p className="text-[10px] text-gray-400">{review.date}</p>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex text-amber-400">
-                                                {[...Array(5)].map((_, i) => (
-                                                    <Star
-                                                        key={i}
-                                                        className={`w-3.5 h-3.5 ${
-                                                            i < review.rating
-                                                                ? 'fill-current text-amber-400'
-                                                                : 'text-gray-200'
-                                                        }`}
-                                                    />
-                                                ))}
-                                            </div>
-                                            <button
-                                                type="button"
-                                                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
-                                            >
-                                                <MoreVertical className="w-3.5 h-3.5" />
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <p className="text-xs text-gray-700 leading-relaxed mb-3">{review.text}</p>
-
-                                    <div className="flex items-center justify-between pt-1">
-                                        <div>
-                                            {review.status === 'published' ? (
-                                                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600">
-                                                    <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Replied
-                                                </span>
-                                            ) : (
-                                                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--brand-primary)]">
-                                                    <div className="w-2 h-2 rounded-full bg-[var(--brand-primary)]"></div> Needs reply
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        <div>
-                                            {review.status === 'published' ? (
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setSelectedReviewId(review.id);
-                                                    }}
-                                                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-gray-50 border border-[#E2E8F0] rounded-lg text-xs font-semibold text-[#0F172A] cursor-pointer shadow-xs"
-                                                >
-                                                    <Eye className="w-3.5 h-3.5 text-gray-500" />
-                                                    View reply
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleDraftSingle(review.id);
-                                                    }}
-                                                    disabled={review.isDrafting}
-                                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-xs ${
-                                                        isSelected
-                                                            ? 'bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white'
-                                                            : 'bg-white hover:bg-gray-50 border border-[#E2E8F0] text-[#0F172A]'
-                                                    }`}
-                                                >
-                                                    {review.isDrafting ? (
-                                                        <Loader2 className="w-3 h-3 animate-spin" />
-                                                    ) : (
-                                                        <BadgeCheck className="w-3 h-3" />
-                                                    )}
-                                                    {review.isDrafting ? 'Drafting...' : 'Generate reply'}
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })
-                    )}
-                </div>
-
-                {/* Right Column: Reply Preview Card */}
-                <div className="lg:col-span-5 sticky top-4">
-                    {selectedReview ? (
-                        <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 shadow-xs">
-                            <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] mb-4">
-                                <h2 className="text-sm font-bold text-[#0F172A]">Reply preview</h2>
-                                <button
-                                    type="button"
-                                    onClick={() => setSelectedReviewId(null)}
-                                    className="p-1 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 cursor-pointer"
-                                >
-                                    <X className="w-4 h-4" />
-                                </button>
-                            </div>
-
-                            {/* Reviewer Header */}
-                            <div className="flex items-center gap-3 mb-4">
-                                <div className="w-9 h-9 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-xs">
-                                    {getInitials(selectedReview.author)}
-                                </div>
-                                <div>
-                                    <h3 className="font-bold text-xs text-[#0F172A]">{selectedReview.author}</h3>
-                                    <div className="flex items-center gap-2 mt-0.5">
-                                        <div className="flex text-amber-400">
-                                            {[...Array(5)].map((_, i) => (
-                                                <Star
-                                                    key={i}
-                                                    className={`w-3 h-3 ${
-                                                        i < selectedReview.rating
-                                                            ? 'fill-current text-amber-400'
-                                                            : 'text-gray-200'
-                                                    }`}
-                                                />
-                                            ))}
-                                        </div>
-                                        <span className="text-[10px] text-gray-400">{selectedReview.date}</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* AI Generated Reply Content */}
-                            <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4 mb-4">
-                                <div className="flex items-center gap-1.5 text-xs font-semibold text-[#0F172A] mb-2.5">
-                                    <BadgeCheck className="w-3.5 h-3.5 text-[var(--brand-primary)]" />
-                                    <span>AI generated reply</span>
-                                </div>
-
-                                {isEditingDraft ? (
-                                    <textarea
-                                        rows={6}
-                                        value={
-                                            selectedReview.draft ||
-                                            `Hi ${selectedReview.author.split(' ')[0] || 'there'},\n\nThank you so much for your wonderful review! We're thrilled to hear you had a great experience with our team. We look forward to welcoming you back to ${businessName} soon!\n\n– The ${businessName} Team`
-                                        }
-                                        onChange={(e) => {
-                                            const val = e.target.value;
-                                            setReviews((prev) =>
-                                                prev.map((r) =>
-                                                    r.id === selectedReview.id ? { ...r, draft: val } : r
-                                                )
-                                            );
-                                        }}
-                                        className="w-full p-2.5 bg-white border border-[#E2E8F0] rounded-lg text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 resize-none"
-                                    />
-                                ) : (
-                                    <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-line">
-                                        {selectedReview.draft ||
-                                            `Hi ${selectedReview.author.split(' ')[0] || 'there'},\n\nThank you so much for your wonderful review! We're thrilled to hear you enjoyed your visit and had a great experience with our team. We look forward to welcoming you back to ${businessName} soon!\n\n– The ${businessName} Team`}
-                                    </p>
-                                )}
-                            </div>
-
-                            {/* Action Buttons */}
-                            <div className="flex items-center gap-2 mb-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsEditingDraft(!isEditingDraft)}
-                                    className="flex-1 py-2 px-3 bg-white hover:bg-gray-50 border border-[#E2E8F0] text-[#0F172A] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-                                >
-                                    <Pencil className="w-3.5 h-3.5 text-gray-500" />
-                                    {isEditingDraft ? 'Done editing' : 'Edit reply'}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => handleApproveAndPublish(selectedReview.id)}
-                                    className="flex-1 py-2 px-3 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-                                >
-                                    <Send className="w-3.5 h-3.5 text-amber-300" />
-                                    Approve & publish
-                                </button>
-                            </div>
-
-                            {/* Bottom Note */}
-                            <div className="flex items-start gap-1.5 text-[11px] text-gray-500">
-                                <Info className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
-                                <p className="leading-tight">
-                                    This is a draft reply. It will only be published after your approval.
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
+                {/* Unified Inbox */}
+                <div className="lg:col-span-2 rounded-2xl border border-[#E2E8F0] bg-white overflow-hidden">
+                    <div className="px-5 py-4 border-b border-[#E2E8F0] flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                            <span className="w-9 h-9 rounded-lg bg-[#0F172A] text-white flex items-center justify-center">
+                                <Inbox className="w-4 h-4" />
+                            </span>
+                            <div>
+                                <h2 className="text-base font-bold text-[#0F172A]">Unified Inbox</h2>
+                                <p className="text-[11px] text-gray-500">
+                                    {business.rating != null ? `${business.rating}★ on Google · ` : ''}
+                                    {items.length} review{items.length === 1 ? '' : 's'} shown{hub?.googleTotal ? ` (${hub.googleTotal.toLocaleString()} on Google)` : ''} · {needsReplyCount} need a reply{hub?.googleSyncedAt ? ` · synced ${ago(hub.googleSyncedAt)}` : ''}
                                 </p>
                             </div>
                         </div>
+                        <div className="flex items-center gap-2">
+                        {hub?.canSync && (
+                            <button
+                                type="button"
+                                onClick={syncGoogle}
+                                disabled={syncing}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-[11px] font-bold text-[#0F172A] hover:bg-slate-50 disabled:opacity-60 cursor-pointer"
+                            >
+                                {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                                {syncing ? 'Syncing…' : 'Sync Google reviews'}
+                            </button>
+                        )}
+                        <span
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                                unreadCount ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'
+                            }`}
+                        >
+                            {unreadCount ? `${unreadCount} Unread` : 'All caught up'}
+                        </span>
+                        </div>
+                    </div>
+
+                    <div className="px-5 py-3 border-b border-[#E2E8F0] flex flex-wrap items-center gap-2">
+                        {(
+                            [
+                                ['all', 'All'],
+                                ['needs', 'Needs reply'],
+                                ['replied', 'Replied']
+                            ] as const
+                        ).map(([k, label]) => (
+                            <button
+                                key={k}
+                                type="button"
+                                onClick={() => setTab(k)}
+                                className={`px-3 py-1 rounded-full text-[11px] font-bold cursor-pointer ${
+                                    tab === k ? 'bg-[#0F172A] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                }`}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                        <div className="relative ml-auto">
+                            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                            <input
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Search reviews"
+                                className="pl-8 pr-3 py-1.5 rounded-lg border border-[#E2E8F0] text-xs outline-none focus:border-[var(--brand-primary)] w-40"
+                            />
+                        </div>
+                    </div>
+
+                    {loading ? (
+                        <div className="flex justify-center py-16 text-gray-400">
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                        </div>
+                    ) : !items.length ? (
+                        <div className="py-14 px-6 text-center">
+                            <p className="text-sm font-semibold text-[#0F172A]">No reviews yet</p>
+                            <p className="text-xs text-gray-500 mt-1">{syncing ? 'Fetching your Google reviews…' : hub?.canSync ? 'Click Sync Google reviews to load your existing reviews. New reviews from your review card appear here right away.' : 'Share your review card or launch a campaign. New reviews appear here right away.'}</p>
+                        </div>
                     ) : (
-                        <div className="bg-white rounded-2xl border border-dashed border-[#CBD5E1] p-8 text-center shadow-xs">
-                            <BadgeCheck className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                            <h3 className="font-bold text-xs text-[#0F172A] mb-1">Select a review</h3>
-                            <p className="text-[11px] text-gray-400">
-                                Click on any review card to generate, view, and approve the AI reply.
-                            </p>
+                        <div className="grid grid-cols-1 md:grid-cols-5 min-h-[420px]">
+                            <ul className="md:col-span-2 border-b md:border-b-0 md:border-r border-[#E2E8F0] max-h-[520px] overflow-y-auto divide-y divide-[#E2E8F0]">
+                                {filtered.map((i) => {
+                                    const isSel = selected?.key === i.key;
+                                    const meta = SOURCE_META[i.sourceKey];
+                                    return (
+                                        <li key={i.key}>
+                                            <button
+                                                type="button"
+                                                onClick={() => openItem(i)}
+                                                className={`w-full text-left px-4 py-3 cursor-pointer border-l-2 ${
+                                                    isSel ? 'bg-slate-50 border-[var(--brand-primary)]' : 'border-transparent hover:bg-slate-50'
+                                                }`}
+                                            >
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span className={`text-xs truncate ${i.unread ? 'font-black' : 'font-bold'} text-[#0F172A]`}>
+                                                        {i.unread && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mr-1.5 align-middle" />}
+                                                        {i.author}
+                                                    </span>
+                                                    <span className="text-[10px] text-gray-400 shrink-0">{i.when}</span>
+                                                </div>
+                                                <div className="mt-1 flex items-center gap-1.5 text-[10px] text-gray-500">
+                                                    {i.kind === 'google' ? <GoogleLogo className="w-3 h-3" /> : meta ? <meta.icon className="w-3 h-3" /> : null}
+                                                    <span className="font-semibold">{i.kind === 'google' ? 'Google Maps' : meta?.label || 'Direct'}</span>
+                                                    {i.reply && <span className="ml-auto text-emerald-600 font-bold">{i.ownerReplied ? 'Replied on Google' : 'Replied'}</span>}
+                                                </div>
+                                                <p className="text-[11px] text-gray-500 mt-1 line-clamp-2">{i.text}</p>
+                                                <div className="mt-1">
+                                                    <Stars rating={i.rating} />
+                                                </div>
+                                            </button>
+                                        </li>
+                                    );
+                                })}
+                                {!filtered.length && <li className="px-4 py-8 text-center text-xs text-gray-400">Nothing matches.</li>}
+                            </ul>
+
+                            <div className="md:col-span-3 flex flex-col">
+                                {selected ? (
+                                    <>
+                                        <div className="p-5 flex-1">
+                                            <div className="rounded-xl border border-[#E2E8F0] bg-slate-50/60 p-4">
+                                                <div className="flex items-center gap-3 mb-3">
+                                                    <span className="w-9 h-9 rounded-lg bg-[#0F172A] text-white text-xs font-bold flex items-center justify-center">
+                                                        {getInitials(selected.author)}
+                                                    </span>
+                                                    <div>
+                                                        <p className="text-sm font-bold text-[#0F172A]">{selected.author}</p>
+                                                        <p className="text-[11px] text-gray-500 flex items-center gap-1.5">
+                                                            {selected.kind === 'google' ? 'Left a review on Google' : `Left a review via ${SOURCE_META[selected.sourceKey]?.label || 'your review page'}`}
+                                                            <Stars rating={selected.rating} className="w-2.5 h-2.5" />
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <p className="text-sm text-gray-700 leading-relaxed">&ldquo;{selected.text}&rdquo;</p>
+                                            </div>
+                                            {selected.reply && (
+                                                <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                                                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 mb-1">{selected.ownerReplied ? 'Your reply on Google' : 'Your reply'}</p>
+                                                    <p className="text-xs text-gray-700 whitespace-pre-wrap">{selected.reply}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="border-t border-[#E2E8F0] p-4">
+                                            <textarea
+                                                value={draftFor(selected)}
+                                                onChange={(e) => setDrafts((d) => ({ ...d, [selected.key]: e.target.value }))}
+                                                rows={4}
+                                                placeholder={selected.reply ? 'Edit your reply…' : 'Draft your response… AI assist is available.'}
+                                                className="w-full rounded-lg border border-[#E2E8F0] p-3 text-xs outline-none focus:border-[var(--brand-primary)] resize-none"
+                                            />
+                                            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={aiDraft}
+                                                        disabled={drafting}
+                                                        className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[var(--brand-primary)] hover:underline disabled:opacity-60 cursor-pointer"
+                                                    >
+                                                        {drafting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                                                        AI Draft Reply
+                                                    </button>
+                                                    <select
+                                                        value={tone}
+                                                        onChange={(e) => setTone(e.target.value)}
+                                                        className="text-[11px] rounded border border-[#E2E8F0] bg-white px-1.5 py-0.5 text-gray-600"
+                                                        aria-label="Reply tone"
+                                                    >
+                                                        <option value="warm">Warm</option>
+                                                        <option value="apologetic">Apologetic</option>
+                                                        <option value="enthusiastic">Enthusiastic</option>
+                                                    </select>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={postReply}
+                                                    disabled={posting}
+                                                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F172A] px-4 py-2 text-xs font-bold text-white disabled:opacity-60 cursor-pointer"
+                                                >
+                                                    {posting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                                                    {selected.reply ? 'Update Reply' : 'Post Reply'}
+                                                </button>
+                                            </div>
+                                            {selected.kind === 'google' && (
+                                                <p className="text-[10px] text-gray-400 mt-2">
+                                                    Replies to Google reviews are saved here and copied for you to paste in your Google Business Profile.
+                                                    {business.mapsUrl && (
+                                                        <>
+                                                            {' '}
+                                                            <a href={business.mapsUrl} target="_blank" rel="noreferrer" className="font-semibold text-[var(--brand-primary)] hover:underline">
+                                                                Open Google
+                                                            </a>
+                                                        </>
+                                                    )}
+                                                </p>
+                                            )}
+                                            {selected.kind === 'direct' && (
+                                                <p className="text-[10px] text-gray-400 mt-2">
+                                                    {selected.email ? `Your reply will also be emailed to ${selected.email}.` : 'This customer did not leave an email, so the reply is saved here only.'}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <p className="m-auto text-xs text-gray-400">Select a review to read and reply.</p>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>
+
+                {/* Right column */}
+                <div className="space-y-5">
+                    <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5">
+                        <h3 className="text-base font-bold text-[#0F172A]">In-Store Collection</h3>
+                        <p className="text-[11px] text-gray-500 mt-1">Customers scan the card, rate you and leave a review in seconds. Happy customers are invited to post on Google too.</p>
+
+                        <div className="mt-4 rounded-xl bg-[#0F172A] p-4 text-white">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-lg font-black leading-tight truncate">{business.name || 'Your business'}</p>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-300 mt-4">Scan to Review</p>
+                                    <p className="text-xs text-slate-300">Takes 30 seconds</p>
+                                    <div className="mt-2">
+                                        <Stars rating={5} className="w-3.5 h-3.5" />
+                                    </div>
+                                </div>
+                                <div className="w-24 h-24 shrink-0 rounded-lg bg-white p-1.5 flex items-center justify-center">
+                                    {qrSvg ? (
+                                        <div className="w-full h-full [&>svg]:w-full [&>svg]:h-full" dangerouslySetInnerHTML={{ __html: qrSvg }} />
+                                    ) : (
+                                        <QrCode className="w-8 h-8 text-slate-300" />
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                onClick={downloadQr}
+                                disabled={!qrSvg}
+                                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#E2E8F0] py-2 text-[11px] font-bold text-[#0F172A] hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+                            >
+                                <Download className="w-3.5 h-3.5" /> QR Vector
+                            </button>
+                            <button
+                                type="button"
+                                onClick={copyLink}
+                                disabled={!shownLink}
+                                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#E2E8F0] py-2 text-[11px] font-bold text-[#0F172A] hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+                            >
+                                <Link2 className="w-3.5 h-3.5" /> Copy Link
+                            </button>
+                        </div>
+                        <div className="mt-3 flex items-center gap-2">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400" htmlFor="link-source">
+                                Link for
+                            </label>
+                            <select
+                                id="link-source"
+                                value={linkSource}
+                                onChange={(e) => setLinkSource(e.target.value)}
+                                className="flex-1 text-[11px] rounded border border-[#E2E8F0] bg-white px-2 py-1 text-gray-600"
+                            >
+                                {Object.entries(SOURCE_META).map(([k, m]) => (
+                                    <option key={k} value={k}>
+                                        {m.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        {shownLink && (
+                            <a href={shownLink} target="_blank" rel="noreferrer" className="mt-2 block truncate text-[10px] text-gray-400 hover:text-[var(--brand-primary)]">
+                                {shownLink}
+                            </a>
+                        )}
+                    </div>
+
+                    <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5">
+                        <div className="flex items-start justify-between gap-2">
+                            <h3 className="text-base font-bold text-[#0F172A]">Source Attribution</h3>
+                            <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Last 30 Days</span>
+                        </div>
+                        {sourceRows.total === 0 ? (
+                            <p className="mt-3 text-xs text-gray-500">No collected reviews yet. Share the QR card or launch a campaign to see where reviews come from.</p>
+                        ) : (
+                            <ul className="mt-4 space-y-3">
+                                {sourceRows.rows.map((r) => {
+                                    const Icon = SOURCE_META[r.key].icon;
+                                    return (
+                                        <li key={r.key}>
+                                            <div className="flex items-center justify-between text-xs">
+                                                <span className="inline-flex items-center gap-1.5 font-semibold text-[#0F172A]">
+                                                    <Icon className="w-3.5 h-3.5 text-gray-500" />
+                                                    {SOURCE_META[r.key].label}
+                                                </span>
+                                                <span className="font-bold text-[#0F172A]">
+                                                    {r.pct}% <span className="font-normal text-gray-400">({r.n})</span>
+                                                </span>
+                                            </div>
+                                            <div className="mt-1 h-1.5 rounded-full bg-slate-100">
+                                                <div className="h-1.5 rounded-full bg-[#0F172A]" style={{ width: `${r.pct}%` }} />
+                                            </div>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        )}
+                    </div>
+                </div>
             </div>
+
+            {campaignOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !sending && setCampaignOpen(false)}>
+                    <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-base font-bold text-[#0F172A]">Launch review campaign</h3>
+                            <button type="button" onClick={() => setCampaignOpen(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer" aria-label="Close">
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">Send customers a link to your review page. Separate several with commas or new lines.</p>
+                        <label className="block mt-4 text-[11px] font-bold text-gray-500">Email addresses</label>
+                        <textarea
+                            value={campaign.emails}
+                            onChange={(e) => setCampaign((c) => ({ ...c, emails: e.target.value }))}
+                            rows={3}
+                            placeholder="jane@example.com, sam@example.com"
+                            className="mt-1 w-full rounded-lg border border-[#E2E8F0] p-2.5 text-xs outline-none focus:border-[var(--brand-primary)]"
+                        />
+                        <label className="block mt-3 text-[11px] font-bold text-gray-500">Phone numbers for SMS (optional)</label>
+                        <textarea
+                            value={campaign.phones}
+                            onChange={(e) => setCampaign((c) => ({ ...c, phones: e.target.value }))}
+                            rows={2}
+                            placeholder="07123 456789"
+                            className="mt-1 w-full rounded-lg border border-[#E2E8F0] p-2.5 text-xs outline-none focus:border-[var(--brand-primary)]"
+                        />
+                        <label className="block mt-3 text-[11px] font-bold text-gray-500">Message (optional)</label>
+                        <textarea
+                            value={campaign.message}
+                            onChange={(e) => setCampaign((c) => ({ ...c, message: e.target.value }))}
+                            rows={2}
+                            maxLength={500}
+                            placeholder="Thanks for visiting! Could you leave us a quick review?"
+                            className="mt-1 w-full rounded-lg border border-[#E2E8F0] p-2.5 text-xs outline-none focus:border-[var(--brand-primary)]"
+                        />
+                        <div className="mt-4 flex justify-end gap-2">
+                            <button type="button" onClick={() => setCampaignOpen(false)} className="px-4 py-2 rounded-lg border border-[#E2E8F0] text-xs font-bold cursor-pointer">
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={sendCampaign}
+                                disabled={sending || (!campaign.emails.trim() && !campaign.phones.trim())}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--brand-primary)] text-xs font-bold text-white disabled:opacity-50 cursor-pointer"
+                            >
+                                {sending && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Send requests
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -791,8 +928,6 @@ export function QAAutoResponder() {
 
     return (
         <div className="max-w-7xl mx-auto animate-in fade-in duration-500 pb-12">
-            <VisibilityFixBanner />
-
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <div>

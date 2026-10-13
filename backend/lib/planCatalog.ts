@@ -33,6 +33,7 @@ const PLAN_FEATURES: Record<string, string[]> = {
 const ROUTE_FEATURES: Record<string, string | string[] | null> = {
     '/dashboard': null,
     '/rank-tracker': 'local_growth',
+    '/visibility-tracker': 'local_growth',
     '/report': ['local_growth', 'reporting'],
     '/profile': 'local_presence',
     '/citations': 'local_presence',

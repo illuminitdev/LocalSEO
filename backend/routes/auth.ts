@@ -522,6 +522,7 @@ router.patch('/profile', requireAuth, async (req: Request, res: Response) => {
         if (!name) return res.status(400).json({ error: 'Name is required.' });
         const avatarUrl =
             req.body?.avatarUrl != null ? String(req.body.avatarUrl).trim() : undefined;
+        const userId = (req as any).user.id;
 
         const { rows } = await query(
             `UPDATE users SET
@@ -529,8 +530,10 @@ router.patch('/profile', requireAuth, async (req: Request, res: Response) => {
                 avatar_url = CASE WHEN $3::text IS NOT NULL THEN $3 ELSE avatar_url END
              WHERE id = $2
              RETURNING id, email, name, avatar_url, must_change_password`,
-            [name, (req as any).user.id, avatarUrl ?? null]
+            [name, userId, avatarUrl ?? null]
         );
+        // Keep Team / booking display in sync with Account settings name
+        await query(`UPDATE memberships SET display_name = $1 WHERE user_id = $2`, [name, userId]);
         res.json({ user: authUserPayload(rows[0]) });
     } catch (err: any) {
         console.error('Update profile error:', err);

@@ -45,7 +45,7 @@ import ExcelLeadUploadModal, { downloadLeadsExcelTemplate } from '../sales-agent
 import AddLeadModal from '../sales-agent/AddLeadModal';
 import { emailShareStatusLabel, emailShareStatusHint } from '../shared/emailShareStatus';
 import { cn } from '../shared/utils';
-import { matchesEmailFilter, matchesLeadStatusFilter } from './crmFilters';
+import { matchesEmailFilter, matchesLeadStatusFilter, resolveLeadStatus } from './crmFilters';
 
 type ContactFilter = 'any' | 'email' | 'phone' | 'both';
 type SourceCategoryFilter = 'all' | 'growth_audit' | 'added';
@@ -197,14 +197,75 @@ function displayLeadStatus(lead: {
 }
 
 function getCleanSalesNote(lead: AdminLead): string {
-    const raw = lead.salesNotes || lead.latestActivity?.note || '';
-    if (!raw) return '';
-    const note = raw.trim();
-    const colonIdx = note.indexOf(': ');
-    if (colonIdx !== -1 && (note.startsWith('Task "') || note.startsWith('Note added to task'))) {
-        const afterColon = note.substring(colonIdx + 2).trim();
-        if (afterColon) return afterColon;
+    const act = lead.latestActivity;
+    const actType = (act as any)?.activityType || (act as any)?.activity_type || (act as any)?.type;
+    if (actType === 'task_event') return '';
+
+    const author = (act as any)?.authorName || (act as any)?.author_name;
+    if (author === 'Excel Import' || author === 'System') return '';
+
+    const conclusion = String(lead.notes || (lead as any).conclusion || (lead as any).auditConclusion || '').trim();
+    const conclusionLower = conclusion.toLowerCase();
+
+    // Priority 1: Note logged from a human telecaller activity (disposition / status update / call log)
+    let raw = '';
+    if (act?.note && act.note.trim()) {
+        const actNote = act.note.trim();
+        const actLower = actNote.toLowerCase();
+        if (
+            author !== 'Excel Import' &&
+            author !== 'System' &&
+            !actLower.startsWith('lead imported') &&
+            (!conclusionLower || (actLower !== conclusionLower && !conclusionLower.includes(actLower)))
+        ) {
+            raw = actNote;
+        }
     }
+
+    // Priority 2: Direct salesNotes if distinct from the spreadsheet conclusion
+    if (!raw && lead.salesNotes) {
+        const sn = lead.salesNotes.trim();
+        const snLower = sn.toLowerCase();
+        if (
+            !conclusionLower ||
+            (snLower !== conclusionLower && !conclusionLower.includes(snLower) && !snLower.includes(conclusionLower))
+        ) {
+            raw = sn;
+        }
+    }
+
+    if (!raw) return '';
+
+    const note = raw.trim();
+    const lower = note.toLowerCase();
+
+    // Exclude task events, assignment logs, and system automated messages
+    if (lower.includes('task') || lower.includes('assigned') || lower.includes('unassigned')) return '';
+    if (
+        lower.startsWith('status updated to') ||
+        lower.startsWith('status changed to') ||
+        lower.startsWith('lead status set to') ||
+        lower.startsWith('lead imported') ||
+        lower.startsWith('status updated from excel') ||
+        lower.startsWith('updated from excel')
+    ) {
+        return '';
+    }
+
+    // Exclude spreadsheet conclusion / audit takeaway notes
+    if (
+        conclusionLower &&
+        (lower === conclusionLower || lower.includes(conclusionLower) || conclusionLower.includes(lower))
+    ) {
+        return '';
+    }
+
+    // For added / Excel-imported leads that are still 'New' with no agent note, suppress initial imported remarks
+    const isExcelLead = lead.source === 'Excel Import' || lead.type === 'excel_import' || lead.sourceCategory === 'added';
+    if (isExcelLead && (!lead.status || lead.status === 'new') && (!author || author === 'Excel Import' || author === 'System')) {
+        return '';
+    }
+
     return note;
 }
 
@@ -552,6 +613,29 @@ export default function AdminGrowthAuditLeads() {
         () => leads.filter((l) => isLeadAdded(l)).length,
         [leads]
     );
+
+    const statusCounts = useMemo(() => {
+        const counts: Record<string, number> = {
+            all: leads.length,
+            new: 0,
+            in_progress: 0,
+            contacted: 0,
+            follow_up: 0,
+            interested: 0,
+            not_interested: 0,
+            converted: 0,
+            completed: 0,
+            voicemail: 0,
+            cancelled: 0
+        };
+        for (const l of leads) {
+            const s = resolveLeadStatus(l);
+            if (counts[s] !== undefined) {
+                counts[s]++;
+            }
+        }
+        return counts;
+    }, [leads]);
 
     const selectedExcelBatch = useMemo(
         () => excelBatches.find((b) => b.batchId === excelBatchFilter) || null,
@@ -1026,19 +1110,28 @@ export default function AdminGrowthAuditLeads() {
                             <select
                                 value={selectedStatus}
                                 onChange={(e) => setFilter('status', e.target.value)}
-                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500 font-medium"
+                                title="Filter leads by status"
                             >
-                                <option value="all">All Statuses</option>
-                                <option value="new">New</option>
-                                <option value="in_progress">In Progress</option>
-                                <option value="contacted">Contacted</option>
-                                <option value="follow_up">Follow Up</option>
-                                <option value="interested">Interested</option>
-                                <option value="not_interested">Not Interested</option>
-                                <option value="converted">Converted</option>
-                                <option value="completed">Completed</option>
-                                <option value="voicemail">Voicemail</option>
-                                <option value="cancelled">Cancelled</option>
+                                <option value="all">All Statuses ({leads.length})</option>
+                                <option value="new">New ({statusCounts.new})</option>
+                                <option value="contacted">Contacted ({statusCounts.contacted})</option>
+                                <option value="follow_up">Follow Up ({statusCounts.follow_up})</option>
+                                <option value="interested">Interested ({statusCounts.interested})</option>
+                                <option value="converted">Converted ({statusCounts.converted})</option>
+                                <option value="not_interested">Not Interested ({statusCounts.not_interested})</option>
+                                {statusCounts.in_progress > 0 && (
+                                    <option value="in_progress">In Progress ({statusCounts.in_progress})</option>
+                                )}
+                                {statusCounts.completed > 0 && (
+                                    <option value="completed">Completed ({statusCounts.completed})</option>
+                                )}
+                                {statusCounts.voicemail > 0 && (
+                                    <option value="voicemail">Voicemail ({statusCounts.voicemail})</option>
+                                )}
+                                {statusCounts.cancelled > 0 && (
+                                    <option value="cancelled">Cancelled ({statusCounts.cancelled})</option>
+                                )}
                             </select>
                         </div>
 
@@ -1141,11 +1234,11 @@ export default function AdminGrowthAuditLeads() {
                                         <col className="w-[38px]" />
                                         <col className="w-[105px]" />
                                         <col className="w-[125px]" />
-                                        <col className="w-[160px]" />
                                         <col className="w-[230px]" />
                                         <col className="w-[185px]" />
                                         <col className="w-[110px]" />
                                         <col className="w-[135px]" />
+                                        <col className="w-[160px]" />
                                         <col className="w-[272px]" />
                                     </colgroup>
                                     <thead>
@@ -1161,11 +1254,11 @@ export default function AdminGrowthAuditLeads() {
                                             </th>
                                             <th className="px-3 py-2.5 font-bold">Date</th>
                                             <th className="px-3 py-2.5 font-bold">Type & Source</th>
-                                            <th className="px-3 py-2.5 font-bold">Status & Notes</th>
                                             <th className="px-3 py-2.5 font-bold">Name / Business</th>
                                             <th className="px-3 py-2.5 font-bold">Contact Info</th>
                                             <th className="px-3 py-2.5 font-bold text-center">Score / Report</th>
                                             <th className="px-3 py-2.5 font-bold">Assigned To</th>
+                                            <th className="px-3 py-2.5 font-bold">Lead Status</th>
                                             <th className="px-3 py-2.5 font-bold text-right">Actions</th>
                                         </tr>
                                     </thead>
@@ -1219,45 +1312,6 @@ export default function AdminGrowthAuditLeads() {
                                                                  {lead.source}
                                                              </div>
                                                          ) : null}
-                                                     </td>
-                                                     <td className="px-3 py-2.5 align-top">
-                                                         <button
-                                                             type="button"
-                                                             onClick={(e) => {
-                                                                 e.stopPropagation();
-                                                                 setSelectedStatusLead(lead);
-                                                             }}
-                                                             className={cn(
-                                                                 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer hover:shadow-xs hover:scale-105 transition-all text-left group/badge',
-                                                                 badge ? badge.className : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                                                             )}
-                                                             title="Click to view full status history timeline"
-                                                         >
-                                                             <span>{badge ? badge.label : 'New'}</span>
-                                                             <History className="w-2.5 h-2.5 opacity-60 group-hover/badge:opacity-100 shrink-0" />
-                                                         </button>
-                                                         <div
-                                                             className="flex items-center gap-1 text-[10px] text-slate-400 font-medium mt-1 whitespace-nowrap"
-                                                             title="Date when status was last updated"
-                                                         >
-                                                             <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-                                                             <span>{fmtDate(lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt)}</span>
-                                                         </div>
-                                                         {(() => {
-                                                             const note = getCleanSalesNote(lead);
-                                                             if (!note) return null;
-                                                             return (
-                                                                 <div
-                                                                     className="flex items-start gap-1 mt-1 max-w-[200px]"
-                                                                     title={note}
-                                                                 >
-                                                                     <MessageSquare className="w-2.5 h-2.5 text-indigo-400 shrink-0 mt-0.5" />
-                                                                     <span className="text-[10px] text-slate-600 leading-tight line-clamp-3 break-words">
-                                                                         {note}
-                                                                     </span>
-                                                                 </div>
-                                                             );
-                                                         })()}
                                                      </td>
                                                      <td className="px-3 py-2.5 text-sm font-semibold text-[#0F172A] overflow-hidden">
                                                          <div className="w-full min-w-0 pr-1.5">
@@ -1405,6 +1459,45 @@ export default function AdminGrowthAuditLeads() {
                                                              </span>
                                                          )}
                                                      </td>
+                                                     <td className="px-3 py-2.5 align-top">
+                                                         <button
+                                                             type="button"
+                                                             onClick={(e) => {
+                                                                 e.stopPropagation();
+                                                                 setSelectedStatusLead(lead);
+                                                             }}
+                                                             className={cn(
+                                                                 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer hover:shadow-xs hover:scale-105 transition-all text-left group/badge',
+                                                                 badge ? badge.className : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                                                             )}
+                                                             title="Click to view full status history timeline"
+                                                         >
+                                                             <span>{badge ? badge.label : 'New'}</span>
+                                                             <History className="w-2.5 h-2.5 opacity-60 group-hover/badge:opacity-100 shrink-0" />
+                                                         </button>
+                                                         <div
+                                                             className="flex items-center gap-1 text-[10px] text-slate-400 font-medium mt-1 whitespace-nowrap"
+                                                             title="Date when status was last updated"
+                                                         >
+                                                             <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                                             <span>{fmtDate(lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt)}</span>
+                                                         </div>
+                                                         {(() => {
+                                                             const note = getCleanSalesNote(lead);
+                                                             if (!note) return null;
+                                                             return (
+                                                                 <div
+                                                                     className="flex items-start gap-1 mt-1 max-w-[200px]"
+                                                                     title={note}
+                                                                 >
+                                                                     <MessageSquare className="w-2.5 h-2.5 text-indigo-400 shrink-0 mt-0.5" />
+                                                                     <span className="text-[10px] text-slate-600 leading-tight line-clamp-3 break-words">
+                                                                         {note}
+                                                                     </span>
+                                                                 </div>
+                                                             );
+                                                         })()}
+                                                     </td>
                                                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
                                                          <div className="flex items-center justify-end gap-1.5">
                                                              <button
@@ -1443,13 +1536,14 @@ export default function AdminGrowthAuditLeads() {
                                  </table>
                             ) : (
                                 /* 2. SPREADSHEET / ADDED LEADS DETAILED COLUMNS VIEW */
-                                <table className="w-full text-left text-sm min-w-[1100px] table-fixed">
+                                <table className="w-full text-left text-sm min-w-[1260px] table-fixed">
                                     <colgroup>
                                         <col className="w-[38px]" />
                                         <col className="w-[240px]" />
                                         <col className="w-[200px]" />
                                         <col className="w-[140px]" />
                                         <col className="w-[150px]" />
+                                        <col className="w-[160px]" />
                                         <col className="w-[110px]" />
                                         <col className="w-[110px]" />
                                         <col className="w-[120px]" />
@@ -1469,6 +1563,7 @@ export default function AdminGrowthAuditLeads() {
                                             <th className="px-3 py-2.5 font-bold">Contact Info</th>
                                             <th className="px-3 py-2.5 font-bold">Type & Source</th>
                                             <th className="px-3 py-2.5 font-bold">Assigned To</th>
+                                            <th className="px-3 py-2.5 font-bold">Lead Status</th>
                                             <th className="px-3 py-2.5 font-bold">Date</th>
                                             <th className="px-3 py-2.5 font-bold text-center">Priority</th>
                                             <th className="px-3 py-2.5 font-bold text-right">Actions</th>
@@ -1476,6 +1571,7 @@ export default function AdminGrowthAuditLeads() {
                                     </thead>
                                     <tbody className="divide-y divide-[#F1F5F9]">
                                         {pageLeads.map((lead) => {
+                                            const badge = statusBadge(displayLeadStatus(lead));
                                             const title = displayName(lead);
                                             const oppLevel = String(lead.opportunityLevel || '').toLowerCase();
                                             const isSelected = selectedLeadIds.has(lead.id);
@@ -1603,6 +1699,45 @@ export default function AdminGrowthAuditLeads() {
                                                                 Unassigned
                                                             </span>
                                                         )}
+                                                    </td>
+                                                    <td className="px-3 py-2.5 align-top">
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setSelectedStatusLead(lead);
+                                                            }}
+                                                            className={cn(
+                                                                'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer hover:shadow-xs hover:scale-105 transition-all text-left group/badge',
+                                                                badge ? badge.className : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                                                            )}
+                                                            title="Click to view full status history timeline"
+                                                        >
+                                                            <span>{badge ? badge.label : 'New'}</span>
+                                                            <History className="w-2.5 h-2.5 opacity-60 group-hover/badge:opacity-100 shrink-0" />
+                                                        </button>
+                                                        <div
+                                                            className="flex items-center gap-1 text-[10px] text-slate-400 font-medium mt-1 whitespace-nowrap"
+                                                            title="Date when status was last updated"
+                                                        >
+                                                            <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                                            <span>{fmtDate(lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt)}</span>
+                                                        </div>
+                                                        {(() => {
+                                                            const note = getCleanSalesNote(lead);
+                                                            if (!note) return null;
+                                                            return (
+                                                                <div
+                                                                    className="flex items-start gap-1 mt-1 max-w-[200px]"
+                                                                    title={note}
+                                                                >
+                                                                    <MessageSquare className="w-2.5 h-2.5 text-indigo-400 shrink-0 mt-0.5" />
+                                                                    <span className="text-[10px] text-slate-600 leading-tight line-clamp-3 break-words">
+                                                                        {note}
+                                                                    </span>
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </td>
                                                     <td className="px-3 py-2.5 text-xs whitespace-nowrap">
                                                         {(() => {

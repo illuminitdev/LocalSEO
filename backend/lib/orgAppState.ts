@@ -33,12 +33,6 @@ export function emptyDashboardState() {
         weeklyPosts: 0,
         photoCount: 0,
         activities: [] as any[],
-        lastVisibilityAudit: null as null | {
-            total: number;
-            bandLabel: string;
-            createdAt: string;
-            query: string;
-        },
         trackedKeywords: [] as Array<{
             keyword: string;
             avgRank: number;
@@ -65,8 +59,10 @@ export function emptyDashboardState() {
             startedAt: string;
         },
         gbpDrafts: [] as Record<string, any>[],
-        strategyReport: null as null | Record<string, any>,
-        strategyReportHistory: [] as Record<string, any>[]
+        llmVisibility: null as null | Record<string, any>,
+        llmVisibilityHistory: [] as Record<string, any>[],
+        aiInsights: null as null | Record<string, any>,
+        aiInsightsHistory: [] as Record<string, any>[]
     };
 }
 

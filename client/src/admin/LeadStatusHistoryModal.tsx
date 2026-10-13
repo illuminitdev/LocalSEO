@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { X, History, User, MessageSquare, Plus, RefreshCw, AlertCircle, CheckCircle2, Calendar } from 'lucide-react';
+import { X, History, User, MessageSquare, Plus, RefreshCw, AlertCircle, CheckCircle2, Calendar, CheckSquare, Layers } from 'lucide-react';
 import { adminGet, updateAdminCrmLead, type LeadActivity } from './adminApi';
 import { apiGet, apiPatch, cn } from '../shared/utils';
 
@@ -13,6 +13,7 @@ interface LeadStatusHistoryModalProps {
     authorName?: string | null;
     readOnly?: boolean;
     allowLogStatus?: boolean;
+    defaultTab?: 'lead_status' | 'task_status' | 'all';
     onClose: () => void;
     onStatusUpdated?: (newStatus: string) => void;
 }
@@ -47,6 +48,7 @@ export default function LeadStatusHistoryModal({
     authorName,
     readOnly = false,
     allowLogStatus,
+    defaultTab = 'lead_status',
     onClose,
     onStatusUpdated
 }: LeadStatusHistoryModalProps) {
@@ -54,6 +56,9 @@ export default function LeadStatusHistoryModal({
     const [activities, setActivities] = useState<LeadActivity[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+
+    // Active timeline tab: lead status updates vs task status updates vs all
+    const [activeTab, setActiveTab] = useState<'lead_status' | 'task_status' | 'all'>(defaultTab);
 
     // New status update form state
     const [isAddingStatus, setIsAddingStatus] = useState(false);
@@ -67,11 +72,26 @@ export default function LeadStatusHistoryModal({
         if (!leadId) return;
         setLoading(true);
         setError(null);
+
+        const normalizeActs = (arr: any[]): LeadActivity[] => {
+            return (arr || []).map((a: any) => ({
+                id: a.id,
+                leadId: a.leadId || a.lead_id || leadId,
+                activityType: a.activityType || a.activity_type || 'note',
+                disposition: a.disposition,
+                note: a.note || '',
+                authorName: a.authorName || a.author_name || a.userName || a.user_name || 'Sales Agent',
+                createdAt: a.createdAt || a.created_at || new Date().toISOString(),
+                userName: a.userName || a.user_name,
+                userEmail: a.userEmail || a.user_email
+            }));
+        };
+
         try {
             try {
                 const res = await adminGet(`/api/admin/crm/leads/${encodeURIComponent(leadId)}/activities`);
                 if (res && res.activities) {
-                    setActivities(res.activities);
+                    setActivities(normalizeActs(res.activities));
                     return;
                 }
             } catch (aErr) {
@@ -79,13 +99,13 @@ export default function LeadStatusHistoryModal({
                 try {
                     const sRes = await apiGet(`/api/sales/leads/${encodeURIComponent(leadId)}/activities`);
                     if (sRes && sRes.activities) {
-                        setActivities(sRes.activities);
+                        setActivities(normalizeActs(sRes.activities));
                         return;
                     }
                 } catch {
                     const sCrm = await apiGet(`/api/sales/leads/${encodeURIComponent(leadId)}/crm`);
                     if (sCrm && sCrm.activities) {
-                        setActivities(sCrm.activities);
+                        setActivities(normalizeActs(sCrm.activities));
                         return;
                     }
                 }
@@ -118,17 +138,15 @@ export default function LeadStatusHistoryModal({
         setError(null);
         try {
             const parsedDate = statusDate ? new Date(statusDate).toISOString() : new Date().toISOString();
+            const payload = {
+                status: newStatus,
+                notes: statusNote.trim() || undefined,
+                createdAt: parsedDate
+            };
             try {
-                await updateAdminCrmLead(leadId, {
-                    status: newStatus,
-                    notes: statusNote.trim() || undefined,
-                    createdAt: parsedDate
-                } as any);
+                await updateAdminCrmLead(leadId, payload as any);
             } catch (adminErr) {
-                await apiPatch(`/api/sales/leads/${encodeURIComponent(leadId)}`, {
-                    status: newStatus,
-                    notes: statusNote.trim() || undefined
-                });
+                await apiPatch(`/api/sales/leads/${encodeURIComponent(leadId)}`, payload);
             }
 
             setSuccessMessage(`Status updated to "${STATUS_CONFIG[newStatus]?.label || newStatus}"`);
@@ -169,17 +187,24 @@ export default function LeadStatusHistoryModal({
         const list: LeadActivity[] = [...activities];
         if (initialNote && initialNote.trim()) {
             const cleanInitial = initialNote.trim().toLowerCase();
-            const hasMatch = list.some(a => (a.note || '').toLowerCase().includes(cleanInitial));
-            if (!hasMatch) {
-                list.push({
-                    id: 'lead-active-note',
-                    leadId,
-                    activityType: 'note',
-                    disposition: currentStatus || 'in_progress',
-                    note: initialNote,
-                    authorName: authorName || 'Sales Agent',
-                    createdAt: initialDate || new Date().toISOString()
-                } as LeadActivity);
+            const isObservationOrConclusion =
+                cleanInitial.includes('gbp') ||
+                cleanInitial.includes('observation') ||
+                cleanInitial.includes('audit') ||
+                cleanInitial.length > 80;
+            if (!isObservationOrConclusion) {
+                const hasMatch = list.some(a => (a.note || '').toLowerCase().includes(cleanInitial));
+                if (!hasMatch) {
+                    list.push({
+                        id: 'lead-active-note',
+                        leadId,
+                        activityType: 'note',
+                        disposition: currentStatus || 'in_progress',
+                        note: initialNote,
+                        authorName: authorName || 'Sales Agent',
+                        createdAt: initialDate || new Date().toISOString()
+                    } as LeadActivity);
+                }
             }
         } else if (list.length === 0 && currentStatus) {
             list.push({
@@ -195,13 +220,63 @@ export default function LeadStatusHistoryModal({
         return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     })();
 
-    const effectiveStatus = statusHistory[0]?.disposition || currentStatus;
+    const isTaskActivity = (item: LeadActivity): boolean => {
+        const actType = item.activityType || (item as any).activity_type;
+        if (actType === 'task_event') return true;
+        const note = String(item.note || '').toLowerCase();
+        if (
+            note.includes('task') ||
+            note.includes('assigned to telecaller') ||
+            note.includes('assigned to agent') ||
+            note.includes('assigned to sales') ||
+            note.includes('assigned to admin') ||
+            note.includes('unassigned') ||
+            note.startsWith('assigned to')
+        ) {
+            return true;
+        }
+        const disp = String(item.disposition || '').toLowerCase();
+        if (disp.includes('task') || disp.includes('assigned')) {
+            return true;
+        }
+        return false;
+    };
+
+    const leadStatusHistory = statusHistory.filter(item => !isTaskActivity(item));
+    const taskStatusHistory = statusHistory.filter(item => isTaskActivity(item));
+
+    const displayedItems =
+        activeTab === 'lead_status'
+            ? leadStatusHistory
+            : activeTab === 'task_status'
+              ? taskStatusHistory
+              : statusHistory;
+
+    const effectiveStatus = currentStatus || leadStatusHistory[0]?.disposition || 'new';
     const activeBadge = STATUS_CONFIG[String(effectiveStatus || '').toLowerCase()] || {
         label: effectiveStatus ? String(effectiveStatus).replace(/_/g, ' ') : 'New',
         className: 'bg-slate-100 text-slate-700 border-slate-200'
     };
 
     const getBadgeInfo = (item: LeadActivity) => {
+        if (isTaskActivity(item)) {
+            const noteLower = (item.note || '').toLowerCase();
+            const dispLower = (item.disposition || '').toLowerCase();
+            if (noteLower.includes('created task') || dispLower.includes('created')) {
+                return { label: 'Task Created', className: 'bg-indigo-50 text-indigo-700 border-indigo-200 font-bold' };
+            }
+            if (noteLower.includes('completed') || dispLower.includes('completed')) {
+                return { label: 'Task Completed', className: 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold' };
+            }
+            if (noteLower.includes('assigned') || dispLower.includes('assigned')) {
+                return { label: 'Task Assigned', className: 'bg-blue-50 text-blue-700 border-blue-200 font-bold' };
+            }
+            if (noteLower.includes('cancelled') || dispLower.includes('cancelled')) {
+                return { label: 'Task Cancelled', className: 'bg-slate-100 text-slate-600 border-slate-200' };
+            }
+            return { label: 'Task Update', className: 'bg-indigo-50 text-indigo-700 border-indigo-200 font-bold' };
+        }
+
         const rawStatus = (item.disposition || '').toLowerCase();
         if (rawStatus && STATUS_CONFIG[rawStatus]) {
             return STATUS_CONFIG[rawStatus];
@@ -227,9 +302,6 @@ export default function LeadStatusHistoryModal({
         }
         if (item.activityType === 'call_log') {
             return { label: 'Call Log', className: 'bg-blue-50 text-blue-700 border-blue-200' };
-        }
-        if (item.activityType === 'task_event') {
-            return { label: 'Task Update', className: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
         }
         return {
             label: item.disposition ? item.disposition.replace(/_/g, ' ') : 'Status Update',
@@ -386,32 +458,138 @@ export default function LeadStatusHistoryModal({
                         </div>
                     )}
 
+                    {/* Tabs to Separate Lead Status Updates vs Task Status Updates */}
+                    <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200">
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('lead_status')}
+                            className={cn(
+                                'flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5',
+                                activeTab === 'lead_status'
+                                    ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/80'
+                                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                            )}
+                        >
+                            <History className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Lead Status</span>
+                            <span
+                                className={cn(
+                                    'px-1.5 py-0.2 rounded-full text-[10px] font-extrabold',
+                                    activeTab === 'lead_status'
+                                        ? 'bg-amber-100 text-amber-900'
+                                        : 'bg-slate-200 text-slate-600'
+                                )}
+                            >
+                                {leadStatusHistory.length}
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('task_status')}
+                            className={cn(
+                                'flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5',
+                                activeTab === 'task_status'
+                                    ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/80'
+                                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                            )}
+                        >
+                            <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Task Updates</span>
+                            <span
+                                className={cn(
+                                    'px-1.5 py-0.2 rounded-full text-[10px] font-extrabold',
+                                    activeTab === 'task_status'
+                                        ? 'bg-indigo-100 text-indigo-900'
+                                        : 'bg-slate-200 text-slate-600'
+                                )}
+                            >
+                                {taskStatusHistory.length}
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('all')}
+                            className={cn(
+                                'py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1',
+                                activeTab === 'all'
+                                    ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/80'
+                                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                            )}
+                            title="View All Timeline"
+                        >
+                            <span>All</span>
+                            <span
+                                className={cn(
+                                    'px-1.5 py-0.2 rounded-full text-[10px] font-extrabold',
+                                    activeTab === 'all'
+                                        ? 'bg-slate-900 text-white'
+                                        : 'bg-slate-200 text-slate-600'
+                                )}
+                            >
+                                {statusHistory.length}
+                            </span>
+                        </button>
+                    </div>
+
                     {/* Timeline List (Latest First) */}
                     <div>
                         <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                                Status Timeline (Latest First)
+                            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                                {activeTab === 'lead_status' ? (
+                                    <>
+                                        <History className="w-3.5 h-3.5 text-amber-600" />
+                                        <span>Lead Status Timeline (Latest First)</span>
+                                    </>
+                                ) : activeTab === 'task_status' ? (
+                                    <>
+                                        <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
+                                        <span>Task Status Timeline (Latest First)</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Layers className="w-3.5 h-3.5 text-slate-600" />
+                                        <span>All Status & Task Timeline</span>
+                                    </>
+                                )}
                             </h3>
                             <span className="text-[11px] text-slate-400 font-medium">
-                                {statusHistory.length} {statusHistory.length === 1 ? 'update' : 'updates'}
+                                {displayedItems.length} {displayedItems.length === 1 ? 'update' : 'updates'}
                             </span>
                         </div>
 
                         {loading ? (
                             <div className="p-8 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
                                 <RefreshCw className="w-4 h-4 animate-spin text-amber-500" />
-                                <span>Loading status history…</span>
+                                <span>Loading history…</span>
                             </div>
-                        ) : statusHistory.length === 0 ? (
+                        ) : displayedItems.length === 0 ? (
                             <div className="p-6 bg-slate-50 rounded-xl border border-slate-200/80 text-center space-y-1">
-                                <p className="text-xs font-semibold text-slate-600">No previous status updates recorded.</p>
-                                <p className="text-[11px] text-slate-400">Current active status: <span className="font-bold text-slate-700">{activeBadge.label}</span></p>
+                                <p className="text-xs font-semibold text-slate-600">
+                                    {activeTab === 'lead_status'
+                                        ? 'No lead status updates recorded yet.'
+                                        : activeTab === 'task_status'
+                                          ? 'No task status updates recorded yet for this lead.'
+                                          : 'No history updates recorded.'}
+                                </p>
+                                {activeTab === 'lead_status' && (
+                                    <p className="text-[11px] text-slate-400">
+                                        Current active status: <span className="font-bold text-slate-700">{activeBadge.label}</span>
+                                    </p>
+                                )}
+                                {activeTab === 'task_status' && (
+                                    <p className="text-[11px] text-slate-400">
+                                        Tasks created, assigned, or completed for this lead will appear here.
+                                    </p>
+                                )}
                             </div>
                         ) : (
                             <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-                                {statusHistory.map((item, idx) => {
+                                {displayedItems.map((item, idx) => {
+                                    const isTask = isTaskActivity(item);
                                     const badge = getBadgeInfo(item);
-                                    const isLatest = idx === 0;
+                                    const isCurrentLeadStatus = !isTask && idx === 0 && (activeTab === 'lead_status' || activeTab === 'all');
 
                                     return (
                                         <div key={item.id || idx} className="relative group">
@@ -419,13 +597,20 @@ export default function LeadStatusHistoryModal({
                                             <div
                                                 className={cn(
                                                     'absolute -left-6 top-1.5 w-3 h-3 rounded-full border-2 bg-white',
-                                                    isLatest
+                                                    isCurrentLeadStatus
                                                         ? 'border-amber-500 bg-amber-500 ring-4 ring-amber-100'
-                                                        : 'border-slate-300'
+                                                        : isTask
+                                                          ? idx === 0 && activeTab === 'task_status'
+                                                            ? 'border-indigo-500 bg-indigo-500 ring-4 ring-indigo-100'
+                                                            : 'border-indigo-400 bg-indigo-50'
+                                                          : 'border-slate-300'
                                                 )}
                                             />
 
-                                            <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs hover:border-amber-300 transition-colors">
+                                            <div className={cn(
+                                                'bg-white p-3.5 rounded-xl border shadow-2xs transition-colors',
+                                                isTask ? 'border-slate-200/80 hover:border-indigo-300' : 'border-slate-200/80 hover:border-amber-300'
+                                            )}>
                                                 <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
                                                     <div className="flex items-center gap-2">
                                                         <span
@@ -436,7 +621,7 @@ export default function LeadStatusHistoryModal({
                                                         >
                                                             {badge.label}
                                                         </span>
-                                                        {isLatest && (
+                                                        {isCurrentLeadStatus && (
                                                             <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[9px] font-extrabold uppercase">
                                                                 Current Status
                                                             </span>
@@ -455,21 +640,37 @@ export default function LeadStatusHistoryModal({
                                                 </div>
 
                                                 {/* Note / Remarks */}
-                                                {item.note && (
-                                                    <div className="flex items-start gap-1.5 mt-2 pt-2 border-t border-slate-100 text-xs text-slate-700 bg-slate-50/70 p-2.5 rounded-lg">
-                                                        <MessageSquare className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
-                                                        <p className="whitespace-pre-line leading-relaxed break-words font-medium">
-                                                            {(() => {
-                                                                const raw = item.note || '';
-                                                                const noteMatch = raw.match(/(?:—\s*Note:\s*|\|\s*Note:\s*|Note:\s*)["']?([\s\S]*?)["']?$/i);
-                                                                if (noteMatch && noteMatch[1]) {
-                                                                    return noteMatch[1].replace(/["']$/, '').trim();
-                                                                }
-                                                                return raw;
-                                                            })()}
-                                                        </p>
-                                                    </div>
-                                                )}
+                                                {item.note && (() => {
+                                                    const raw = item.note || '';
+                                                    // If updated by Excel Import, do not display full observation / audit conclusion as a status note
+                                                    if (
+                                                        item.authorName === 'Excel Import' &&
+                                                        !raw.startsWith('Lead imported') &&
+                                                        !raw.startsWith('Status updated') &&
+                                                        !raw.startsWith('Updated from Excel')
+                                                    ) {
+                                                        return null;
+                                                    }
+                                                    const noteMatch = raw.match(/(?:—\s*Note:\s*|\|\s*Note:\s*|Note:\s*)["']?([\s\S]*?)["']?$/i);
+                                                    const displayNote = noteMatch && noteMatch[1] ? noteMatch[1].replace(/["']$/, '').trim() : raw;
+                                                    if (!displayNote) return null;
+
+                                                    return (
+                                                        <div className={cn(
+                                                            'flex items-start gap-1.5 mt-2 pt-2 border-t border-slate-100 text-xs text-slate-700 p-2.5 rounded-lg',
+                                                            isTask ? 'bg-indigo-50/50 border border-indigo-100/60' : 'bg-slate-50/70'
+                                                        )}>
+                                                            {isTask ? (
+                                                                <CheckSquare className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
+                                                            ) : (
+                                                                <MessageSquare className="w-3 h-3 text-amber-600 shrink-0 mt-0.5" />
+                                                            )}
+                                                            <p className="whitespace-pre-line leading-relaxed break-words font-medium">
+                                                                {displayNote}
+                                                            </p>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     );

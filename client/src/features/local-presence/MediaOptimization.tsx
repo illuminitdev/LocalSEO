@@ -16,7 +16,6 @@ import {
     Trash2
 } from 'lucide-react';
 import { apiPost, logDashboardActivity } from '../../shared/utils';
-import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
 
 interface CategoryStatus {
     id: string;
@@ -80,8 +79,6 @@ export default function MediaOptimization() {
 
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
-            <VisibilityFixBanner />
-
             {/* Page Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <div>

@@ -110,7 +110,7 @@ export default function ClientPortal() {
         normalizeBookingIndustryId(org?.tradeType) === 'salons';
 
     return (
-        <div className="min-h-screen bg-[#F8FAFC] py-8 px-4" style={orgBrandStyle(org)}>
+        <div className="portal-brand min-h-screen bg-[#F8FAFC] py-8 px-4" style={orgBrandStyle(org)}>
             <div className="max-w-3xl mx-auto space-y-4">
                 <div
                     className="text-white rounded-2xl px-5 py-5"

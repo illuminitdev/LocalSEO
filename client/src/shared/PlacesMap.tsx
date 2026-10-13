@@ -57,6 +57,9 @@ export type MapMarker = {
     highlight?: boolean;
     
     color?: string;
+    /** Compact rounded-square badge (used for rank grid cells). */
+    compact?: boolean;
+    textColor?: string;
 };
 
 type PlacesMapProps = {
@@ -70,6 +73,8 @@ type PlacesMapProps = {
     
     showPlaceholder?: boolean;
     placeholder?: string;
+    /** When set, clicking the map reports the clicked coordinates (e.g. to pick a center). */
+    onMapClick?: (lat: number, lng: number) => void;
 };
 
 
@@ -82,8 +87,11 @@ export default function PlacesMap({
     markers,
     zoom,
     showPlaceholder = false,
-    placeholder = 'Map unavailable right now.'
+    placeholder = 'Map unavailable right now.',
+    onMapClick
 }: PlacesMapProps) {
+    const clickRef = useRef(onMapClick);
+    clickRef.current = onMapClick;
     const containerRef = useRef<HTMLDivElement>(null);
     const [failed, setFailed] = useState(false);
 
@@ -127,6 +135,11 @@ export default function PlacesMap({
                     ]
                 });
 
+                map.addListener('click', (e: any) => {
+                    const cb = clickRef.current;
+                    if (cb && e?.latLng) cb(e.latLng.lat(), e.latLng.lng());
+                });
+
                 const bounds = new maps.LatLngBounds();
                 pointList.forEach((m, idx) => {
                     const pos = { lat: m.lat, lng: m.lng };
@@ -135,6 +148,13 @@ export default function PlacesMap({
                     const fill = m.color || (m.highlight ? brand : darkenHex(brand));
                     const labelText = m.label !== undefined ? String(m.label) : String(idx + 1);
 
+                    const textColor = m.textColor || '#ffffff';
+                    const compactPin = encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+  <rect x="1.5" y="1.5" width="27" height="27" rx="7" fill="${fill}" stroke="#ffffff" stroke-width="2"/>
+  <text x="15" y="20" font-size="12" font-weight="800" font-family="system-ui, -apple-system, sans-serif" fill="${textColor}" text-anchor="middle">${labelText}</text>
+</svg>
+                    `.trim());
                     const svgPin = encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" width="34" height="44" viewBox="0 0 34 44">
   <path d="M17 0C7.61 0 0 7.61 0 17c0 12.8 17 27 17 27s17-14.2 17-27C34 7.61 26.39 0 17 0z" fill="${fill}" stroke="#ffffff" stroke-width="2"/>
@@ -146,11 +166,17 @@ export default function PlacesMap({
                         position: pos,
                         map,
                         title: m.title || `Stop ${labelText}`,
-                        icon: {
-                            url: `data:image/svg+xml;charset=UTF-8,${svgPin}`,
-                            scaledSize: new maps.Size(34, 44),
-                            anchor: new maps.Point(17, 44)
-                        }
+                        icon: m.compact
+                            ? {
+                                  url: `data:image/svg+xml;charset=UTF-8,${compactPin}`,
+                                  scaledSize: new maps.Size(30, 30),
+                                  anchor: new maps.Point(15, 15)
+                              }
+                            : {
+                                  url: `data:image/svg+xml;charset=UTF-8,${svgPin}`,
+                                  scaledSize: new maps.Size(34, 44),
+                                  anchor: new maps.Point(17, 44)
+                              }
                     });
                 });
                 if (pointList.length > 1) {
@@ -189,6 +215,22 @@ export default function PlacesMap({
     );
 }
 
+export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+    if (!MAPS_JS_KEY) return null;
+    try {
+        await loadMapsScript(MAPS_JS_KEY);
+        const maps = (window as any).google?.maps;
+        if (!maps?.Geocoder) return null;
+        return await new Promise<string | null>((resolve) => {
+            new maps.Geocoder().geocode({ location: { lat, lng } }, (results: any[], status: string) => {
+                resolve(status === 'OK' && results?.[0]?.formatted_address ? String(results[0].formatted_address) : null);
+            });
+        });
+    } catch {
+        return null;
+    }
+}
+
 export function mapsJsConfigured() {
     return Boolean(MAPS_JS_KEY);
 }
@@ -223,30 +265,32 @@ export function geoGridMarkers(
     centerLat: number,
     centerLng: number,
     grid: number[][],
-    radiusMiles = 2
+    halfSpanMiles = 4
 ): MapMarker[] {
-    if (!Array.isArray(grid) || grid.length !== 3) return [];
-    const stepMiles = radiusMiles;
-    const dLat = stepMiles / 69;
+    const size = Array.isArray(grid) ? grid.length : 0;
+    if (size < 2) return [];
+    const step = (halfSpanMiles * 2) / (size - 1);
+    const mid = (size - 1) / 2;
+    const dLat = step / 69;
     const cos = Math.cos((centerLat * Math.PI) / 180);
-    const dLng = stepMiles / (69 * (Math.abs(cos) < 0.01 ? 0.01 : cos));
+    const dLng = step / (69 * (Math.abs(cos) < 0.01 ? 0.01 : cos));
 
     const markers: MapMarker[] = [];
-    for (let r = 0; r < 3; r++) {
+    for (let r = 0; r < size; r++) {
         const row = grid[r];
-        if (!Array.isArray(row) || row.length !== 3) continue;
-        for (let c = 0; c < 3; c++) {
+        if (!Array.isArray(row)) continue;
+        for (let c = 0; c < row.length; c++) {
             const rank = Number(row[c]);
             if (!Number.isFinite(rank)) continue;
-            const rowOffset = r - 1;
-            const colOffset = c - 1;
+            const rounded = Math.round(rank);
             markers.push({
-                lat: centerLat - rowOffset * dLat,
-                lng: centerLng + colOffset * dLng,
-                label: String(Math.round(rank)),
-                title: `Estimated Local Pack rank ${Math.round(rank)}`,
-                highlight: rank <= 3,
-                color: rank <= 3 ? readBrandPrimaryHex() : rank <= 5 ? darkenHex(readBrandPrimaryHex()) : '#EF4444'
+                lat: centerLat - (r - mid) * dLat,
+                lng: centerLng + (c - mid) * dLng,
+                label: rounded >= 21 ? '20+' : String(rounded),
+                title: rounded >= 21 ? 'Not in top 20' : `Local Pack rank ${rounded}`,
+                compact: true,
+                color: rounded <= 3 ? '#9A3A0A' : rounded <= 10 ? '#FDBA9B' : '#E2E8F0',
+                textColor: rounded <= 3 ? '#ffffff' : rounded <= 10 ? '#7C2D12' : '#64748B'
             });
         }
     }

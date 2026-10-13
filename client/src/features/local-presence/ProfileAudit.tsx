@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity, updateDashboardStats } from '../../shared/utils';
 import { useToast } from '../../shared/Toast';
-import VisibilityFixBanner from '../../shared/VisibilityFixBanner';
 
 const REQUIRED_FIELDS = ['name', 'category', 'address', 'phone'] as const;
 
@@ -213,8 +212,6 @@ export default function ProfileAudit() {
 
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
-            <VisibilityFixBanner />
-
             {/* Page Header */}
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
                 <div>

@@ -147,17 +147,6 @@ export function clearOrgBrandCache() {
     }
 }
 
-export function applyDocumentBrandVars(brandPrimary: string, brandSecondary: string) {
-    if (typeof document === 'undefined') return;
-    const root = document.documentElement;
-    const primaryForeground = getContrastTextColor(brandPrimary);
-    root.style.setProperty('--brand-primary', brandPrimary);
-    root.style.setProperty('--brand-primary-foreground', primaryForeground);
-    root.style.setProperty('--brand-secondary', brandSecondary);
-    root.style.setProperty('--color-orange', brandPrimary);
-    root.style.setProperty('--color-orange-dark', brandPrimary);
-}
-
 export function readBrandPrimaryHex() {
     if (typeof document === 'undefined') return DEFAULT_BRAND_PRIMARY;
     const raw = getComputedStyle(document.documentElement).getPropertyValue('--brand-primary').trim();

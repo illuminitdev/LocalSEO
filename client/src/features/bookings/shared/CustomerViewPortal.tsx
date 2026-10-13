@@ -12,14 +12,25 @@ import {
     Paintbrush,
     Palette,
     Scissors,
+    Search,
     Syringe,
     Trash2,
     User,
+    X,
     type LucideIcon
 } from 'lucide-react';
 import { apiGet, apiPost, cn, formatCents, restrictPhoneInput } from '../../../shared/utils';
 import { orgBrandStyle, resolveOrgBrand } from '../../../shared/orgBrand';
-import { monthDays, todayStr, readBookingDraft, writeBookingDraft, clearBookingDraft } from './bookingUtils';
+import {
+    monthDays,
+    todayStr,
+    readBookingDraft,
+    writeBookingDraft,
+    clearBookingDraft,
+    formatBusinessTimeOnly,
+    formatInBusinessTime,
+    resolveBusinessTimezone
+} from './bookingUtils';
 import {
     getBookingPreset,
     getBookingFlowConfig,
@@ -87,10 +98,34 @@ type HostBrand = {
     phone?: string;
     email?: string;
     serviceArea?: string;
+    timezone?: string;
     logoUrl?: string;
     brandPrimary?: string;
     brandSecondary?: string;
 };
+
+/** Prefer wall-clock label from API; else format ISO in UK business timezone. */
+function formatSlotTime(slot: Slot, timezone?: string) {
+    const fromLabel = String(slot.label || '')
+        .split(/\s*[–-]\s*/)[0]
+        ?.trim();
+    if (fromLabel && /^\d{1,2}:\d{2}/.test(fromLabel)) return fromLabel.slice(0, 5);
+    return formatBusinessTimeOnly(slot.startAt, timezone);
+}
+
+function formatSlotDateTime(iso: string, timezone?: string) {
+    return formatInBusinessTime(
+        iso,
+        {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit'
+        },
+        timezone
+    );
+}
 
 type IndustryConfig = {
     id?: string;
@@ -170,6 +205,8 @@ export default function CustomerViewPortal({
 
     const showCatalog =
         flowConfig.catalogMode === 'priceList' && menuItems.length > 0 && Boolean(slotEventSlug);
+
+    const businessTimezone = resolveBusinessTimezone(host.timezone);
 
     const catalogLabel = (m: ShellMenuItem) => {
         const cat = String(m.category || '').trim();
@@ -304,6 +341,7 @@ export default function CustomerViewPortal({
     const [catalogTab, setCatalogTab] = useState<CatalogBrowseTab>(
         () => draft?.catalogTab || 'appointments'
     );
+    const [serviceSearch, setServiceSearch] = useState('');
     const [cart, setCart] = useState<ShellEventType[]>(() => restoredCart);
     const [selectedCatalog, setSelectedCatalog] = useState<ShellMenuItem | null>(() => {
         if (!draft?.selectedCatalog?.id) return null;
@@ -331,6 +369,7 @@ export default function CustomerViewPortal({
         () => draft?.intakeMode || 'instant'
     );
     const [preferredAt, setPreferredAt] = useState(() => String(draft?.preferredAt || ''));
+    const [requestNote, setRequestNote] = useState(() => String(draft?.requestNote || ''));
     const [month, setMonth] = useState(() => {
         if (draft?.month?.year != null && draft?.month?.month != null) {
             return { year: draft.month.year, month: draft.month.month };
@@ -354,6 +393,8 @@ export default function CustomerViewPortal({
     const [loadingSlots, setLoadingSlots] = useState(false);
     const [maxDaysAhead, setMaxDaysAhead] = useState(60);
     const [hasAvailabilityRules, setHasAvailabilityRules] = useState(false);
+    const [availableDates, setAvailableDates] = useState<Set<string>>(() => new Set());
+    const [monthAvailabilityLoaded, setMonthAvailabilityLoaded] = useState(false);
     const [paymentsMode, setPaymentsMode] = useState<'stripe' | 'simulated'>('stripe');
     const [stripePaymentsReady, setStripePaymentsReady] = useState(true);
     const [customerName, setCustomerName] = useState(() => String(draft?.customerName || ''));
@@ -395,6 +436,12 @@ export default function CustomerViewPortal({
         return set;
     }, [cart]);
 
+    const serviceSearchQuery = serviceSearch.trim().toLowerCase();
+    const isServiceSearch = serviceSearchQuery.length > 0;
+
+    const matchesServiceSearch = (parts: Array<string | undefined | null>) =>
+        parts.some((p) => String(p || '').toLowerCase().includes(serviceSearchQuery));
+
     const visibleServices = useMemo(() => {
         if (!flowConfig.categories || activeCategory === 'All') return categorizedEventTypes;
         return categorizedEventTypes.filter((et) => {
@@ -409,12 +456,24 @@ export default function CustomerViewPortal({
         return priceListByCategory.filter(([cat]) => cat === activeCategory);
     }, [priceListByCategory, activeCategory]);
 
+    const searchedAppointments = useMemo(() => {
+        if (!isServiceSearch) return [];
+        return categorizedEventTypes.filter((et) =>
+            matchesServiceSearch([et.name, et.category, et.description])
+        );
+    }, [categorizedEventTypes, isServiceSearch, serviceSearchQuery]);
+
+    const searchedTreatments = useMemo(() => {
+        if (!isServiceSearch || !showCatalog) return [];
+        return menuItems.filter((item) =>
+            matchesServiceSearch([item.name, item.category, item.description])
+        );
+    }, [menuItems, showCatalog, isServiceSearch, serviceSearchQuery]);
+
+    const searchResultCount = searchedAppointments.length + searchedTreatments.length;
+
     useEffect(() => {
-        if (flowConfig.staffStep !== 'team') {
-            setTeamsEnabled(false);
-            setTeamMembers([]);
-            return;
-        }
+        // Load bookable team for any industry when Booking Pro teams are enabled.
         apiGet(`/api/public/${hostSlug}/team`)
             .then((data) => {
                 setTeamsEnabled(Boolean(data.teamsEnabled));
@@ -429,7 +488,7 @@ export default function CustomerViewPortal({
                 setTeamsEnabled(false);
                 setTeamMembers([]);
             });
-    }, [hostSlug, flowConfig.staffStep]);
+    }, [hostSlug]);
 
     useEffect(() => {
         if (done) {
@@ -455,6 +514,7 @@ export default function CustomerViewPortal({
             intakeAnswers,
             intakeMode,
             preferredAt,
+            requestNote,
             selectedDate,
             selectedSlot,
             customerName,
@@ -480,6 +540,7 @@ export default function CustomerViewPortal({
         intakeAnswers,
         intakeMode,
         preferredAt,
+        requestNote,
         selectedDate,
         selectedSlot,
         customerName,
@@ -505,21 +566,20 @@ export default function CustomerViewPortal({
     }, [hostSlug, primaryService?.slug]);
 
     useEffect(() => {
-        if (
-            intakeMode !== 'instant' ||
-            !primaryService?.slug ||
-            !selectedDate ||
-            !cart.length
-        ) {
+        if (!primaryService?.slug || !selectedDate || !cart.length) {
             setDaySlots([]);
-            setHasAvailabilityRules(false);
+            if (intakeMode === 'instant') setHasAvailabilityRules(false);
             return;
         }
         setLoadingSlots(true);
         const qs = new URLSearchParams({ from: selectedDate, to: selectedDate });
         qs.set('serviceSlugs', cart.map((s) => s.slug).join(','));
         if (cartDuration > 0) qs.set('durationMinutes', String(cartDuration));
-        if (flowConfig.staffStep === 'team' && teamsEnabled) {
+        // Date-then-team: always load union of member slots; filter by member on the client.
+        const teamUnion = teamsEnabled && teamMembers.length > 0;
+        if (teamUnion) {
+            qs.set('firstAvailable', 'true');
+        } else if (flowConfig.staffStep === 'team' && teamsEnabled) {
             if (stylistUserId) qs.set('userId', stylistUserId);
             else qs.set('firstAvailable', 'true');
         }
@@ -528,19 +588,27 @@ export default function CustomerViewPortal({
                 setDaySlots(data.slots || []);
                 setHasAvailabilityRules(Boolean(data.hasAvailabilityRules));
                 if (data.maxDaysAhead) setMaxDaysAhead(data.maxDaysAhead);
+                setError('');
             })
-            .catch(() => {
+            .catch((e: any) => {
                 setDaySlots([]);
                 setHasAvailabilityRules(false);
+                if (intakeMode === 'instant') {
+                    setError(e?.message || 'Could not load available times.');
+                }
             })
             .finally(() => setLoadingSlots(false));
-        setSelectedSlot(null);
+        if (intakeMode === 'instant') setSelectedSlot(null);
     }, [
         hostSlug,
         primaryService?.slug,
         selectedDate,
         teamsEnabled,
-        stylistUserId,
+        teamMembers.length,
+        // Only refetch when member filter hits the API (non–team-union mode).
+        flowConfig.staffStep === 'team' && teamsEnabled && teamMembers.length === 0
+            ? stylistUserId
+            : null,
         cartSlugsKey,
         cartDuration,
         cart.length,
@@ -548,8 +616,75 @@ export default function CustomerViewPortal({
         flowConfig.staffStep
     ]);
 
+    // Month-range availability for closed / holiday day highlighting on the calendar.
+    useEffect(() => {
+        if (!primaryService?.slug || !cart.length) {
+            setAvailableDates(new Set());
+            setMonthAvailabilityLoaded(false);
+            return;
+        }
+        const from = `${month.year}-${String(month.month + 1).padStart(2, '0')}-01`;
+        const lastDay = new Date(month.year, month.month + 1, 0).getDate();
+        const to = `${month.year}-${String(month.month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        const qs = new URLSearchParams({ from, to });
+        qs.set('serviceSlugs', cart.map((s) => s.slug).join(','));
+        if (cartDuration > 0) qs.set('durationMinutes', String(cartDuration));
+        // Calendar open days = any bookable member (union), not one selected stylist.
+        if (teamsEnabled && teamMembers.length > 0) {
+            qs.set('firstAvailable', 'true');
+        } else if (flowConfig.staffStep === 'team' && teamsEnabled) {
+            qs.set('firstAvailable', 'true');
+        }
+        let cancelled = false;
+        setMonthAvailabilityLoaded(false);
+        apiGet(`/api/public/${hostSlug}/${primaryService.slug}/availability?${qs.toString()}`)
+            .then((data) => {
+                if (cancelled) return;
+                setAvailableDates(new Set((data.availableDates || []).map(String)));
+                setHasAvailabilityRules(Boolean(data.hasAvailabilityRules));
+                if (data.maxDaysAhead) setMaxDaysAhead(data.maxDaysAhead);
+                setMonthAvailabilityLoaded(true);
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setAvailableDates(new Set());
+                setMonthAvailabilityLoaded(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        hostSlug,
+        primaryService?.slug,
+        month.year,
+        month.month,
+        teamsEnabled,
+        teamMembers.length,
+        cartSlugsKey,
+        cartDuration,
+        cart.length,
+        flowConfig.staffStep
+    ]);
+
+    useEffect(() => {
+        if (
+            !selectedDate ||
+            !monthAvailabilityLoaded ||
+            !hasAvailabilityRules ||
+            availableDates.has(selectedDate)
+        ) {
+            return;
+        }
+        setSelectedDate('');
+        setSelectedSlot(null);
+        setDaySlots([]);
+    }, [selectedDate, monthAvailabilityLoaded, hasAvailabilityRules, availableDates]);
+
+    /** Real team calendars (Booking Pro) — pick date first, then member. */
+    const useTeamBooking = teamsEnabled && teamMembers.length > 0;
+
     const stylistOptions = useMemo(() => {
-        if (flowConfig.staffStep === 'team' && teamsEnabled && teamMembers.length) {
+        if (useTeamBooking) {
             return [
                 { id: '', label: 'First Available' },
                 ...teamMembers.map((m) => ({ id: m.id, label: m.displayName }))
@@ -560,14 +695,39 @@ export default function CustomerViewPortal({
             id: '',
             label: opt
         }));
-    }, [flowConfig.staffStep, teamsEnabled, teamMembers, stylistField?.options]);
+    }, [useTeamBooking, flowConfig.staffStep, teamMembers, stylistField?.options]);
 
-    const needsStylist =
-        flowConfig.staffStep === 'team'
-            ? Boolean(teamsEnabled || stylistField?.options?.length)
-            : flowConfig.staffStep === 'field'
-              ? Boolean(stylistField?.options?.length)
-              : false;
+    /** Separate stylist step only when there is no live team calendar (label prefs). */
+    const needsStylist = useTeamBooking
+        ? false
+        : flowConfig.staffStep === 'team'
+          ? Boolean(stylistField?.options?.length)
+          : flowConfig.staffStep === 'field'
+            ? Boolean(stylistField?.options?.length)
+            : false;
+
+    const availableTeamToday = useMemo(() => {
+        if (!useTeamBooking || !selectedDate) return [];
+        const ids = new Set(
+            daySlots.map((s) => s.assignedUserId).filter((id): id is string => Boolean(id))
+        );
+        return teamMembers.filter((m) => ids.has(m.id));
+    }, [useTeamBooking, selectedDate, daySlots, teamMembers]);
+
+    const displayedDaySlots = useMemo(() => {
+        if (!useTeamBooking || !stylistUserId) return daySlots;
+        return daySlots.filter((s) => s.assignedUserId === stylistUserId);
+    }, [daySlots, useTeamBooking, stylistUserId]);
+
+    useEffect(() => {
+        if (!useTeamBooking || !stylistUserId || !selectedDate || loadingSlots) return;
+        const stillAvailable = daySlots.some((s) => s.assignedUserId === stylistUserId);
+        if (!stillAvailable) {
+            setStylistUserId(null);
+            setStylist('First Available');
+            setSelectedSlot(null);
+        }
+    }, [useTeamBooking, stylistUserId, selectedDate, daySlots, loadingSlots]);
 
     useEffect(() => {
         if (step === 'stylist' && !needsStylist) {
@@ -651,8 +811,11 @@ export default function CustomerViewPortal({
     const buildIntakeAnswers = () => {
         const answers = {
             ...intakeAnswers,
-            ...(stylistField && needsStylist
-                ? { [stylistField.id]: stylist || stylistOptions[0]?.label || 'First Available' }
+            ...((stylistField && needsStylist) || useTeamBooking
+                ? {
+                      [stylistField?.id || 'practitionerPref']:
+                          stylist || stylistOptions[0]?.label || 'First Available'
+                  }
                 : {})
         };
         if (flowConfig.propertyStep && propertyType) {
@@ -664,6 +827,9 @@ export default function CustomerViewPortal({
         if (selectedCatalog) {
             answers.catalogItemId = selectedCatalog.id;
             answers.catalogLabel = catalogLabel(selectedCatalog);
+        }
+        if (intakeMode === 'request' && requestNote.trim()) {
+            answers.preferredTimeNote = requestNote.trim();
         }
         return answers;
     };
@@ -944,7 +1110,7 @@ export default function CustomerViewPortal({
         try {
             const answers = buildIntakeAnswers();
             const { email: bookEmail, phone: bookPhone } = contactPayload();
-            const useTeamAssign = flowConfig.staffStep === 'team' && teamsEnabled;
+            const useTeamAssign = useTeamBooking;
             const assignedFromSlot =
                 useTeamAssign && !stylistUserId ? selectedSlot.assignedUserId || null : stylistUserId;
             const result = await apiPost(`/api/public/${hostSlug}/${primaryService.slug}/book`, {
@@ -1040,6 +1206,15 @@ export default function CustomerViewPortal({
                         + Add or change services
                     </button>
                 )}
+                {step !== 'services' && step !== 'property' && (
+                    <button
+                        type="button"
+                        onClick={goBack}
+                        className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm font-bold text-[#0F172A] hover:border-[var(--brand-primary)] transition"
+                    >
+                        <ArrowLeft className="w-4 h-4" /> Back
+                    </button>
+                )}
                 {stickyCta && (
                     <button
                         type="button"
@@ -1052,6 +1227,70 @@ export default function CustomerViewPortal({
                         <ArrowRight className="w-4 h-4" />
                     </button>
                 )}
+                {useTeamBooking && step === 'when' && selectedDate ? (
+                    <div className="rounded-xl border border-[#E2E8F0] bg-white p-3 space-y-2">
+                        <div>
+                            <p className="text-xs font-black text-[#0F172A]">Who would you like?</p>
+                            <p className="text-[11px] text-[#64748B] mt-0.5">
+                                Optional — pick someone free today, or leave as anyone.
+                            </p>
+                        </div>
+                        <div className="space-y-1.5">
+                            <button
+                                type="button"
+                                disabled={loadingSlots}
+                                onClick={() => {
+                                    setStylistUserId(null);
+                                    setStylist('First Available');
+                                    setSelectedSlot(null);
+                                    setError('');
+                                }}
+                                className={cn(
+                                    'w-full text-left rounded-lg border px-3 py-2.5 transition disabled:opacity-50',
+                                    !stylistUserId
+                                        ? 'border-[#0F172A] bg-[#F8FAFC]'
+                                        : 'border-[#E2E8F0] hover:border-[var(--brand-primary)]'
+                                )}
+                            >
+                                <span className="block text-sm font-bold text-[#0F172A]">
+                                    Anyone available
+                                </span>
+                                <span className="block text-[11px] text-[#64748B] mt-0.5">
+                                    First free person at your time
+                                </span>
+                            </button>
+                            {availableTeamToday.map((m) => {
+                                const selected = stylistUserId === m.id;
+                                return (
+                                    <button
+                                        key={m.id}
+                                        type="button"
+                                        disabled={loadingSlots}
+                                        onClick={() => {
+                                            setStylistUserId(m.id);
+                                            setStylist(m.displayName);
+                                            setSelectedSlot(null);
+                                            setError('');
+                                        }}
+                                        className={cn(
+                                            'w-full text-left rounded-lg border px-3 py-2.5 transition disabled:opacity-50',
+                                            selected
+                                                ? 'border-[#0F172A] bg-[#F8FAFC]'
+                                                : 'border-[#E2E8F0] hover:border-[var(--brand-primary)]'
+                                        )}
+                                    >
+                                        <span className="block text-sm font-bold text-[#0F172A] uppercase tracking-wide">
+                                            {m.displayName}
+                                        </span>
+                                        <span className="block text-[11px] text-[#64748B] mt-0.5">
+                                            Free this date
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ) : null}
             </div>
         </aside>
     ) : null;
@@ -1068,7 +1307,7 @@ export default function CustomerViewPortal({
         const isRequestDone = flowConfig.requestMode && intakeMode === 'request';
         return (
             <div
-                className="min-h-screen flex flex-col items-center justify-center text-center py-12 px-4"
+                className="portal-brand min-h-screen flex flex-col items-center justify-center text-center py-12 px-4"
                 style={{
                     ...orgBrandStyle(host),
                     background:
@@ -1098,13 +1337,7 @@ export default function CustomerViewPortal({
                                   minute: '2-digit'
                               })}`
                             : selectedSlot
-                              ? ` · ${new Date(selectedSlot.startAt).toLocaleString('en-GB', {
-                                    weekday: 'short',
-                                    day: 'numeric',
-                                    month: 'short',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                })}`
+                              ? ` · ${formatSlotDateTime(selectedSlot.startAt, businessTimezone)}`
                               : ''}
                     </p>
                     {stylist && !isRequestDone && (
@@ -1271,7 +1504,7 @@ export default function CustomerViewPortal({
 
     return (
         <div
-            className="min-h-screen"
+            className="portal-brand min-h-screen"
             style={{
                 ...orgBrandStyle(host),
                 background: '#F8FAFC',
@@ -1415,7 +1648,33 @@ export default function CustomerViewPortal({
                                     ) : null}
                                 </div>
 
-                                {showCatalog && (
+                                <div className="relative max-w-xl">
+                                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
+                                    <input
+                                        type="search"
+                                        value={serviceSearch}
+                                        onChange={(e) => setServiceSearch(e.target.value)}
+                                        placeholder={
+                                            showCatalog
+                                                ? 'Search treatments or appointments…'
+                                                : 'Search services…'
+                                        }
+                                        className="w-full rounded-xl border border-[#E2E8F0] bg-white py-2.5 pl-10 pr-10 text-sm text-[#0F172A] placeholder:text-[#94A3B8] focus:border-[var(--brand-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-primary)]"
+                                        autoComplete="off"
+                                    />
+                                    {isServiceSearch && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setServiceSearch('')}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-[#94A3B8] hover:bg-[#F1F5F9] hover:text-[#0F172A]"
+                                            aria-label="Clear search"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    )}
+                                </div>
+
+                                {!isServiceSearch && showCatalog && (
                                     <div className="flex gap-2 p-1 rounded-xl bg-[#F1F5F9] w-fit">
                                         <button
                                             type="button"
@@ -1450,7 +1709,8 @@ export default function CustomerViewPortal({
                                     </div>
                                 )}
 
-                                {flowConfig.categories &&
+                                {!isServiceSearch &&
+                                    flowConfig.categories &&
                                     !(showCatalog && catalogTab === 'treatments'
                                         ? treatmentCategories.length === 0
                                         : categories.length === 0) && (
@@ -1514,9 +1774,186 @@ export default function CustomerViewPortal({
                                     </div>
                                 )}
 
-                                {showCatalog && catalogTab === 'treatments'
-                                    ? renderTreatmentList()
-                                    : renderServiceList(visibleServices)}
+                                {isServiceSearch ? (
+                                    <div className="space-y-3">
+                                        <p className="text-xs font-semibold text-[#64748B]">
+                                            {searchResultCount === 0
+                                                ? `No matches for “${serviceSearch.trim()}”`
+                                                : `${searchResultCount} result${searchResultCount === 1 ? '' : 's'} across ${showCatalog ? 'appointments & treatments' : 'services'}`}
+                                        </p>
+                                        {searchResultCount === 0 ? (
+                                            <div className="rounded-2xl border border-[#E2E8F0] bg-white px-6 py-12 text-center shadow-sm">
+                                                <p className="text-sm text-[#64748B]">
+                                                    Try another word, or{' '}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setServiceSearch('')}
+                                                        className="font-bold underline-offset-2 hover:underline"
+                                                        style={{ color: 'var(--brand-primary)' }}
+                                                    >
+                                                        clear search
+                                                    </button>
+                                                    .
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <div className="rounded-2xl border border-[#E2E8F0] bg-white overflow-hidden shadow-sm">
+                                                <ul className="divide-y divide-[#F1F5F9]">
+                                                    {searchedAppointments.map((et) => {
+                                                        const inCart =
+                                                            !selectedCatalog &&
+                                                            cart.some((s) => s.slug === et.slug);
+                                                        const price =
+                                                            Number(et.totalCents ?? et.depositCents) ||
+                                                            0;
+                                                        return (
+                                                            <li
+                                                                key={`appt-${et.slug}`}
+                                                                className="px-5 py-5 sm:px-6"
+                                                            >
+                                                                <div className="flex items-start justify-between gap-6">
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className="text-[10px] font-bold uppercase tracking-wide text-[#94A3B8]">
+                                                                            {showCatalog
+                                                                                ? 'Appointment'
+                                                                                : et.category ||
+                                                                                  'Service'}
+                                                                        </p>
+                                                                        <p className="text-base font-bold text-[#0F172A]">
+                                                                            {et.name}
+                                                                        </p>
+                                                                        <p className="mt-1.5 text-sm text-[#64748B]">
+                                                                            {formatDuration(
+                                                                                et.durationMinutes
+                                                                            )}
+                                                                            {et.description
+                                                                                ? ` · ${et.description}`
+                                                                                : ''}
+                                                                        </p>
+                                                                    </div>
+                                                                    <div className="flex shrink-0 flex-col items-end gap-2.5">
+                                                                        <p className="text-base font-black text-[#0F172A]">
+                                                                            {price > 0
+                                                                                ? formatCents(price)
+                                                                                : 'Free'}
+                                                                        </p>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() =>
+                                                                                toggleService(et)
+                                                                            }
+                                                                            className={cn(
+                                                                                'min-w-[96px] rounded-lg border px-4 py-2 text-sm font-bold transition',
+                                                                                inCart
+                                                                                    ? 'border-transparent'
+                                                                                    : 'bg-white'
+                                                                            )}
+                                                                            style={
+                                                                                inCart
+                                                                                    ? {
+                                                                                          background:
+                                                                                              'var(--brand-primary)',
+                                                                                          color: brand.brandPrimaryForeground
+                                                                                      }
+                                                                                    : {
+                                                                                          borderColor:
+                                                                                              'var(--brand-primary)',
+                                                                                          color: 'var(--brand-primary)'
+                                                                                      }
+                                                                            }
+                                                                        >
+                                                                            {inCart
+                                                                                ? 'Selected'
+                                                                                : 'Select'}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </li>
+                                                        );
+                                                    })}
+                                                    {searchedTreatments.map((item) => {
+                                                        const inCart =
+                                                            selectedCatalog?.id === item.id;
+                                                        const price = Number(item.priceCents) || 0;
+                                                        const cat =
+                                                            String(item.category || '').trim() ||
+                                                            'Treatments';
+                                                        return (
+                                                            <li
+                                                                key={`tx-${item.id}`}
+                                                                className="px-5 py-5 sm:px-6"
+                                                            >
+                                                                <div className="flex items-start justify-between gap-6">
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className="text-[10px] font-bold uppercase tracking-wide text-[#94A3B8]">
+                                                                            Treatment · {cat}
+                                                                        </p>
+                                                                        <p className="text-base font-bold text-[#0F172A]">
+                                                                            {item.name}
+                                                                        </p>
+                                                                        {item.description ? (
+                                                                            <p className="mt-1.5 text-sm text-[#64748B] leading-relaxed max-w-2xl">
+                                                                                {item.description}
+                                                                            </p>
+                                                                        ) : null}
+                                                                    </div>
+                                                                    <div className="flex shrink-0 flex-col items-end gap-2.5">
+                                                                        <p className="text-base font-black text-[#0F172A]">
+                                                                            {price > 0
+                                                                                ? formatCents(price)
+                                                                                : 'Free'}
+                                                                        </p>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                if (inCart) {
+                                                                                    removeFromCart(
+                                                                                        slotEventSlug
+                                                                                    );
+                                                                                } else {
+                                                                                    selectTreatment(
+                                                                                        item
+                                                                                    );
+                                                                                }
+                                                                            }}
+                                                                            className={cn(
+                                                                                'min-w-[96px] rounded-lg border px-4 py-2 text-sm font-bold transition',
+                                                                                inCart
+                                                                                    ? 'border-transparent'
+                                                                                    : 'bg-white'
+                                                                            )}
+                                                                            style={
+                                                                                inCart
+                                                                                    ? {
+                                                                                          background:
+                                                                                              'var(--brand-primary)',
+                                                                                          color: brand.brandPrimaryForeground
+                                                                                      }
+                                                                                    : {
+                                                                                          borderColor:
+                                                                                              'var(--brand-primary)',
+                                                                                          color: 'var(--brand-primary)'
+                                                                                      }
+                                                                            }
+                                                                        >
+                                                                            {inCart
+                                                                                ? 'Selected'
+                                                                                : 'Select'}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </li>
+                                                        );
+                                                    })}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : showCatalog && catalogTab === 'treatments' ? (
+                                    renderTreatmentList()
+                                ) : (
+                                    renderServiceList(visibleServices)
+                                )}
                             </div>
                         )}
 
@@ -1526,9 +1963,9 @@ export default function CustomerViewPortal({
                                 <button
                                     type="button"
                                     onClick={goBack}
-                                    className="inline-flex items-center gap-1 text-xs font-bold text-[#64748B]"
+                                    className="inline-flex items-center gap-1.5 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-xs font-bold text-[#0F172A] hover:border-[var(--brand-primary)] hover:bg-white transition"
                                 >
-                                    <ArrowLeft className="w-3.5 h-3.5" /> Back
+                                    <ArrowLeft className="w-3.5 h-3.5" /> Back to previous step
                                 </button>
 
                                 {step === 'stylist' && needsStylist && (
@@ -1576,7 +2013,13 @@ export default function CustomerViewPortal({
                                             <p className="text-sm text-[#64748B] mt-1">
                                                 {cart.length} service{cart.length === 1 ? '' : 's'} ·{' '}
                                                 {formatDuration(cartDuration)}
-                                                {stylist ? ` · ${stylist}` : ''}
+                                                {useTeamBooking
+                                                    ? stylistUserId && stylist
+                                                        ? ` · ${stylist}`
+                                                        : ' · Anyone available'
+                                                    : stylist
+                                                      ? ` · ${stylist === 'First Available' ? 'Anyone available' : stylist}`
+                                                      : ''}
                                             </p>
                                         </div>
 
@@ -1586,6 +2029,7 @@ export default function CustomerViewPortal({
                                                     type="button"
                                                     onClick={() => {
                                                         setIntakeMode('instant');
+                                                        setPreferredAt('');
                                                         setError('');
                                                     }}
                                                     className={cn(
@@ -1602,6 +2046,7 @@ export default function CustomerViewPortal({
                                                     onClick={() => {
                                                         setIntakeMode('request');
                                                         setSelectedSlot(null);
+                                                        setPreferredAt('');
                                                         setError('');
                                                     }}
                                                     className={cn(
@@ -1616,28 +2061,14 @@ export default function CustomerViewPortal({
                                             </div>
                                         )}
 
-                                        {flowConfig.requestMode && intakeMode === 'request' ? (
-                                            <label className="block max-w-md">
-                                                <span className="text-xs font-bold text-[#64748B]">
-                                                    Preferred date & time *
-                                                </span>
-                                                <input
-                                                    type="datetime-local"
-                                                    value={preferredAt}
-                                                    onChange={(e) => {
-                                                        setPreferredAt(e.target.value);
-                                                        setError('');
-                                                    }}
-                                                    className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
-                                                />
-                                            </label>
-                                        ) : (
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <div className="rounded-2xl border border-[#E2E8F0] bg-[#FAFBFC] p-4 shadow-sm">
                                                     <div className="flex items-center justify-between mb-3">
                                                         <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm">
                                                             <Calendar className="w-4 h-4 text-[var(--brand-primary)]" />{' '}
-                                                            Pick a date
+                                                            {intakeMode === 'request'
+                                                                ? 'Preferred date'
+                                                                : 'Pick a date'}
                                                         </h3>
                                                         <div className="flex gap-1">
                                                             <button
@@ -1702,11 +2133,18 @@ export default function CustomerViewPortal({
                                                             if (!d.inMonth || !d.date) {
                                                                 return <div key={`pad-${i}`} />;
                                                             }
-                                                            const selectable =
+                                                            const inWindow =
                                                                 isDateSelectable(
                                                                     d.date,
                                                                     maxDaysAhead
                                                                 ) && d.date >= todayStr();
+                                                            const isClosedDay =
+                                                                monthAvailabilityLoaded &&
+                                                                hasAvailabilityRules &&
+                                                                inWindow &&
+                                                                !availableDates.has(d.date);
+                                                            const selectable =
+                                                                inWindow && !isClosedDay;
                                                             return (
                                                                 <button
                                                                     key={d.date}
@@ -1715,14 +2153,26 @@ export default function CustomerViewPortal({
                                                                     onClick={() => {
                                                                         setSelectedDate(d.date);
                                                                         setSelectedSlot(null);
+                                                                        if (useTeamBooking) {
+                                                                            setStylistUserId(null);
+                                                                            setStylist(
+                                                                                'First Available'
+                                                                            );
+                                                                        }
+                                                                        if (intakeMode === 'request') {
+                                                                            setPreferredAt('');
+                                                                        }
                                                                         setError('');
                                                                     }}
                                                                     className={cn(
                                                                         'aspect-square rounded-lg text-sm font-bold transition',
                                                                         selectable
                                                                             ? 'hover:bg-[var(--brand-secondary)] hover:text-white border border-[#E2E8F0] bg-white'
-                                                                            : 'text-[#CBD5E1] cursor-not-allowed',
+                                                                            : isClosedDay
+                                                                              ? 'text-red-500 cursor-not-allowed'
+                                                                              : 'text-[#CBD5E1] cursor-not-allowed',
                                                                         selectedDate === d.date &&
+                                                                            selectable &&
                                                                             'bg-[var(--brand-secondary)] text-white border-[var(--brand-secondary)]'
                                                                     )}
                                                                 >
@@ -1733,7 +2183,7 @@ export default function CustomerViewPortal({
                                                     </div>
                                                 </div>
                                                 <div className="rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-sm">
-                                                    <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm mb-3">
+                                                    <h3 className="font-bold text-[#0F172A] flex items-center gap-2 text-sm mb-1">
                                                         <Clock className="w-4 h-4 text-[var(--brand-primary)]" />
                                                         {selectedDate
                                                             ? new Date(
@@ -1745,6 +2195,14 @@ export default function CustomerViewPortal({
                                                               })
                                                             : 'Select a date'}
                                                     </h3>
+                                                    <p className="text-[11px] font-semibold text-[#64748B] mb-3">
+                                                        {intakeMode === 'request'
+                                                            ? 'Preferred times in UK'
+                                                            : 'Times in UK'}
+                                                        {host.serviceArea
+                                                            ? ` · ${host.serviceArea}`
+                                                            : ''}
+                                                    </p>
                                                     {!selectedDate && (
                                                         <p className="text-sm text-[#64748B] py-8 text-center">
                                                             Choose a date on the calendar.
@@ -1765,39 +2223,81 @@ export default function CustomerViewPortal({
                                                     {selectedDate &&
                                                         !loadingSlots &&
                                                         hasAvailabilityRules &&
-                                                        daySlots.length === 0 && (
+                                                        displayedDaySlots.length === 0 && (
                                                             <p className="text-sm text-[#64748B] py-8 text-center">
-                                                                No times — try another date.
+                                                                No times — try another date
+                                                                {stylistUserId
+                                                                    ? ' or another person'
+                                                                    : ''}
+                                                                .
+                                                            </p>
+                                                        )}
+                                                    {selectedDate &&
+                                                        !loadingSlots &&
+                                                        displayedDaySlots.length > 0 && (
+                                                            <p className="text-xs font-bold text-[#64748B] mb-2">
+                                                                {stylistUserId
+                                                                    ? `Times with ${stylist}`
+                                                                    : 'Pick a time'}
                                                             </p>
                                                         )}
                                                     <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-                                                        {daySlots.map((slot) => (
-                                                            <button
-                                                                key={slot.startAt}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setSelectedSlot(slot);
-                                                                    setError('');
-                                                                }}
-                                                                className={cn(
-                                                                    'py-2.5 rounded-xl border text-sm font-bold transition',
-                                                                    selectedSlot?.startAt ===
-                                                                        slot.startAt
-                                                                        ? 'bg-[var(--brand-secondary)] text-white border-[var(--brand-secondary)]'
-                                                                        : 'border-[#E2E8F0] hover:border-[var(--brand-primary)]'
-                                                                )}
-                                                            >
-                                                                {new Date(
-                                                                    slot.startAt
-                                                                ).toLocaleTimeString('en-GB', {
-                                                                    hour: '2-digit',
-                                                                    minute: '2-digit'
-                                                                })}
-                                                            </button>
-                                                        ))}
+                                                        {displayedDaySlots.map((slot) => {
+                                                            const isSelected =
+                                                                intakeMode === 'request'
+                                                                    ? preferredAt === slot.startAt
+                                                                    : selectedSlot?.startAt ===
+                                                                      slot.startAt;
+                                                            return (
+                                                                <button
+                                                                    key={slot.startAt}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        if (
+                                                                            intakeMode === 'request'
+                                                                        ) {
+                                                                            setPreferredAt(
+                                                                                slot.startAt
+                                                                            );
+                                                                            setSelectedSlot(null);
+                                                                        } else {
+                                                                            setSelectedSlot(slot);
+                                                                        }
+                                                                        setError('');
+                                                                    }}
+                                                                    className={cn(
+                                                                        'py-2.5 rounded-xl border text-sm font-bold transition',
+                                                                        isSelected
+                                                                            ? 'bg-[var(--brand-secondary)] text-white border-[var(--brand-secondary)]'
+                                                                            : 'border-[#E2E8F0] hover:border-[var(--brand-primary)]'
+                                                                    )}
+                                                                >
+                                                                    {formatSlotTime(
+                                                                        slot,
+                                                                        businessTimezone
+                                                                    )}
+                                                                </button>
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
                                             </div>
+                                        {intakeMode === 'request' && (
+                                            <label className="block">
+                                                <span className="text-xs font-bold text-[#64748B]">
+                                                    Note about preferred date & time (optional)
+                                                </span>
+                                                <textarea
+                                                    value={requestNote}
+                                                    onChange={(e) => {
+                                                        setRequestNote(e.target.value);
+                                                        setError('');
+                                                    }}
+                                                    placeholder="e.g. Mornings work best, or I can do Tue/Thu after 2pm if this slot is full"
+                                                    rows={3}
+                                                    className="mt-1 w-full max-w-2xl rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
+                                                />
+                                            </label>
                                         )}
                                     </div>
                                 )}
@@ -1928,7 +2428,7 @@ export default function CustomerViewPortal({
                                                     className="mt-1 w-full rounded-xl border border-[#E2E8F0] px-3 py-2.5 text-sm"
                                                 />
                                             </label>
-                                            {mediaUploadsEnabled && (
+                                            {mediaUploadsEnabled && industryId !== 'dentists' && (
                                                 <label className="block">
                                                     <span className="text-xs font-bold text-[#64748B]">
                                                         {industry.uploadPrompt || 'Inspiration photo'}
@@ -2001,7 +2501,7 @@ export default function CustomerViewPortal({
                                                     ))}
                                                 </ul>
                                             </div>
-                                            {needsStylist && stylist ? (
+                                            {(needsStylist || useTeamBooking) && stylist ? (
                                                 <p>
                                                     <span className="font-bold text-[#0F172A]">
                                                         {flowConfig.labels.staff}:
@@ -2027,15 +2527,9 @@ export default function CustomerViewPortal({
                                             ) : null}
                                             <p>
                                                 <span className="font-bold text-[#0F172A]">When:</span>{' '}
-                                                {new Date(selectedSlot.startAt).toLocaleString(
-                                                    'en-GB',
-                                                    {
-                                                        weekday: 'short',
-                                                        day: 'numeric',
-                                                        month: 'short',
-                                                        hour: '2-digit',
-                                                        minute: '2-digit'
-                                                    }
+                                                {formatSlotDateTime(
+                                                    selectedSlot.startAt,
+                                                    businessTimezone
                                                 )}
                                                 {cartDuration
                                                     ? ` · ${formatDuration(cartDuration)}`
@@ -2046,19 +2540,29 @@ export default function CustomerViewPortal({
                                                 {cartDeposit > 0 ? formatCents(cartDeposit) : '£0'}
                                             </p>
                                         </div>
-                                        <button
-                                            type="button"
-                                            disabled={submitting}
-                                            onClick={submit}
-                                            className="w-full max-w-lg rounded-xl px-4 py-3.5 text-sm font-black disabled:opacity-50 bg-[var(--brand-primary)]"
-                                            style={{ color: brand.brandPrimaryForeground }}
-                                        >
-                                            {submitting
-                                                ? 'Processing…'
-                                                : cartDeposit > 0
-                                                  ? `Pay ${formatCents(cartDeposit)} deposit`
-                                                  : 'Confirm appointment'}
-                                        </button>
+                                        <div className="flex flex-col sm:flex-row gap-2 max-w-lg">
+                                            <button
+                                                type="button"
+                                                onClick={goBack}
+                                                disabled={submitting}
+                                                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-4 py-3.5 text-sm font-bold text-[#0F172A] hover:border-[var(--brand-primary)] transition disabled:opacity-50"
+                                            >
+                                                <ArrowLeft className="w-4 h-4" /> Back
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={submitting}
+                                                onClick={submit}
+                                                className="w-full flex-1 rounded-xl px-4 py-3.5 text-sm font-black disabled:opacity-50 bg-[var(--brand-primary)]"
+                                                style={{ color: brand.brandPrimaryForeground }}
+                                            >
+                                                {submitting
+                                                    ? 'Processing…'
+                                                    : cartDeposit > 0
+                                                      ? `Pay ${formatCents(cartDeposit)} deposit`
+                                                      : 'Confirm appointment'}
+                                            </button>
+                                        </div>
                                         <p className="text-[11px] text-[#94A3B8] max-w-lg">
                                             {paymentsMode === 'stripe' && stripePaymentsReady
                                                 ? 'You will be redirected to Stripe Checkout to pay securely.'

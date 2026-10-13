@@ -125,7 +125,7 @@ export function PublicBookHost() {
     if (isRestaurantHost && path === 'choose') {
         return (
             <div
-                className="min-h-screen"
+                className="portal-brand min-h-screen"
                 style={{
                     ...orgBrandStyle({
                         logoUrl: data.logoUrl,
@@ -188,7 +188,7 @@ export function PublicBookHost() {
     if (isRestaurantHost && path === 'food') {
         return (
             <div
-                className="min-h-screen"
+                className="portal-brand min-h-screen"
                 style={{
                     ...orgBrandStyle({
                         logoUrl: data.logoUrl,
@@ -235,7 +235,7 @@ export function PublicBookHost() {
         <>
             {isRestaurantHost && (
                 <div
-                    className="bg-[#F8FAFC] px-4 pt-3"
+                    className="portal-brand bg-[#F8FAFC] px-4 pt-3"
                     style={orgBrandStyle({
                         logoUrl: data.logoUrl,
                         brandPrimary: data.brandPrimary,
@@ -259,6 +259,7 @@ export function PublicBookHost() {
                     phone: data.phone,
                     email: data.email,
                     serviceArea: data.serviceArea,
+                    timezone: data.timezone || data.host?.timezone || 'Europe/London',
                     logoUrl: data.logoUrl || data.logo_url || '',
                     brandPrimary: data.brandPrimary || data.brand_primary,
                     brandSecondary: data.brandSecondary || data.brand_secondary
@@ -296,10 +297,22 @@ export function PublicBookEvent() {
     if (loading) return <div className="min-h-screen flex items-center justify-center text-[#64748B]">Loading schedule…</div>;
     if (error || !data) return <div className="min-h-screen flex items-center justify-center text-red-600 p-6">{error || 'Not found'}</div>;
 
+    const menuItems = (data.menuItems || []).map((m: any) => ({
+        id: m.id,
+        category: m.category || '',
+        name: m.name,
+        description: m.description || '',
+        priceCents: Number(m.priceCents ?? m.price_cents) || 0,
+        available: m.active !== false && m.available !== false
+    }));
+
     return (
         <PublicCustomerPortal
             hostSlug={hostSlug!}
-            host={data.host}
+            host={{
+                ...data.host,
+                timezone: data.host?.timezone || data.timezone || 'Europe/London'
+            }}
             industry={data.industry || getBookingPreset(data.host?.bookingIndustryId || data.host?.tradeType)}
             mediaUploadsEnabled={Boolean(data.mediaUploadsEnabled)}
             eventTypes={[
@@ -313,6 +326,7 @@ export function PublicBookEvent() {
                     category: resolveSalonServiceCategory(data.eventType.name, data.eventType.category)
                 }
             ]}
+            menuItems={menuItems}
             eventSlug={eventSlug!}
         />
     );

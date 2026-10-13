@@ -167,7 +167,7 @@ export function FoodOrderTrack() {
 
     return (
         <div
-            className="min-h-screen"
+            className="portal-brand min-h-screen"
             style={{
                 ...orgBrandStyle(brandHost),
                 background: '#F8FAFC',

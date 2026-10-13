@@ -33,8 +33,12 @@ async function readError(res: Response, path: string): Promise<Error> {
         } catch {
             data = null;
         }
-        if (data?.error === 'upgrade_required') {
-            const err = new Error('Upgrade required') as Error & {
+        if (data?.error === 'upgrade_required' || data?.code === 'upgrade_required') {
+            const err = new Error(
+                data?.error && data.error !== 'upgrade_required'
+                    ? String(data.error)
+                    : 'Upgrade required'
+            ) as Error & {
                 code?: string;
                 feature?: string;
                 requiredPlanHint?: unknown;
