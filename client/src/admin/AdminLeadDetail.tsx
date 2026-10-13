@@ -917,7 +917,7 @@ export default function AdminLeadDetail() {
                     initialDate={selectedHistoryTask.updatedAt || selectedHistoryTask.createdAt}
                     authorName={selectedHistoryTask.assignedToName || undefined}
                     readOnly={false}
-                    defaultTab="task_status"
+                    defaultTab="lead_status"
                     onClose={() => setSelectedHistoryTask(null)}
                     onStatusUpdated={async () => {
                         await loadLead();
