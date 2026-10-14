@@ -15,6 +15,7 @@ import {
     shareInfoForLeadObservation
 } from '../lib/leadObservationEmailSends';
 import { sendLeadObservationsEmail } from '../lib/bookingEmail';
+import { triggerLeadEnrichment, enrichStatusForBatch } from '../lib/leadGbpEnrich';
 import { reportShareUrl } from '../lib/zappSitesAuditProxy';
 
 const router = Router();
@@ -1180,7 +1181,8 @@ router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Re
                 spreadsheetStatus: String(item.spreadsheetStatus || '').trim(),
                 spreadsheetStatus1: String(item.spreadsheetStatus1 || '').trim(),
                 spreadsheetStatus2: String(item.spreadsheetStatus2 || '').trim(),
-                spreadsheetStatus3: String(item.spreadsheetStatus3 || '').trim()
+                spreadsheetStatus3: String(item.spreadsheetStatus3 || '').trim(),
+                gbpUrl: String(item.gbpUrl || item['GBP URL'] || item['GBP Link'] || item['Google Maps URL'] || '').trim()
             };
         });
 
@@ -1189,10 +1191,32 @@ router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Re
             importBatchId,
             importUploadedAt
         });
-        res.json(result);
+
+        // Leads with a GBP URL and empty observation/priority cells are queued as 'pending';
+        // analyse them in the background so the upload returns immediately.
+        const queuedForEnrich = normalizedLeads.filter(
+            (l: any) => l.gbpUrl && !(l.gbpObservation && l.aiVisibilityObservation && l.leadOpportunity)
+        ).length;
+        if (queuedForEnrich > 0) {
+            await triggerLeadEnrichment(result.importBatchId || importBatchId);
+        }
+        res.json({ ...result, enrichQueued: queuedForEnrich });
     } catch (err: any) {
         console.error('Admin bulk import error:', err);
         res.status(500).json({ error: err.message || 'Failed to import leads' });
+    }
+});
+
+/** Admin: progress of GBP auto-analysis for an Excel upload batch */
+router.get('/crm/leads/enrich-status', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const batchId = String(req.query.batchId || '').trim();
+        if (!batchId) return res.status(400).json({ error: 'batchId is required' });
+        res.json(await enrichStatusForBatch(batchId));
+    } catch (err: any) {
+        console.error('Enrich status error:', err);
+        res.status(500).json({ error: err.message || 'Failed to load enrichment status' });
     }
 });
 

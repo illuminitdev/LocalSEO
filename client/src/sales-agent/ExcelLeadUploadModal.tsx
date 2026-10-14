@@ -19,6 +19,8 @@ export interface ParsedLeadRow {
     email: string;
     address: string;
     website: string;
+    /** Google Business Profile link; when set, the backend auto-fills the empty observation/priority cells. */
+    gbpUrl?: string;
     industry: string;
     gbpObservation: string;
     aiVisibilityObservation: string;
@@ -41,7 +43,7 @@ interface ExcelLeadUploadModalProps {
     importEndpoint?: (
         leads: ParsedLeadRow[],
         meta?: { fileName: string }
-    ) => Promise<{ count: number; created: number; skipped: number }>;
+    ) => Promise<{ count: number; created: number; skipped: number; enrichQueued?: number }>;
 }
 
 const SKIP_SHEET_NAMES = new Set(['note', 'notes', 'instructions', 'readme']);
@@ -53,6 +55,7 @@ export const LEADS_EXCEL_TEMPLATE_HEADERS = [
     'Business name',
     'Town/postcode',
     'Website URL',
+    'GBP URL',
     'My Observation GBP',
     'My Observation AI Visibility',
     'My Conclusion',
@@ -71,13 +74,13 @@ export function downloadLeadsExcelTemplate(filename = 'zappsites-leads-import-te
             'Business name': 'LES Pest Management',
             'Town/postcode': 'Unit 6A, Bannister Hall Works, Higher Walton, Preston PR5 4DZ',
             'Website URL': 'https://lespestmgt.com/',
-            'My Observation GBP':
-                '1. Basic Information : Correct\n2. Categories : Correct\n3. Services & Description : Correct\n4. Reviews & Engagement : Present\n5. Photos & Profile Completeness : Almost done but missing regular postings',
-            'My Observation AI Visibility':
-                '1. Who provides pest control services in South Ribble? Ans : Not Listed\n2. Who provides pest control services in Preston? Ans : Not Listed',
+            'GBP URL': 'https://maps.app.goo.gl/EXAMPLE',
+            // Leave the next 3 empty: they are filled automatically from the GBP URL
+            'My Observation GBP': '',
+            'My Observation AI Visibility': '',
             'My Conclusion':
                 'GBP : Postings on GBP will also increase the enquiries. Website : We can get more enquiries if we optimise for local AI SEO and add a booking system.',
-            'Lead Oppurtunity': 'Medium but we can pitch for Booking System',
+            'Lead Oppurtunity': '',
             'Status 1': '10/09 voicemail',
             'Status 2': '11/09 voicemail',
             'Status 3': 'Follow up next week'
@@ -88,6 +91,7 @@ export function downloadLeadsExcelTemplate(filename = 'zappsites-leads-import-te
             'Business name': 'JDM Gardens',
             'Town/postcode': '26 Whitehaven Rd, Bramhall, Stockport SK7 1EL, United Kingdom',
             'Website URL': 'https://www.jdmgardens.com/',
+            'GBP URL': '',
             'My Observation GBP':
                 '1. Basic Information : Missing "Garden Design & Landscaping" in Business Name\n2. Categories : Correct\n3. Services & Description : Correct\n4. Reviews & Engagement : No replies for reviews\n5. Photos & Profile Completeness : Done',
             'My Observation AI Visibility':
@@ -109,6 +113,14 @@ export function downloadLeadsExcelTemplate(filename = 'zappsites-leads-import-te
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Leads');
+    const help = XLSX.utils.aoa_to_sheet([
+        ['Instructions'],
+        ['GBP URL (optional): paste the lead\'s Google Business Profile / Google Maps link.'],
+        ['If GBP URL is filled and My Observation GBP, My Observation AI Visibility or Lead Oppurtunity are empty, they are filled automatically after upload from 6 GBP checks.'],
+        ['Cells you fill in yourself are never overwritten. Rows without a GBP URL import exactly as before.']
+    ]);
+    help['!cols'] = [{ wch: 110 }];
+    XLSX.utils.book_append_sheet(wb, help, 'Instructions');
     XLSX.writeFile(wb, filename);
 }
 
@@ -232,12 +244,18 @@ function parseWorkbookSheet(
 
         const phone = findVal(['phone', 'businessphone', 'mobile', 'tel', 'contact', 'telephone', 'contactnumber']);
         const address = findVal(['townpostcode', 'postcode', 'town', 'address', 'location', 'city', 'street']);
-        const website = findVal(['websiteurl', 'website', 'url', 'domain', 'web', 'site', 'businessdomain']);
+        const GBP_URL_HEADERS = ['gbpurl', 'gbpurls', 'gbplink', 'googlemapsurl', 'googlemapslink', 'mapsurl', 'maplink', 'googlebusinessprofileurl'];
+        const website = findVal(['websiteurl', 'website', 'url', 'domain', 'web', 'site', 'businessdomain'], GBP_URL_HEADERS);
+        const gbpUrl = findVal(GBP_URL_HEADERS, ['url', 'websiteurl', 'website', 'web', 'site']);
         const rowIndustry = findVal(
             ['business', 'industry', 'category', 'sector', 'niche', 'vertical', 'businesstype'],
             ['businessname', 'companyname']
         );
-        const gbp = findVal(['myobservationgbp', 'gbpobservation', 'gbp', 'googlebusinessprofile', 'googlebusiness']);
+        const gbp = findVal(
+            ['myobservationgbp', 'gbpobservation', 'gbp', 'googlebusinessprofile', 'googlebusiness'],
+            // 'business' is the industry column; the loose substring match would otherwise read it as the GBP observation
+            [...GBP_URL_HEADERS, 'business', 'businessname', 'businesstype', 'industry', 'category']
+        );
         const aiVis = findVal([
             'myobservationaivisibility',
             'myobservationaiv',
@@ -474,6 +492,7 @@ function parseWorkbookSheet(
             email,
             address,
             website,
+            gbpUrl,
             industry: finalIndustry,
             gbpObservation: gbp,
             aiVisibilityObservation: aiVis,
@@ -508,7 +527,7 @@ export default function ExcelLeadUploadModal({
     const [isLoading, setIsLoading] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
-    const [importResult, setImportResult] = useState<{ created: number; skipped: number } | null>(null);
+    const [importResult, setImportResult] = useState<{ created: number; skipped: number; enrichQueued?: number } | null>(null);
     const [isDragging, setIsDragging] = useState(false);
 
     const resetModal = () => {
@@ -646,7 +665,8 @@ export default function ExcelLeadUploadModal({
                 const res = await importEndpoint(rowsToSend, { fileName });
                 setImportResult({
                     created: res.created,
-                    skipped: res.skipped + dedupeInfo.duplicateCount
+                    skipped: res.skipped + dedupeInfo.duplicateCount,
+                    enrichQueued: res.enrichQueued
                 });
                 onImportSuccess(res.created);
             } else {
@@ -721,6 +741,13 @@ export default function ExcelLeadUploadModal({
                                     </span>
                                 )}
                             </p>
+                            {!!importResult.enrichQueued && (
+                                <p className="text-xs text-indigo-600 max-w-md mx-auto">
+                                    {importResult.enrichQueued} lead{importResult.enrichQueued === 1 ? '' : 's'} with a GBP URL are being
+                                    analysed in the background. Observations and priority will fill in automatically (about 1 minute
+                                    per lead).
+                                </p>
+                            )}
                             <div className="pt-4 flex justify-center gap-3">
                                 <button
                                     onClick={resetModal}

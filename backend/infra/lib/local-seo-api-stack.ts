@@ -230,6 +230,66 @@ export class LocalSeoApiStack extends cdk.Stack {
       'Zappsites/prod/DATAFORSEO_PASSWORD'
     );
 
+    const apiEnv: Record<string, string> = {
+      STAGE: stage,
+      NODE_ENV: 'production',
+      SHARED_RDS: 'true',
+      AUTH_REQUIRED: 'true',
+      DB_SECRET_ARN: dbSecret.secretArn,
+      DB_PROXY_ENDPOINT: cfg.proxyEndpoint,
+      DB_NAME: 'zappsites',
+      DB_USER: 'zappsites_admin',
+      JWT_SECRET: jwtSecret.secretValue.unsafeUnwrap(),
+      JWT_EXPIRES: process.env.JWT_EXPIRES || '7d',
+      CLIENT_ORIGIN: cfg.clientOrigin,
+      FRONTEND_URL: cfg.clientOrigin,
+      ZAPP_SITES_ORIGIN: cfg.zappSitesOrigin,
+      ZAPP_SITES_API_BASE: zappSitesApiBase,
+      ...(stage === 'dev' ? { ZAPP_SITES_API_BASE_DEV: zappSitesApiBase } : {}),
+      PAYMENT_API_URL:
+        process.env.PAYMENT_API_URL ||
+        (stage === 'prod'
+          ? 'https://gq94idnsj0.execute-api.us-east-1.amazonaws.com'
+          : 'https://gq94idnsj0.execute-api.us-east-1.amazonaws.com'),
+      AUDIT_OPS_SECRET: auditOpsSecret.secretValue.unsafeUnwrap(),
+      API_BASE_URL: apiBaseUrl,
+      ENTITLEMENTS_DISABLED: 'false',
+      MEDIA_BUCKET: mediaBucket.bucketName,
+      ADMIN_EMAIL: stage === 'prod' ? 'admin@localseo.com' : 'admin@localseo.net',
+      ...(adminPassword ? { ADMIN_PASSWORD: adminPassword } : {}),
+      ...(adminPasswordHash ? { ADMIN_PASSWORD_HASH: adminPasswordHash } : {}),
+      ...(stripeSecretKey ? { STRIPE_SECRET_KEY: stripeSecretKey } : {}),
+      ...(stripePublishableKey ? { STRIPE_PUBLISHABLE_KEY: stripePublishableKey } : {}),
+      ...(stripeWebhookSecret ? { STRIPE_WEBHOOK_SECRET: stripeWebhookSecret } : {}),
+      STRIPE_PLATFORM_FEE_BPS: process.env.STRIPE_PLATFORM_FEE_BPS || '500',
+      STRIPE_CONNECT_DEFAULT_COUNTRY: process.env.STRIPE_CONNECT_DEFAULT_COUNTRY || 'GB',
+      ...(process.env.STRIPE_CONNECT_RETURN_URL
+        ? { STRIPE_CONNECT_RETURN_URL: process.env.STRIPE_CONNECT_RETURN_URL }
+        : {}),
+      ...(process.env.STRIPE_CONNECT_REFRESH_URL
+        ? { STRIPE_CONNECT_REFRESH_URL: process.env.STRIPE_CONNECT_REFRESH_URL }
+        : {}),
+      ...(process.env.GOOGLE_CLIENT_ID
+        ? { GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID }
+        : {}),
+      ...(process.env.GOOGLE_CLIENT_SECRET
+        ? { GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET }
+        : {}),
+      ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+        ? { GOOGLE_REDIRECT_URI: googleRedirectUri }
+        : {}),
+      ...(process.env.GOOGLE_PLACES_API_KEY
+        ? { GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY }
+        : {}),
+      ...(geminiKey ? { GEMINI_API_KEY: geminiKey } : {}),
+      DATAFORSEO_LOGIN: dataForSeoLogin.secretValue.unsafeUnwrap(),
+      DATAFORSEO_PASSWORD: dataForSeoPassword.secretValue.unsafeUnwrap(),
+      EMAIL_TRANSPORT: 'ses',
+      BOOKING_EMAIL_FROM: process.env.BOOKING_EMAIL_FROM || 'info@zappsites.com',
+      SES_REGION: process.env.SES_REGION || 'us-east-1',
+      ...(process.env.SMS_SENDER_ID ? { SMS_SENDER_ID: process.env.SMS_SENDER_ID } : {}),
+    };
+
     const fn = new lambda.Function(this, 'ApiFn', {
       functionName: `localseo-api-${stage}`,
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -244,65 +304,7 @@ export class LocalSeoApiStack extends cdk.Stack {
         ),
       },
       securityGroups: [lambdaSg],
-      environment: {
-        STAGE: stage,
-        NODE_ENV: 'production',
-        SHARED_RDS: 'true',
-        AUTH_REQUIRED: 'true',
-        DB_SECRET_ARN: dbSecret.secretArn,
-        DB_PROXY_ENDPOINT: cfg.proxyEndpoint,
-        DB_NAME: 'zappsites',
-        DB_USER: 'zappsites_admin',
-        JWT_SECRET: jwtSecret.secretValue.unsafeUnwrap(),
-        JWT_EXPIRES: process.env.JWT_EXPIRES || '7d',
-        CLIENT_ORIGIN: cfg.clientOrigin,
-        FRONTEND_URL: cfg.clientOrigin,
-        ZAPP_SITES_ORIGIN: cfg.zappSitesOrigin,
-        ZAPP_SITES_API_BASE: zappSitesApiBase,
-        ...(stage === 'dev' ? { ZAPP_SITES_API_BASE_DEV: zappSitesApiBase } : {}),
-        PAYMENT_API_URL:
-          process.env.PAYMENT_API_URL ||
-          (stage === 'prod'
-            ? 'https://gq94idnsj0.execute-api.us-east-1.amazonaws.com'
-            : 'https://gq94idnsj0.execute-api.us-east-1.amazonaws.com'),
-        AUDIT_OPS_SECRET: auditOpsSecret.secretValue.unsafeUnwrap(),
-        API_BASE_URL: apiBaseUrl,
-        ENTITLEMENTS_DISABLED: 'false',
-        MEDIA_BUCKET: mediaBucket.bucketName,
-        ADMIN_EMAIL: stage === 'prod' ? 'admin@localseo.com' : 'admin@localseo.net',
-        ...(adminPassword ? { ADMIN_PASSWORD: adminPassword } : {}),
-        ...(adminPasswordHash ? { ADMIN_PASSWORD_HASH: adminPasswordHash } : {}),
-        ...(stripeSecretKey ? { STRIPE_SECRET_KEY: stripeSecretKey } : {}),
-        ...(stripePublishableKey ? { STRIPE_PUBLISHABLE_KEY: stripePublishableKey } : {}),
-        ...(stripeWebhookSecret ? { STRIPE_WEBHOOK_SECRET: stripeWebhookSecret } : {}),
-        STRIPE_PLATFORM_FEE_BPS: process.env.STRIPE_PLATFORM_FEE_BPS || '500',
-        STRIPE_CONNECT_DEFAULT_COUNTRY: process.env.STRIPE_CONNECT_DEFAULT_COUNTRY || 'GB',
-        ...(process.env.STRIPE_CONNECT_RETURN_URL
-          ? { STRIPE_CONNECT_RETURN_URL: process.env.STRIPE_CONNECT_RETURN_URL }
-          : {}),
-        ...(process.env.STRIPE_CONNECT_REFRESH_URL
-          ? { STRIPE_CONNECT_REFRESH_URL: process.env.STRIPE_CONNECT_REFRESH_URL }
-          : {}),
-        ...(process.env.GOOGLE_CLIENT_ID
-          ? { GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID }
-          : {}),
-        ...(process.env.GOOGLE_CLIENT_SECRET
-          ? { GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET }
-          : {}),
-        ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
-          ? { GOOGLE_REDIRECT_URI: googleRedirectUri }
-          : {}),
-        ...(process.env.GOOGLE_PLACES_API_KEY
-          ? { GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY }
-          : {}),
-        ...(geminiKey ? { GEMINI_API_KEY: geminiKey } : {}),
-        DATAFORSEO_LOGIN: dataForSeoLogin.secretValue.unsafeUnwrap(),
-        DATAFORSEO_PASSWORD: dataForSeoPassword.secretValue.unsafeUnwrap(),
-        EMAIL_TRANSPORT: 'ses',
-        BOOKING_EMAIL_FROM: process.env.BOOKING_EMAIL_FROM || 'info@zappsites.com',
-        SES_REGION: process.env.SES_REGION || 'us-east-1',
-        ...(process.env.SMS_SENDER_ID ? { SMS_SENDER_ID: process.env.SMS_SENDER_ID } : {}),
-      },
+      environment: { ...apiEnv, LEAD_ENRICH_FN: `localseo-lead-enrich-${stage}` },
       logGroup,
     });
 
@@ -329,6 +331,28 @@ export class LocalSeoApiStack extends cdk.Stack {
         resources: ['*'],
       })
     );
+
+    // Long-running worker for admin lead GBP enrichment (API Lambda is capped at 30s).
+    const leadEnrichFn = new lambda.Function(this, 'LeadEnrichFn', {
+      functionName: `localseo-lead-enrich-${stage}`,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      handler: 'dist/leadEnrich.handler',
+      code: lambda.Code.fromAsset(assetPath),
+      memorySize: 1024,
+      timeout: cdk.Duration.minutes(15),
+      vpc,
+      vpcSubnets: {
+        subnets: cfg.subnetIds.map((subnetId, i) =>
+          ec2.Subnet.fromSubnetId(this, `EnrichSubnet${i}`, subnetId)
+        ),
+      },
+      securityGroups: [lambdaSg],
+      environment: apiEnv,
+    });
+    dbSecret.grantRead(leadEnrichFn);
+    dataForSeoLogin.grantRead(leadEnrichFn);
+    dataForSeoPassword.grantRead(leadEnrichFn);
+    leadEnrichFn.grantInvoke(fn);
 
     const integration = new HttpLambdaIntegration('ApiIntegration', fn);
 
