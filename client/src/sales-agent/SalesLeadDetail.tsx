@@ -52,6 +52,7 @@ import {
     BarChart3,
     BadgeCheck
 } from 'lucide-react';
+import AiVisibilityText from '../shared/AiVisibilityText';
 
 export default function SalesLeadDetail() {
     const { id } = useParams<{ id: string }>();
@@ -838,7 +839,11 @@ export default function SalesLeadDetail() {
                                 : 'text-slate-400 bg-slate-50/60 border-dashed border-slate-200 italic'
                         )}
                     >
-                        {lead.aiVisibilityObservation || 'No AI visibility notes yet.'}
+                        {lead.aiVisibilityObservation ? (
+                            <AiVisibilityText text={lead.aiVisibilityObservation} />
+                        ) : (
+                            'No AI visibility notes yet.'
+                        )}
                     </div>
                 </div>
 

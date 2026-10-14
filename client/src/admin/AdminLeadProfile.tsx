@@ -36,6 +36,7 @@ import {
     emailShareStatusLabel,
     emailShareStatusTimeLines
 } from '../shared/emailShareStatus';
+import AiVisibilityText from '../shared/AiVisibilityText';
 
 function formatTimestamp(isoString?: string | null) {
     if (!isoString) return '';
@@ -805,12 +806,12 @@ export default function AdminLeadProfile() {
                                     <Bot className="w-3.5 h-3.5" />
                                 </div>
                                 <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                                    AI Visibility Observations (Search / Perplexity / Gemini)
+                                    AI Visibility Observations
                                 </h2>
                             </div>
                             {lead.aiVisibilityObservation ? (
                                 <div className="text-slate-700 text-xs whitespace-pre-line leading-relaxed pl-1 pt-1">
-                                    {lead.aiVisibilityObservation}
+                                    <AiVisibilityText text={lead.aiVisibilityObservation} />
                                 </div>
                             ) : (
                                 <p className="text-slate-400 text-xs italic pl-1">No AI visibility observations recorded.</p>

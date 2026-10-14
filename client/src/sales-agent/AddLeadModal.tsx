@@ -312,7 +312,7 @@ export default function AddLeadModal({
 
                         <div>
                             <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-                                My Observation: AI Visibility (Search / Perplexity / Gemini) (Optional)
+                                My Observation: AI Visibility (Optional)
                             </label>
                             <textarea
                                 rows={2}

@@ -10,14 +10,22 @@ import {
     fetchGbpUpdates,
     requireDataForSeoConfigured
 } from '../audit-worker/src/lib/dataForSeo';
+import { askLlm } from './aiInsights';
 import {
     CheckResult,
+    AI_NOT_CHECKED,
+    aiAnswerResult,
+    aiQuestions,
+    areaFromGbpAddress,
+    cityFromGbpAddress,
+    formatAiVisibility,
     gapLabels,
     nameMatches,
     napMismatches,
     parseGbpUrlText,
     priorityFromChecks,
-    templateCopy
+    serviceFromBusiness,
+    templateGbpObservation
 } from './leadGbpScore';
 
 const POSTING_WINDOW_DAYS = 30;
@@ -26,6 +34,12 @@ const CONCURRENCY = 5;
 const SOFT_DEADLINE_MS = 12 * 60 * 1000;
 const UA =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
+/**
+ * share.google links only redirect to the business when the client is NOT a browser (a browser UA is sent to a
+ * JavaScript-only page), so those links are opened with a plain UA.
+ */
+const SHARE_LINK_UA = 'curl/8.0';
 
 type LeadRow = {
     id: string;
@@ -59,9 +73,10 @@ const isEmpty = (v: unknown) => !String(v ?? '').trim();
 async function expandUrl(url: string): Promise<string> {
     if (/\/maps\/place\/.+(@|!1s0x)/i.test(url)) return url;
     try {
+        const isShare = /(^|\/\/)share\.google\//i.test(url);
         const res = await fetch(url, {
             redirect: 'follow',
-            headers: { 'User-Agent': UA, 'Accept-Language': 'en-GB,en;q=0.9' },
+            headers: { 'User-Agent': isShare ? SHARE_LINK_UA : UA, 'Accept-Language': 'en-GB,en;q=0.9' },
             signal: AbortSignal.timeout(10000)
         });
         return res.url || url;
@@ -198,14 +213,23 @@ async function fetchSiteText(website: string): Promise<string | null> {
 
 /* ----------------------------------- Checks -------------------------------- */
 
-export async function runChecks(lead: LeadRow): Promise<{ checks: CheckResult[]; gbpName: string; notes: string[] }> {
+export type GbpSummary = { title: string; category: string; address: string; website: string };
+
+export async function runChecks(
+    lead: LeadRow
+): Promise<{ checks: CheckResult[]; gbpName: string; notes: string[]; gbp: GbpSummary }> {
     const notes: string[] = [];
     const expanded = await expandUrl(lead.gbp_url);
     const parsed = parseGbpUrlText(expanded);
 
     const byId = parsed.placeId ? `place_id:${parsed.placeId}` : parsed.cid ? `cid:${parsed.cid}` : '';
     // Links we can't resolve to an id (e.g. share.google, which needs JavaScript) fall back to a name + address search.
-    const candidates = byId ? [byId] : keywordCandidates(parsed.name || lead.name, lead.address);
+    // The name in the resolved link is Google's own listing name, so it is searched first, then the Excel name.
+    const candidates = byId
+        ? [byId]
+        : Array.from(
+              new Set([parsed.name, lead.name].flatMap((n) => (n ? keywordCandidates(n, lead.address) : [])))
+          );
     let keyword = candidates[0] || '';
     let info: GbpInfo | null = null;
     for (const kw of candidates) {
@@ -220,10 +244,13 @@ export async function runChecks(lead: LeadRow): Promise<{ checks: CheckResult[];
         }
     }
     if (!info) {
+        const deadShare = /share\.google\/error/i.test(expanded);
         throw new Error(
-            byId
-                ? 'GBP not found for this URL'
-                : 'GBP not found. Short links like share.google cannot be opened by the server - paste the full Google Maps link (or use Share > Copy link from Maps).'
+            deadShare
+                ? 'This share.google link is invalid or expired - copy the GBP link again from Google Maps / Search.'
+                : byId
+                  ? 'GBP not found for this URL'
+                  : 'GBP not found for this link or the business name + address in the Excel - check the GBP URL and Town/postcode.'
         );
     }
 
@@ -305,34 +332,33 @@ export async function runChecks(lead: LeadRow): Promise<{ checks: CheckResult[];
 
     const unknown = checks.filter((c) => c.pass === null).map((c) => c.key);
     if (unknown.length) notes.push(`Not measured: ${unknown.join(', ')}`);
-    return { checks, gbpName: info.title, notes };
+    return {
+        checks,
+        gbpName: info.title,
+        notes,
+        gbp: { title: info.title, category: info.category, address: info.address, website: info.website }
+    };
 }
 
 /* ------------------------------------ Copy --------------------------------- */
 
 let aiClient: GoogleGenAI | null = null;
 
-export async function writeCopy(
-    lead: LeadRow,
-    gbpName: string,
-    checks: CheckResult[]
-): Promise<{ gbpObservation: string; aiVisibilityObservation: string }> {
-    const fallback = templateCopy(checks);
+export async function writeCopy(lead: LeadRow, gbpName: string, checks: CheckResult[]): Promise<string> {
+    const fallback = templateGbpObservation(checks);
     const gaps = gapLabels(checks);
     if (!gaps.length || !process.env.GEMINI_API_KEY) return fallback;
 
     try {
         if (!aiClient) aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const prompt = [
-            'You are a UK local-SEO sales agent writing short call-prep notes about a prospect\'s Google Business Profile.',
+            "You are a UK local-SEO sales agent writing short call-prep notes about a prospect's Google Business Profile.",
             `Business: ${gbpName || lead.name}${lead.industry ? ` (${lead.industry})` : ''}`,
             'Gaps found (mention ONLY these, nothing else):',
             ...gaps.map((g, i) => `${i + 1}. ${g.gbp} [evidence: ${g.evidence}]`),
             '',
-            'Write two fields, each a numbered list with one short line per gap (max 20 words per line, plain text, no markdown):',
-            '- gbpObservation: the gap as a sales agent would state it to a colleague, mentioning the evidence where useful.',
-            '- aiVisibilityObservation: the same gaps, explaining how each makes ChatGPT/Gemini less likely to recommend the business.',
-            'Do not invent facts. Do not mention passing checks. Reply with JSON only: {"gbpObservation":"...","aiVisibilityObservation":"..."}'
+            'Write a numbered list with one short line per gap (max 20 words per line, plain text, no markdown), stated as a sales agent would to a colleague, mentioning the evidence where useful.',
+            'Do not invent facts. Do not mention passing checks. Reply with JSON only: {"gbpObservation":"..."}'
         ].join('\n');
 
         // Primary model first, then a fallback model (each tried once; 503s are common under load).
@@ -359,14 +385,52 @@ export async function writeCopy(
             .replace(/^```(?:json)?/i, '')
             .replace(/```$/, '')
             .trim();
-        const json = JSON.parse(raw);
-        const gbp = String(json.gbpObservation || '').trim();
-        const ai = String(json.aiVisibilityObservation || '').trim();
-        if (gbp && ai) return { gbpObservation: gbp, aiVisibilityObservation: ai };
+        const gbp = String(JSON.parse(raw).gbpObservation || '').trim();
+        if (gbp) return gbp;
     } catch (err) {
         console.warn('[lead-enrich] Gemini copy failed, using template:', (err as Error)?.message);
     }
     return fallback;
+}
+
+/* --------------------------------- AI visibility --------------------------- */
+
+const AI_PLATFORM = (process.env.LEAD_AI_PLATFORM as 'chatgpt' | 'claude' | 'perplexity') || 'chatgpt';
+
+/**
+ * Ask the AI assistant 4 local-search questions (the Excel business type + city / neighbourhood from the GBP) and report
+ * whether the business is named. Only the "Not Listed" questions (max 2) are written to the column.
+ */
+export async function runAiVisibility(lead: LeadRow, gbp: GbpSummary): Promise<string> {
+    const service = serviceFromBusiness(lead.industry, gbp.category);
+    if (!service) return 'AI visibility not checked: add the Business type (e.g. Windows & Doors) to the Excel row.';
+    const city = cityFromGbpAddress(gbp.address) || cityFromGbpAddress(lead.address);
+    const area = areaFromGbpAddress(gbp.address) || areaFromGbpAddress(lead.address);
+    const questions = aiQuestions(service, city, area);
+    const name = gbp.title || lead.name;
+    const website = lead.website || gbp.website;
+    const results = await Promise.all(
+        questions.map(async (q) => {
+            try {
+                const ans = await askLlm(AI_PLATFORM, q, {
+                    name,
+                    address: gbp.address || lead.address,
+                    category: gbp.category,
+                    website
+                });
+                // Check both the Google listing name and the Excel name; any of them named counts as listed.
+                const domains = ans.sources.map((x) => x.domain);
+                const verdicts = [...new Set([name, lead.name].filter(Boolean))].map((n) =>
+                    aiAnswerResult(ans.text, n, website, domains)
+                );
+                return verdicts.find((v) => v !== 'Not Listed') || 'Not Listed';
+            } catch (err) {
+                console.warn('[lead-enrich] AI question failed:', (err as Error)?.message);
+                return AI_NOT_CHECKED;
+            }
+        })
+    );
+    return formatAiVisibility(questions, results);
 }
 
 /* ------------------------------- Orchestration ----------------------------- */
@@ -382,8 +446,11 @@ async function processLead(lead: LeadRow) {
             return;
         }
 
-        const { checks, gbpName, notes } = await runChecks(lead);
-        const copy = await writeCopy(lead, gbpName, checks);
+        const { checks, gbpName, notes, gbp } = await runChecks(lead);
+        const [gbpObservation, aiVisibility] = await Promise.all([
+            writeCopy(lead, gbpName, checks),
+            isEmpty(lead.ai_visibility_observation) ? runAiVisibility(lead, gbp) : Promise.resolve('')
+        ]);
         const priority = priorityFromChecks(checks);
 
         await query(
@@ -400,8 +467,8 @@ async function processLead(lead: LeadRow) {
              WHERE id = $1`,
             [
                 lead.id,
-                copy.gbpObservation,
-                copy.aiVisibilityObservation,
+                gbpObservation,
+                aiVisibility,
                 priority,
                 priority.toLowerCase(),
                 notes.join('; '),
