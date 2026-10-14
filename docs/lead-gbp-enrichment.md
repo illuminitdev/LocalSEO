@@ -42,12 +42,18 @@ Who are the top rated double glazing in West Heath, Birmingham?
 Which double glazing near West Heath should I choose?
 ```
 For each answer the business counts as listed only if its full name (or website domain) is in it (a few shared words do
-not match); the position is noted when it is item N of a numbered list.
+not match). If it is item N of a numbered list the rank is recorded.
 
-The AI visibility column then contains **only the questions where the business is "Not Listed" (max 2)**, each with its
-question, e.g. `1. What are the best windows and doors in Birmingham? (Not Listed)`. "(Not Listed)" is shown in red in the lead details (shared/AiVisibilityText.tsx). Listed answers are not repeated; if the
-business is listed everywhere the column says so in one line. Questions that fail are ignored (all failed ->
-"AI visibility could not be checked right now.").
+The AI visibility column shows **every question with its result in brackets**: the rank when the business is named
+(`(1st place)`, `(2nd place)`...), `(Listed)` when named without a rank, or `(Not Listed)`, e.g.
+
+```
+1. What are the best windows and doors in Birmingham? (Not Listed)
+2. Who would you recommend for windows and doors in Birmingham? (2nd place)
+```
+
+In the lead details `(Not Listed)` is red and ranks are green (`shared/AiVisibilityText.tsx`). Questions that fail are left out
+(all failed -> "AI visibility could not be checked right now.").
 
 Every check result + evidence is saved in `sales_leads.enrich_checks`.
 

@@ -188,7 +188,7 @@ const compact = (v: string) =>
         .replace(/[^a-z0-9]+/g, '');
 
 /**
- * "Not Listed" when the business is not in the AI answer, "2nd position" when it appears as item 2 of a
+ * "Not Listed" when the business is not in the AI answer, "2nd place" when it appears as item 2 of a
  * numbered list, otherwise "Listed". Matches the full business name (or its website domain), never a few shared words.
  */
 export function aiAnswerResult(answerText: string, businessName: string, website = '', sourceDomains: string[] = []): string {
@@ -208,27 +208,24 @@ export function aiAnswerResult(answerText: string, businessName: string, website
     for (const line of lines) {
         const m = line.match(/^\s*(?:#+\s*)?(?:\*\*)?(\d{1,2})[.)]\s/);
         if (m) position = Number(m[1]);
-        if (hit(line)) return position ? `${ordinal(position)} position` : 'Listed';
+        if (hit(line)) return position ? `${ordinal(position)} place` : 'Listed';
     }
     const inSources = Boolean(host && sourceDomains.some((d) => d === host || d.endsWith(`.${host}`)));
     return inSources ? 'Listed' : 'Not Listed';
 }
 
-export const MAX_AI_GAPS = 2;
 export const AI_NOT_CHECKED = 'Could not be checked';
 
-
+/**
+ * Column text: every question that was checked with its result in brackets - the rank when the business is named
+ * ("(2nd place)"), "(Listed)" when named without a rank, or "(Not Listed)".
+ */
 export function formatAiVisibility(questions: string[], results: string[]): string {
-    const checked = results.filter((r) => r && r !== AI_NOT_CHECKED).length;
-    if (!checked) return 'AI visibility could not be checked right now.';
-    const notListed = questions
+    const rows = questions
         .map((q, i) => ({ q, r: results[i] }))
-        .filter((x) => x.r === 'Not Listed')
-        .slice(0, MAX_AI_GAPS);
-    if (!notListed.length) {
-        return `Listed in all ${checked} AI answers checked for local searches in their area.`;
-    }
-    return notListed.map((x, i) => `${i + 1}. ${x.q} (Not Listed)`).join('\n');
+        .filter((x) => x.r && x.r !== AI_NOT_CHECKED);
+    if (!rows.length) return 'AI visibility could not be checked right now.';
+    return rows.map((x, i) => `${i + 1}. ${x.q} (${x.r})`).join('\n');
 }
 
 

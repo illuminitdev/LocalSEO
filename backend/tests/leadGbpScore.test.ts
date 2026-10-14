@@ -89,24 +89,25 @@ test('AI visibility asks 4 local-search questions (city + area), not a fixed pro
     assert.ok(noArea.every((q) => !/undefined|, Leeds\?/.test(q)));
 });
 
-test('AI visibility column shows only the Not Listed questions (max 2)', () => {
+test('AI visibility column shows every question with its rank or (Not Listed)', () => {
     const qs = ['Q1?', 'Q2?', 'Q3?', 'Q4?'];
     assert.equal(
-        formatAiVisibility(qs, ['Not Listed', '2nd position', 'Not Listed', 'Not Listed']),
-        '1. Q1? (Not Listed)\n2. Q3? (Not Listed)'
+        formatAiVisibility(qs, ['Not Listed', '2nd place', '1st place', 'Not Listed']),
+        '1. Q1? (Not Listed)\n2. Q2? (2nd place)\n3. Q3? (1st place)\n4. Q4? (Not Listed)'
     );
-    assert.equal(formatAiVisibility(qs, ['Listed', '1st position', 'Listed', 'Listed']), 'Listed in all 4 AI answers checked for local searches in their area.');
+    // a question that could not be asked is left out and the rest are renumbered
     assert.equal(
-        formatAiVisibility(qs, ['Could not be checked', 'Not Listed', 'Could not be checked', 'Could not be checked']),
-        '1. Q2? (Not Listed)'
+        formatAiVisibility(qs, ['Could not be checked', 'Not Listed', 'Listed', 'Could not be checked']),
+        '1. Q2? (Not Listed)\n2. Q3? (Listed)'
     );
     assert.match(formatAiVisibility(qs, Array(4).fill('Could not be checked')), /could not be checked/i);
 });
 
-test('AI answer: Not Listed / position / Listed, matching the full name only', () => {
+test('AI answer: Not Listed / place / Listed, matching the full name only', () => {
     const answer = '1. Acme Roofing Ltd - great\n2. Smith Roofing Limited - good\n3. Other Co';
-    assert.equal(aiAnswerResult(answer, 'Smith Roofing Ltd'), '2nd position');
-    assert.equal(aiAnswerResult(answer, 'Acme Roofing'), '1st position');
+    assert.equal(aiAnswerResult(answer, 'Smith Roofing Ltd'), '2nd place');
+    assert.equal(aiAnswerResult(answer, 'Acme Roofing'), '1st place');
+    assert.equal(aiAnswerResult('1. A\n2. B\n3. C\n4. Smith Roofing', 'Smith Roofing'), '4th place');
     assert.equal(aiAnswerResult(answer, 'Zed Roofing'), 'Not Listed');
     // a few shared words are not a match
     assert.equal(aiAnswerResult('1. Birmingham Glass Repair Centre', 'Birmingham Glass Services Ltd'), 'Not Listed');
