@@ -9,6 +9,7 @@ import {
     Lightbulb,
     Mail,
     MapPin,
+    History,
     MessageSquare,
     Pencil,
     Phone,
@@ -20,11 +21,13 @@ import {
 } from 'lucide-react';
 import {
     type AdminLeadCrmDetail,
+    type LeadActivity,
     type SalesAgent,
     fetchAdminLeadCrm,
     fetchSalesAgents,
     updateAdminCrmLead
 } from './adminApi';
+import LeadStatusHistoryModal from './LeadStatusHistoryModal';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import { cn } from '../shared/utils';
 import { useToast } from '../shared/Toast';
@@ -168,6 +171,8 @@ export default function AdminLeadProfile() {
     const [form, setForm] = useState<EditForm | null>(null);
     const [assignOpen, setAssignOpen] = useState(false);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
+    const [activities, setActivities] = useState<LeadActivity[]>([]);
+    const [showLeadHistoryModal, setShowLeadHistoryModal] = useState(false);
 
     const loadLead = useCallback(async () => {
         if (!id) return;
@@ -179,6 +184,7 @@ export default function AdminLeadProfile() {
                 fetchSalesAgents().catch(() => [] as SalesAgent[])
             ]);
             setLead(data.lead);
+            setActivities(data.activities || []);
             setForm(formFromLead(data.lead));
             setSalesAgents(agents);
         } catch (err: any) {
@@ -266,8 +272,37 @@ export default function AdminLeadProfile() {
     const combinedSheet = String(lead.spreadsheetStatus || '').trim();
     const hasSheetStatuses = Boolean(status1 || status2 || status3 || combinedSheet);
     const conclusion = String(lead.notes || '').trim();
-    const crmStatus = String(lead.status || '').trim();
-    const showCrmStatus = Boolean(crmStatus && crmStatus.toLowerCase() !== 'new');
+    const latestAct = activities.length > 0 ? activities[0] : null;
+    const crmStatus = String(lead.status || latestAct?.disposition || (latestAct as any)?.disposition || '').trim();
+    const showCrmStatus = Boolean(crmStatus);
+
+    // Find latest note entered by a human specifically for lead status / sales update (strictly excluding task events and assignments)
+    const humanActivityWithNote = activities.find(a => {
+        const actType = a.activityType || (a as any).activity_type;
+        if (actType === 'task_event') return false;
+
+        const author = a.authorName || (a as any).author_name;
+        if (author === 'Excel Import' || (a as any).authorName === 'Excel Import') return false;
+
+        const noteText = String(a.note || '').trim();
+        if (!noteText) return false;
+
+        const lower = noteText.toLowerCase();
+        if (lower.includes('task') || lower.includes('assigned') || lower.includes('unassigned')) return false;
+        if (lower.startsWith('lead imported') || lower.startsWith('status updated from excel')) return false;
+        if (lower.startsWith('status updated to') || lower.startsWith('status changed to') || lower.startsWith('lead status set to')) return false;
+        return true;
+    });
+
+    const rawSalesNote = String((lead as any).salesNotes || '').trim();
+    const isTaskSalesNote = rawSalesNote.toLowerCase().includes('task') || rawSalesNote.toLowerCase().includes('assigned');
+    const activeNote = humanActivityWithNote
+        ? humanActivityWithNote.note
+        : (!isTaskSalesNote && rawSalesNote && rawSalesNote !== lead.notes
+            ? rawSalesNote
+            : '');
+    const activeDate = humanActivityWithNote?.createdAt || (humanActivityWithNote as any)?.created_at || latestAct?.createdAt || (latestAct as any)?.created_at || lead.updatedAt || null;
+    const activeAuthor = humanActivityWithNote?.authorName || (humanActivityWithNote as any)?.author_name || humanActivityWithNote?.userName || (humanActivityWithNote as any)?.user_name || latestAct?.authorName || (latestAct as any)?.author_name || lead.assignedAgentName || null;
     const obsLabel = emailShareStatusLabel(lead.observationEmailShareStatus);
     const auditLabel = emailShareStatusLabel(lead.emailShareStatus);
     const obsTimes = {
@@ -622,23 +657,43 @@ export default function AdminLeadProfile() {
                     </div>
 
                     <div className="p-5 sm:p-6 space-y-5 bg-slate-50/50">
-                        {(hasSheetStatuses || showCrmStatus || conclusion) && (
+                        {(hasSheetStatuses || showCrmStatus || activeNote) && (
                             <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-300/80 text-xs text-amber-950 space-y-2.5">
                                 <div className="flex items-center justify-between flex-wrap gap-2">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-6 h-6 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <div className="w-6 h-6 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center font-bold shrink-0">
                                             <Clock className="w-3.5 h-3.5" />
                                         </div>
                                         <span className="font-bold text-amber-950 uppercase tracking-wider text-[11px]">
                                             Status & Notes
                                         </span>
+                                        {showCrmStatus && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowLeadHistoryModal(true)}
+                                                className={cn(
+                                                    'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border shadow-2xs cursor-pointer hover:scale-105 transition-all group/badge shrink-0',
+                                                    crmStatus.includes('convert')
+                                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                                        : crmStatus.includes('progress')
+                                                          ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                                          : 'bg-white text-slate-800 border-slate-300'
+                                                )}
+                                                title="Click to view full lead status history timeline"
+                                            >
+                                                <span>{crmStatus.replace(/_/g, ' ')}</span>
+                                                <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100" />
+                                            </button>
+                                        )}
                                     </div>
-                                    {lead.updatedAt ? (
-                                        <span className="text-[11px] text-slate-600 font-medium flex items-center gap-1">
-                                            <Clock className="w-3 h-3 text-slate-400" />
-                                            {formatTimestamp(lead.updatedAt)}
-                                        </span>
-                                    ) : null}
+                                    <div className="flex items-center gap-2 ml-auto">
+                                        {activeDate ? (
+                                            <span className="text-[11px] text-slate-600 font-medium flex items-center gap-1">
+                                                <Clock className="w-3 h-3 text-slate-400" />
+                                                {formatTimestamp(activeDate)}
+                                            </span>
+                                        ) : null}
+                                    </div>
                                 </div>
                                 {hasSheetStatuses ? (
                                     <ul className="space-y-1.5 text-xs text-slate-800 font-semibold leading-relaxed list-none pl-0">
@@ -664,23 +719,24 @@ export default function AdminLeadProfile() {
                                         ) : null}
                                     </ul>
                                 ) : null}
-                                {conclusion ? (
+
+                                {activeNote && (
                                     <div className="flex items-start gap-2 bg-white/90 p-3 rounded-xl border border-amber-200/80">
                                         <MessageSquare className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" />
                                         <div className="flex-1 min-w-0">
                                             <p className="text-slate-800 font-semibold text-xs leading-relaxed whitespace-pre-wrap">
-                                                {conclusion}
+                                                {activeNote}
                                             </p>
-                                            {lead.assignedAgentName ? (
+                                            {activeAuthor && (
                                                 <p className="text-[10px] text-slate-500 font-medium mt-1 flex items-center gap-1">
                                                     <User className="w-3 h-3 text-slate-400" />
-                                                    Assigned:{' '}
-                                                    <span className="text-slate-800 font-bold">{lead.assignedAgentName}</span>
+                                                    Updated by <span className="text-slate-800 font-bold">{activeAuthor}</span>
                                                 </p>
-                                            ) : null}
+                                            )}
                                         </div>
                                     </div>
-                                ) : null}
+                                )}
+
                             </div>
                         )}
 
@@ -793,6 +849,23 @@ export default function AdminLeadProfile() {
                     onViewDetails={() => setAssignOpen(false)}
                 />
             ) : null}
+
+            {showLeadHistoryModal && id && (
+                <LeadStatusHistoryModal
+                    isOpen={showLeadHistoryModal}
+                    leadId={id}
+                    leadName={lead?.businessName || 'Lead'}
+                    currentStatus={lead?.status || activities[0]?.disposition || 'contacted'}
+                    initialNote={activeNote || undefined}
+                    initialDate={activeDate || undefined}
+                    authorName={activeAuthor || lead?.assignedAgentName || undefined}
+                    readOnly={false}
+                    onClose={() => setShowLeadHistoryModal(false)}
+                    onStatusUpdated={async () => {
+                        await loadLead();
+                    }}
+                />
+            )}
         </div>
     );
 }

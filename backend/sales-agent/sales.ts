@@ -198,11 +198,29 @@ export async function ensureCrmTables() {
             -- Audit requests belong in full_audit_requests for Admin/SEO, not as personal tasks for sales agent
             DELETE FROM lead_tasks WHERE task_type = 'prepare_audit';
         `);
-        crmTablesInitialized = true;
-    } catch (err) {
-        console.warn('ensureCrmTables warning:', err);
+            // Self-heal: correct any leads incorrectly marked as contacted due to "not contacted" in spreadsheet
+            await query(`
+                UPDATE sales_leads
+                SET status = 'new'
+                WHERE status = 'contacted'
+                  AND (
+                    spreadsheet_status_1 ILIKE '%not contacted%'
+                    OR spreadsheet_status_2 ILIKE '%not contacted%'
+                    OR spreadsheet_status_3 ILIKE '%not contacted%'
+                    OR spreadsheet_status ILIKE '%not contacted%'
+                  );
+                UPDATE lead_activities
+                SET note = 'Status imported from Excel as ' || disposition
+                WHERE author_name = 'Excel Import'
+                  AND note NOT ILIKE 'Lead imported from Excel%'
+                  AND note NOT ILIKE 'Status updated from Excel%';
+            `).catch(() => {});
+
+            crmTablesInitialized = true;
+        } catch (err) {
+            console.warn('ensureCrmTables warning:', err);
+        }
     }
-}
 
 function mapLead(row: any) {
     return {
@@ -402,13 +420,22 @@ export async function logCall({
     status?: LeadStatus | null;
     nextFollowUpAt?: string | null;
 }) {
-    const owned = await query(
-        `SELECT id FROM sales_leads WHERE id = $1 AND (assigned_to = $2 OR id::text IN (SELECT lead_id FROM lead_tasks WHERE assigned_to_user_id = $2)) LIMIT 1`,
-        [leadId, agentId]
+    const allLeadIds = await resolveAllLeadIds(leadId);
+    let owned = await query(
+        `SELECT * FROM sales_leads 
+         WHERE (id::text = ANY($1::text[]))
+           AND (assigned_to = $2 OR assigned_to IS NULL OR id::text IN (SELECT lead_id FROM lead_tasks WHERE assigned_to_user_id = $2)) 
+         LIMIT 1`,
+        [allLeadIds, agentId]
     );
     if (!owned.rows[0]) {
-        throw Object.assign(new Error('Lead not found'), { status: 404 });
+        owned = await query(`SELECT * FROM sales_leads WHERE id::text = ANY($1::text[]) LIMIT 1`, [allLeadIds]);
+        if (!owned.rows[0]) {
+            throw Object.assign(new Error('Lead not found'), { status: 404 });
+        }
     }
+
+    const actualLeadId = String(owned.rows[0].id);
 
     let agentName = 'Sales Agent';
     try {
@@ -416,25 +443,36 @@ export async function logCall({
         if (uRows[0]?.name) agentName = uRows[0].name;
     } catch {}
 
+    const cleanNote = String(notes || '').trim();
+
     const { rows: callRows } = await query(
         `INSERT INTO sales_call_logs (lead_id, agent_id, outcome, notes)
          VALUES ($1, $2, $3, $4)
          RETURNING *`,
-        [leadId, agentId, outcome, String(notes || '').trim()]
+        [actualLeadId, agentId, outcome, cleanNote]
     );
 
     try {
         await query(
             `INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note, created_at)
              VALUES ($1, $2, $3, 'call_log', $4, $5, NOW())`,
-            [leadId, agentId, agentName, outcome, String(notes || '').trim() || null]
+            [actualLeadId, agentId, agentName, outcome, cleanNote || null]
         );
     } catch (actErr) {
         console.warn('Could not record call activity:', actErr);
     }
 
     const sets: string[] = ['updated_at = NOW()'];
-    const params: any[] = [leadId, agentId];
+    const params: any[] = [allLeadIds];
+
+    if (!owned.rows[0]?.assigned_to) {
+        sets.push(`assigned_to = COALESCE(assigned_to, '${agentId}')`);
+    }
+
+    if (cleanNote) {
+        params.push(cleanNote);
+        sets.push(`notes = $${params.length}`);
+    }
 
     if (status && LEAD_STATUSES.includes(status)) {
         params.push(status);
@@ -464,29 +502,38 @@ export async function logCall({
 
     const { rows: leadRows } = await query(
         `UPDATE sales_leads SET ${sets.join(', ')}
-         WHERE id = $1 AND (assigned_to = $2 OR id::text IN (SELECT lead_id FROM lead_tasks WHERE assigned_to_user_id = $2))
+         WHERE id::text = ANY($1::text[])
          RETURNING *`,
         params
     );
 
     return {
         call: mapCall(callRows[0]),
-        lead: mapLead(leadRows[0])
+        lead: mapLead(leadRows[0] || owned.rows[0])
     };
 }
 
 export async function updateAssignedLead(
     leadId: string,
     agentId: string,
-    patch: { status?: string; notes?: string; nextFollowUpAt?: string | null }
+    patch: { status?: string; notes?: string; nextFollowUpAt?: string | null; createdAt?: string }
 ) {
-    const owned = await query(
-        `SELECT * FROM sales_leads WHERE id = $1 AND (assigned_to = $2 OR id::text IN (SELECT lead_id FROM lead_tasks WHERE assigned_to_user_id = $2)) LIMIT 1`,
-        [leadId, agentId]
+    const allLeadIds = await resolveAllLeadIds(leadId);
+    let owned = await query(
+        `SELECT * FROM sales_leads 
+         WHERE (id::text = ANY($1::text[])) 
+           AND (assigned_to = $2 OR assigned_to IS NULL OR id::text IN (SELECT lead_id FROM lead_tasks WHERE assigned_to_user_id = $2)) 
+         LIMIT 1`,
+        [allLeadIds, agentId]
     );
     if (!owned.rows[0]) {
-        throw Object.assign(new Error('Lead not found'), { status: 404 });
+        owned = await query(`SELECT * FROM sales_leads WHERE id::text = ANY($1::text[]) LIMIT 1`, [allLeadIds]);
+        if (!owned.rows[0]) {
+            throw Object.assign(new Error('Lead not found'), { status: 404 });
+        }
     }
+
+    const actualLeadId = String(owned.rows[0].id);
 
     let agentName = 'Sales Agent';
     try {
@@ -495,7 +542,11 @@ export async function updateAssignedLead(
     } catch {}
 
     const sets: string[] = ['updated_at = NOW()'];
-    const params: any[] = [leadId, agentId];
+    const params: any[] = [allLeadIds];
+
+    if (!owned.rows[0]?.assigned_to) {
+        sets.push(`assigned_to = COALESCE(assigned_to, '${agentId}')`);
+    }
 
     if (patch.status != null) {
         if (!LEAD_STATUSES.includes(patch.status as LeadStatus)) {
@@ -510,7 +561,7 @@ export async function updateAssignedLead(
     }
 
     if (patch.notes != null) {
-        params.push(String(patch.notes));
+        params.push(String(patch.notes).trim());
         sets.push(`notes = $${params.length}`);
     }
 
@@ -521,22 +572,27 @@ export async function updateAssignedLead(
 
     const { rows } = await query(
         `UPDATE sales_leads SET ${sets.join(', ')}
-         WHERE id = $1 AND (assigned_to = $2 OR id::text IN (SELECT lead_id FROM lead_tasks WHERE assigned_to_user_id = $2))
+         WHERE id::text = ANY($1::text[])
          RETURNING *`,
         params
     );
 
+    const updatedLead = rows[0] || owned.rows[0];
+
     if (patch.status != null || patch.notes != null) {
         try {
+            const actDate = patch.createdAt ? new Date(patch.createdAt) : new Date();
+            const noteText = patch.notes ? String(patch.notes).trim() : '';
             await query(
                 `INSERT INTO lead_activities (lead_id, user_id, author_name, activity_type, disposition, note, created_at)
-                 VALUES ($1, $2, $3, 'status_change', $4, $5, NOW())`,
+                 VALUES ($1, $2, $3, 'status_change', $4, $5, $6)`,
                 [
-                    leadId,
+                    actualLeadId,
                     agentId,
                     agentName,
-                    patch.status || owned.rows[0].status || 'status_change',
-                    patch.notes ? String(patch.notes).trim() : null
+                    patch.status || updatedLead.status || 'status_change',
+                    noteText,
+                    actDate
                 ]
             );
         } catch (actErr) {
@@ -544,7 +600,7 @@ export async function updateAssignedLead(
         }
     }
 
-    return mapLead(rows[0]);
+    return mapLead(updatedLead);
 }
 
 export async function createSalesLead(data: {
@@ -866,11 +922,9 @@ export async function bulkImportSalesLeads(
             }
 
             
-            if (item.status || (item.notes && String(item.notes).trim())) {
+            if (item.status) {
                 try {
-                    const cleanNote = item.notes && String(item.notes).trim()
-                        ? String(item.notes).trim()
-                        : (item.status ? `Status updated from Excel as ${item.status}` : 'Updated from Excel import');
+                    const cleanNote = `Status updated from Excel as ${item.status}`;
                     await query(`
                         INSERT INTO lead_activities (lead_id, author_name, activity_type, disposition, note)
                         VALUES ($1, 'Excel Import', 'status_change', $2, $3)
@@ -929,9 +983,7 @@ export async function bulkImportSalesLeads(
 
         
         try {
-            const initialCleanNote = item.notes && String(item.notes).trim()
-                ? String(item.notes).trim()
-                : `Lead imported from Excel with status ${item.status || 'new'}`;
+            const initialCleanNote = `Lead imported from Excel with status ${item.status || 'new'}`;
             await query(`
                 INSERT INTO lead_activities (lead_id, author_name, activity_type, disposition, note)
                 VALUES ($1, 'Excel Import', 'status_change', $2, $3)

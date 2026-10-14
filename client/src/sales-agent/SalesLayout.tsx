@@ -14,7 +14,7 @@ const NAV_GROUPS = [
         items: [
             { name: 'Dashboard', to: '/sales', icon: LayoutDashboard, end: true },
             { name: 'Customers', to: '/sales/customers', icon: Users, end: true },
-            { name: 'Tasks', to: '/sales/tasks', icon: CheckSquare, end: true },
+            { name: 'Leads', to: '/sales/tasks', icon: CheckSquare, end: true },
             { name: 'Self Reminders', to: '/sales/reminders', icon: Bell, end: true },
             { name: 'Call Logs', to: '/sales/calls', icon: PhoneCall, end: true }
         ]

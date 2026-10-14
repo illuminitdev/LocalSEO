@@ -1018,10 +1018,11 @@ export default function SalesReminders() {
                     leadId={selectedHistoryTask.leadId}
                     leadName={selectedHistoryTask.leadBusinessName || selectedHistoryTask.title}
                     currentStatus={selectedHistoryTask.status || 'pending'}
-                    initialNote={selectedHistoryTask.notes}
+                    initialNote={undefined}
                     initialDate={selectedHistoryTask.updatedAt || selectedHistoryTask.createdAt}
                     authorName={(selectedHistoryTask as any).assignedToName || undefined}
                     readOnly={true}
+                    defaultTab="lead_status"
                     onClose={() => setSelectedHistoryTask(null)}
                     onStatusUpdated={async () => {
                         await loadData();

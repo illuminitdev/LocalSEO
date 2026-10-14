@@ -692,6 +692,7 @@ router.get('/crm/leads/:leadId/crm', requireAdmin, async (req: Request, res: Res
             lead.industry = s.industry || lead.industry;
             lead.status = s.status || lead.status;
             lead.notes = s.notes || lead.notes;
+            (lead as any).salesNotes = s.notes || (lead as any).salesNotes || '';
             lead.gbpObservation = s.gbp_observation || lead.gbpObservation;
             lead.aiVisibilityObservation = s.ai_visibility_observation || lead.aiVisibilityObservation;
             lead.leadOpportunity = s.lead_opportunity || lead.leadOpportunity;
@@ -1105,6 +1106,7 @@ router.post('/crm/leads', requireAdmin, async (req: Request, res: Response) => {
 function normalizeSpreadsheetStatus(rawStatus: any): string {
     const s = String(rawStatus || '').toLowerCase().trim().replace(/[-_]/g, ' ');
     if (!s) return 'new';
+    if (s.includes('not contacted') || s.includes('uncontacted') || s.includes('never contacted') || s.includes('yet to contact') || s.includes('to be contacted') || s.includes('to contact')) return 'new';
     if (s.includes('convert') || s.includes('won') || s.includes('closed') || s.includes('customer') || s.includes('paid')) return 'converted';
     if (s.includes('not interested') || s.includes('lost') || s.includes('rejected') || s.includes('declined') || s.includes('dnc') || s.includes('cold') || s.includes('wrong number')) return 'not_interested';
     if (s.includes('callback') || s.includes('call back') || s.includes('follow') || s.includes('call later')) return 'callback';

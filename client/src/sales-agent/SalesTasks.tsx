@@ -245,7 +245,7 @@ export default function SalesTasks() {
         navigate(`/sales/leads/${encodeURIComponent(task.leadId)}${focusSection ? `#${focusSection}` : ''}`, {
             state: {
                 from: `${location.pathname}${location.search}`,
-                fromLabel: 'Tasks',
+                fromLabel: 'Leads',
                 scrollTo: focusSection
             }
         });
@@ -757,7 +757,7 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                 <div className="p-4 border-b border-[#F1F5F9] flex items-center justify-between">
                     <h2 className="text-sm font-bold text-[#0F172A] flex items-center gap-2">
                         <CheckSquare className="w-4 h-4 text-amber-500" />
-                        Task Queue ({dedupedTasks.length})
+                        Leads Queue ({dedupedTasks.length})
                     </h2>
                 </div>
 
@@ -781,7 +781,7 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                         <table className="w-full table-fixed text-left border-collapse text-sm min-w-[800px]">
                             <thead>
                                 <tr className="border-b border-[#E2E8F0] bg-slate-50/60 text-[11px] font-bold text-[#64748B] uppercase tracking-wider">
-                                    <th className="py-4 pl-6 pr-4 w-[32%]">Name / Business</th>
+                                    <th className="py-4 pl-6 pr-4 w-[32%]">Leads / Business</th>
                                     <th className="py-4 px-4 w-[24%]">Contact Info</th>
                                     <th className="py-4 px-4 w-[11%]">Priority</th>
                                     <th className="py-4 px-4 w-[18%] text-center">Status</th>
@@ -1011,10 +1011,11 @@ function compareTasksForPrimary(a: SalesLeadTask, b: SalesLeadTask): number {
                     leadId={selectedHistoryTask.leadId}
                     leadName={selectedHistoryTask.leadBusinessName || selectedHistoryTask.title}
                     currentStatus={selectedHistoryTask.leadStatus || 'new'}
-                    initialNote={selectedHistoryTask.notes}
+                    initialNote={undefined}
                     initialDate={selectedHistoryTask.updatedAt || selectedHistoryTask.createdAt}
                     authorName={(selectedHistoryTask as any).assignedToName || undefined}
                     readOnly={false}
+                    defaultTab="lead_status"
                     onClose={() => setSelectedHistoryTask(null)}
                     onStatusUpdated={async () => {
                         await loadData();

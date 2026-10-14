@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { X, History, User, MessageSquare, Plus, RefreshCw, AlertCircle, CheckCircle2, Calendar } from 'lucide-react';
-import { adminGet, updateAdminCrmLead, type LeadActivity } from './adminApi';
-import { apiGet, apiPatch, cn } from '../shared/utils';
+import { useEffect, useState, useCallback } from 'react';
+import { X, History, User, MessageSquare, AlertCircle, Calendar, CheckSquare, Layers, RefreshCw } from 'lucide-react';
+import { adminGet, type LeadActivity } from './adminApi';
+import { apiGet, cn } from '../shared/utils';
 
 interface LeadStatusHistoryModalProps {
     isOpen: boolean;
@@ -13,6 +13,7 @@ interface LeadStatusHistoryModalProps {
     authorName?: string | null;
     readOnly?: boolean;
     allowLogStatus?: boolean;
+    defaultTab?: 'lead_status' | 'task_status' | 'all';
     onClose: () => void;
     onStatusUpdated?: (newStatus: string) => void;
 }
@@ -31,12 +32,6 @@ const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
     no_answer: { label: 'No Answer', className: 'bg-slate-100 text-slate-700 border-slate-200' }
 };
 
-function getLocalIsoString() {
-    const now = new Date();
-    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-    return now.toISOString().slice(0, 16);
-}
-
 export default function LeadStatusHistoryModal({
     isOpen,
     leadId,
@@ -45,33 +40,40 @@ export default function LeadStatusHistoryModal({
     initialNote,
     initialDate,
     authorName,
-    readOnly = false,
-    allowLogStatus,
-    onClose,
-    onStatusUpdated
+    defaultTab = 'lead_status',
+    onClose
 }: LeadStatusHistoryModalProps) {
-    const canLogStatus = !readOnly && allowLogStatus !== false;
     const [activities, setActivities] = useState<LeadActivity[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // New status update form state
-    const [isAddingStatus, setIsAddingStatus] = useState(false);
-    const [newStatus, setNewStatus] = useState<string>(currentStatus || 'contacted');
-    const [statusDate, setStatusDate] = useState<string>(getLocalIsoString());
-    const [statusNote, setStatusNote] = useState('');
-    const [submitting, setSubmitting] = useState(false);
-    const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    // Active timeline tab: lead status updates vs task status updates vs all
+    const [activeTab, setActiveTab] = useState<'lead_status' | 'task_status' | 'all'>(defaultTab);
 
     const loadActivities = useCallback(async () => {
         if (!leadId) return;
         setLoading(true);
         setError(null);
+
+        const normalizeActs = (arr: any[]): LeadActivity[] => {
+            return (arr || []).map((a: any) => ({
+                id: a.id,
+                leadId: a.leadId || a.lead_id || leadId,
+                activityType: a.activityType || a.activity_type || 'note',
+                disposition: a.disposition,
+                note: a.note || '',
+                authorName: a.authorName || a.author_name || a.userName || a.user_name || 'Sales Agent',
+                createdAt: a.createdAt || a.created_at || new Date().toISOString(),
+                userName: a.userName || a.user_name,
+                userEmail: a.userEmail || a.user_email
+            }));
+        };
+
         try {
             try {
                 const res = await adminGet(`/api/admin/crm/leads/${encodeURIComponent(leadId)}/activities`);
                 if (res && res.activities) {
-                    setActivities(res.activities);
+                    setActivities(normalizeActs(res.activities));
                     return;
                 }
             } catch (aErr) {
@@ -79,13 +81,13 @@ export default function LeadStatusHistoryModal({
                 try {
                     const sRes = await apiGet(`/api/sales/leads/${encodeURIComponent(leadId)}/activities`);
                     if (sRes && sRes.activities) {
-                        setActivities(sRes.activities);
+                        setActivities(normalizeActs(sRes.activities));
                         return;
                     }
                 } catch {
                     const sCrm = await apiGet(`/api/sales/leads/${encodeURIComponent(leadId)}/crm`);
                     if (sCrm && sCrm.activities) {
-                        setActivities(sCrm.activities);
+                        setActivities(normalizeActs(sCrm.activities));
                         return;
                     }
                 }
@@ -100,51 +102,11 @@ export default function LeadStatusHistoryModal({
     useEffect(() => {
         if (isOpen && leadId) {
             loadActivities();
-            setNewStatus(currentStatus || 'contacted');
-            setStatusDate(getLocalIsoString());
-            setStatusNote('');
-            setIsAddingStatus(false);
-            setSuccessMessage(null);
+            setActiveTab('lead_status');
         }
-    }, [isOpen, leadId, currentStatus, loadActivities]);
+    }, [isOpen, leadId, loadActivities]);
 
     if (!isOpen) return null;
-
-    const handleUpdateStatus = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!newStatus) return;
-
-        setSubmitting(true);
-        setError(null);
-        try {
-            const parsedDate = statusDate ? new Date(statusDate).toISOString() : new Date().toISOString();
-            try {
-                await updateAdminCrmLead(leadId, {
-                    status: newStatus,
-                    notes: statusNote.trim() || undefined,
-                    createdAt: parsedDate
-                } as any);
-            } catch (adminErr) {
-                await apiPatch(`/api/sales/leads/${encodeURIComponent(leadId)}`, {
-                    status: newStatus,
-                    notes: statusNote.trim() || undefined
-                });
-            }
-
-            setSuccessMessage(`Status updated to "${STATUS_CONFIG[newStatus]?.label || newStatus}"`);
-            setStatusNote('');
-            setIsAddingStatus(false);
-            if (onStatusUpdated) {
-                onStatusUpdated(newStatus);
-            }
-            await loadActivities();
-            setTimeout(() => setSuccessMessage(null), 3500);
-        } catch (err: any) {
-            setError(err.message || 'Failed to update status');
-        } finally {
-            setSubmitting(false);
-        }
-    };
 
     const formatTimestamp = (isoString?: string) => {
         if (!isoString) return '—';
@@ -169,17 +131,24 @@ export default function LeadStatusHistoryModal({
         const list: LeadActivity[] = [...activities];
         if (initialNote && initialNote.trim()) {
             const cleanInitial = initialNote.trim().toLowerCase();
-            const hasMatch = list.some(a => (a.note || '').toLowerCase().includes(cleanInitial));
-            if (!hasMatch) {
-                list.push({
-                    id: 'lead-active-note',
-                    leadId,
-                    activityType: 'note',
-                    disposition: currentStatus || 'in_progress',
-                    note: initialNote,
-                    authorName: authorName || 'Sales Agent',
-                    createdAt: initialDate || new Date().toISOString()
-                } as LeadActivity);
+            const isObservationOrConclusion =
+                cleanInitial.includes('gbp') ||
+                cleanInitial.includes('observation') ||
+                cleanInitial.includes('audit') ||
+                cleanInitial.length > 80;
+            if (!isObservationOrConclusion) {
+                const hasMatch = list.some(a => (a.note || '').toLowerCase().includes(cleanInitial));
+                if (!hasMatch) {
+                    list.push({
+                        id: 'lead-active-note',
+                        leadId,
+                        activityType: 'note',
+                        disposition: currentStatus || 'in_progress',
+                        note: initialNote,
+                        authorName: authorName || 'Sales Agent',
+                        createdAt: initialDate || new Date().toISOString()
+                    } as LeadActivity);
+                }
             }
         } else if (list.length === 0 && currentStatus) {
             list.push({
@@ -195,13 +164,63 @@ export default function LeadStatusHistoryModal({
         return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     })();
 
-    const effectiveStatus = statusHistory[0]?.disposition || currentStatus;
+    const isTaskActivity = (item: LeadActivity): boolean => {
+        const actType = item.activityType || (item as any).activity_type;
+        if (actType === 'task_event') return true;
+        const note = String(item.note || '').toLowerCase();
+        if (
+            note.includes('task') ||
+            note.includes('assigned to telecaller') ||
+            note.includes('assigned to agent') ||
+            note.includes('assigned to sales') ||
+            note.includes('assigned to admin') ||
+            note.includes('unassigned') ||
+            note.startsWith('assigned to')
+        ) {
+            return true;
+        }
+        const disp = String(item.disposition || '').toLowerCase();
+        if (disp.includes('task') || disp.includes('assigned')) {
+            return true;
+        }
+        return false;
+    };
+
+    const leadStatusHistory = statusHistory.filter(item => !isTaskActivity(item));
+    const taskStatusHistory = statusHistory.filter(item => isTaskActivity(item));
+
+    const displayedItems =
+        activeTab === 'lead_status'
+            ? leadStatusHistory
+            : activeTab === 'task_status'
+              ? taskStatusHistory
+              : statusHistory;
+
+    const effectiveStatus = currentStatus || leadStatusHistory[0]?.disposition || 'new';
     const activeBadge = STATUS_CONFIG[String(effectiveStatus || '').toLowerCase()] || {
         label: effectiveStatus ? String(effectiveStatus).replace(/_/g, ' ') : 'New',
         className: 'bg-slate-100 text-slate-700 border-slate-200'
     };
 
     const getBadgeInfo = (item: LeadActivity) => {
+        if (isTaskActivity(item)) {
+            const noteLower = (item.note || '').toLowerCase();
+            const dispLower = (item.disposition || '').toLowerCase();
+            if (noteLower.includes('created task') || dispLower.includes('created')) {
+                return { label: 'Task Created', className: 'bg-indigo-50 text-indigo-700 border-indigo-200 font-bold' };
+            }
+            if (noteLower.includes('completed') || dispLower.includes('completed')) {
+                return { label: 'Task Completed', className: 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold' };
+            }
+            if (noteLower.includes('assigned') || dispLower.includes('assigned')) {
+                return { label: 'Task Assigned', className: 'bg-blue-50 text-blue-700 border-blue-200 font-bold' };
+            }
+            if (noteLower.includes('cancelled') || dispLower.includes('cancelled')) {
+                return { label: 'Task Cancelled', className: 'bg-slate-100 text-slate-600 border-slate-200' };
+            }
+            return { label: 'Task Update', className: 'bg-indigo-50 text-indigo-700 border-indigo-200 font-bold' };
+        }
+
         const rawStatus = (item.disposition || '').toLowerCase();
         if (rawStatus && STATUS_CONFIG[rawStatus]) {
             return STATUS_CONFIG[rawStatus];
@@ -227,9 +246,6 @@ export default function LeadStatusHistoryModal({
         }
         if (item.activityType === 'call_log') {
             return { label: 'Call Log', className: 'bg-blue-50 text-blue-700 border-blue-200' };
-        }
-        if (item.activityType === 'task_event') {
-            return { label: 'Task Update', className: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
         }
         return {
             label: item.disposition ? item.disposition.replace(/_/g, ' ') : 'Status Update',
@@ -283,135 +299,140 @@ export default function LeadStatusHistoryModal({
                         </div>
                     )}
 
-                    {successMessage && (
-                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2 text-xs text-emerald-800 font-semibold">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>{successMessage}</span>
-                        </div>
-                    )}
 
-                    {/* Add Status Update Button / Form */}
-                    {canLogStatus && (
-                        <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200">
-                            {!isAddingStatus ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setIsAddingStatus(true)}
-                                    className="w-full py-2 px-3 bg-white hover:bg-slate-100 text-slate-800 font-bold text-xs rounded-lg border border-slate-200 transition-all flex items-center justify-center gap-1.5 shadow-2xs"
-                                >
-                                    <Plus className="w-3.5 h-3.5 text-amber-600" />
-                                    <span>Log New Status Update</span>
-                                </button>
-                            ) : (
-                                <form onSubmit={handleUpdateStatus} className="space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-xs font-bold text-slate-800">Update Lead Status</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setIsAddingStatus(false)}
-                                            className="text-[11px] text-slate-500 hover:text-slate-800"
-                                        >
-                                            Cancel
-                                        </button>
-                                    </div>
 
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                        <div>
-                                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                                                Select New Status
-                                            </label>
-                                            <select
-                                                value={newStatus}
-                                                onChange={(e) => setNewStatus(e.target.value)}
-                                                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:border-amber-500 font-medium"
-                                            >
-                                                <option value="new">New</option>
-                                                <option value="contacted">Contacted</option>
-                                                <option value="in_progress">In Progress</option>
-                                                <option value="callback">Callback Requested</option>
-                                                <option value="interested">Interested</option>
-                                                <option value="not_interested">Not Interested</option>
-                                                <option value="converted">Converted</option>
-                                                <option value="completed">Completed</option>
-                                            </select>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                                                Update Date & Time
-                                            </label>
-                                            <input
-                                                type="datetime-local"
-                                                value={statusDate}
-                                                onChange={(e) => setStatusDate(e.target.value)}
-                                                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:border-amber-500 font-medium"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                                            Update Note / Remark
-                                        </label>
-                                        <textarea
-                                            value={statusNote}
-                                            onChange={(e) => setStatusNote(e.target.value)}
-                                            rows={2}
-                                            placeholder="Add notes about the call or reason for status change…"
-                                            className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:border-amber-500 font-medium placeholder:text-slate-400 resize-none"
-                                        />
-                                    </div>
-
-                                    <div className="flex items-center justify-end gap-2 pt-1">
-                                        <button
-                                            type="submit"
-                                            disabled={submitting}
-                                            className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-all disabled:opacity-50 shadow-2xs inline-flex items-center gap-1.5"
-                                        >
-                                            {submitting ? (
-                                                <>
-                                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                                    <span>Saving…</span>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <CheckCircle2 className="w-3.5 h-3.5" />
-                                                    <span>Save Status Update</span>
-                                                </>
-                                            )}
-                                        </button>
-                                    </div>
-                                </form>
+                    {/* Tabs to Separate Lead Status Updates vs Task Status Updates */}
+                    <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200">
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('lead_status')}
+                            className={cn(
+                                'flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5',
+                                activeTab === 'lead_status'
+                                    ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/80'
+                                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                             )}
-                        </div>
-                    )}
+                        >
+                            <History className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Lead Status</span>
+                            <span
+                                className={cn(
+                                    'px-1.5 py-0.2 rounded-full text-[10px] font-extrabold',
+                                    activeTab === 'lead_status'
+                                        ? 'bg-amber-100 text-amber-900'
+                                        : 'bg-slate-200 text-slate-600'
+                                )}
+                            >
+                                {leadStatusHistory.length}
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('task_status')}
+                            className={cn(
+                                'flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5',
+                                activeTab === 'task_status'
+                                    ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/80'
+                                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                            )}
+                        >
+                            <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Task Updates</span>
+                            <span
+                                className={cn(
+                                    'px-1.5 py-0.2 rounded-full text-[10px] font-extrabold',
+                                    activeTab === 'task_status'
+                                        ? 'bg-indigo-100 text-indigo-900'
+                                        : 'bg-slate-200 text-slate-600'
+                                )}
+                            >
+                                {taskStatusHistory.length}
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('all')}
+                            className={cn(
+                                'py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1',
+                                activeTab === 'all'
+                                    ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/80'
+                                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                            )}
+                            title="View All Timeline"
+                        >
+                            <span>All</span>
+                            <span
+                                className={cn(
+                                    'px-1.5 py-0.2 rounded-full text-[10px] font-extrabold',
+                                    activeTab === 'all'
+                                        ? 'bg-slate-900 text-white'
+                                        : 'bg-slate-200 text-slate-600'
+                                )}
+                            >
+                                {statusHistory.length}
+                            </span>
+                        </button>
+                    </div>
 
                     {/* Timeline List (Latest First) */}
                     <div>
                         <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                                Status Timeline (Latest First)
+                            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                                {activeTab === 'lead_status' ? (
+                                    <>
+                                        <History className="w-3.5 h-3.5 text-amber-600" />
+                                        <span>Lead Status Timeline (Latest First)</span>
+                                    </>
+                                ) : activeTab === 'task_status' ? (
+                                    <>
+                                        <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
+                                        <span>Task Status Timeline (Latest First)</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Layers className="w-3.5 h-3.5 text-slate-600" />
+                                        <span>All Status & Task Timeline</span>
+                                    </>
+                                )}
                             </h3>
                             <span className="text-[11px] text-slate-400 font-medium">
-                                {statusHistory.length} {statusHistory.length === 1 ? 'update' : 'updates'}
+                                {displayedItems.length} {displayedItems.length === 1 ? 'update' : 'updates'}
                             </span>
                         </div>
 
                         {loading ? (
                             <div className="p-8 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
                                 <RefreshCw className="w-4 h-4 animate-spin text-amber-500" />
-                                <span>Loading status history…</span>
+                                <span>Loading history…</span>
                             </div>
-                        ) : statusHistory.length === 0 ? (
+                        ) : displayedItems.length === 0 ? (
                             <div className="p-6 bg-slate-50 rounded-xl border border-slate-200/80 text-center space-y-1">
-                                <p className="text-xs font-semibold text-slate-600">No previous status updates recorded.</p>
-                                <p className="text-[11px] text-slate-400">Current active status: <span className="font-bold text-slate-700">{activeBadge.label}</span></p>
+                                <p className="text-xs font-semibold text-slate-600">
+                                    {activeTab === 'lead_status'
+                                        ? 'No lead status updates recorded yet.'
+                                        : activeTab === 'task_status'
+                                          ? 'No task status updates recorded yet for this lead.'
+                                          : 'No history updates recorded.'}
+                                </p>
+                                {activeTab === 'lead_status' && (
+                                    <p className="text-[11px] text-slate-400">
+                                        Current active status: <span className="font-bold text-slate-700">{activeBadge.label}</span>
+                                    </p>
+                                )}
+                                {activeTab === 'task_status' && (
+                                    <p className="text-[11px] text-slate-400">
+                                        Tasks created, assigned, or completed for this lead will appear here.
+                                    </p>
+                                )}
                             </div>
                         ) : (
                             <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-                                {statusHistory.map((item, idx) => {
+                                {displayedItems.map((item, idx) => {
+                                    const isTask = isTaskActivity(item);
                                     const badge = getBadgeInfo(item);
-                                    const isLatest = idx === 0;
+                                    const isCurrentLeadStatus = !isTask && idx === 0 && (activeTab === 'lead_status' || activeTab === 'all');
 
                                     return (
                                         <div key={item.id || idx} className="relative group">
@@ -419,13 +440,20 @@ export default function LeadStatusHistoryModal({
                                             <div
                                                 className={cn(
                                                     'absolute -left-6 top-1.5 w-3 h-3 rounded-full border-2 bg-white',
-                                                    isLatest
+                                                    isCurrentLeadStatus
                                                         ? 'border-amber-500 bg-amber-500 ring-4 ring-amber-100'
-                                                        : 'border-slate-300'
+                                                        : isTask
+                                                          ? idx === 0 && activeTab === 'task_status'
+                                                            ? 'border-indigo-500 bg-indigo-500 ring-4 ring-indigo-100'
+                                                            : 'border-indigo-400 bg-indigo-50'
+                                                          : 'border-slate-300'
                                                 )}
                                             />
 
-                                            <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-2xs hover:border-amber-300 transition-colors">
+                                            <div className={cn(
+                                                'bg-white p-3.5 rounded-xl border shadow-2xs transition-colors',
+                                                isTask ? 'border-slate-200/80 hover:border-indigo-300' : 'border-slate-200/80 hover:border-amber-300'
+                                            )}>
                                                 <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
                                                     <div className="flex items-center gap-2">
                                                         <span
@@ -436,7 +464,7 @@ export default function LeadStatusHistoryModal({
                                                         >
                                                             {badge.label}
                                                         </span>
-                                                        {isLatest && (
+                                                        {isCurrentLeadStatus && (
                                                             <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[9px] font-extrabold uppercase">
                                                                 Current Status
                                                             </span>
@@ -455,21 +483,37 @@ export default function LeadStatusHistoryModal({
                                                 </div>
 
                                                 {/* Note / Remarks */}
-                                                {item.note && (
-                                                    <div className="flex items-start gap-1.5 mt-2 pt-2 border-t border-slate-100 text-xs text-slate-700 bg-slate-50/70 p-2.5 rounded-lg">
-                                                        <MessageSquare className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
-                                                        <p className="whitespace-pre-line leading-relaxed break-words font-medium">
-                                                            {(() => {
-                                                                const raw = item.note || '';
-                                                                const noteMatch = raw.match(/(?:—\s*Note:\s*|\|\s*Note:\s*|Note:\s*)["']?([\s\S]*?)["']?$/i);
-                                                                if (noteMatch && noteMatch[1]) {
-                                                                    return noteMatch[1].replace(/["']$/, '').trim();
-                                                                }
-                                                                return raw;
-                                                            })()}
-                                                        </p>
-                                                    </div>
-                                                )}
+                                                {item.note && (() => {
+                                                    const raw = item.note || '';
+                                                    // If updated by Excel Import, do not display full observation / audit conclusion as a status note
+                                                    if (
+                                                        item.authorName === 'Excel Import' &&
+                                                        !raw.startsWith('Lead imported') &&
+                                                        !raw.startsWith('Status updated') &&
+                                                        !raw.startsWith('Updated from Excel')
+                                                    ) {
+                                                        return null;
+                                                    }
+                                                    const noteMatch = raw.match(/(?:—\s*Note:\s*|\|\s*Note:\s*|Note:\s*)["']?([\s\S]*?)["']?$/i);
+                                                    const displayNote = noteMatch && noteMatch[1] ? noteMatch[1].replace(/["']$/, '').trim() : raw;
+                                                    if (!displayNote) return null;
+
+                                                    return (
+                                                        <div className={cn(
+                                                            'flex items-start gap-1.5 mt-2 pt-2 border-t border-slate-100 text-xs text-slate-700 p-2.5 rounded-lg',
+                                                            isTask ? 'bg-indigo-50/50 border border-indigo-100/60' : 'bg-slate-50/70'
+                                                        )}>
+                                                            {isTask ? (
+                                                                <CheckSquare className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
+                                                            ) : (
+                                                                <MessageSquare className="w-3 h-3 text-amber-600 shrink-0 mt-0.5" />
+                                                            )}
+                                                            <p className="whitespace-pre-line leading-relaxed break-words font-medium">
+                                                                {displayNote}
+                                                            </p>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     );

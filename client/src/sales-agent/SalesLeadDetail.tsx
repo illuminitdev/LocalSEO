@@ -600,32 +600,55 @@ export default function SalesLeadDetail() {
                     // Back-compat: older imports only have combined spreadsheetStatus
                     const combinedSheet = String((lead as any).spreadsheetStatus || '').trim();
                     const hasSheetStatuses = Boolean(status1 || status2 || status3 || combinedSheet);
-                    const crmStatus = String((lead as any).status || latestAct?.disposition || '').trim();
-                    const showCrmPill = Boolean(crmStatus && crmStatus.toLowerCase() !== 'new');
-                    const activeNote = latestAct?.note || (lead as any).salesNotes || (lead as any).notes || '';
-                    const activeDate = latestAct?.createdAt || (lead as any).updatedAt || (lead as any).createdAt;
-                    const activeAuthor = latestAct?.authorName || (lead as any).assignedAgentName;
+                    const crmStatus = String((lead as any).status || latestAct?.disposition || (latestAct as any)?.disposition || '').trim();
+                    const showCrmPill = Boolean(crmStatus);
+
+                    // Find latest note entered by a human specifically for lead status / sales update (strictly excluding task events and assignments)
+                    const humanActivityWithNote = activities.find(a => {
+                        const actType = a.activityType || (a as any).activity_type;
+                        if (actType === 'task_event') return false;
+
+                        const author = a.authorName || (a as any).author_name;
+                        if (author === 'Excel Import' || (a as any).authorName === 'Excel Import') return false;
+
+                        const noteText = String(a.note || '').trim();
+                        if (!noteText) return false;
+
+                        const lower = noteText.toLowerCase();
+                        if (lower.includes('task') || lower.includes('assigned') || lower.includes('unassigned')) return false;
+                        if (lower.startsWith('lead imported') || lower.startsWith('status updated from excel')) return false;
+                        if (lower.startsWith('status updated to') || lower.startsWith('status changed to') || lower.startsWith('lead status set to')) return false;
+                        return true;
+                    });
+
+                    const rawSalesNote = String((lead as any).salesNotes || '').trim();
+                    const isTaskSalesNote = rawSalesNote.toLowerCase().includes('task') || rawSalesNote.toLowerCase().includes('assigned');
+                    const activeNote = humanActivityWithNote
+                        ? humanActivityWithNote.note
+                        : (!isTaskSalesNote && rawSalesNote && rawSalesNote !== (lead as any).notes
+                            ? rawSalesNote
+                            : '');
+                    const activeDate = humanActivityWithNote?.createdAt || (humanActivityWithNote as any)?.created_at || latestAct?.createdAt || (latestAct as any)?.created_at || (lead as any).updatedAt || (lead as any).createdAt;
+                    const activeAuthor = humanActivityWithNote?.authorName || (humanActivityWithNote as any)?.author_name || humanActivityWithNote?.userName || (humanActivityWithNote as any)?.user_name || latestAct?.authorName || (latestAct as any)?.author_name || (lead as any).assignedAgentName;
 
                     if (!hasSheetStatuses && !showCrmPill && !activeNote) return null;
 
                     return (
                         <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-300/80 text-xs text-amber-950 space-y-2.5 shadow-2xs">
                             <div className="flex items-center justify-between flex-wrap gap-2">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center font-bold">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="w-6 h-6 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center font-bold shrink-0">
                                         <Clock className="w-3.5 h-3.5" />
                                     </div>
                                     <span className="font-bold text-amber-950 uppercase tracking-wider text-[11px]">
                                         Current Status & Sales Notes
                                     </span>
-                                </div>
-                                <div className="flex items-center gap-2">
                                     {showCrmPill && (
                                         <button
                                             type="button"
                                             onClick={() => setShowLeadHistoryModal(true)}
                                             className={cn(
-                                                'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border shadow-2xs cursor-pointer hover:scale-105 transition-all group/badge',
+                                                'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border shadow-2xs cursor-pointer hover:scale-105 transition-all group/badge shrink-0',
                                                 crmStatus.includes('convert') ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200' :
                                                 crmStatus.includes('progress') ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200' :
                                                 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
@@ -636,6 +659,8 @@ export default function SalesLeadDetail() {
                                             <History className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100" />
                                         </button>
                                     )}
+                                </div>
+                                <div className="flex items-center gap-2 ml-auto">
                                     {!showCrmPill && (
                                         <button
                                             type="button"
@@ -1151,10 +1176,10 @@ export default function SalesLeadDetail() {
                     leadId={id}
                     leadName={lead?.businessName || 'Lead'}
                     currentStatus={(lead as any)?.status || (activities[0]?.disposition) || 'contacted'}
-                    initialNote={(lead as any)?.salesNotes || (lead as any)?.notes || activities[0]?.note}
+                    initialNote={(lead as any)?.salesNotes || undefined}
                     initialDate={activities[0]?.createdAt || (lead as any)?.updatedAt || (lead as any)?.createdAt}
                     authorName={activities[0]?.authorName || (lead as any)?.assignedAgentName}
-                    readOnly={true}
+                    readOnly={false}
                     onClose={() => setShowLeadHistoryModal(false)}
                     onStatusUpdated={async () => {
                         await loadLead();
@@ -1169,10 +1194,11 @@ export default function SalesLeadDetail() {
                     leadId={selectedHistoryTask.leadId || id || ''}
                     leadName={selectedHistoryTask.leadBusinessName || lead?.businessName || selectedHistoryTask.title}
                     currentStatus={selectedHistoryTask.status || 'pending'}
-                    initialNote={selectedHistoryTask.notes}
+                    initialNote={undefined}
                     initialDate={selectedHistoryTask.updatedAt || selectedHistoryTask.createdAt}
                     authorName={(selectedHistoryTask as any).assignedToName || undefined}
-                    readOnly={true}
+                    readOnly={false}
+                    defaultTab="lead_status"
                     onClose={() => setSelectedHistoryTask(null)}
                     onStatusUpdated={async () => {
                         await loadLead();

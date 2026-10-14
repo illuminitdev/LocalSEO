@@ -250,7 +250,7 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                         if (slData.status && slData.status !== 'new') {
                             lead.status = slData.status;
                         }
-                        if (slData.notes) {
+                        if (slData.notes && slData.notes !== lead.notes) {
                             (lead as any).salesNotes = slData.notes;
                         }
                         if (slData.agentName) {
