@@ -16,8 +16,7 @@ const ADMIN_LEAD_TYPES = [
     'growth_audit_lead',
     'contact',
     'audit_intake',
-    'visibility_check',
-    'checkout_lead'
+    'visibility_check'
 ] as const;
 
 function normalizeLeadStatus(raw: unknown): string | null {

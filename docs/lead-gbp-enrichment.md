@@ -25,9 +25,24 @@ Passed 0-3 -> **High**, passed 4 -> **Medium**, passed 5-6 -> **Low**. Stored in
 `opportunity_level`.
 
 ## Text
-**GBP observation**: sales-agent tone, only the failed checks, max 3 (order: primary category, NAP,
-review replies, posting, services, secondary category). Written by Gemini; deterministic text
-(`templateGbpObservation`) is used if Gemini fails or times out.
+**GBP observation**: one numbered line for **every** failed check (no cap, in the order of the 6 checks), only what is
+missing. Passed checks and matched NAP parts are never mentioned. It is built from the check results (no AI writing), so
+it states exactly what was found, e.g.
+
+```
+1. No services or products listed on the profile
+2. Not posting regularly on the profile: no Google posts in the last 30 days (last post 3 Oct 2025)
+3. Phone number missing on the website (GBP: 0121 477 9799)
+4. No secondary categories added, so they miss related searches
+```
+No posts at all reads "No Google posts on the profile (not posting at all)". NAP lines are per missing part (business name /
+phone number / address, each with the value from the GBP).
+
+**NAP accuracy.** The website text comes from the home page plus /contact, /contact-us, /about (and .html / -us variants),
+including the page title, meta tags, JSON-LD and `tel:` links; HTML entities are decoded. Phone numbers are compared by
+national digits, so `+44 (0)121 477 9799`, `0121-477-9799` and `01214779799` all match; names ignore punctuation, `&`/`and`,
+`Ltd` and spaces. If the site cannot be read (blocked, down, or almost no text because it is built with JavaScript) NAP is
+**not judged** instead of being reported as missing.
 
 **AI visibility**: 4 local-search questions are asked to ChatGPT per lead (DataForSEO
 `ai_optimization/chat_gpt/llm_responses/live`, via `askLlm` in `aiInsights.ts`; platform can be changed with
@@ -84,7 +99,7 @@ roughly 10 leads ~1 min, 50 leads ~5-8 min, 200 leads ~20-30 min.
 
 ## Files
 - `backend/lib/leadGbpScore.ts` - pure logic (checks -> priority, copy templates, URL parsing, NAP match); tests in `backend/tests/leadGbpScore.test.ts`
-- `backend/lib/leadGbpEnrich.ts` - DataForSEO + website + Gemini + DB orchestration
+- `backend/lib/leadGbpEnrich.ts` - DataForSEO + website + ChatGPT (AI visibility) + DB orchestration
 - `backend/leadEnrich.ts` - Lambda entry
 - `backend/migrations/037_sales_leads_gbp_enrich.sql` - `gbp_url`, `enrich_*` columns
 - `client/src/sales-agent/ExcelLeadUploadModal.tsx` - template + GBP URL column parsing

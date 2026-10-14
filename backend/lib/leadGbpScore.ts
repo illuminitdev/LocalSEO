@@ -12,7 +12,13 @@ export type CheckKey =
     | 'secondaryCategory';
 
 /** pass: true = ok, false = confirmed gap, null = could not be measured (never reported as a gap). */
-export type CheckResult = { key: CheckKey; pass: boolean | null; evidence: string };
+export type CheckResult = {
+    key: CheckKey;
+    pass: boolean | null;
+    evidence: string;
+    /** Specific sales-note lines for a failed check (e.g. which NAP parts are missing). Falls back to GAP_TEXT. */
+    gaps?: string[];
+};
 
 export type Priority = 'High' | 'Medium' | 'Low';
 
@@ -25,18 +31,7 @@ export const CHECK_KEYS: CheckKey[] = [
     'secondaryCategory'
 ];
 
-/** Which gaps to mention first when more than MAX_GAPS fail (most sellable first). */
-const GAP_ORDER: CheckKey[] = [
-    'primaryCategory',
-    'nap',
-    'reviewReplies',
-    'posting',
-    'services',
-    'secondaryCategory'
-];
-
-export const MAX_GAPS = 3;
-
+/** Fallback wording when a failed check has no specific lines of its own. */
 const GAP_TEXT: Record<CheckKey, string> = {
     reviewReplies: "Owner isn't replying to customer reviews",
     services: 'No services or products listed on the profile',
@@ -62,23 +57,22 @@ export function priorityFromChecks(checks: CheckResult[]): Priority {
     return 'Low';
 }
 
-/** Failed checks, ordered by sales relevance and capped. */
-export function topGaps(checks: CheckResult[], max = MAX_GAPS): CheckResult[] {
+/** Failed checks in the order of the 6 checks. There is no cap: every confirmed gap is reported. */
+export function topGaps(checks: CheckResult[]): CheckResult[] {
     const failed = failedChecks(checks);
-    return GAP_ORDER.map((k) => failed.find((c) => c.key === k)).filter(Boolean).slice(0, max) as CheckResult[];
+    return CHECK_KEYS.map((k) => failed.find((c) => c.key === k)).filter(Boolean) as CheckResult[];
 }
 
-/** Deterministic GBP observation (used when the LLM is unavailable or returns junk). */
+/**
+ * GBP observation: one numbered line per gap, only what is missing (passed checks and matched NAP parts are never
+ * mentioned). Built from the check results, so it states exactly what was found.
+ */
 export function templateGbpObservation(checks: CheckResult[]): string {
-    const gaps = topGaps(checks);
-    if (!gaps.length) {
+    const lines = topGaps(checks).flatMap((c) => (c.gaps && c.gaps.length ? c.gaps : [GAP_TEXT[c.key]]));
+    if (!lines.length) {
         return 'Profile basics are in good shape: replies, services, posting, NAP and categories all check out.';
     }
-    return gaps.map((g, i) => `${i + 1}. ${GAP_TEXT[g.key]}`).join('\n');
-}
-
-export function gapLabels(checks: CheckResult[]): Array<{ key: CheckKey; gbp: string; evidence: string }> {
-    return topGaps(checks).map((g) => ({ key: g.key, gbp: GAP_TEXT[g.key], evidence: g.evidence }));
+    return lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
 }
 
 /* ------------------------- AI visibility questions ------------------------- */
@@ -204,11 +198,22 @@ export function aiAnswerResult(answerText: string, businessName: string, website
         return (name.length >= 4 && c.includes(name)) || Boolean(host && t.toLowerCase().includes(host));
     };
 
+    // Rank = item number in a numbered list, else the position among bullet / bold-heading items.
     let position = 0;
+    let bullets = 0;
+    let bulletPosition = 0;
     for (const line of lines) {
         const m = line.match(/^\s*(?:#+\s*)?(?:\*\*)?(\d{1,2})[.)]\s/);
-        if (m) position = Number(m[1]);
-        if (hit(line)) return position ? `${ordinal(position)} place` : 'Listed';
+        if (m) {
+            position = Number(m[1]);
+        } else if (/^\s*(?:[-*•]\s+|#{2,4}\s+)/.test(line)) {
+            bullets += 1;
+            bulletPosition = bullets;
+        }
+        if (hit(line)) {
+            const rank = position || bulletPosition;
+            return rank ? `${ordinal(rank)} place` : 'Listed';
+        }
     }
     const inSources = Boolean(host && sourceDomains.some((d) => d === host || d.endsWith(`.${host}`)));
     return inSources ? 'Listed' : 'Not Listed';
@@ -312,23 +317,40 @@ function tokens(s: string): string[] {
         .filter((t) => t.length > 1 && !STOP.has(t));
 }
 
+/** Letters and digits only, so "Smith & Sons Ltd", "Smith and Sons" and "SmithSons" compare equal. */
+const squash = (s: string) =>
+    String(s || '')
+        .toLowerCase()
+        .replace(/&/g, 'and')
+        .replace(/\b(ltd|limited|llp|plc)\b\.?/g, '')
+        .replace(/[^a-z0-9]/g, '');
+
 export function nameMatches(gbpName: string, pageText: string): boolean {
     const page = norm(pageText);
     const n = norm(gbpName);
     if (!n) return true;
     if (page.includes(n)) return true;
+    const sq = squash(gbpName);
+    if (sq.length >= 4 && squash(pageText).includes(sq)) return true;
     const t = tokens(gbpName);
     if (!t.length) return true;
     const hit = t.filter((x) => page.includes(x)).length;
     return hit / t.length >= 0.75;
 }
 
+/** UK number without the country code or leading zero: "+44 (0)121 477 9799" and "0121 477 9799" -> "1214779799". */
+export function nationalDigits(raw: string): string {
+    let d = String(raw || '').replace(/\D/g, '');
+    if (d.startsWith('0044')) d = d.slice(4);
+    else if (d.startsWith('44') && d.length >= 11) d = d.slice(2);
+    return d.replace(/^0+/, '');
+}
+
 export function phoneMatches(gbpPhone: string, pageText: string): boolean {
-    const d = String(gbpPhone || '').replace(/\D/g, '');
+    const d = nationalDigits(gbpPhone);
     if (d.length < 7) return true;
-    const tail = d.slice(-9);
     const pageDigits = String(pageText || '').replace(/\D/g, '');
-    return pageDigits.includes(tail);
+    return pageDigits.includes(d.slice(-9));
 }
 
 export function addressMatches(gbpAddress: string, pageText: string): boolean {
@@ -344,14 +366,23 @@ export function addressMatches(gbpAddress: string, pageText: string): boolean {
     return hit / t.length >= 0.6;
 }
 
-/** Compare GBP name/address/phone with website text. Returns the mismatching parts (empty = match). */
-export function napMismatches(
-    gbp: { name: string; address: string; phone: string },
-    pageText: string
-): string[] {
-    const bad: string[] = [];
-    if (!nameMatches(gbp.name, pageText)) bad.push('name');
-    if (!addressMatches(gbp.address, pageText)) bad.push('address');
-    if (!phoneMatches(gbp.phone, pageText)) bad.push('phone');
-    return bad;
+export type NapPart = 'name' | 'phone' | 'address';
+
+/** Which of the GBP's name / phone / address cannot be found on the website text (empty = all found). */
+export function napMissing(gbp: { name: string; address: string; phone: string }, pageText: string): NapPart[] {
+    const missing: NapPart[] = [];
+    if (!nameMatches(gbp.name, pageText)) missing.push('name');
+    if (!phoneMatches(gbp.phone, pageText)) missing.push('phone');
+    if (!addressMatches(gbp.address, pageText)) missing.push('address');
+    return missing;
+}
+
+/** Sales-note line for each missing NAP part (only what is missing, with the value from the GBP). */
+export function napGapLines(missing: NapPart[], gbp: { name: string; address: string; phone: string }): string[] {
+    const line: Record<NapPart, string> = {
+        name: `Business name missing on the website (GBP: ${gbp.name})`,
+        phone: `Phone number missing on the website (GBP: ${gbp.phone})`,
+        address: `Address missing on the website (GBP: ${gbp.address})`
+    };
+    return missing.map((p) => line[p]);
 }

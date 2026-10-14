@@ -33,6 +33,12 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
             OR NULLIF(TRIM(COALESCE(s.payload->>'phone', a.data->'business'->>'phone', s.payload->'customer'->>'phone', '')), '') IS NOT NULL
         )`);
 
+        // Registered users (free or paid accounts) are not leads.
+        where.push(`NOT EXISTS (
+            SELECT 1 FROM users ru
+            WHERE LOWER(ru.email) = LOWER(NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', s.payload->'customer'->>'email', '')), ''))
+        )`);
+
         if (contactFilter === 'email') {
             where.push(
                 `NULLIF(TRIM(COALESCE(s.payload->>'email', s.email, a.data->'business'->>'email', s.payload->'customer'->>'email', '')), '') IS NOT NULL`
@@ -82,7 +88,9 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
 
         // 2. Added CRM sales leads query
         const salesParams: any[] = [];
-        const salesWhere: string[] = ['1=1'];
+        const salesWhere: string[] = [
+            `NOT EXISTS (SELECT 1 FROM users ru WHERE LOWER(ru.email) = LOWER(NULLIF(TRIM(l.email), '')))`
+        ];
 
         if (contactFilter === 'email') {
             salesWhere.push(`NULLIF(TRIM(l.email), '') IS NOT NULL`);
