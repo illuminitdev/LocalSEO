@@ -443,6 +443,10 @@ export type AdminCrmLead = {
     spreadsheetStatus1?: string;
     spreadsheetStatus2?: string;
     spreadsheetStatus3?: string;
+    gbpUrl?: string;
+    /** '' | 'pending' | 'running' | 'done' | 'failed' (GBP auto-analysis from Excel upload) */
+    enrichStatus?: string;
+    enrichError?: string;
     auditId?: string | null;
     createdAt: string;
     updatedAt: string;
@@ -474,7 +478,14 @@ export async function createAdminCrmLead(lead: Partial<AdminCrmLead>): Promise<A
 export async function bulkImportAdminCrmLeads(
     leads: any[],
     meta?: { fileName?: string }
-): Promise<{ count: number; created: number; skipped: number; leads: AdminCrmLead[]; importBatchId?: string | null }> {
+): Promise<{
+    count: number;
+    created: number;
+    skipped: number;
+    leads: AdminCrmLead[];
+    importBatchId?: string | null;
+    enrichQueued?: number;
+}> {
     return adminPost('/api/admin/crm/leads/bulk-import', {
         leads,
         fileName: meta?.fileName || ''

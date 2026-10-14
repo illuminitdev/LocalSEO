@@ -183,7 +183,10 @@ function mapSalesLeadToAdminLead(row: any) {
         spreadsheetStatus: row.spreadsheet_status || '',
         spreadsheetStatus1: row.spreadsheet_status_1 || '',
         spreadsheetStatus2: row.spreadsheet_status_2 || '',
-        spreadsheetStatus3: row.spreadsheet_status_3 || ''
+        spreadsheetStatus3: row.spreadsheet_status_3 || '',
+        gbpUrl: row.gbp_url || '',
+        enrichStatus: row.enrich_status || '',
+        enrichError: row.enrich_error || ''
     };
 }
 
@@ -274,6 +277,9 @@ async function fetchAdminLeadMetadataMap(leadIds: string[]) {
                 spreadsheetStatus3: row.spreadsheet_status_3 || existing?.spreadsheetStatus3 || '',
                 importBatchId: row.import_batch_id || null,
                 importFileName: row.import_file_name || null,
+                gbpUrl: row.gbp_url || '',
+                enrichStatus: row.enrich_status || '',
+                enrichError: row.enrich_error || '',
                 updatedAt: row.updated_at || row.created_at || existing?.updatedAt || null
             });
         }

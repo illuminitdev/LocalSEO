@@ -23,7 +23,8 @@ import {
     X,
     History,
     Clock,
-    Calendar
+    Calendar,
+    Loader2
 } from 'lucide-react';
 import {
     adminGet,
@@ -67,6 +68,10 @@ type AdminLead = GrowthAuditLeadRef & {
     importBatchId?: string | null;
     importFileName?: string | null;
     importUploadedAt?: string | null;
+    gbpUrl?: string | null;
+    /** GBP auto-analysis from Excel upload: '' | pending | running | done | failed */
+    enrichStatus?: string | null;
+    enrichError?: string | null;
     spreadsheetStatus?: string | null;
     spreadsheetStatus1?: string | null;
     spreadsheetStatus2?: string | null;
@@ -514,6 +519,22 @@ export default function AdminGrowthAuditLeads() {
     useEffect(() => {
         load();
     }, [load]);
+
+    // While GBP auto-analysis is running for uploaded leads, refresh quietly until it finishes.
+    const hasEnriching = leads.some((l) => l.enrichStatus === 'pending' || l.enrichStatus === 'running');
+    useEffect(() => {
+        if (!hasEnriching) return;
+        const params = new URLSearchParams();
+        if (query.trim()) params.set('q', query.trim());
+        if (hasContact !== 'any') params.set('hasContact', hasContact);
+        const qs = params.toString();
+        const timer = setInterval(() => {
+            adminGet(`/api/admin/growth-audit-leads${qs ? `?${qs}` : ''}`)
+                .then((data) => setLeads(data.leads || []))
+                .catch(() => {});
+        }, 8000);
+        return () => clearInterval(timer);
+    }, [hasEnriching, query, hasContact]);
 
     useEffect(() => {
         // Only auto-clear real Excel batch IDs that no longer exist — never source tabs.
@@ -1616,7 +1637,19 @@ export default function AdminGrowthAuditLeads() {
                                                         })()}
                                                     </td>
                                                     <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                                                        {lead.opportunityLevel ? (
+                                                        {lead.enrichStatus === 'pending' || lead.enrichStatus === 'running' ? (
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-indigo-50 text-indigo-700 border-indigo-200">
+                                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                                                Analyzing
+                                                            </span>
+                                                        ) : lead.enrichStatus === 'failed' ? (
+                                                            <span
+                                                                title={lead.enrichError || 'GBP analysis failed'}
+                                                                className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-red-50 text-red-700 border-red-200"
+                                                            >
+                                                                GBP failed
+                                                            </span>
+                                                        ) : lead.opportunityLevel ? (
                                                             <span className={cn(
                                                                 'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border shadow-2xs',
                                                                 oppLevel === 'high' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :

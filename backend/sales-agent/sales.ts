@@ -75,6 +75,12 @@ export async function ensureCrmTables() {
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status_2 TEXT NOT NULL DEFAULT '';
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status_3 TEXT NOT NULL DEFAULT '';
 
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS gbp_url TEXT NOT NULL DEFAULT '';
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS enrich_status TEXT NOT NULL DEFAULT '';
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS enrich_error TEXT NOT NULL DEFAULT '';
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS enrich_checks JSONB NULL;
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMPTZ NULL;
+
             CREATE INDEX IF NOT EXISTS idx_sales_leads_industry ON sales_leads(industry);
             CREATE INDEX IF NOT EXISTS idx_sales_leads_is_customer ON sales_leads(is_customer);
             CREATE INDEX IF NOT EXISTS idx_sales_leads_opportunity ON sales_leads(opportunity_level);
@@ -223,6 +229,10 @@ function mapLead(row: any) {
         importBatchId: row.import_batch_id || null,
         importFileName: row.import_file_name || '',
         importUploadedAt: row.import_uploaded_at || null,
+        gbpUrl: row.gbp_url || '',
+        enrichStatus: row.enrich_status || '',
+        enrichError: row.enrich_error || '',
+        enrichChecks: row.enrich_checks || null,
         spreadsheetStatus: row.spreadsheet_status || '',
         spreadsheetStatus1: row.spreadsheet_status_1 || '',
         spreadsheetStatus2: row.spreadsheet_status_2 || '',
@@ -561,6 +571,8 @@ export async function createSalesLead(data: {
     spreadsheetStatus1?: string;
     spreadsheetStatus2?: string;
     spreadsheetStatus3?: string;
+    gbpUrl?: string;
+    enrichStatus?: string;
 }) {
     await ensureCrmTables();
     const oppLevel = ['high', 'medium', 'low'].includes(String(data.opportunityLevel || '').toLowerCase())
@@ -592,8 +604,9 @@ export async function createSalesLead(data: {
             gbp_observation, ai_visibility_observation, lead_opportunity, opportunity_level,
             assigned_to, next_follow_up_at, created_by_admin, is_customer, converted_at,
             import_batch_id, import_file_name, import_uploaded_at,
-            spreadsheet_status, spreadsheet_status_1, spreadsheet_status_2, spreadsheet_status_3
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+            spreadsheet_status, spreadsheet_status_1, spreadsheet_status_2, spreadsheet_status_3,
+            gbp_url, enrich_status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
         RETURNING *`,
         [
             String(data.name || 'New Lead').trim(),
@@ -620,7 +633,9 @@ export async function createSalesLead(data: {
             spreadsheetStatus,
             status1,
             status2,
-            status3
+            status3,
+            String(data.gbpUrl || '').trim(),
+            String(data.enrichStatus || '').trim()
         ]
     );
 
@@ -648,6 +663,7 @@ export async function bulkImportSalesLeads(
         spreadsheetStatus1?: string;
         spreadsheetStatus2?: string;
         spreadsheetStatus3?: string;
+        gbpUrl?: string;
     }>,
     createdByAdmin = true,
     opts?: {
@@ -815,6 +831,17 @@ export async function bulkImportSalesLeads(
                 updates.push(`spreadsheet_status_3 = $${params.length}`);
             }
 
+            // GBP URL supplied: remember it and queue auto-enrichment for any empty observation/priority cells
+            const itemGbpUrl = String(item.gbpUrl || '').trim();
+            if (itemGbpUrl) {
+                params.push(itemGbpUrl);
+                updates.push(`gbp_url = $${params.length}`);
+                if (!(item.gbpObservation && item.aiVisibilityObservation && item.leadOpportunity)) {
+                    updates.push(`enrich_status = 'pending'`);
+                    updates.push(`enrich_error = ''`);
+                }
+            }
+
             // Move lead into this upload batch for filter / assign / delete by Excel
             if (importBatchId) {
                 params.push(importBatchId);
@@ -883,7 +910,13 @@ export async function bulkImportSalesLeads(
             spreadsheetStatus: item.spreadsheetStatus || '',
             spreadsheetStatus1: item.spreadsheetStatus1 || '',
             spreadsheetStatus2: item.spreadsheetStatus2 || '',
-            spreadsheetStatus3: item.spreadsheetStatus3 || ''
+            spreadsheetStatus3: item.spreadsheetStatus3 || '',
+            gbpUrl: item.gbpUrl || '',
+            enrichStatus:
+                String(item.gbpUrl || '').trim() &&
+                !(item.gbpObservation && item.aiVisibilityObservation && item.leadOpportunity)
+                    ? 'pending'
+                    : ''
         });
 
         createdLeads.push(lead);
