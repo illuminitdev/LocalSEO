@@ -3,7 +3,6 @@
  * "GBP observation", "AI visibility" and priority fields (only the cells that are empty).
  * See docs/lead-gbp-enrichment.md.
  */
-import { GoogleGenAI } from '@google/genai';
 import { query } from './db';
 import {
     fetchGbpReviewsSample,
@@ -19,9 +18,9 @@ import {
     areaFromGbpAddress,
     cityFromGbpAddress,
     formatAiVisibility,
-    gapLabels,
     nameMatches,
-    napMismatches,
+    napGapLines,
+    napMissing,
     parseGbpUrlText,
     priorityFromChecks,
     serviceFromBusiness,
@@ -133,14 +132,14 @@ async function fetchGbpInfo(opts: {
     };
 }
 
-const COMPANY_SUFFIX = /(ltd|limited|llp|plc|inc).?$/i;
+const COMPANY_SUFFIX = /\s+(ltd|limited|llp|plc|inc)\.?$/i;
 
 /** Search keywords for a business we only know by name + address, most specific first. */
 function keywordCandidates(name: string, address: string): string[] {
     const n = String(name || '').trim();
     const a = String(address || '').trim();
     const bare = n.replace(COMPANY_SUFFIX, '').trim();
-    const postcode = a.match(/[A-Z]{1,2}d[A-Zd]?s*d[A-Z]{2}/i)?.[0] || '';
+    const postcode = a.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i)?.[0] || '';
     const town = a.split(',').map((p) => p.trim()).filter(Boolean).slice(-2)[0] || '';
     const list = Array.from(
         new Set(
@@ -165,34 +164,83 @@ function titleLooksLikeLead(title: string, leadName: string, urlName: string): b
 
 /* -------------------------------- Website NAP ------------------------------ */
 
-function htmlToText(html: string): string {
-    return html
-        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;|&#160;/gi, ' ')
-        .replace(/&amp;/gi, '&')
-        .replace(/\s+/g, ' ');
+const NAMED_ENTITIES: Record<string, string> = {
+    nbsp: ' ',
+    amp: '&',
+    quot: '"',
+    apos: "'",
+    lsquo: "'",
+    rsquo: "'",
+    ldquo: '"',
+    rdquo: '"',
+    ndash: '-',
+    mdash: '-',
+    hellip: '...',
+    pound: '£'
+};
+
+/** "Smith&#039;s", "Smith&rsquo;s" and "Smith &amp; Sons" must read like the name on the GBP. */
+function decodeEntities(s: string): string {
+    return s
+        .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+        .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+        .replace(/&([a-z]+);/gi, (m, n) => NAMED_ENTITIES[n.toLowerCase()] ?? m);
 }
 
-async function fetchPage(url: string): Promise<string | null> {
+function htmlToText(html: string): string {
+    return decodeEntities(
+        html
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+            .replace(/<[^>]+>/g, ' ')
+    ).replace(/\s+/g, ' ');
+}
+
+/** Text the visible page does not show but that still names the business: <title>, meta tags, JSON-LD (telephone, address). */
+function hiddenBusinessText(html: string): string {
+    const parts: string[] = [];
+    const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (title) parts.push(title[1]);
+    for (const m of html.matchAll(/<meta[^>]+(?:property|name)=["'](?:og:site_name|og:title|application-name|twitter:title)["'][^>]*>/gi)) {
+        const c = m[0].match(/content=["']([^"']*)["']/i);
+        if (c) parts.push(c[1]);
+    }
+    for (const m of html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+        parts.push(m[1].replace(/[{}\[\]",:]/g, ' '));
+    }
+    // tel: links often carry the phone number even when the visible text is formatted oddly
+    parts.push((html.match(/href=["']tel:([^"']+)["']/gi) || []).join(' '));
+    return decodeEntities(parts.join(' '));
+}
+
+type Page = { text: string; visibleChars: number };
+
+async function fetchPage(url: string): Promise<Page | null> {
     try {
         const res = await fetch(url, {
             redirect: 'follow',
-            headers: { 'User-Agent': UA, Accept: 'text/html' },
+            headers: { 'User-Agent': UA, Accept: 'text/html', 'Accept-Language': 'en-GB,en;q=0.9' },
             signal: AbortSignal.timeout(9000)
         });
         if (!res.ok) return null;
-        const html = (await res.text()).slice(0, 600_000);
-        // tel: links often carry the phone number even when the visible text is formatted oddly
-        const tel = (html.match(/href=["']tel:([^"']+)["']/gi) || []).join(' ');
-        return `${htmlToText(html)} ${tel}`;
+        const html = (await res.text()).slice(0, 800_000);
+        const visible = htmlToText(html);
+        return { text: `${visible} ${hiddenBusinessText(html)}`, visibleChars: visible.length };
     } catch {
         return null;
     }
 }
 
-/** Homepage + a few likely contact pages. null when the site can't be reached at all. */
+/** Below this much text the page is almost certainly built by JavaScript (or blocked), so it cannot be judged. */
+const MIN_READABLE_CHARS = 400;
+
+const CONTACT_PATHS = ['/contact', '/contact-us', '/contact-us/', '/contact.html', '/about', '/about-us', '/about-us/'];
+
+/**
+ * Homepage + likely contact/about pages. null when the site can't be reached or its content can't be read, so that
+ * a JavaScript-only site is reported as "not measured" instead of wrongly as "missing".
+ */
 async function fetchSiteText(website: string): Promise<string | null> {
     let base = String(website || '').trim();
     if (!base) return null;
@@ -203,12 +251,11 @@ async function fetchSiteText(website: string): Promise<string | null> {
     } catch {
         return null;
     }
-    const home = await fetchPage(base);
+    const [home, ...extra] = await Promise.all([base, ...CONTACT_PATHS.map((p) => origin + p)].map(fetchPage));
     if (home === null) return null;
-    const extra = await Promise.all(
-        ['/contact', '/contact-us', '/about'].map((p) => fetchPage(origin + p))
-    );
-    return [home, ...extra.filter((x): x is string => Boolean(x))].join(' ');
+    const pages = [home, ...extra.filter((x): x is Page => Boolean(x))];
+    const visible = pages.reduce((n, p) => n + p.visibleChars, 0);
+    return visible >= MIN_READABLE_CHARS ? pages.map((p) => p.text).join(' ') : null;
 }
 
 /* ----------------------------------- Checks -------------------------------- */
@@ -276,7 +323,10 @@ export async function runChecks(
         checks.push({
             key: 'reviewReplies',
             pass: reviews.repliedCount > 0 && reviews.ownerRepliesLikely !== false,
-            evidence: `${reviews.repliedCount}/${reviews.reviewCount} sampled reviews have an owner reply`
+            evidence: `${reviews.repliedCount}/${reviews.reviewCount} sampled reviews have an owner reply`,
+            gaps: [
+                `Owner isn't replying to customer reviews (${reviews.repliedCount} of ${reviews.reviewCount} recent reviews have a reply)`
+            ]
         });
     } else {
         checks.push({ key: 'reviewReplies', pass: null, evidence: reviews?.evidence || 'Reviews not measured' });
@@ -291,10 +341,18 @@ export async function runChecks(
 
     // 3. Regular posting
     if (updates?.ok && updates.hasRecentPosts !== null) {
+        const lastPost = updates.recentPostAt
+            ? new Date(updates.recentPostAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+            : '';
         checks.push({
             key: 'posting',
             pass: Boolean(updates.hasRecentPosts),
-            evidence: updates.evidence
+            evidence: updates.evidence,
+            gaps: [
+                updates.totalPosts > 0
+                    ? `Not posting regularly on the profile: no Google posts in the last ${POSTING_WINDOW_DAYS} days${lastPost ? ` (last post ${lastPost})` : ''}`
+                    : 'No Google posts on the profile (not posting at all)'
+            ]
         });
     } else {
         checks.push({ key: 'posting', pass: null, evidence: updates?.evidence || 'Posts not measured' });
@@ -302,17 +360,21 @@ export async function runChecks(
 
     // 4. NAP vs website
     if (siteText) {
-        const bad = napMismatches({ name: info.title, address: info.address, phone: info.phone }, siteText);
+        const gbpNap = { name: info.title, address: info.address, phone: info.phone };
+        const missing = napMissing(gbpNap, siteText);
         checks.push({
             key: 'nap',
-            pass: bad.length === 0,
-            evidence: bad.length ? `GBP ${bad.join(', ')} not found on website` : 'Name, address and phone match website'
+            pass: missing.length === 0,
+            evidence: missing.length ? `Not found on website: ${missing.join(', ')}` : 'Name, address and phone found on website',
+            gaps: napGapLines(missing, gbpNap)
         });
     } else {
         checks.push({
             key: 'nap',
             pass: null,
-            evidence: websiteUrl ? 'Website could not be reached' : 'No website to compare against'
+            evidence: websiteUrl
+                ? 'Website could not be read (blocked, down, or built with JavaScript) - NAP not judged'
+                : 'No website to compare against'
         });
     }
 
@@ -338,59 +400,6 @@ export async function runChecks(
         notes,
         gbp: { title: info.title, category: info.category, address: info.address, website: info.website }
     };
-}
-
-/* ------------------------------------ Copy --------------------------------- */
-
-let aiClient: GoogleGenAI | null = null;
-
-export async function writeCopy(lead: LeadRow, gbpName: string, checks: CheckResult[]): Promise<string> {
-    const fallback = templateGbpObservation(checks);
-    const gaps = gapLabels(checks);
-    if (!gaps.length || !process.env.GEMINI_API_KEY) return fallback;
-
-    try {
-        if (!aiClient) aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const prompt = [
-            "You are a UK local-SEO sales agent writing short call-prep notes about a prospect's Google Business Profile.",
-            `Business: ${gbpName || lead.name}${lead.industry ? ` (${lead.industry})` : ''}`,
-            'Gaps found (mention ONLY these, nothing else):',
-            ...gaps.map((g, i) => `${i + 1}. ${g.gbp} [evidence: ${g.evidence}]`),
-            '',
-            'Write a numbered list with one short line per gap (max 20 words per line, plain text, no markdown), stated as a sales agent would to a colleague, mentioning the evidence where useful.',
-            'Do not invent facts. Do not mention passing checks. Reply with JSON only: {"gbpObservation":"..."}'
-        ].join('\n');
-
-        // Primary model first, then a fallback model (each tried once; 503s are common under load).
-        const models = [process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash', 'gemini-flash-latest'];
-        let response: any = null;
-        let lastErr: unknown = null;
-        for (const model of models) {
-            try {
-                response = await Promise.race([
-                    aiClient.models.generateContent({
-                        model,
-                        contents: prompt,
-                        config: { responseMimeType: 'application/json' }
-                    }),
-                    new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Gemini timeout')), 20000))
-                ]);
-                break;
-            } catch (e) {
-                lastErr = e;
-            }
-        }
-        if (!response) throw lastErr || new Error('Gemini unavailable');
-        const raw = String((response as any).text || '')
-            .replace(/^```(?:json)?/i, '')
-            .replace(/```$/, '')
-            .trim();
-        const gbp = String(JSON.parse(raw).gbpObservation || '').trim();
-        if (gbp) return gbp;
-    } catch (err) {
-        console.warn('[lead-enrich] Gemini copy failed, using template:', (err as Error)?.message);
-    }
-    return fallback;
 }
 
 /* --------------------------------- AI visibility --------------------------- */
@@ -448,7 +457,7 @@ async function processLead(lead: LeadRow) {
 
         const { checks, gbpName, notes, gbp } = await runChecks(lead);
         const [gbpObservation, aiVisibility] = await Promise.all([
-            writeCopy(lead, gbpName, checks),
+            Promise.resolve(templateGbpObservation(checks)),
             isEmpty(lead.ai_visibility_observation) ? runAiVisibility(lead, gbp) : Promise.resolve('')
         ]);
         const priority = priorityFromChecks(checks);
@@ -538,6 +547,36 @@ export async function triggerLeadEnrichment(batchId: string | null): Promise<voi
     setImmediate(() => {
         runEnrichment(batchId).catch((e) => console.error('[lead-enrich] run failed:', e?.message || e));
     });
+}
+
+/**
+ * Re-run AI visibility for leads whose generated text still says "(Listed)" without a rank, so they get
+ * "(1st place)" etc. Only auto-generated text is replaced, and a lead keeps its old text if the re-check fails.
+ */
+export async function rerunUnrankedAiVisibility(): Promise<{ checked: number; updated: number }> {
+    const { rows } = await query(
+        `SELECT id, name, website, address, industry, gbp_url, gbp_observation, ai_visibility_observation, lead_opportunity
+         FROM sales_leads
+         WHERE ai_visibility_observation LIKE '%(Listed)%'
+         ORDER BY created_at`
+    );
+    let updated = 0;
+    for (let i = 0; i < rows.length; i += CONCURRENCY) {
+        await Promise.all(
+            (rows.slice(i, i + CONCURRENCY) as LeadRow[]).map(async (lead) => {
+                try {
+                    const gbp: GbpSummary = { title: lead.name, category: '', address: lead.address, website: lead.website };
+                    const text = await runAiVisibility(lead, gbp);
+                    if (!text.includes('(') || text.startsWith('AI visibility')) return;
+                    await query(`UPDATE sales_leads SET ai_visibility_observation = $2, updated_at = NOW() WHERE id = $1`, [lead.id, text]);
+                    updated += 1;
+                } catch (err: any) {
+                    console.warn('[lead-enrich] rerun failed', lead.id, err?.message || err);
+                }
+            })
+        );
+    }
+    return { checked: rows.length, updated };
 }
 
 export async function enrichStatusForBatch(batchId: string) {

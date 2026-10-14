@@ -49,6 +49,11 @@ type AdminUser = {
         planId: string;
         planName: string;
         status: string;
+        isFreeTier?: boolean;
+        promoCode?: string | null;
+        freeTierStartedAt?: string | null;
+        freeTierEndsAt?: string | null;
+        freeTierDaysLeft?: number | null;
         priceLabel: string | null;
         periodEnd?: string | null;
         daysLeft?: number | null;
@@ -358,7 +363,12 @@ export default function AdminUserDetail() {
                                 Not logged in yet
                             </span>
                         )}
-                        {!isSalesAgent && user.subscription?.status === 'active' && (
+                        {!isSalesAgent && user.subscription?.isFreeTier && (
+                            <span className="text-[10px] font-bold uppercase px-2 py-1 rounded-md bg-amber-400/20 text-amber-100 border border-amber-300/30">
+                                Free Trial
+                            </span>
+                        )}
+                        {!isSalesAgent && !user.subscription?.isFreeTier && user.subscription?.status === 'active' && (
                             <span className="text-[10px] font-bold uppercase px-2 py-1 rounded-md bg-emerald-400/20 text-emerald-100 border border-emerald-300/30">
                                 Plan active
                             </span>
@@ -392,14 +402,29 @@ export default function AdminUserDetail() {
                             <div className="rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
                                 <div className="flex items-center gap-2 text-[#64748B]">
                                     <CalendarClock className="w-4 h-4 text-[#F59E0B]" />
-                                    <span className="text-[11px] font-bold uppercase">When it ends</span>
+                                    <span className="text-[11px] font-bold uppercase">
+                                        {user.subscription?.isFreeTier
+                                            ? 'Free tier ends'
+                                            : 'When it ends'}
+                                    </span>
                                 </div>
-                                <p className="text-lg font-bold mt-2">{fmtDate(user.subscription?.periodEnd)}</p>
+                                <p className="text-lg font-bold mt-2">
+                                    {fmtDate(
+                                        user.subscription?.isFreeTier
+                                            ? user.subscription.freeTierEndsAt || user.subscription.periodEnd
+                                            : user.subscription?.periodEnd
+                                    )}
+                                </p>
                                 <p className="text-sm text-[#64748B] mt-1">
-                                    Paid {fmtDate(user.subscription?.paidAt)}
-                                    {user.subscription?.daysLeft != null && user.subscription.daysLeft >= 0
-                                        ? ` · ${user.subscription.daysLeft}d left`
-                                        : ''}
+                                    {user.subscription?.isFreeTier
+                                        ? 'Card is charged automatically after this date'
+                                        : `Paid ${fmtDate(user.subscription?.paidAt)}`}
+                                    {(() => {
+                                        const left = user.subscription?.isFreeTier
+                                            ? user.subscription.freeTierDaysLeft
+                                            : user.subscription?.daysLeft;
+                                        return left != null && left >= 0 ? ` · ${left}d left` : '';
+                                    })()}
                                 </p>
                             </div>
                             <div className="rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">

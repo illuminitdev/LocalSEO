@@ -42,6 +42,11 @@ type AdminUser = {
         planId?: string | null;
         planName: string;
         status: string;
+        isFreeTier?: boolean;
+        promoCode?: string | null;
+        freeTierStartedAt?: string | null;
+        freeTierEndsAt?: string | null;
+        freeTierDaysLeft?: number | null;
         priceLabel: string | null;
         periodEnd?: string | null;
         daysLeft?: number | null;
@@ -50,7 +55,7 @@ type AdminUser = {
     invite: { id: string } | null;
 };
 
-type RoleFilter = 'all' | 'customer' | 'sales_agent' | 'converted_lead' | 'invite';
+type RoleFilter = 'all' | 'customer' | 'sales_agent' | 'converted_lead' | 'invite' | 'free_tier';
 
 const PAGE_SIZE = 10;
 
@@ -89,6 +94,7 @@ function roleOf(user: AdminUser): 'customer' | 'sales_agent' | 'converted_lead' 
 
 function roleLabel(user: AdminUser) {
     const r = roleOf(user);
+    if ((r === 'invite' || r === 'customer') && user.subscription?.isFreeTier) return 'Free Trial';
     if (r === 'sales_agent') return 'Sales Agent';
     if (r === 'converted_lead') return user.telecallerName ? `Converted (${user.telecallerName})` : 'Converted Customer';
     if (r === 'invite') return 'Pending invite';
@@ -245,6 +251,7 @@ export default function AdminUsers() {
             if (roleFilter === 'sales_agent' && role !== 'sales_agent') return false;
             if (roleFilter === 'converted_lead' && role !== 'converted_lead') return false;
             if (roleFilter === 'invite' && role !== 'invite') return false;
+            if (roleFilter === 'free_tier' && !u.subscription?.isFreeTier) return false;
 
             if (serviceFilter) {
                 const industryId = u.organization?.bookingIndustryId || '';
@@ -462,6 +469,7 @@ export default function AdminUsers() {
                                 <option value="sales_agent">Sales Agents</option>
                                 <option value="converted_lead">Converted by Telecallers</option>
                                 <option value="invite">Pending invites</option>
+                                <option value="free_tier">Free Tier</option>
                             </select>
                         </label>
                         <label className="block text-xs font-semibold text-[#64748B] lg:w-44 shrink-0">
@@ -594,7 +602,7 @@ export default function AdminUsers() {
                                                     </span>
                                                     {user.kind === 'user' &&
                                                         role === 'customer' &&
-                                                        (user.subscription?.status === 'active' ? (
+                                                        (user.subscription?.isFreeTier ? null : user.subscription?.status === 'active' ? (
                                                             <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
                                                                 Live
                                                             </span>
@@ -611,8 +619,15 @@ export default function AdminUsers() {
                                                         {user.subscription?.priceLabel
                                                             ? ` · ${user.subscription.priceLabel}`
                                                             : ''}
-                                                        {user.subscription?.periodEnd
-                                                            ? ` · ends ${fmtDate(user.subscription.periodEnd)}`
+                                                        {user.subscription?.isFreeTier
+                                                            ? ` · free until ${fmtDate(user.subscription.freeTierEndsAt || user.subscription.periodEnd)}`
+                                                            : user.subscription?.periodEnd
+                                                                ? ` · ends ${fmtDate(user.subscription.periodEnd)}`
+                                                                : ''}
+                                                        {user.subscription?.isFreeTier &&
+                                                            user.subscription.freeTierDaysLeft != null &&
+                                                            user.subscription.freeTierDaysLeft >= 0
+                                                            ? ` · ${user.subscription.freeTierDaysLeft}d left`
                                                             : ''}
                                                     </p>
                                                 )}

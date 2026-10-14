@@ -20,7 +20,8 @@ import {
     getStripeClient,
     mapRegisteredUser,
     mapConvertedLeadUser,
-    mapInviteUser
+    mapInviteUser,
+    attachFreeTier
 } from './helpers';
 
 const router = Router();
@@ -54,7 +55,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
              LEFT JOIN memberships m ON m.user_id = u.id AND m.role = 'owner'
              LEFT JOIN organizations o ON o.id = m.org_id
              LEFT JOIN booking_industries bi ON bi.id = o.booking_industry_id
-             LEFT JOIN subscriptions s ON s.status = 'active' AND (
+             LEFT JOIN subscriptions s ON s.status IN ('active', 'trialing') AND (
                  (o.id IS NOT NULL AND s.org_id = o.id)
                  OR LOWER(s.customer_email) = LOWER(u.email)
              )
@@ -98,7 +99,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
              FROM portal_invites pi
              LEFT JOIN booking_industries bi ON bi.id = pi.booking_industry_id
              LEFT JOIN plans p ON p.id = pi.plan_id
-             LEFT JOIN subscriptions s ON s.status = 'active'
+             LEFT JOIN subscriptions s ON s.status IN ('active', 'trialing')
                AND (LOWER(s.customer_email) = LOWER(pi.email)
                     OR (pi.stripe_subscription_id IS NOT NULL AND s.stripe_subscription_id = pi.stripe_subscription_id))
              WHERE pi.claimed_at IS NULL AND pi.status = 'paid'
@@ -123,6 +124,7 @@ router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
         const users = rows.map(mapRegisteredUser);
         const pendingInvites = inviteOnly.rows.map(mapInviteUser);
         const convertedLeads = convertedLeadsOnly.rows.map(mapConvertedLeadUser);
+        await attachFreeTier([...pendingInvites, ...users]);
 
         res.json({
             stage: resolveAdminCredentials().stage,
@@ -161,7 +163,7 @@ router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Respon
              LEFT JOIN memberships m ON m.user_id = u.id AND m.role = 'owner'
              LEFT JOIN organizations o ON o.id = m.org_id
              LEFT JOIN booking_industries bi ON bi.id = o.booking_industry_id
-             LEFT JOIN subscriptions s ON s.status = 'active' AND (
+             LEFT JOIN subscriptions s ON s.status IN ('active', 'trialing') AND (
                  (o.id IS NOT NULL AND s.org_id = o.id)
                  OR LOWER(s.customer_email) = LOWER(u.email)
              )
@@ -180,7 +182,8 @@ router.get('/users/user/:userId', requireAdmin, async (req: Request, res: Respon
             [userId]
         );
         if (!rows.length) return res.status(404).json({ error: 'Customer not found' });
-        res.json({ user: mapRegisteredUser(rows[0]), plans: PLANS });
+        const [user] = await attachFreeTier([mapRegisteredUser(rows[0])]);
+        res.json({ user, plans: PLANS });
     } catch (err: any) {
         console.error('Admin user detail error:', err);
         res.status(500).json({ error: err.message });
@@ -203,7 +206,7 @@ router.get('/users/invite/:inviteId', requireAdmin, async (req: Request, res: Re
              FROM portal_invites pi
              LEFT JOIN booking_industries bi ON bi.id = pi.booking_industry_id
              LEFT JOIN plans p ON p.id = pi.plan_id
-             LEFT JOIN subscriptions s ON s.status = 'active'
+             LEFT JOIN subscriptions s ON s.status IN ('active', 'trialing')
                AND (LOWER(s.customer_email) = LOWER(pi.email)
                     OR (pi.stripe_subscription_id IS NOT NULL AND s.stripe_subscription_id = pi.stripe_subscription_id))
              WHERE pi.id = $1
@@ -211,7 +214,8 @@ router.get('/users/invite/:inviteId', requireAdmin, async (req: Request, res: Re
             [inviteId]
         );
         if (!rows.length) return res.status(404).json({ error: 'Invite not found' });
-        res.json({ user: mapInviteUser(rows[0]), plans: PLANS });
+        const [user] = await attachFreeTier([mapInviteUser(rows[0])]);
+        res.json({ user, plans: PLANS });
     } catch (err: any) {
         console.error('Admin invite detail error:', err);
         res.status(500).json({ error: err.message });
@@ -364,7 +368,7 @@ router.delete('/users/user/:userId', requireAdmin, async (req: Request, res: Res
 
         await query(
             `UPDATE subscriptions SET status = 'canceled', updated_at = NOW()
-             WHERE status = 'active'
+             WHERE status IN ('active', 'trialing')
                AND (
                  LOWER(COALESCE(customer_email, '')) = LOWER($1)
                  OR ($2::uuid[] IS NOT NULL AND org_id = ANY($2))
@@ -400,7 +404,7 @@ router.delete('/users/invite/:inviteId', requireAdmin, async (req: Request, res:
         const invite = rows[0];
         await query(
             `UPDATE subscriptions SET status = 'canceled', updated_at = NOW()
-             WHERE status = 'active' AND LOWER(COALESCE(customer_email, '')) = LOWER($1)`,
+             WHERE status IN ('active', 'trialing') AND LOWER(COALESCE(customer_email, '')) = LOWER($1)`,
             [invite.email]
         ).catch(() => {});
         await query(`DELETE FROM portal_invites WHERE id = $1`, [inviteId]);
@@ -460,7 +464,7 @@ router.patch('/organizations/:orgId/subscription', requireAdmin, async (req: Req
         if (!planId) {
             await query(
                 `UPDATE subscriptions SET status = 'canceled', updated_at = NOW()
-                 WHERE org_id = $1 AND status = 'active'`,
+                 WHERE org_id = $1 AND status IN ('active', 'trialing')`,
                 [orgId]
             );
             return res.json({

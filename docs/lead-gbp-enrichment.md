@@ -25,9 +25,24 @@ Passed 0-3 -> **High**, passed 4 -> **Medium**, passed 5-6 -> **Low**. Stored in
 `opportunity_level`.
 
 ## Text
-**GBP observation**: sales-agent tone, only the failed checks, max 3 (order: primary category, NAP,
-review replies, posting, services, secondary category). Written by Gemini; deterministic text
-(`templateGbpObservation`) is used if Gemini fails or times out.
+**GBP observation**: one numbered line for **every** failed check (no cap, in the order of the 6 checks), only what is
+missing. Passed checks and matched NAP parts are never mentioned. It is built from the check results (no AI writing), so
+it states exactly what was found, e.g.
+
+```
+1. No services or products listed on the profile
+2. Not posting regularly on the profile: no Google posts in the last 30 days (last post 3 Oct 2025)
+3. Phone number missing on the website (GBP: 0121 477 9799)
+4. No secondary categories added, so they miss related searches
+```
+No posts at all reads "No Google posts on the profile (not posting at all)". NAP lines are per missing part (business name /
+phone number / address, each with the value from the GBP).
+
+**NAP accuracy.** The website text comes from the home page plus /contact, /contact-us, /about (and .html / -us variants),
+including the page title, meta tags, JSON-LD and `tel:` links; HTML entities are decoded. Phone numbers are compared by
+national digits, so `+44 (0)121 477 9799`, `0121-477-9799` and `01214779799` all match; names ignore punctuation, `&`/`and`,
+`Ltd` and spaces. If the site cannot be read (blocked, down, or almost no text because it is built with JavaScript) NAP is
+**not judged** instead of being reported as missing.
 
 **AI visibility**: 4 local-search questions are asked to ChatGPT per lead (DataForSEO
 `ai_optimization/chat_gpt/llm_responses/live`, via `askLlm` in `aiInsights.ts`; platform can be changed with
@@ -42,12 +57,18 @@ Who are the top rated double glazing in West Heath, Birmingham?
 Which double glazing near West Heath should I choose?
 ```
 For each answer the business counts as listed only if its full name (or website domain) is in it (a few shared words do
-not match); the position is noted when it is item N of a numbered list.
+not match). If it is item N of a numbered list the rank is recorded.
 
-The AI visibility column then contains **only the questions where the business is "Not Listed" (max 2)**, each with its
-question, e.g. `1. What are the best windows and doors in Birmingham? (Not Listed)`. "(Not Listed)" is shown in red in the lead details (shared/AiVisibilityText.tsx). Listed answers are not repeated; if the
-business is listed everywhere the column says so in one line. Questions that fail are ignored (all failed ->
-"AI visibility could not be checked right now.").
+The AI visibility column shows **every question with its result in brackets**: the rank when the business is named
+(`(1st place)`, `(2nd place)`...), `(Listed)` when named without a rank, or `(Not Listed)`, e.g.
+
+```
+1. What are the best windows and doors in Birmingham? (Not Listed)
+2. Who would you recommend for windows and doors in Birmingham? (2nd place)
+```
+
+In the lead details `(Not Listed)` is red and ranks are green (`shared/AiVisibilityText.tsx`). Questions that fail are left out
+(all failed -> "AI visibility could not be checked right now.").
 
 Every check result + evidence is saved in `sales_leads.enrich_checks`.
 
@@ -78,7 +99,7 @@ roughly 10 leads ~1 min, 50 leads ~5-8 min, 200 leads ~20-30 min.
 
 ## Files
 - `backend/lib/leadGbpScore.ts` - pure logic (checks -> priority, copy templates, URL parsing, NAP match); tests in `backend/tests/leadGbpScore.test.ts`
-- `backend/lib/leadGbpEnrich.ts` - DataForSEO + website + Gemini + DB orchestration
+- `backend/lib/leadGbpEnrich.ts` - DataForSEO + website + ChatGPT (AI visibility) + DB orchestration
 - `backend/leadEnrich.ts` - Lambda entry
 - `backend/migrations/037_sales_leads_gbp_enrich.sql` - `gbp_url`, `enrich_*` columns
 - `client/src/sales-agent/ExcelLeadUploadModal.tsx` - template + GBP URL column parsing

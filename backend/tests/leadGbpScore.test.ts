@@ -4,7 +4,11 @@ import {
     CHECK_KEYS,
     CheckKey,
     CheckResult,
-    napMismatches,
+    napGapLines,
+    napMissing,
+    nationalDigits,
+    phoneMatches,
+    nameMatches,
     parseGbpUrlText,
     priorityFromChecks,
     templateGbpObservation,
@@ -44,13 +48,29 @@ test('unmeasured checks are not counted as gaps', () => {
     );
 });
 
-test('GBP observation mentions only failed checks, max 3', () => {
+test('GBP observation lists every failed check (no cap), including posts', () => {
     const all = templateGbpObservation(withFails([...CHECK_KEYS]));
-    assert.equal(all.split('\n').length, 3);
+    assert.equal(all.split('\n').length, 6);
+    assert.match(all, /posting|posts/i);
 
     const one = templateGbpObservation(withFails(['posting']));
-    assert.match(one, /posting/i);
+    assert.match(one, /posting|posts/i);
     assert.doesNotMatch(one, /category|reviews/i);
+});
+
+test('GBP observation uses the specific lines of a failed check and skips passed ones', () => {
+    const checks = withFails(['posting', 'nap']).map((c) =>
+        c.key === 'posting'
+            ? { ...c, gaps: ['No Google posts in the last 30 days (last post 3 Oct 2025)'] }
+            : c.key === 'nap'
+              ? { ...c, gaps: napGapLines(['phone'], { name: 'Smith', address: 'A', phone: '0121 477 9799' }) }
+              : c
+    );
+    assert.equal(
+        templateGbpObservation(checks),
+        '1. No Google posts in the last 30 days (last post 3 Oct 2025)\n' +
+            '2. Phone number missing on the website (GBP: 0121 477 9799)'
+    );
 });
 
 test('all checks passing gives a positive line', () => {
@@ -89,24 +109,25 @@ test('AI visibility asks 4 local-search questions (city + area), not a fixed pro
     assert.ok(noArea.every((q) => !/undefined|, Leeds\?/.test(q)));
 });
 
-test('AI visibility column shows only the Not Listed questions (max 2)', () => {
+test('AI visibility column shows every question with its rank or (Not Listed)', () => {
     const qs = ['Q1?', 'Q2?', 'Q3?', 'Q4?'];
     assert.equal(
-        formatAiVisibility(qs, ['Not Listed', '2nd position', 'Not Listed', 'Not Listed']),
-        '1. Q1? (Not Listed)\n2. Q3? (Not Listed)'
+        formatAiVisibility(qs, ['Not Listed', '2nd place', '1st place', 'Not Listed']),
+        '1. Q1? (Not Listed)\n2. Q2? (2nd place)\n3. Q3? (1st place)\n4. Q4? (Not Listed)'
     );
-    assert.equal(formatAiVisibility(qs, ['Listed', '1st position', 'Listed', 'Listed']), 'Listed in all 4 AI answers checked for local searches in their area.');
+    // a question that could not be asked is left out and the rest are renumbered
     assert.equal(
-        formatAiVisibility(qs, ['Could not be checked', 'Not Listed', 'Could not be checked', 'Could not be checked']),
-        '1. Q2? (Not Listed)'
+        formatAiVisibility(qs, ['Could not be checked', 'Not Listed', 'Listed', 'Could not be checked']),
+        '1. Q2? (Not Listed)\n2. Q3? (Listed)'
     );
     assert.match(formatAiVisibility(qs, Array(4).fill('Could not be checked')), /could not be checked/i);
 });
 
-test('AI answer: Not Listed / position / Listed, matching the full name only', () => {
+test('AI answer: Not Listed / place / Listed, matching the full name only', () => {
     const answer = '1. Acme Roofing Ltd - great\n2. Smith Roofing Limited - good\n3. Other Co';
-    assert.equal(aiAnswerResult(answer, 'Smith Roofing Ltd'), '2nd position');
-    assert.equal(aiAnswerResult(answer, 'Acme Roofing'), '1st position');
+    assert.equal(aiAnswerResult(answer, 'Smith Roofing Ltd'), '2nd place');
+    assert.equal(aiAnswerResult(answer, 'Acme Roofing'), '1st place');
+    assert.equal(aiAnswerResult('1. A\n2. B\n3. C\n4. Smith Roofing', 'Smith Roofing'), '4th place');
     assert.equal(aiAnswerResult(answer, 'Zed Roofing'), 'Not Listed');
     // a few shared words are not a match
     assert.equal(aiAnswerResult('1. Birmingham Glass Repair Centre', 'Birmingham Glass Services Ltd'), 'Not Listed');
@@ -140,11 +161,11 @@ test('parses cid= links and unwraps consent redirects', () => {
     assert.equal(parseGbpUrlText(wrapped).name, 'JDM Gardens');
 });
 
-test('NAP match tolerates formatting differences', () => {
+test('NAP: everything on the website gives nothing missing', () => {
     const page =
         'Welcome to LES Pest Management Ltd. Unit 6A, Bannister Hall Works, Higher Walton, Preston PR5 4DZ. Call us on 01772 885100';
     assert.deepEqual(
-        napMismatches(
+        napMissing(
             {
                 name: 'LES Pest Management',
                 address: 'Unit 6A, Bannister Hall Works, Higher Walton, Preston PR5 4DZ, UK',
@@ -156,11 +177,41 @@ test('NAP match tolerates formatting differences', () => {
     );
 });
 
-test('NAP mismatch reports which parts differ', () => {
+test('NAP: reports only what is missing', () => {
     const page = 'Smith Plumbing, 1 High Street, Leeds LS1 1AA, tel 0113 496 0000';
-    const bad = napMismatches(
-        { name: 'Smith Plumbing', address: '22 Other Road, Bradford BD1 2XY', phone: '01274 555 123' },
-        page
-    );
-    assert.deepEqual(bad, ['address', 'phone']);
+    const gbp = { name: 'Smith Plumbing', address: '22 Other Road, Bradford BD1 2XY', phone: '01274 555 123' };
+    const missing = napMissing(gbp, page);
+    assert.deepEqual(missing, ['phone', 'address']);
+    assert.deepEqual(napGapLines(missing, gbp), [
+        'Phone number missing on the website (GBP: 01274 555 123)',
+        'Address missing on the website (GBP: 22 Other Road, Bradford BD1 2XY)'
+    ]);
+    // a missing number is reported as missing, a matching name is not mentioned at all
+    assert.ok(napGapLines(missing, gbp).every((l) => !/name/i.test(l)));
+});
+
+test('phone numbers match however the website formats them', () => {
+    const gbp = '0121 477 9799';
+    assert.equal(nationalDigits('+44 (0)121 477 9799'), '1214779799');
+    assert.equal(nationalDigits('0044 121 477 9799'), '1214779799');
+    for (const shown of [
+        'Call 0121 477 9799',
+        'Call 0121-477-9799',
+        'Call 0121.477.9799',
+        'Call +44 (0)121 477 9799',
+        'Call +44 121 477 9799',
+        'Call 01214779799'
+    ]) {
+        assert.equal(phoneMatches(gbp, shown), true, shown);
+    }
+    // GBP written with +44, website with the leading 0
+    assert.equal(phoneMatches('+44 121 477 9799', 'Tel: 0121 477 9799'), true);
+    assert.equal(phoneMatches(gbp, 'Call 0121 477 9800'), false);
+});
+
+test('business name matches despite punctuation, "&"/"and", Ltd and joined words', () => {
+    assert.equal(nameMatches('Smith & Sons Ltd', 'Welcome to Smith and Sons'), true);
+    assert.equal(nameMatches('Solihull WDC Ltd', 'SolihullWDC - windows, doors and conservatories'), true);
+    assert.equal(nameMatches("Joe's Plumbing", "JOE'S PLUMBING - Leeds"), true);
+    assert.equal(nameMatches('Acme Roofing', 'Totally different company page'), false);
 });
