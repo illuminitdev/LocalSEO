@@ -585,12 +585,6 @@ export default function AdminFullAudits() {
             .sort((a, b) => timeOf(b.requestedAt) - timeOf(a.requestedAt));
     }, [requests, requestFilter, reqDateField, listFilters.reqFrom, listFilters.reqTo]);
 
-    // Serial numbers follow creation order (#1 = oldest) so they stay stable across filters/pages.
-    const auditSerials = useMemo(() => {
-        const ordered = [...audits].sort((a, b) => timeOf(a.createdAt) - timeOf(b.createdAt));
-        return new Map(ordered.map((a, i) => [a.id, i + 1]));
-    }, [audits]);
-
     const filteredAudits = useMemo(
         () =>
             audits
@@ -743,6 +737,83 @@ export default function AdminFullAudits() {
 
     const rangeStart = filteredAudits.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
     const rangeEnd = Math.min(safePage * PAGE_SIZE, filteredAudits.length);
+
+    const [selectedAuditIds, setSelectedAuditIds] = useState<Set<string>>(() => new Set());
+    const [bulkAgentId, setBulkAgentId] = useState('');
+    const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+    const selectablePageAudits = useMemo(() => pageAudits.filter(isReadyAudit), [pageAudits]);
+    const allPageSelected =
+        selectablePageAudits.length > 0 && selectablePageAudits.every((a) => selectedAuditIds.has(a.id));
+
+    // Drop selections for audits that no longer exist (deleted / reloaded).
+    useEffect(() => {
+        setSelectedAuditIds((prev) => {
+            const ids = new Set(audits.map((a) => a.id));
+            const next = new Set([...prev].filter((id) => ids.has(id)));
+            return next.size === prev.size ? prev : next;
+        });
+    }, [audits]);
+
+    const toggleSelectAudit = (id: string) => {
+        setSelectedAuditIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleSelectPage = () => {
+        setSelectedAuditIds((prev) => {
+            const next = new Set(prev);
+            for (const a of selectablePageAudits) {
+                if (allPageSelected) next.delete(a.id);
+                else next.add(a.id);
+            }
+            return next;
+        });
+    };
+
+    const handleBulkAssign = async () => {
+        const agent = salesAgents.find((s) => s.id === bulkAgentId);
+        const targets = audits.filter((a) => selectedAuditIds.has(a.id) && isReadyAudit(a));
+        if (!agent || !targets.length) return;
+        setError('');
+        setBulkProgress({ done: 0, total: targets.length });
+        const failed: FullAuditListItem[] = [];
+        // Sequential on purpose: each assign also syncs sibling requests/tasks for the same lead.
+        for (const [i, audit] of targets.entries()) {
+            const req =
+                assignmentByAuditId.get(audit.id) ||
+                requests.find(
+                    (r) =>
+                        r.fulfilledAuditId === audit.id ||
+                        (r.businessName && r.businessName.toLowerCase() === (audit.businessName || '').toLowerCase())
+                );
+            try {
+                await assignFullAuditToAgent({
+                    requestId: req?.id,
+                    auditId: audit.id,
+                    agentId: agent.id,
+                    businessName: req?.businessName || audit.businessName,
+                    leadId: req?.leadId
+                });
+            } catch {
+                failed.push(audit);
+            }
+            setBulkProgress({ done: i + 1, total: targets.length });
+        }
+        setBulkProgress(null);
+        const ok = targets.length - failed.length;
+        if (ok) show(`Assigned ${ok} audit${ok === 1 ? '' : 's'} to ${agent.name || agent.email}.`);
+        if (failed.length) {
+            setError(`Could not assign: ${failed.map((a) => a.businessName || a.id.slice(0, 8)).join(', ')}`);
+        }
+        // Keep only the failures selected so they can be retried.
+        setSelectedAuditIds(new Set(failed.map((a) => a.id)));
+        setBulkAgentId('');
+        load();
+    };
 
     const totalRequestPages = Math.max(1, Math.ceil(filteredRequests.length / PAGE_SIZE));
     const safeRequestPage = Math.min(requestPage, totalRequestPages);
@@ -1628,13 +1699,65 @@ export default function AdminFullAudits() {
                         </span>
                     </div>
                     <div className="px-5 py-2.5 border-b border-[#E2E8F0] bg-[#FCFDFE] flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-[11px] text-[#94A3B8]">Newest first · #1 is the first audit ever created</p>
+                        <label className="inline-flex items-center gap-2 text-[11px] font-bold text-[#475569] cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                className="w-4 h-4 accent-[#F59E0B]"
+                                checked={allPageSelected}
+                                disabled={!selectablePageAudits.length}
+                                onChange={toggleSelectPage}
+                            />
+                            {selectedAuditIds.size ? `${selectedAuditIds.size} selected` : 'Select page'}
+                        </label>
                         <DateRangeFilter
                             from={listFilters.from}
                             to={listFilters.to}
                             onChange={(from, to) => patchListFilters({ from, to })}
                         />
                     </div>
+
+                    {selectedAuditIds.size ? (
+                        <div className="px-5 py-2.5 border-b border-[#FDE68A] bg-[#FFFBEB] flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-bold text-[#92400E]">
+                                {selectedAuditIds.size} audit{selectedAuditIds.size === 1 ? '' : 's'} selected
+                            </span>
+                            <select
+                                value={bulkAgentId}
+                                onChange={(e) => setBulkAgentId(e.target.value)}
+                                disabled={Boolean(bulkProgress)}
+                                className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-[#E2E8F0] bg-white text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/30"
+                                aria-label="Sales agent for selected audits"
+                            >
+                                <option value="">Select sales agent…</option>
+                                {salesAgents.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.name || s.email}
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                onClick={handleBulkAssign}
+                                disabled={!bulkAgentId || Boolean(bulkProgress)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-[#0F172A] text-white hover:bg-[#1E293B] disabled:opacity-40"
+                            >
+                                {bulkProgress ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                    <UserCheck className="w-3.5 h-3.5" />
+                                )}
+                                {bulkProgress ? `Assigning ${bulkProgress.done}/${bulkProgress.total}…` : 'Assign selected'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedAuditIds(new Set())}
+                                disabled={Boolean(bulkProgress)}
+                                className="px-2 py-1.5 text-xs font-semibold text-[#64748B] hover:text-[#0F172A] disabled:opacity-40"
+                            >
+                                Clear
+                            </button>
+                        </div>
+                    ) : null}
 
                     {loading ? <p className="p-6 text-sm text-[#64748B]">Loading…</p> : null}
 
@@ -1670,14 +1793,18 @@ export default function AdminFullAudits() {
                                     key={a.id}
                                     className="group p-4 sm:p-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between transition-colors"
                                 >
+                                    <div className="min-w-0 flex-1 flex items-start gap-3">
+                                    <input
+                                        type="checkbox"
+                                        className="mt-1.5 w-4 h-4 shrink-0 accent-[#F59E0B] disabled:opacity-30"
+                                        checked={selectedAuditIds.has(a.id)}
+                                        disabled={!isReadyAudit(a)}
+                                        onChange={() => toggleSelectAudit(a.id)}
+                                        aria-label={`Select ${a.businessName || 'audit'}`}
+                                        title={isReadyAudit(a) ? 'Select for bulk assign' : 'Publish before assigning'}
+                                    />
                                     <div className="min-w-0 flex-1 space-y-2">
                                         <div className="flex flex-wrap items-center gap-2">
-                                            <span
-                                                className="inline-flex items-center rounded-md bg-[#0F172A] px-1.5 py-0.5 text-[11px] font-black tabular-nums text-white"
-                                                title="Serial number (creation order)"
-                                            >
-                                                #{auditSerials.get(a.id) ?? '—'}
-                                            </span>
                                             <p className="text-base font-semibold text-[#0F172A] truncate group-hover:font-bold">
                                                 {a.businessName || 'Untitled business'}
                                             </p>
@@ -1719,6 +1846,7 @@ export default function AdminFullAudits() {
                                             {[a.email, a.phone].filter(Boolean).join(' · ') || 'No contact'}
                                             {a.website ? ` · ${a.website}` : ''}
                                         </p>
+                                    </div>
                                     </div>
 
                                     <div className="flex flex-wrap items-center gap-2 shrink-0">
