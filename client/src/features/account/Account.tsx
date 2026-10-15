@@ -19,7 +19,8 @@ import {
     EyeOff,
     UploadCloud,
     Calendar,
-    Upload
+    Upload,
+    Gauge
 } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, cn } from '../../shared/utils';
 import { clearToken, setMustChangePassword } from '../auth/auth';
@@ -27,7 +28,10 @@ import GroundingModal from '../dashboard/GroundingModal';
 import PlacesMap from '../../shared/PlacesMap';
 import { useEntitlements } from '../../shared/EntitlementsContext';
 import { useToast } from '../../shared/Toast';
-import { FEATURE_LABELS, PLANS, type FeatureKey } from '../../shared/planCatalog';
+import { useCredits } from '../../shared/CreditsContext';
+import UsagePanel from './UsagePanel';
+import PlanPanel from './PlanPanel';
+import { PLANS } from '../../shared/planCatalog';
 import {
     DEFAULT_BRAND_PRIMARY,
     DEFAULT_BRAND_SECONDARY,
@@ -46,7 +50,8 @@ const ACCOUNT_NAV = [
     { id: 'password', label: 'Account security', icon: Shield },
     { id: 'branding', label: 'Branding', icon: ImageIcon },
     { id: 'business', label: 'Business', icon: Building2 },
-    { id: 'location', label: 'Location', icon: MapPin }
+    { id: 'location', label: 'Location', icon: MapPin },
+    { id: 'usage', label: 'Usage', icon: Gauge }
 ] as const;
 
 type OrgForm = {
@@ -168,12 +173,6 @@ export default function Account() {
 
     const {
         planId,
-        planName,
-        priceLabel,
-        features,
-        subscriptionStatus,
-        currentPeriodEnd,
-        activeSubscriptions,
         simulatePlan,
         entitlementsDisabled,
         hasFeature
@@ -183,33 +182,6 @@ export default function Account() {
     const showSimulate = entitlementsDisabled;
     const hasLocalPresence = hasFeature('local_presence');
     const hasBookings = hasFeature('bookings');
-
-    const formatPeriod = (value: string | null | undefined) =>
-        value
-            ? new Date(value).toLocaleDateString('en-GB', {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric'
-              })
-            : null;
-
-    const periodLabel = formatPeriod(currentPeriodEnd);
-    const stackedPlans =
-        activeSubscriptions.length > 0
-            ? activeSubscriptions
-            : planId
-              ? [
-                    {
-                        id: planId,
-                        planId,
-                        planName: planName || planId,
-                        priceLabel,
-                        currentPeriodEnd,
-                        status: subscriptionStatus || 'active'
-                    }
-                ]
-              : [];
-    const showStackedList = stackedPlans.length > 1;
 
     const hasOrgDetails = Boolean(
         org.name?.trim() || org.hostName?.trim() || org.phone?.trim() || org.tradeType?.trim()
@@ -276,9 +248,12 @@ export default function Account() {
         if (forcePassword) selectSection('password');
     }, [forcePassword]);
 
+    const { summary: creditsSummary, hasPool: hasCredits } = useCredits();
+
     const visibleNav = ACCOUNT_NAV.filter((item) => {
         if (item.id === 'location') return hasLocalPresence;
         if (item.id === 'branding') return hasBookings;
+        if (item.id === 'usage') return hasCredits;
         return true;
     });
 
@@ -289,6 +264,11 @@ export default function Account() {
     useEffect(() => {
         if (activeSection === 'branding' && !hasBookings) selectSection('profile');
     }, [activeSection, hasBookings]);
+
+    // Usage only exists for plans with credits; wait until credits have loaded before redirecting.
+    useEffect(() => {
+        if (activeSection === 'usage' && creditsSummary && !hasCredits) selectSection('profile');
+    }, [activeSection, creditsSummary, hasCredits]);
 
     const saveProfile = async (e: FormEvent) => {
         e.preventDefault();
@@ -733,103 +713,11 @@ export default function Account() {
                 )}
 
                 {activeSection === 'plan' && (
-                <SectionCard
-                    id="plan"
-                    icon={CreditCard}
-                    title={showStackedList ? 'Your plans' : 'Your plan'}
-                    subtitle={
-                        showStackedList
-                            ? 'Active ZappSites subscriptions on this account. Features below are combined across all plans.'
-                            : 'Features included with your ZappSites subscription.'
-                    }
-                >
-                    {stackedPlans.length > 0 ? (
-                        <div className="space-y-5">
-                            {showStackedList ? (
-                                <ul className="space-y-3">
-                                    {stackedPlans.map((sub) => {
-                                        const subPeriod = formatPeriod(sub.currentPeriodEnd);
-                                        return (
-                                            <li
-                                                key={sub.id}
-                                                className="rounded-2xl border border-[var(--brand-primary-line)]/70 bg-gradient-to-br from-[var(--brand-primary-soft)] to-white p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
-                                            >
-                                                <div className="flex flex-wrap items-end justify-between gap-3">
-                                                    <div>
-                                                        <p className="text-xl font-black tracking-tight text-[#0F172A]">
-                                                            {sub.planName}
-                                                        </p>
-                                                        {'priceLabel' in sub && sub.priceLabel ? (
-                                                            <p className="text-sm text-[#92400E] mt-1 font-medium">
-                                                                {sub.priceLabel}
-                                                            </p>
-                                                        ) : null}
-                                                        {subPeriod && (
-                                                            <p className="text-xs text-[#64748B] mt-2">
-                                                                Access until {subPeriod}
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                    {sub.status && (
-                                                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200/80 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 capitalize shadow-sm">
-                                                            <Check className="w-3 h-3" />
-                                                            {sub.status}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
-                            ) : (
-                                <div className="rounded-2xl border border-[var(--brand-primary-line)]/70 bg-gradient-to-br from-[var(--brand-primary-soft)] to-white p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
-                                    <div className="flex flex-wrap items-end justify-between gap-3">
-                                        <div>
-                                            <p className="text-2xl font-black tracking-tight text-[#0F172A]">{planName}</p>
-                                            {priceLabel && (
-                                                <p className="text-sm text-[#92400E] mt-1 font-medium">{priceLabel}</p>
-                                            )}
-                                            {periodLabel && (
-                                                <p className="text-xs text-[#64748B] mt-2">Access until {periodLabel}</p>
-                                            )}
-                                        </div>
-                                        {subscriptionStatus && (
-                                            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200/80 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 capitalize shadow-sm">
-                                                <Check className="w-3 h-3" />
-                                                {subscriptionStatus}
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                            {features.length > 0 ? (
-                                <ul className="grid sm:grid-cols-2 gap-2.5">
-                                    {features.map((f: FeatureKey) => (
-                                        <li
-                                            key={f}
-                                            className="text-sm text-[#334155] flex items-center gap-2.5 rounded-xl border border-[#E2E8F0] bg-white px-3.5 py-2.5 shadow-[0_4px_12px_-8px_rgba(15,23,42,0.35)]"
-                                        >
-                                            <span
-                                                className="w-2 h-2 rounded-full shrink-0 shadow-sm"
-                                                style={{ background: 'var(--brand-primary)' }}
-                                            />
-                                            {FEATURE_LABELS[f]}
-                                        </li>
-                                    ))}
-                                </ul>
-                            ) : (
-                                <p className="text-sm text-[#64748B]">
-                                    Website plan — local SEO and booking tools are not included.
-                                </p>
-                            )}
-                        </div>
-                    ) : (
-                        <p className="text-sm text-[#64748B]">
-                            No active plan on this account. Contact ZappSites or upgrade to unlock local SEO and booking tools.
-                        </p>
-                    )}
+                <section id="plan" className="space-y-5">
+                    <h2 className="text-2xl font-black tracking-tight text-[#0F172A]">Billing &amp; Invoices</h2>
+                    <PlanPanel />
                     {showSimulate && (
-                        <div className="pt-4 mt-4 border-t border-[#E2E8F0]">
+                        <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6">
                             <label className="block text-xs font-medium text-[#64748B] mb-1.5">
                                 Simulate plan (ENTITLEMENTS_DISABLED only)
                             </label>
@@ -848,7 +736,7 @@ export default function Account() {
                             </select>
                         </div>
                     )}
-                </SectionCard>
+                </section>
                 )}
 
                 {activeSection === 'password' && (
@@ -1398,6 +1286,17 @@ export default function Account() {
                             </>
                         )}
                     </div>
+                </SectionCard>
+                )}
+
+                {activeSection === 'usage' && hasCredits && (
+                <SectionCard
+                    id="usage"
+                    icon={Gauge}
+                    title="Usage"
+                    subtitle="Your monthly credits for scans, rank checks and reports."
+                >
+                    <UsagePanel />
                 </SectionCard>
                 )}
             </div>

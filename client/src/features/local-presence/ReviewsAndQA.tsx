@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentType } from 'react';
+﻿import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import QRCode from 'qrcode';
 import {
     CheckCircle2,
@@ -26,7 +26,9 @@ import {
     RefreshCw
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
+import { useCredits } from '../../shared/CreditsContext';
 import { useToast } from '../../shared/Toast';
+import { getPageCache, setPageCache } from '../../shared/pageCache';
 
 function getInitials(name: string): string {
     if (!name) return 'U';
@@ -137,12 +139,19 @@ function Stars({ rating, className = 'w-3 h-3' }: { rating: number; className?: 
     );
 }
 
+type ReviewsCache = {
+    googleReviews: Array<{ author: string; rating: number; text: string; date: string }>;
+    business: { name: string; rating: number | null; count: number; mapsUrl: string };
+    hub: Hub | null;
+};
+
 export function ReviewManagement() {
     const { show } = useToast();
-    const [googleReviews, setGoogleReviews] = useState<Array<{ author: string; rating: number; text: string; date: string }>>([]);
-    const [business, setBusiness] = useState<{ name: string; rating: number | null; count: number; mapsUrl: string }>({ name: '', rating: null, count: 0, mapsUrl: '' });
-    const [hub, setHub] = useState<Hub | null>(null);
-    const [loading, setLoading] = useState(true);
+    const cached = getPageCache<ReviewsCache>('reviews');
+    const [googleReviews, setGoogleReviews] = useState<ReviewsCache['googleReviews']>(cached?.googleReviews ?? []);
+    const [business, setBusiness] = useState<ReviewsCache['business']>(cached?.business ?? { name: '', rating: null, count: 0, mapsUrl: '' });
+    const [hub, setHub] = useState<Hub | null>(cached?.hub ?? null);
+    const [loading, setLoading] = useState(!cached);
     const [error, setError] = useState('');
     const [tab, setTab] = useState<'all' | 'needs' | 'replied'>('all');
     const [search, setSearch] = useState('');
@@ -157,6 +166,35 @@ export function ReviewManagement() {
     const [campaign, setCampaign] = useState({ emails: '', phones: '', message: '' });
     const [sending, setSending] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const { refresh: refreshCredits } = useCredits();
+
+    // Reply drafts (AI or typed) are kept on the org so a refresh does not lose them; posting a reply removes its draft.
+    const [draftsRestored, setDraftsRestored] = useState(false);
+    const draftsSavedKey = useRef('');
+    useEffect(() => {
+        apiGet('/api/ai/saved/review-drafts')
+            .then((d) => {
+                const v = d?.saved?.value;
+                if (v && typeof v === 'object' && !Array.isArray(v)) {
+                    setDrafts((cur) => ({ ...v, ...cur }));
+                    draftsSavedKey.current = JSON.stringify(v);
+                }
+            })
+            .catch(() => {})
+            .finally(() => setDraftsRestored(true));
+    }, []);
+    useEffect(() => {
+        if (!draftsRestored) return;
+        // Keep the 50 most recent non-empty drafts so the saved value stays small.
+        const value = Object.fromEntries(Object.entries(drafts).filter(([, t]) => String(t || '').trim()).slice(-50));
+        const key = JSON.stringify(value);
+        if (key === draftsSavedKey.current) return;
+        const t = setTimeout(() => {
+            draftsSavedKey.current = key;
+            apiPost('/api/ai/saved/review-drafts', { value }).catch(() => {});
+        }, 1000);
+        return () => clearTimeout(t);
+    }, [draftsRestored, drafts]);
 
     useEffect(() => {
         Promise.all([
@@ -190,7 +228,11 @@ export function ReviewManagement() {
             .finally(() => setLoading(false));
     }, []);
 
-    const syncGoogle = async () => {
+    useEffect(() => {
+        if (!loading) setPageCache('reviews', { googleReviews, business, hub } satisfies ReviewsCache);
+    }, [loading, googleReviews, business, hub]);
+
+    const syncGoogle = async (auto = false) => {
         setSyncing(true);
         setError('');
         try {
@@ -207,20 +249,15 @@ export function ReviewManagement() {
             }
             setError('Google is still collecting your reviews. Try Sync again in a minute.');
         } catch (err: any) {
-            setError(err?.message || 'Could not sync Google reviews.');
+            // The automatic first-visit sync stays quiet when there are no credits left.
+            if (!(auto && err?.code === 'insufficient_credits')) setError(err?.message || 'Could not sync Google reviews.');
         } finally {
             setSyncing(false);
+            refreshCredits();
         }
     };
 
-    // First visit: pull existing Google reviews automatically (once). After that it is the Sync button.
-    const [autoSynced, setAutoSynced] = useState(false);
-    useEffect(() => {
-        if (autoSynced || !hub || !hub.canSync || hub.googleSyncedAt) return;
-        setAutoSynced(true);
-        syncGoogle();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [hub, autoSynced]);
+    // Google reviews are pulled only when the Sync button is clicked (it costs DataForSEO money and a credit).
 
     const items: InboxItem[] = useMemo(() => {
         const direct: InboxItem[] = (hub?.collected || []).map((c) => ({
@@ -302,6 +339,7 @@ export function ReviewManagement() {
             setError(err?.message || 'Could not draft a reply.');
         } finally {
             setDrafting(false);
+            refreshCredits();
         }
     };
 
@@ -442,6 +480,17 @@ export function ReviewManagement() {
 
     const shownLink = hub?.links?.[linkSource] || '';
 
+    if (loading) {
+        return (
+            <div className="max-w-6xl mx-auto pb-12">
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#0F172A]">Review Growth Engine</h1>
+                <div className="flex justify-center py-24 text-gray-400">
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
@@ -490,7 +539,7 @@ export function ReviewManagement() {
                         {hub?.canSync && (
                             <button
                                 type="button"
-                                onClick={syncGoogle}
+                                onClick={() => syncGoogle()}
                                 disabled={syncing}
                                 className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-[11px] font-bold text-[#0F172A] hover:bg-slate-50 disabled:opacity-60 cursor-pointer"
                             >
@@ -853,6 +902,7 @@ const EXAMPLE_QUESTIONS = [
 
 export function QAAutoResponder() {
     const { show } = useToast();
+    const { refresh: refreshCredits } = useCredits();
     const [kbText, setKbText] = useState('');
     const [questions, setQuestions] = useState<Question[]>([]);
     const [newQuestion, setNewQuestion] = useState('');
@@ -861,6 +911,35 @@ export function QAAutoResponder() {
     const [isSavingKB, setIsSavingKB] = useState(false);
     const [showExamplesModal, setShowExamplesModal] = useState(false);
     const [error, setError] = useState('');
+
+    // The questions, drafted answers and knowledge base are kept on the org so a refresh does not lose them.
+    const [qaRestored, setQaRestored] = useState(false);
+    const qaSavedKey = useRef('');
+    useEffect(() => {
+        apiGet('/api/ai/saved/qa-board')
+            .then((d) => {
+                const v = d?.saved?.value;
+                if (v) {
+                    if (Array.isArray(v.questions)) setQuestions(v.questions);
+                    if (typeof v.kbText === 'string') setKbText(v.kbText);
+                    if (v.answerStyle) setAnswerStyle(v.answerStyle);
+                    qaSavedKey.current = JSON.stringify({ questions: v.questions || [], kbText: v.kbText || '', answerStyle: v.answerStyle || '' });
+                }
+            })
+            .catch(() => {})
+            .finally(() => setQaRestored(true));
+    }, []);
+    useEffect(() => {
+        if (!qaRestored) return;
+        const value = { questions, kbText, answerStyle };
+        const key = JSON.stringify(value);
+        if (key === qaSavedKey.current || (!questions.length && !kbText)) return;
+        const t = setTimeout(() => {
+            qaSavedKey.current = key;
+            apiPost('/api/ai/saved/qa-board', { value }).catch(() => {});
+        }, 1000);
+        return () => clearTimeout(t);
+    }, [qaRestored, questions, kbText, answerStyle]);
 
     const addQuestion = (textToAdd?: string) => {
         const text = (textToAdd || newQuestion).trim();
@@ -893,6 +972,7 @@ export function QAAutoResponder() {
             setError(err.message || 'Answer generation failed');
         } finally {
             setIsGenerating(null);
+            refreshCredits();
         }
     };
 

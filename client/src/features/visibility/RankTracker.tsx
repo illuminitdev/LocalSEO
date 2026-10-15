@@ -5,8 +5,6 @@ import {
     Users,
     Sparkles,
     Target,
-    MapPin,
-    LocateFixed,
     Download,
     Loader2,
     ArrowUp,
@@ -22,13 +20,11 @@ import {
     BarChart3,
     Play
 } from 'lucide-react';
-import { apiGet, apiPost, logDashboardActivity, updateDashboardStats, cn } from '../../shared/utils';
-import PlacesMap, {
-    geocodeAddress,
-    mapsJsConfigured,
-    reverseGeocode,
-    type MapMarker
-} from '../../shared/PlacesMap';
+import { ago, apiDelete, apiGet, apiPost, logDashboardActivity, updateDashboardStats, cn, type ApiError } from '../../shared/utils';
+import PlacesMap, { mapsJsConfigured, type MapMarker } from '../../shared/PlacesMap';
+import LocationPicker, { type SavedLocation } from '../../shared/LocationPicker';
+import { useCredits } from '../../shared/CreditsContext';
+import { creditErrorMessage } from '../../shared/creditMessages';
 
 type TrackedKeyword = {
     keyword: string;
@@ -46,7 +42,8 @@ type Place = { name: string; lat: number | null; lng: number | null; rating?: nu
 type GapRun = {
     competitors?: Place[];
     keyword: string;
-    grid: number[][];
+    /** Missing once a scan is older than 90 days (only the summary numbers are kept). */
+    grid: number[][] | null;
     gridSize?: number;
     center?: { lat: number; lng: number } | null;
     competitorShare?: ShareRow[];
@@ -60,6 +57,8 @@ type Opportunity = { keyword: string; rank: number; action: { label: string; to:
 
 // Hidden 3×3 sample around the center: used only to score rank / share, never drawn on the map.
 const SAMPLE_SIZE = 3;
+
+const fmtDay = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 const SCAN_CONCURRENCY = 5;
 
 const insightIcon = (label?: string) => {
@@ -83,6 +82,9 @@ export default function RankTracker() {
     const gridSize = SAMPLE_SIZE;
     const [places, setPlaces] = useState<Place[]>([]);
     const [suggestions, setSuggestions] = useState<string[]>([]);
+    // The business's one keyword list, shared with the Visibility Tracker and AI Insights.
+    const [sharedKeywords, setSharedKeywords] = useState<string[]>([]);
+    const [keywordLimit, setKeywordLimit] = useState<number | null>(null);
     const [grid, setGrid] = useState<number[][]>([]);
     const [share, setShare] = useState<ShareRow[]>([]);
     const [trackedKeywords, setTrackedKeywords] = useState<TrackedKeyword[]>([]);
@@ -95,32 +97,48 @@ export default function RankTracker() {
     const [progress, setProgress] = useState({ done: 0, total: 0 });
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
+    // Monthly 3x3 scan allowance for the business (all addresses); each keyword+address runs once a month.
+    const [gridUsage, setGridUsage] = useState<{ used: number; limit: number; periodEnd: string } | null>(null);
 
     const [businessName, setBusinessName] = useState('');
     const [businessCategory, setBusinessCategory] = useState('');
-    const [address, setAddress] = useState('');
     const [services, setServices] = useState<string[]>([]);
-    const [centerLabel, setCenterLabel] = useState('');
-    const [customCenter, setCustomCenter] = useState(false);
-    const [locating, setLocating] = useState(false);
-    const [businessCenter, setBusinessCenter] = useState<{ lat: number; lng: number } | null>(null);
-    const [lat, setLat] = useState<number | null>(null);
-    const [lng, setLng] = useState<number | null>(null);
+
+    // Scans always run from one of the saved locations (the business address is the first one).
+    const { refresh: refreshCredits } = useCredits();
+    const [locations, setLocations] = useState<SavedLocation[]>([]);
+    const [locationId, setLocationId] = useState('');
+    const [locationLimit, setLocationLimit] = useState(1);
+    const [canAddLocation, setCanAddLocation] = useState(false);
+    const [needsAddress, setNeedsAddress] = useState(false);
+    const selectedLocation = locations.find((l) => l.id === locationId) || null;
+    const lat = selectedLocation?.lat ?? null;
+    const lng = selectedLocation?.lng ?? null;
 
     const applyRun = (run: GapRun) => {
         setKeyword(run.keyword);
         setGrid(Array.isArray(run.grid) ? run.grid : []);
         setShare(Array.isArray(run.competitorShare) ? run.competitorShare : []);
         setPlaces(Array.isArray(run.competitors) ? run.competitors : []);
-        if (run.center && Number.isFinite(run.center.lat) && Number.isFinite(run.center.lng)) {
-            setLat(run.center.lat);
-            setLng(run.center.lng);
-        }
     };
 
-    const loadInsights = async (refresh = false) => {
+    const applyLocations = (data: any) => {
+        if (data && Array.isArray(data.sharedKeywords)) setSharedKeywords(data.sharedKeywords);
+        if (data && typeof data.keywordLimit === 'number') setKeywordLimit(data.keywordLimit);
+        if (data && typeof data.gridScanLimit === 'number') {
+            setGridUsage({ used: Number(data.gridScansUsed) || 0, limit: data.gridScanLimit, periodEnd: String(data.periodEnd || '') });
+        }
+        const list: SavedLocation[] = Array.isArray(data?.locations) ? data.locations : [];
+        setLocations(list);
+        setLocationId(data?.location?.id || list[0]?.id || '');
+        setLocationLimit(Number(data?.locationLimit) || 1);
+        setCanAddLocation(Boolean(data?.canAddLocation));
+        setNeedsAddress(Boolean(data?.needsAddress));
+    };
+
+    const loadInsights = async (refresh = false, forLocation = locationId) => {
         try {
-            const data = await apiPost('/api/ai/rank-insights', { refresh });
+            const data = await apiPost('/api/ai/rank-insights', { refresh, locationId: forLocation || undefined });
             setInsights(Array.isArray(data?.insights) ? data.insights : []);
             setOpportunities(Array.isArray(data?.opportunities) ? data.opportunities : []);
         } catch {
@@ -144,10 +162,6 @@ export default function RankTracker() {
                     setBusinessCategory(biz.category);
                     defaultKeyword = `${biz.category} near me`;
                 }
-                if (biz.address) {
-                    setAddress(biz.address);
-                    setCenterLabel(biz.address);
-                }
                 if (typeof biz.attributes === 'string') {
                     setServices(
                         biz.attributes
@@ -157,31 +171,18 @@ export default function RankTracker() {
                             .slice(0, 6)
                     );
                 }
-                let nextLat = typeof biz.lat === 'number' && Number.isFinite(biz.lat) ? biz.lat : null;
-                let nextLng = typeof biz.lng === 'number' && Number.isFinite(biz.lng) ? biz.lng : null;
-                if (nextLat == null || nextLng == null) {
-                    const geo = await geocodeAddress([biz.name, biz.address].filter(Boolean).join(', '));
-                    if (geo) {
-                        nextLat = geo.lat;
-                        nextLng = geo.lng;
-                    }
-                }
-                if (!cancelled) {
-                    if (nextLat != null) setLat(nextLat);
-                    if (nextLng != null) setLng(nextLng);
-                    if (nextLat != null && nextLng != null) setBusinessCenter({ lat: nextLat, lng: nextLng });
-                }
             }
 
             apiGet('/api/rank/suggestions')
                 .then((d) => !cancelled && setSuggestions(Array.isArray(d?.keywords) ? d.keywords : []))
                 .catch(() => {});
+            applyLocations(state);
             const runs: GapRun[] = Array.isArray(state?.gapAnalyses) ? state.gapAnalyses : [];
             setGapRuns(runs);
             setTrackedKeywords(Array.isArray(state?.trackedKeywords) ? state.trackedKeywords : []);
             if (runs[0]) {
                 applyRun(runs[0]);
-                loadInsights(false);
+                loadInsights(false, state?.location?.id || '');
             } else if (defaultKeyword) {
                 setKeyword(defaultKeyword);
             }
@@ -189,60 +190,52 @@ export default function RankTracker() {
         return () => {
             cancelled = true;
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const pickCenter = async (nextLat: number, nextLng: number, label?: string) => {
-        setLat(nextLat);
-        setLng(nextLng);
-        setCustomCenter(true);
-        setGrid([]);
-        setShare([]);
+    // Switching location loads that location's own scan history.
+    const changeLocation = async (id: string) => {
+        setLocationId(id);
         setError('');
-        setCenterLabel(label || `Pinned location (${nextLat.toFixed(4)}, ${nextLng.toFixed(4)})`);
-        if (!label) {
-            const found = await reverseGeocode(nextLat, nextLng);
-            if (found) setCenterLabel(found);
-        }
-    };
-
-    const applyTypedCenter = async () => {
-        const text = centerLabel.trim();
-        if (!text || (!customCenter && text === address)) return;
-        const geo = await geocodeAddress(text);
-        if (!geo) {
-            setError('Could not find that location. Try a fuller address, or click the map to drop a pin.');
-            return;
-        }
-        await pickCenter(geo.lat, geo.lng, text);
-    };
-
-    const useMyLocation = () => {
-        if (!navigator.geolocation) {
-            setError('Your browser does not support location access.');
-            return;
-        }
-        setLocating(true);
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                setLocating(false);
-                pickCenter(pos.coords.latitude, pos.coords.longitude);
-            },
-            () => {
-                setLocating(false);
-                setError('Location permission was denied. Type an address or click the map instead.');
-            },
-            { enableHighAccuracy: true, timeout: 10000 }
-        );
-    };
-
-    const resetCenter = () => {
-        if (!businessCenter) return;
-        setLat(businessCenter.lat);
-        setLng(businessCenter.lng);
-        setCustomCenter(false);
-        setCenterLabel(address);
+        setNotice('');
         setGrid([]);
         setShare([]);
+        setPlaces([]);
+        setInsights([]);
+        setOpportunities([]);
+        try {
+            const state = await apiGet(`/api/rank/state?locationId=${encodeURIComponent(id)}`);
+            applyLocations(state);
+            const runs: GapRun[] = Array.isArray(state?.gapAnalyses) ? state.gapAnalyses : [];
+            setGapRuns(runs);
+            setTrackedKeywords(Array.isArray(state?.trackedKeywords) ? state.trackedKeywords : []);
+            if (runs[0]) {
+                applyRun(runs[0]);
+                loadInsights(false, id);
+            }
+        } catch (err: any) {
+            setError(err?.message || 'Could not load that location.');
+        }
+    };
+
+    const addLocation = async (addressText: string, label: string) => {
+        try {
+            const data = await apiPost('/api/locations', { address: addressText, label });
+            applyLocations(data);
+            await changeLocation(data?.location?.id || data?.added?.id);
+        } catch (err: any) {
+            return err?.message || 'Could not add that location.';
+        }
+    };
+
+    const removeLocation = async (id: string) => {
+        try {
+            await apiDelete(`/api/locations/${encodeURIComponent(id)}`);
+            const primary = locations.find((l) => l.isPrimary)?.id || '';
+            await changeLocation(primary);
+        } catch (err: any) {
+            return err?.message || 'Could not remove that location.';
+        }
     };
 
     const hasCenter = typeof lat === 'number' && typeof lng === 'number';
@@ -254,8 +247,13 @@ export default function RankTracker() {
         markers.push({
             lat: lat as number,
             lng: lng as number,
-            label: customCenter ? 'Center' : 'You',
-            title: customCenter ? 'Search center' : businessName ? `${businessName} (You)` : 'Your business',
+            label: selectedLocation?.isPrimary === false ? 'Center' : 'You',
+            title:
+                selectedLocation?.isPrimary === false
+                    ? selectedLocation.label || 'Search center'
+                    : businessName
+                      ? `${businessName} (You)`
+                      : 'Your business',
             highlight: true,
             color: '#0F172A'
         });
@@ -272,8 +270,9 @@ export default function RankTracker() {
                 });
             });
         return markers;
-    }, [lat, lng, hasCenter, customCenter, businessName, places]);
+    }, [lat, lng, hasCenter, selectedLocation, businessName, places]);
 
+    const lastScan = gapRuns.find((r) => r.keyword.toLowerCase() === keyword.trim().toLowerCase() && r.updatedAt) || null;
     const flat = grid.flat().filter((n) => Number.isFinite(n));
     const avgRank = flat.length ? (flat.reduce((a, b) => a + b, 0) / flat.length).toFixed(1) : '—';
 
@@ -295,10 +294,6 @@ export default function RankTracker() {
                 .filter((c: any) => c?.name && !/\(You\)/i.test(String(c.name)) && Number.isFinite(Number(c.lat)))
                 .map((c: any) => ({ name: c.name, lat: Number(c.lat), lng: Number(c.lng), rating: c.rating, reviews: c.reviews }))
         );
-        if (data?.center) {
-            setLat(data.center.lat);
-            setLng(data.center.lng);
-        }
         setNotice('DataForSEO is not configured, so this scan shows estimated ranks instead of real Google Maps data.');
     };
 
@@ -308,11 +303,41 @@ export default function RankTracker() {
             setError('Enter a target keyword (e.g. plumber near me) or set your business category.');
             return;
         }
+        if (!locationId) {
+            setError('Add a full address on your Business profile page so we can locate your business.');
+            return;
+        }
         setKeyword(kw);
         setScanning(true);
         setError('');
         setNotice('');
         try {
+            // Reserves the keyword for this month and pays for the scan before any point is requested.
+            // A keyword already scanned this month comes back with its saved result and costs nothing.
+            let scanId = '';
+            try {
+                const started = await apiPost('/api/rank/scan-start', { keyword: kw, locationId });
+                scanId = String(started?.scanId || '');
+            } catch (err: any) {
+                if (err?.code === 'not_configured') {
+                    await runEstimatedFallback(kw);
+                    await loadInsights(true);
+                    return;
+                }
+                if (err?.code === 'already_scanned') {
+                    if (err.body?.run) applyRun(err.body.run as GapRun);
+                    setNotice(`${err.message}${err.body?.nextAvailableAt ? ` You can scan it again after ${fmtDay(err.body.nextAvailableAt)}.` : ''}`);
+                    return;
+                }
+                if (err?.code === 'grid_limit' || err?.code === 'keyword_limit') {
+                    setError(err.message);
+                    return;
+                }
+                throw err;
+            }
+            setGridUsage((u) => (u ? { ...u, used: u.used + 1 } : u));
+            setSharedKeywords((list) => (list.some((k) => k.toLowerCase() === kw.toLowerCase()) ? list : [kw.toLowerCase(), ...list]));
+            refreshCredits();
             const total = gridSize * gridSize;
             const rows: number[][] = Array.from({ length: gridSize }, () => new Array(gridSize).fill(21));
             const tally: Record<string, number> = {};
@@ -326,13 +351,16 @@ export default function RankTracker() {
             setProgress({ done: 0, total });
 
             const scanCell = async (row: number, col: number) => {
-                const body = { keyword: kw, gridSize, row, col, center: hasCenter ? { lat, lng } : undefined };
+                const body = { keyword: kw, gridSize, row, col, scanId, locationId };
                 for (let attempt = 0; attempt < 2; attempt++) {
                     try {
                         return await apiPost('/api/rank/scan-row', body);
                     } catch (err: any) {
                         if (err?.code === 'not_configured' || /need DataForSEO/i.test(err?.message || '')) throw err;
-                        if (/locate the grid center|Invalid grid|Keyword is required|Upgrade required/i.test(err?.message || '')) throw err;
+                        // Retry budget used up: count this point as failed (refunded at finish) instead of stopping the scan.
+                        if (err?.code === 'scan_exhausted') return null;
+                        if (['scan_not_started', 'insufficient_credits', 'upgrade_required'].includes(err?.code)) throw err;
+                        if (/locate the grid center|Invalid grid|Keyword is required|Upgrade required|saved locations/i.test(err?.message || '')) throw err;
                         lastError = err?.message || lastError;
                         if (attempt === 1) return null;
                     }
@@ -402,8 +430,11 @@ export default function RankTracker() {
                 gridSize,
                 grid: rows,
                 tally,
-                center: hasCenter ? { lat, lng } : undefined
+                scanId,
+                locationId,
+                failedCells: failed
             });
+            refreshCredits();
             setGapRuns(Array.isArray(result.gapAnalyses) ? result.gapAnalyses : []);
             setTrackedKeywords(Array.isArray(result.trackedKeywords) ? result.trackedKeywords : []);
             applyRun(result.run);
@@ -416,7 +447,13 @@ export default function RankTracker() {
                 color: 'text-[var(--brand-primary)]'
             });
         } catch (err: any) {
-            setError(err.message || 'Scan failed');
+            const e = err as ApiError;
+            if (e?.code === 'insufficient_credits') {
+                setError(creditErrorMessage(e));
+            } else {
+                setError(e?.message || 'Scan failed');
+            }
+            refreshCredits();
         } finally {
             setScanning(false);
         }
@@ -469,13 +506,25 @@ export default function RankTracker() {
 
     const keywordRows = useMemo(() => {
         const tracked = new Map(trackedKeywords.map((k) => [k.keyword.toLowerCase(), k]));
-        const rows: Array<TrackedKeyword & { scanned: boolean }> = trackedKeywords.map((k) => ({ ...k, scanned: true }));
-        for (const kw of suggestions) {
-            if (tracked.has(kw.toLowerCase())) continue;
-            rows.push({ keyword: kw, avgRank: 0, top3Percentage: 0, updatedAt: '', scanned: false });
+        const rows: Array<TrackedKeyword & { scanned: boolean }> = [];
+        const seen = new Set<string>();
+        const push = (row: TrackedKeyword & { scanned: boolean }) => {
+            const key = row.keyword.toLowerCase();
+            if (seen.has(key)) return;
+            seen.add(key);
+            rows.push(row);
+        };
+        // 1. The shared keyword list (also in the Visibility Tracker): scanned ones show their saved result here.
+        for (const kw of sharedKeywords) {
+            const scan = tracked.get(kw.toLowerCase());
+            push(scan ? { ...scan, scanned: true } : { keyword: kw, avgRank: 0, top3Percentage: 0, updatedAt: '', scanned: false });
         }
+        // 2. Older saved scans at this address.
+        for (const k of trackedKeywords) push({ ...k, scanned: true });
+        // 3. Ideas (scanning one adds it to the shared list, within the plan limit).
+        for (const kw of suggestions) push({ keyword: kw, avgRank: 0, top3Percentage: 0, updatedAt: '', scanned: false });
         return rows;
-    }, [trackedKeywords, suggestions]);
+    }, [sharedKeywords, trackedKeywords, suggestions]);
 
     const visibleKeywords = showAllKeywords ? keywordRows : keywordRows.slice(0, 6);
 
@@ -527,8 +576,8 @@ export default function RankTracker() {
             )}
 
             {/* Controls */}
-            <div className={cn(card, 'p-4 mb-5 flex flex-col lg:flex-row lg:items-end gap-4')}>
-                <div className="flex-1">
+            <div className={cn(card, 'p-4 mb-5 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,auto)] gap-x-4 gap-y-3 items-start')}>
+                <div className="min-w-0 flex flex-col">
                     <label className={miniLabel}>Target Keyword</label>
                     <div className="relative">
                         <input
@@ -537,7 +586,7 @@ export default function RankTracker() {
                             onChange={(e) => setKeyword(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && !scanning && handleRunScan()}
                             placeholder={keywordPlaceholder}
-                            className="w-full px-3 py-2 bg-white border border-[#E2E8F0] rounded-lg text-sm appearance-none [&::-webkit-calendar-picker-indicator]:!hidden [&::-webkit-list-button]:!hidden focus:outline-none focus:border-[var(--brand-primary)]"
+                            className="w-full h-10 px-3 bg-white border border-[#E2E8F0] rounded-lg text-sm appearance-none [&::-webkit-calendar-picker-indicator]:!hidden [&::-webkit-list-button]:!hidden focus:outline-none focus:border-[var(--brand-primary)]"
                         />
                         <datalist id="rank-keywords">
                             {keywordOptions.map((k) => (
@@ -546,44 +595,48 @@ export default function RankTracker() {
                         </datalist>
                     </div>
                 </div>
-                <div className="flex-1">
-                    <label className={miniLabel}>Location Center</label>
-                    <div className="relative">
-                        <MapPin className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                            value={centerLabel}
-                            onChange={(e) => setCenterLabel(e.target.value)}
-                            onBlur={applyTypedCenter}
-                            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                <div className="min-w-0 flex flex-col">
+                    <label className={miniLabel}>Location</label>
+                    {needsAddress ? (
+                        <p className="h-10 flex items-center text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3">
+                            Add a full address on your Business profile page to place your first location.
+                        </p>
+                    ) : (
+                        <LocationPicker
+                            locations={locations}
+                            selectedId={locationId}
+                            onSelect={changeLocation}
+                            limit={locationLimit}
+                            canAdd={canAddLocation}
                             disabled={scanning}
-                            placeholder="Type an address, use your location, or click the map"
-                            className="w-full pl-9 pr-10 py-2 bg-white border border-[#E2E8F0] rounded-lg text-sm text-[#0F172A] focus:outline-none focus:border-[var(--brand-primary)] truncate"
+                            onAdd={addLocation}
+                            onRemove={removeLocation}
                         />
-                        <button
-                            type="button"
-                            onClick={useMyLocation}
-                            disabled={scanning || locating}
-                            title="Use my current location"
-                            aria-label="Use my current location"
-                            className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-gray-500 hover:text-[var(--brand-primary)] hover:bg-[#F1F5F9] cursor-pointer disabled:opacity-50"
-                        >
-                            {locating ? <Loader2 className="w-4 h-4 animate-spin" /> : <LocateFixed className="w-4 h-4" />}
-                        </button>
-                    </div>
-                    {customCenter && businessCenter && (
-                        <button
-                            type="button"
-                            onClick={resetCenter}
-                            className="mt-1 text-[10px] font-semibold text-[var(--brand-primary)] hover:underline cursor-pointer"
-                        >
-                            Reset to business address
-                        </button>
                     )}
                 </div>
-                <div className="lg:text-right lg:pl-4">
-                    <p className="text-xs text-gray-500">
-                        Avg. Rank: <span className="text-xl font-bold text-[var(--brand-primary)] ml-1">{avgRank}</span>
-                    </p>
+                <div className="min-w-0 flex flex-col lg:text-right">
+                    <span className={miniLabel} aria-hidden="true">&nbsp;</span>
+                    <div className="h-10 flex items-center lg:justify-end">
+                        <p className="text-xs text-gray-500 leading-none">
+                            Avg. Rank: <span className="text-xl font-bold text-[var(--brand-primary)] ml-1 align-middle">{avgRank}</span>
+                        </p>
+                    </div>
+                    {lastScan && (
+                        <p className="mt-1 min-h-[16px] text-[10px] font-semibold leading-4 text-gray-500 lg:text-right">
+                            Last scanned: {ago(lastScan.updatedAt)}
+                        </p>
+                    )}
+                    {gridUsage && (
+                        <p className="mt-0.5 text-[10px] font-semibold leading-4 text-gray-500 lg:text-right">
+                            {gridUsage.used} of {gridUsage.limit} scans used this month
+                            {gridUsage.periodEnd ? ` · resets ${fmtDay(gridUsage.periodEnd)}` : ''}
+                        </p>
+                    )}
+                    {keywordLimit != null && (
+                        <p className="mt-0.5 text-[10px] font-semibold leading-4 text-gray-500 lg:text-right">
+                            Keywords: {sharedKeywords.length} of {keywordLimit} (shared with Visibility Tracker)
+                        </p>
+                    )}
                 </div>
             </div>
 
@@ -608,7 +661,6 @@ export default function RankTracker() {
                             markers={mapMarkers}
                             height={320}
                             title="Local competitors"
-                            onMapClick={scanning ? undefined : pickCenter}
                             zoom={places.length ? undefined : 12}
                             showPlaceholder
                             placeholder={

@@ -467,6 +467,131 @@ router.patch('/subscription/autopay', requireAuth, async (req: Request, res: Res
     }
 });
 
+/** Finds the Stripe customer (and subscription, when linked) behind the signed-in account. */
+async function resolveStripeCustomer(stripe: any, req: Request): Promise<{ customerId?: string; stripeSubId?: string }> {
+    const orgId = (req as any).orgId;
+    const email = String((req as any).user?.email || '');
+    const { rows } = await query(
+        `SELECT stripe_subscription_id
+         FROM subscriptions
+         WHERE stripe_subscription_id IS NOT NULL
+           AND (org_id = $1 OR LOWER(customer_email) = LOWER($2))
+         ORDER BY (org_id = $1) DESC, (status = 'active') DESC, created_at DESC
+         LIMIT 1`,
+        [orgId, email]
+    );
+    let stripeSubId: string | undefined = rows[0]?.stripe_subscription_id || undefined;
+    let customerId: string | undefined;
+    if (!stripeSubId) {
+        // The paid checkout invite this account was created from also carries the Stripe ids.
+        const invite = await query(
+            `SELECT stripe_subscription_id, stripe_customer_id
+             FROM portal_invites
+             WHERE (org_id = $1 OR LOWER(email) = LOWER($2))
+               AND (stripe_subscription_id IS NOT NULL OR stripe_customer_id IS NOT NULL)
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [orgId, email]
+        ).catch(() => ({ rows: [] as any[] }));
+        stripeSubId = invite.rows[0]?.stripe_subscription_id || undefined;
+        customerId = invite.rows[0]?.stripe_customer_id || undefined;
+    }
+    if (stripeSubId) {
+        const stripeSub = await stripe.subscriptions.retrieve(stripeSubId);
+        customerId = typeof stripeSub.customer === 'string' ? stripeSub.customer : stripeSub.customer?.id;
+    } else if (!customerId && email) {
+        // Fallback: org plan wasn't linked to a Stripe subscription row; match the customer by email.
+        const found = await stripe.customers.list({ email, limit: 1 });
+        customerId = found.data[0]?.id;
+    }
+    return { customerId, stripeSubId };
+}
+
+router.post('/subscription/portal', requireAuth, async (req: Request, res: Response) => {
+    try {
+        const stripe = getStripeClient();
+        if (!stripe) return res.status(400).json({ error: 'Billing is not configured.' });
+        const { customerId, stripeSubId } = await resolveStripeCustomer(stripe, req);
+        if (!customerId) {
+            // No linked customer: fall back to Stripe's no-code portal login link (user signs in by email code).
+            const loginLink = String(process.env.STRIPE_PORTAL_LINK || '').trim();
+            if (loginLink) {
+                const email = String((req as any).user?.email || '');
+                const sep = loginLink.includes('?') ? '&' : '?';
+                return res.json({
+                    url: email ? `${loginLink}${sep}prefilled_email=${encodeURIComponent(email)}` : loginLink
+                });
+            }
+            return res.status(404).json({
+                error: 'No Stripe subscription found for this account. Subscribe through Stripe checkout with the same email first.'
+            });
+        }
+        const origin = String(req.body?.returnUrl || req.headers.origin || '').trim();
+        const baseParams: any = { customer: customerId, ...(origin ? { return_url: origin } : {}) };
+
+        // "Choose plan" opens Stripe's plan-switch screen; otherwise the full portal home.
+        let session: any = null;
+        if (req.body?.flow === 'update') {
+            try {
+                let subId = stripeSubId;
+                if (!subId) {
+                    const subs = await stripe.subscriptions.list({ customer: customerId, status: 'active', limit: 1 });
+                    subId = subs.data[0]?.id;
+                }
+                if (subId) {
+                    session = await stripe.billingPortal.sessions.create({
+                        ...baseParams,
+                        flow_data: {
+                            type: 'subscription_update',
+                            subscription_update: { subscription: subId },
+                            ...(origin
+                                ? { after_completion: { type: 'redirect', redirect: { return_url: origin } } }
+                                : {})
+                        }
+                    });
+                }
+            } catch (err: any) {
+                console.warn('Plan switch flow unavailable, opening portal home:', err?.message || err);
+            }
+        }
+        if (!session) session = await stripe.billingPortal.sessions.create(baseParams);
+        res.json({ url: session.url });
+    } catch (err: any) {
+        console.error('Billing portal error:', err);
+        res.status(400).json({ error: err.message || 'Could not open billing portal' });
+    }
+});
+
+router.get('/subscription/invoices', requireAuth, async (req: Request, res: Response) => {
+    try {
+        const stripe = getStripeClient();
+        if (!stripe) return res.json({ invoices: [] });
+        const { customerId } = await resolveStripeCustomer(stripe, req);
+        if (!customerId) return res.json({ invoices: [] });
+        const list = await stripe.invoices.list({ customer: customerId, limit: 24 });
+        const invoices = list.data
+            .filter((inv: any) => inv.status !== 'draft' && inv.status !== 'void')
+            .map((inv: any) => ({
+                id: inv.id,
+                number: inv.number || null,
+                created: new Date(inv.created * 1000).toISOString(),
+                description:
+                    inv.description ||
+                    inv.lines?.data?.[0]?.description ||
+                    (inv.number ? `Invoice ${inv.number}` : 'Subscription'),
+                status: inv.status,
+                amount: inv.status === 'paid' ? inv.amount_paid : inv.amount_due,
+                currency: String(inv.currency || 'gbp').toUpperCase(),
+                url: inv.hosted_invoice_url || null,
+                pdf: inv.invoice_pdf || null
+            }));
+        res.json({ invoices });
+    } catch (err: any) {
+        console.error('Invoice list error:', err);
+        res.status(400).json({ error: err.message || 'Could not load invoices' });
+    }
+});
+
 router.patch('/dev/subscription', requireAuth, async (req: Request, res: Response) => {
     if (!allowDevSubscriptionWrites()) {
         return res.status(404).json({ error: 'Not found' });

@@ -54,3 +54,7 @@ If Google Maps returns nothing, or DataForSEO errors (login/balance/access), not
 ## History
 
 The Past Map Pack checks box shows the latest 5 runs. Each row has a delete (trash) icon: `DELETE /api/ai/insights/history?createdAt=...`.
+
+## Credits and cooldown
+
+A refresh costs **6 credits**, taken when the check starts (`/plan`) and refunded if `/finish` fails. The check can be run once every 24 hours (the server answers 429 `cooldown`; the old browser confirm was removed). `/pack` and `/trends` only run inside the 15-minute window opened by `/plan`. Rank movers in the actions come from the `rank_checks` table. See [usage-credits.md](usage-credits.md).

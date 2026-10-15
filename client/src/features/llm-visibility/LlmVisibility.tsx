@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { getPageCache, setPageCache } from '../../shared/pageCache';
 import {
+    LineChart,
     Download,
     Loader2,
     Lightbulb,
@@ -16,6 +19,7 @@ import {
     Trash2
 } from 'lucide-react';
 import { apiDelete, apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
+import { useCredits } from '../../shared/CreditsContext';
 import { downloadElementAsPdf } from '../../shared/downloadElementAsPdf';
 
 type Step = '' | 'asking' | 'analysing';
@@ -42,7 +46,29 @@ function badgeTone(label: string): 'green' | 'amber' | 'red' | 'slate' {
     return 'slate';
 }
 
-function ReportView({ report, platformErrors }: { report: any; platformErrors?: Record<string, string> }) {
+const keyOf = (s: string) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+function ago(iso?: string) {
+    const ms = Date.now() - new Date(iso || '').getTime();
+    if (!iso || !Number.isFinite(ms) || ms < 0) return '';
+    const mins = Math.round(ms / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hours = Math.round(mins / 60);
+    return hours < 48 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+}
+
+function ReportView({
+    report,
+    platformErrors,
+    tracked,
+    onTrack
+}: {
+    report: any;
+    platformErrors?: Record<string, string>;
+    tracked: string[];
+    onTrack: (prompt: string) => void;
+}) {
     const platforms: Record<string, any> = report.platforms || (report.chatgpt ? { chatgpt: report.chatgpt } : {});
     const google = report.google || {};
     const sentiment = report.sentiment || {};
@@ -258,6 +284,19 @@ function ReportView({ report, platformErrors }: { report: any; platformErrors?: 
                                             {q.mentioned ? (q.position ? `Mentioned #${q.position}` : 'Mentioned') : 'Not mentioned'}
                                         </Badge>
                                     )}
+                                    {tracked.includes(keyOf(q.question)) ? (
+                                        <Link to="/llm-visibility/tracking" className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold hover:bg-slate-200">
+                                            Tracking ✓
+                                        </Link>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => onTrack(q.question)}
+                                            className="px-2 py-0.5 rounded-full border border-[#E2E8F0] text-[10px] font-bold text-[var(--brand-primary)] hover:bg-slate-50 cursor-pointer"
+                                        >
+                                            + Track this prompt
+                                        </button>
+                                    )}
                                 </span>
                             </li>
                         ))}
@@ -307,27 +346,65 @@ function PlatformLogo({ id }: { id: string }) {
     );
 }
 
+type VisibilityCache = { report: any; history: any[]; tracked: string[] };
+const CACHE_KEY = 'llm-visibility';
+
 export default function LlmVisibility() {
+    const pageCache = getPageCache<VisibilityCache>(CACHE_KEY);
+    const { refresh: refreshCredits } = useCredits();
     const [step, setStep] = useState<Step>('');
     const [isExporting, setIsExporting] = useState(false);
-    const [report, setReport] = useState<any>(null);
-    const [history, setHistory] = useState<any[]>([]);
+    const [report, setReport] = useState<any>(pageCache?.report ?? null);
+    const [history, setHistory] = useState<any[]>(pageCache?.history ?? []);
+    const [loaded, setLoaded] = useState(Boolean(pageCache));
     const [error, setError] = useState('');
+    // Billing month: one report per month; inside it the saved report is shown and nothing is asked again.
+    const [period, setPeriod] = useState<{ start: string; end: string } | null>(null);
+    const [savedNotice, setSavedNotice] = useState('');
     const [platformErrors, setPlatformErrors] = useState<Record<string, string>>({});
     const [showHowItWorks, setShowHowItWorks] = useState(false);
+    const [tracked, setTracked] = useState<string[]>(pageCache?.tracked ?? []);
+    const [answersAskedAt, setAnswersAskedAt] = useState('');
     const isGenerating = step !== '';
+
+    useEffect(() => {
+        if (loaded) setPageCache(CACHE_KEY, { report, history, tracked });
+    }, [loaded, report, history, tracked]);
 
     useEffect(() => {
         apiGet('/api/llm/visibility')
             .then((data: any) => {
                 setHistory(Array.isArray(data?.history) ? data.history : []);
-                if (data?.report) setReport(data.report);
+                setReport(data?.report || null);
+                if (data?.periodStart && data?.periodEnd) setPeriod({ start: data.periodStart, end: data.periodEnd });
             })
+            .catch(() => {})
+            .finally(() => setLoaded(true));
+        apiGet('/api/llm/tracker')
+            .then((data: any) => setTracked((data?.prompts || []).map((p: any) => keyOf(p.prompt))))
             .catch(() => {});
     }, []);
 
+    const trackPrompt = async (prompt: string) => {
+        setError('');
+        try {
+            const data = await apiPost('/api/llm/tracker/prompts', { prompt });
+            setTracked((data?.prompts || []).map((p: any) => keyOf(p.prompt)));
+        } catch (err: any) {
+            setError(err?.message || 'Could not track this prompt');
+        }
+    };
+
+    // Each prompt is asked once per billing month (answers shared with LLM Tracking). A report already made this
+    // month is just shown again: no AI engine or Gemini call, no credits.
     const handleGenerate = async () => {
         setError('');
+        setSavedNotice('');
+        const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+        if (report?.createdAt && period && new Date(report.createdAt).getTime() >= new Date(period.start).getTime()) {
+            setSavedNotice(`This month's report is already done, so the saved report is shown. You can run a new one after ${fmt(period.end)}.`);
+            return;
+        }
         try {
             const business = await apiGet('/api/business');
             if (!business?.name?.trim()) {
@@ -354,6 +431,8 @@ export default function LlmVisibility() {
             if (!results.some((r) => r.answers.length)) {
                 throw new Error(results.find((r) => r.error)?.error || 'No LLM platform returned answers.');
             }
+            const askedTimes = results.flatMap((r) => r.answers.map((a: any) => a?.askedAt)).filter(Boolean).sort();
+            setAnswersAskedAt(askedTimes[0] || '');
             setStep('analysing');
             const data = await apiPost('/api/llm/visibility/analyze', body);
             setReport(data.report);
@@ -368,6 +447,7 @@ export default function LlmVisibility() {
             setError(err.message || 'Report failed');
         } finally {
             setStep('');
+            refreshCredits();
         }
     };
 
@@ -405,6 +485,13 @@ export default function LlmVisibility() {
                     </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                    <Link
+                        to="/llm-visibility/tracking"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 border border-[#E2E8F0] text-[#0F172A] text-xs font-bold rounded-xl"
+                    >
+                        <LineChart className="w-3.5 h-3.5" />
+                        LLM Tracking
+                    </Link>
                     {report && (
                         <button
                             onClick={handleExport}
@@ -416,7 +503,7 @@ export default function LlmVisibility() {
                         </button>
                     )}
                     <button
-                        onClick={handleGenerate}
+                        onClick={() => handleGenerate()}
                         disabled={isGenerating}
                         className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-70 cursor-pointer"
                     >
@@ -426,6 +513,18 @@ export default function LlmVisibility() {
                 </div>
             </div>
 
+            {period && (() => {
+                const doneThisMonth = Boolean(report?.createdAt) && new Date(report.createdAt).getTime() >= new Date(period.start).getTime();
+                const next = new Date(period.end).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+                return (
+                    <p className="-mt-2 mb-4 text-[11px] font-semibold text-gray-500 sm:text-right">
+                        Report: {doneThisMonth ? 1 : 0} of 1 used this month · {doneThisMonth ? `next on ${next}` : `resets ${next}`}
+                    </p>
+                );
+            })()}
+            {savedNotice && (
+                <p className="mb-4 text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5">{savedNotice}</p>
+            )}
             {error && (
                 <p className="mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5 print:hidden">{error}</p>
             )}
@@ -440,7 +539,13 @@ export default function LlmVisibility() {
                 </div>
             )}
 
-            {!report && !isGenerating && (
+            {!loaded && !isGenerating && (
+                <div className="flex justify-center py-24 print:hidden">
+                    <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                </div>
+            )}
+
+            {loaded && !report && !isGenerating && (
                 <div className="bg-white rounded-2xl border border-dashed border-[#CBD5E1] p-12 md:p-16 flex flex-col items-center text-center shadow-xs mb-6">
                     <div className="w-14 h-14 rounded-2xl bg-slate-50 border border-[#E2E8F0] flex items-center justify-center mb-4">
                         <Bot className="w-7 h-7 text-slate-400" />
@@ -451,7 +556,7 @@ export default function LlmVisibility() {
                     </p>
                     <button
                         type="button"
-                        onClick={handleGenerate}
+                        onClick={() => handleGenerate()}
                         className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-sm font-bold cursor-pointer"
                     >
                         Run your first check
@@ -463,8 +568,14 @@ export default function LlmVisibility() {
                 <div id="report-content" className="bg-slate-50/60 rounded-2xl animate-in slide-in-from-bottom-4 duration-500 mb-6">
                     <p className="text-[11px] text-gray-500 mb-4 font-semibold">
                         {report.businessName} • {when(report.createdAt)}
+                        {answersAskedAt && report.createdAt === history[0]?.createdAt && (
+                            <span className="print:hidden">
+                                {' '}• AI answers from {ago(answersAskedAt)} (shared with LLM Tracking, asked once a month)
+
+                            </span>
+                        )}
                     </p>
-                    <ReportView report={report} platformErrors={platformErrors} />
+                    <ReportView report={report} platformErrors={platformErrors} tracked={tracked} onTrack={trackPrompt} />
                 </div>
             )}
 

@@ -13,6 +13,7 @@ import ReportGenerator from './features/report/ReportGenerator';
 import VisibilityTracker from './features/visibility/VisibilityTracker';
 import PublicReview from './features/reviews/PublicReview';
 import LlmVisibility from './features/llm-visibility/LlmVisibility';
+import LlmTracker from './features/llm-visibility/LlmTracker';
 import Citations from './features/local-presence/Citations';
 import BookingPlots from './features/bookings/shared/BookingPlots';
 import PublicBookHost, { PublicBookEvent, BookSuccess, BookManage } from './features/bookings/shared/PublicBooking';
@@ -141,11 +142,12 @@ export default function App() {
           <Route path="/posts" element={<FeatureGate feature="local_presence"><PostAutomation /></FeatureGate>} />
           <Route path="/reviews" element={<FeatureGate feature="local_presence"><ReviewManagement /></FeatureGate>} />
           <Route path="/qa" element={<FeatureGate feature="local_presence"><QAAutoResponder /></FeatureGate>} />
-          <Route path="/rank-tracker" element={<FeatureGate feature="local_growth"><RankTracker /></FeatureGate>} />
-          <Route path="/visibility-tracker" element={<FeatureGate feature="local_growth"><VisibilityTracker /></FeatureGate>} />
+          <Route path="/rank-tracker" element={<FeatureGate feature="local_presence"><RankTracker /></FeatureGate>} />
+          <Route path="/visibility-tracker" element={<FeatureGate feature="local_presence"><VisibilityTracker /></FeatureGate>} />
           <Route path="/media" element={<FeatureGate feature="local_presence"><MediaOptimization /></FeatureGate>} />
           <Route path="/report" element={<FeatureGate features={['local_growth', 'reporting']}><ReportGenerator /></FeatureGate>} />
-          <Route path="/llm-visibility" element={<FeatureGate features={['local_growth', 'reporting']}><LlmVisibility /></FeatureGate>} />
+          <Route path="/llm-visibility/tracking" element={<FeatureGate feature="local_presence"><LlmTracker /></FeatureGate>} />
+          <Route path="/llm-visibility" element={<FeatureGate feature="local_presence"><LlmVisibility /></FeatureGate>} />
           <Route path="/citations" element={<FeatureGate feature="local_presence"><Citations /></FeatureGate>} />
           <Route path="/booking" element={<FeatureGate feature="bookings"><BookingPlots /></FeatureGate>} />
           <Route path="/clients" element={<FeatureGate feature="bookings"><ClientsListPage /></FeatureGate>} />

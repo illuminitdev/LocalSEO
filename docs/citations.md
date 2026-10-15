@@ -35,3 +35,7 @@ The scan does not use Gemini. `POST /api/ai/citations` queues DataForSEO tasks a
 Deployed API reads the same secrets as the audit worker: `Zappsites/prod/DATAFORSEO_LOGIN` and `Zappsites/prod/DATAFORSEO_PASSWORD`. Locally, set both values in `backend/.env`.
 
 Places is not called on this page, but a connected business (name, address, phone, and map coordinates) makes the match accurate.
+
+## Credits
+
+A new scan costs **4 credits**, charged once when the scan starts (the polling requests are free) and refunded if the scan fails. See [usage-credits.md](usage-credits.md).

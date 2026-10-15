@@ -62,7 +62,9 @@ export function emptyDashboardState() {
         llmVisibility: null as null | Record<string, any>,
         llmVisibilityHistory: [] as Record<string, any>[],
         aiInsights: null as null | Record<string, any>,
-        aiInsightsHistory: [] as Record<string, any>[]
+        aiInsightsHistory: [] as Record<string, any>[],
+        profileAudit: null as null | Record<string, any>,
+        savedTools: {} as Record<string, { value: any; at: string }>
     };
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import {
     BadgeCheck,
     Save,
@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity, updateDashboardStats } from '../../shared/utils';
 import { useToast } from '../../shared/Toast';
+import { useCredits } from '../../shared/CreditsContext';
+import { getPageCache, setPageCache } from '../../shared/pageCache';
 
 const REQUIRED_FIELDS = ['name', 'category', 'address', 'phone'] as const;
 
@@ -33,24 +35,29 @@ const EMPTY_PROFILE = {
     description: ''
 };
 
+type ProfileCache = { formData: typeof EMPTY_PROFILE; bookingOffer: any };
+
 export default function ProfileAudit() {
     const { show } = useToast();
+    const { refresh: refreshCredits } = useCredits();
+    const cached = getPageCache<ProfileCache>('business-profile');
+    const [loaded, setLoaded] = useState(Boolean(cached));
     const [mode, setMode] = useState<'view' | 'edit'>('view');
     const [isAuditing, setIsAuditing] = useState(false);
     const [auditResult, setAuditResult] = useState<any>(null);
     const [isSaving, setIsSaving] = useState(false);
-    const [formData, setFormData] = useState({ ...EMPTY_PROFILE });
+    const [formData, setFormData] = useState({ ...EMPTY_PROFILE, ...(cached?.formData ?? {}) });
     const [error, setError] = useState('');
     const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({});
     const [bookingOffer, setBookingOffer] = useState<{
         pending: boolean;
         booking: { name: string; email: string; phone: string; address: string; category: string };
-    } | null>(null);
+    } | null>(cached?.bookingOffer ?? null);
     const [usingBooking, setUsingBooking] = useState(false);
 
     const applyBusiness = (b: any) => {
         if (!b) return;
-        setFormData({
+        const next = {
             name: b?.name || '',
             category: b?.category || '',
             address: b?.address || '',
@@ -60,7 +67,9 @@ export default function ProfileAudit() {
             hours: b?.hours || '',
             attributes: b?.attributes || '',
             description: b?.description || ''
-        });
+        };
+        setFormData(next);
+        setPageCache('business-profile', { formData: next, bookingOffer: null } satisfies ProfileCache);
     };
 
     const loadBusiness = async () => {
@@ -101,7 +110,11 @@ export default function ProfileAudit() {
     };
 
     useEffect(() => {
-        loadBusiness();
+        loadBusiness().finally(() => setLoaded(true));
+        // Show the last saved audit (a free read); a new audit only runs when the button is clicked.
+        apiGet('/api/ai/audit')
+            .then((d) => d?.audit && setAuditResult(d.audit))
+            .catch(() => {});
     }, []);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -158,6 +171,7 @@ export default function ProfileAudit() {
             setError(err.message || 'Audit failed');
         } finally {
             setIsAuditing(false);
+            refreshCredits();
         }
     };
 
@@ -209,6 +223,17 @@ export default function ProfileAudit() {
               .filter(Boolean)
         : [];
     const hasBusiness = Boolean(String(formData.name || '').trim());
+
+    if (!loaded) {
+        return (
+            <div className="max-w-6xl mx-auto pb-12">
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#0F172A]">Business profile</h1>
+                <div className="flex justify-center py-24">
+                    <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
@@ -268,60 +293,6 @@ export default function ProfileAudit() {
                 </div>
             )}
 
-            {/* Audit Results View (If Available) */}
-            {auditResult && mode === 'view' && (
-                <div className="bg-[#F8FAFC] border border-[var(--brand-primary)]/30 rounded-2xl p-6 mb-6 shadow-xs animate-in zoom-in duration-300">
-                    <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
-                            <BadgeCheck className="w-4 h-4 text-[var(--brand-primary)]" /> Audit Results
-                        </h2>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500 font-semibold">Optimization Score:</span>
-                            <span className="px-3 py-1 bg-white border border-[#E2E8F0] rounded-full font-bold text-xs text-[var(--brand-primary)] shadow-xs">
-                                {auditResult.score}/100
-                            </span>
-                        </div>
-                    </div>
-
-                    <div className="space-y-4">
-                        {auditResult.optimizedDescription && (
-                            <div>
-                                <h3 className="text-xs font-bold text-[#0F172A] mb-1 flex items-center gap-1.5">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> AI Suggested Description
-                                </h3>
-                                <div className="bg-white p-3.5 rounded-xl border border-[#E2E8F0] text-xs text-gray-700 leading-relaxed relative group">
-                                    <p className="pr-20">{auditResult.optimizedDescription}</p>
-                                    <button
-                                        onClick={handleApplyDescription}
-                                        className="absolute top-2.5 right-2.5 text-xs bg-[#F8FAFC] hover:bg-[#E2E8F0] px-2.5 py-1 rounded-lg text-[#0F172A] font-bold opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer border border-[#E2E8F0]"
-                                    >
-                                        Apply & edit
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        {Array.isArray(auditResult.recommendations) && auditResult.recommendations.length > 0 && (
-                            <div>
-                                <h3 className="text-xs font-bold text-[#0F172A] mb-2 flex items-center gap-1.5">
-                                    <ShieldAlert className="w-3.5 h-3.5 text-[var(--brand-primary)]" /> Actionable Recommendations
-                                </h3>
-                                <ul className="space-y-1.5">
-                                    {auditResult.recommendations.map((rec: string, i: number) => (
-                                        <li
-                                            key={i}
-                                            className="flex gap-2 text-xs text-gray-600 bg-white p-2.5 rounded-lg border border-[#E2E8F0]"
-                                        >
-                                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--brand-primary)] mt-1.5 shrink-0" />
-                                            <span className="font-medium">{rec}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
 
             {/* Main Business Profile Card */}
             {mode === 'view' ? (
@@ -618,6 +589,66 @@ export default function ProfileAudit() {
                             {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                             {isSaving ? 'Saving...' : 'Save business info'}
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Audit Results View (If Available) */}
+            {auditResult && mode === 'view' && (
+                <div className="bg-[#F8FAFC] border border-[var(--brand-primary)]/30 rounded-2xl p-6 mt-6 shadow-xs animate-in zoom-in duration-300">
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
+                            <BadgeCheck className="w-4 h-4 text-[var(--brand-primary)]" /> Audit Results
+                            {auditResult.createdAt && (
+                                <span className="text-[11px] font-medium text-gray-400">
+                                    Last run {new Date(auditResult.createdAt).toLocaleString()}
+                                </span>
+                            )}
+                        </h2>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500 font-semibold">Optimization Score:</span>
+                            <span className="px-3 py-1 bg-white border border-[#E2E8F0] rounded-full font-bold text-xs text-[var(--brand-primary)] shadow-xs">
+                                {auditResult.score}/100
+                            </span>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        {auditResult.optimizedDescription && (
+                            <div>
+                                <h3 className="text-xs font-bold text-[#0F172A] mb-1 flex items-center gap-1.5">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> AI Suggested Description
+                                </h3>
+                                <div className="bg-white p-3.5 rounded-xl border border-[#E2E8F0] text-xs text-gray-700 leading-relaxed relative group">
+                                    <p className="pr-20">{auditResult.optimizedDescription}</p>
+                                    <button
+                                        onClick={handleApplyDescription}
+                                        className="absolute top-2.5 right-2.5 text-xs bg-[#F8FAFC] hover:bg-[#E2E8F0] px-2.5 py-1 rounded-lg text-[#0F172A] font-bold opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer border border-[#E2E8F0]"
+                                    >
+                                        Apply & edit
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {Array.isArray(auditResult.recommendations) && auditResult.recommendations.length > 0 && (
+                            <div>
+                                <h3 className="text-xs font-bold text-[#0F172A] mb-2 flex items-center gap-1.5">
+                                    <ShieldAlert className="w-3.5 h-3.5 text-[var(--brand-primary)]" /> Actionable Recommendations
+                                </h3>
+                                <ul className="space-y-1.5">
+                                    {auditResult.recommendations.map((rec: string, i: number) => (
+                                        <li
+                                            key={i}
+                                            className="flex gap-2 text-xs text-gray-600 bg-white p-2.5 rounded-lg border border-[#E2E8F0]"
+                                        >
+                                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--brand-primary)] mt-1.5 shrink-0" />
+                                            <span className="font-medium">{rec}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

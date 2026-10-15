@@ -35,3 +35,7 @@ Reviews are pulled when connecting via Places (or Gemini fallback), not via live
 | Google Gemini | `GEMINI_API_KEY` | Reply generation |
 
 No Google Business Profile API write-back for posting replies automatically.
+
+## Google review sync (credits)
+
+Syncing existing Google reviews (DataForSEO) costs **1 credit**. The automatic first-visit sync is skipped quietly when credits run out. See [usage-credits.md](usage-credits.md).

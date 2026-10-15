@@ -10,6 +10,8 @@ import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 
 export type Stage = 'dev' | 'prod';
 
@@ -230,7 +232,8 @@ export class LocalSeoApiStack extends cdk.Stack {
       'Zappsites/prod/DATAFORSEO_PASSWORD'
     );
 
-    const apiEnv: Record<string, string> = {
+    // Shared by the API function, scheduled-jobs, and lead-enrich functions.
+    const apiEnvironment: Record<string, string> = {
       STAGE: stage,
       NODE_ENV: 'production',
       SHARED_RDS: 'true',
@@ -261,6 +264,13 @@ export class LocalSeoApiStack extends cdk.Stack {
       ...(stripeSecretKey ? { STRIPE_SECRET_KEY: stripeSecretKey } : {}),
       ...(stripePublishableKey ? { STRIPE_PUBLISHABLE_KEY: stripePublishableKey } : {}),
       ...(stripeWebhookSecret ? { STRIPE_WEBHOOK_SECRET: stripeWebhookSecret } : {}),
+      ...((stage === 'prod' ? process.env.STRIPE_PORTAL_LINK_PROD : process.env.STRIPE_PORTAL_LINK)
+        ? {
+            STRIPE_PORTAL_LINK: String(
+              stage === 'prod' ? process.env.STRIPE_PORTAL_LINK_PROD : process.env.STRIPE_PORTAL_LINK
+            ),
+          }
+        : {}),
       STRIPE_PLATFORM_FEE_BPS: process.env.STRIPE_PLATFORM_FEE_BPS || '500',
       STRIPE_CONNECT_DEFAULT_COUNTRY: process.env.STRIPE_CONNECT_DEFAULT_COUNTRY || 'GB',
       ...(process.env.STRIPE_CONNECT_RETURN_URL
@@ -290,6 +300,10 @@ export class LocalSeoApiStack extends cdk.Stack {
       ...(process.env.SMS_SENDER_ID ? { SMS_SENDER_ID: process.env.SMS_SENDER_ID } : {}),
     };
 
+    const privateSubnets = cfg.subnetIds.map((subnetId, i) =>
+      ec2.Subnet.fromSubnetId(this, `PrivateSubnet${i}`, subnetId)
+    );
+
     const fn = new lambda.Function(this, 'ApiFn', {
       functionName: `localseo-api-${stage}`,
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -298,15 +312,47 @@ export class LocalSeoApiStack extends cdk.Stack {
       memorySize: 1024,
       timeout: cdk.Duration.seconds(30),
       vpc,
-      vpcSubnets: {
-        subnets: cfg.subnetIds.map((subnetId, i) =>
-          ec2.Subnet.fromSubnetId(this, `PrivateSubnet${i}`, subnetId)
-        ),
-      },
+      vpcSubnets: { subnets: privateSubnets },
       securityGroups: [lambdaSg],
-      environment: { ...apiEnv, LEAD_ENRICH_FN: `localseo-lead-enrich-${stage}` },
+      environment: { ...apiEnvironment, LEAD_ENRICH_FN: `localseo-lead-enrich-${stage}` },
       logGroup,
     });
+
+    // Daily job: automatic keyword checks (weekly / daily by plan) and history cleanup.
+    // Its own function because it can run for minutes, far past the API's 30 second limit.
+    const jobsLogGroup = new logs.LogGroup(this, 'JobsLogs', {
+      logGroupName: `/aws/lambda/localseo-jobs-${stage}`,
+      retention: logs.RetentionDays.TWO_WEEKS,
+      removalPolicy: stage === 'dev' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
+    });
+    const jobsFn = new lambda.Function(this, 'JobsFn', {
+      functionName: `localseo-jobs-${stage}`,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      handler: 'dist/jobs.handler',
+      code: lambda.Code.fromAsset(assetPath),
+      memorySize: 1024,
+      timeout: cdk.Duration.minutes(10),
+      vpc,
+      vpcSubnets: { subnets: privateSubnets },
+      securityGroups: [lambdaSg],
+      // No paid API keys: the cleanup job must never call DataForSEO, Gemini or Google Places.
+      environment: Object.fromEntries(
+        Object.entries(apiEnvironment).filter(
+          ([k]) => !['DATAFORSEO_LOGIN', 'DATAFORSEO_PASSWORD', 'GEMINI_API_KEY', 'GOOGLE_PLACES_API_KEY'].includes(k)
+        )
+      ),
+      logGroup: jobsLogGroup,
+    });
+    // Daily history cleanup only. Automatic rank checks were removed from jobs.ts, so this never calls DataForSEO.
+    new events.Rule(this, 'DailyJobsRule', {
+      ruleName: `localseo-daily-jobs-${stage}`,
+      description: 'Rank history cleanup (no paid API calls)',
+      schedule: events.Schedule.cron({ minute: '30', hour: '3' }),
+      targets: [new targets.LambdaFunction(jobsFn, { retryAttempts: 0 })],
+    });
+
+    dbSecret.grantRead(jobsFn);
+    // No DataForSEO secrets for the jobs function: it only cleans up history and must never make paid calls.
 
     dbSecret.grantRead(fn);
     jwtSecret.grantRead(fn);
@@ -341,13 +387,9 @@ export class LocalSeoApiStack extends cdk.Stack {
       memorySize: 1024,
       timeout: cdk.Duration.minutes(15),
       vpc,
-      vpcSubnets: {
-        subnets: cfg.subnetIds.map((subnetId, i) =>
-          ec2.Subnet.fromSubnetId(this, `EnrichSubnet${i}`, subnetId)
-        ),
-      },
+      vpcSubnets: { subnets: privateSubnets },
       securityGroups: [lambdaSg],
-      environment: apiEnv,
+      environment: apiEnvironment,
     });
     dbSecret.grantRead(leadEnrichFn);
     dataForSeoLogin.grantRead(leadEnrichFn);

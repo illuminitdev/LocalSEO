@@ -79,3 +79,7 @@ Public `/book/*` and `/api/public/*` are not gated by plan.
 
 - Stripe/OTP checkout for **plans** (ZappSites Payment API)
 - Creating `plans` / `plan_features` / `subscriptions` / `portal_invites` on shared RDS (ZappSites owns them)
+
+## Usage credits and limits
+
+Each Local SEO plan has a monthly credit pool, a location limit and a tracked-keyword limit. See [usage-credits.md](usage-credits.md). `/visibility-tracker` is gated by `local_growth`; `/llm-visibility` needs `local_growth` and `reporting`.

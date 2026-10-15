@@ -60,10 +60,6 @@ function periodStillValid(periodEnd: any) {
 }
 
 
-
-
-
-
 async function loadOrgEntitlements(orgId: any, email?: any) {
     if (!orgId && !email) {
         return emptyEntitlements();
