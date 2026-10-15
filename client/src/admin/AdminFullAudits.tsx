@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
     Check,
@@ -22,6 +22,8 @@ import {
     Trash2,
     UserCheck,
     BadgeCheck,
+    CalendarDays,
+    CheckCircle2,
     X
 } from 'lucide-react';
 import {
@@ -100,6 +102,92 @@ function auditsReadyForRequest(req: FullAuditRequest, audits: FullAuditListItem[
     });
 }
 
+
+function timeOf(value?: string | null) {
+    const t = value ? new Date(value).getTime() : NaN;
+    return Number.isFinite(t) ? t : 0;
+}
+
+function formatDateTime(value?: string | null) {
+    if (!timeOf(value)) return '—';
+    return new Date(value as string).toLocaleString(undefined, {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+/** Local-day key (YYYY-MM-DD) so it compares directly with <input type="date"> values. */
+function localDateKey(value?: string | null) {
+    const t = timeOf(value);
+    if (!t) return '';
+    const d = new Date(t);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function inDateRange(value: string | null | undefined, from: string, to: string) {
+    if (!from && !to) return true;
+    const key = localDateKey(value);
+    if (!key) return false;
+    if (from && key < from) return false;
+    if (to && key > to) return false;
+    return true;
+}
+
+function isAssignedRequest(r: FullAuditRequest) {
+    return r.status === 'completed' && Boolean(r.assignedToUserId || r.assignedAgentName);
+}
+
+function DateRangeFilter({
+    from,
+    to,
+    onChange,
+    children
+}: {
+    from: string;
+    to: string;
+    onChange: (from: string, to: string) => void;
+    children?: ReactNode;
+}) {
+    const inputCls =
+        'px-2 py-1 text-[11px] font-semibold rounded-lg border border-[#E2E8F0] bg-white text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/30';
+    return (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-[#64748B]">
+            <CalendarDays className="w-3.5 h-3.5 text-[#94A3B8]" />
+            {children}
+            <span>From</span>
+            <input
+                type="date"
+                value={from}
+                max={to || undefined}
+                onChange={(e) => onChange(e.target.value, to)}
+                className={inputCls}
+                aria-label="From date"
+            />
+            <span>To</span>
+            <input
+                type="date"
+                value={to}
+                min={from || undefined}
+                onChange={(e) => onChange(from, e.target.value)}
+                className={inputCls}
+                aria-label="To date"
+            />
+            {from || to ? (
+                <button
+                    type="button"
+                    onClick={() => onChange('', '')}
+                    className="px-2 py-1 rounded-lg text-[#94A3B8] hover:text-[#0F172A] hover:bg-[#F1F5F9]"
+                >
+                    Clear
+                </button>
+            ) : null}
+        </div>
+    );
+}
 
 const CRAWL_EXPECTED_MS = 8 * 60 * 1000;
 
@@ -280,7 +368,13 @@ function auditToLeadRef(a: FullAuditListItem): GrowthAuditLeadRef {
 const FULL_AUDIT_LIST_DEFAULTS = {
     reqFilter: 'open' as RequestFilter,
     page: '1',
-    requestPage: '1'
+    requestPage: '1',
+    from: '',
+    to: '',
+    reqFrom: '',
+    reqTo: '',
+    /** Which request date the range applies to: when it came in, or when it was assigned. */
+    reqDateField: 'requested'
 };
 
 export default function AdminFullAudits() {
@@ -472,19 +566,43 @@ export default function AdminFullAudits() {
         });
     }, [activeTab, openRequests]);
 
+    const reqDateField = listFilters.reqDateField === 'assigned' ? 'assigned' : 'requested';
     const filteredRequests = useMemo(() => {
-        return requests.filter((r) => {
-            if (requestFilter === 'all') return true;
-            if (requestFilter === 'open') return r.status === 'pending' || r.status === 'in_progress';
-            if (requestFilter === 'assigned') {
-                return r.status === 'completed' && Boolean(r.assignedToUserId || r.assignedAgentName);
-            }
-            if (requestFilter === 'done') {
-                return r.status === 'completed' || r.status === 'dismissed';
-            }
-            return true;
-        });
-    }, [requests, requestFilter]);
+        return requests
+            .filter((r) => {
+                if (requestFilter === 'open') return r.status === 'pending' || r.status === 'in_progress';
+                if (requestFilter === 'assigned') return isAssignedRequest(r);
+                if (requestFilter === 'done') return r.status === 'completed' || r.status === 'dismissed';
+                return true;
+            })
+            .filter((r) =>
+                inDateRange(
+                    reqDateField === 'assigned' ? (isAssignedRequest(r) ? r.completedAt : null) : r.requestedAt,
+                    listFilters.reqFrom,
+                    listFilters.reqTo
+                )
+            )
+            .sort((a, b) => timeOf(b.requestedAt) - timeOf(a.requestedAt));
+    }, [requests, requestFilter, reqDateField, listFilters.reqFrom, listFilters.reqTo]);
+
+    const filteredAudits = useMemo(
+        () =>
+            audits
+                .filter((a) => inDateRange(a.createdAt, listFilters.from, listFilters.to))
+                .sort((a, b) => timeOf(b.createdAt) - timeOf(a.createdAt)),
+        [audits, listFilters.from, listFilters.to]
+    );
+
+    // Latest assignment per audit, so the list can show who it went to.
+    const assignmentByAuditId = useMemo(() => {
+        const map = new Map<string, FullAuditRequest>();
+        for (const r of requests) {
+            if (!r.fulfilledAuditId || !isAssignedRequest(r)) continue;
+            const prev = map.get(r.fulfilledAuditId);
+            if (!prev || timeOf(r.completedAt) > timeOf(prev.completedAt)) map.set(r.fulfilledAuditId, r);
+        }
+        return map;
+    }, [requests]);
 
     const openNewFormFromRequest = (req: FullAuditRequest) => {
         setPrefillRequestId(req.id);
@@ -509,9 +627,11 @@ export default function AdminFullAudits() {
     };
 
     const openAssignModalForAudit = (audit: FullAuditListItem) => {
-        const existingReq = requests.find(
-            (r) => r.fulfilledAuditId === audit.id || (r.businessName && r.businessName.toLowerCase() === (audit.businessName || '').toLowerCase())
-        );
+        const existingReq =
+            assignmentByAuditId.get(audit.id) ||
+            requests.find(
+                (r) => r.fulfilledAuditId === audit.id || (r.businessName && r.businessName.toLowerCase() === (audit.businessName || '').toLowerCase())
+            );
         if (existingReq) {
             openAssignModal(existingReq);
         } else {
@@ -604,19 +724,96 @@ export default function AdminFullAudits() {
         return () => clearInterval(timer);
     }, [creating]);
 
-    const totalPages = Math.max(1, Math.ceil(audits.length / PAGE_SIZE));
+    const totalPages = Math.max(1, Math.ceil(filteredAudits.length / PAGE_SIZE));
     const safePage = Math.min(page, totalPages);
     const pageAudits = useMemo(() => {
         const start = (safePage - 1) * PAGE_SIZE;
-        return audits.slice(start, start + PAGE_SIZE);
-    }, [audits, safePage]);
+        return filteredAudits.slice(start, start + PAGE_SIZE);
+    }, [filteredAudits, safePage]);
 
     useEffect(() => {
         if (page !== safePage) setPage(safePage);
     }, [page, safePage]);
 
-    const rangeStart = audits.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
-    const rangeEnd = Math.min(safePage * PAGE_SIZE, audits.length);
+    const rangeStart = filteredAudits.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+    const rangeEnd = Math.min(safePage * PAGE_SIZE, filteredAudits.length);
+
+    const [selectedAuditIds, setSelectedAuditIds] = useState<Set<string>>(() => new Set());
+    const [bulkAgentId, setBulkAgentId] = useState('');
+    const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+    const selectablePageAudits = useMemo(() => pageAudits.filter(isReadyAudit), [pageAudits]);
+    const allPageSelected =
+        selectablePageAudits.length > 0 && selectablePageAudits.every((a) => selectedAuditIds.has(a.id));
+
+    // Drop selections for audits that no longer exist (deleted / reloaded).
+    useEffect(() => {
+        setSelectedAuditIds((prev) => {
+            const ids = new Set(audits.map((a) => a.id));
+            const next = new Set([...prev].filter((id) => ids.has(id)));
+            return next.size === prev.size ? prev : next;
+        });
+    }, [audits]);
+
+    const toggleSelectAudit = (id: string) => {
+        setSelectedAuditIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleSelectPage = () => {
+        setSelectedAuditIds((prev) => {
+            const next = new Set(prev);
+            for (const a of selectablePageAudits) {
+                if (allPageSelected) next.delete(a.id);
+                else next.add(a.id);
+            }
+            return next;
+        });
+    };
+
+    const handleBulkAssign = async () => {
+        const agent = salesAgents.find((s) => s.id === bulkAgentId);
+        const targets = audits.filter((a) => selectedAuditIds.has(a.id) && isReadyAudit(a));
+        if (!agent || !targets.length) return;
+        setError('');
+        setBulkProgress({ done: 0, total: targets.length });
+        const failed: FullAuditListItem[] = [];
+        // Sequential on purpose: each assign also syncs sibling requests/tasks for the same lead.
+        for (const [i, audit] of targets.entries()) {
+            const req =
+                assignmentByAuditId.get(audit.id) ||
+                requests.find(
+                    (r) =>
+                        r.fulfilledAuditId === audit.id ||
+                        (r.businessName && r.businessName.toLowerCase() === (audit.businessName || '').toLowerCase())
+                );
+            try {
+                await assignFullAuditToAgent({
+                    requestId: req?.id,
+                    auditId: audit.id,
+                    agentId: agent.id,
+                    businessName: req?.businessName || audit.businessName,
+                    leadId: req?.leadId
+                });
+            } catch {
+                failed.push(audit);
+            }
+            setBulkProgress({ done: i + 1, total: targets.length });
+        }
+        setBulkProgress(null);
+        const ok = targets.length - failed.length;
+        if (ok) show(`Assigned ${ok} audit${ok === 1 ? '' : 's'} to ${agent.name || agent.email}.`);
+        if (failed.length) {
+            setError(`Could not assign: ${failed.map((a) => a.businessName || a.id.slice(0, 8)).join(', ')}`);
+        }
+        // Keep only the failures selected so they can be retried.
+        setSelectedAuditIds(new Set(failed.map((a) => a.id)));
+        setBulkAgentId('');
+        load();
+    };
 
     const totalRequestPages = Math.max(1, Math.ceil(filteredRequests.length / PAGE_SIZE));
     const safeRequestPage = Math.min(requestPage, totalRequestPages);
@@ -1002,6 +1199,22 @@ export default function AdminFullAudits() {
                                     {f.label}
                                 </button>
                             ))}
+                            <span className="mx-1 h-4 w-px bg-[#E2E8F0]" aria-hidden />
+                            <DateRangeFilter
+                                from={listFilters.reqFrom}
+                                to={listFilters.reqTo}
+                                onChange={(reqFrom, reqTo) => patchListFilters({ reqFrom, reqTo, requestPage: '1' })}
+                            >
+                                <select
+                                    value={reqDateField}
+                                    onChange={(e) => patchListFilters({ reqDateField: e.target.value, requestPage: '1' })}
+                                    className="px-2 py-1 text-[11px] font-semibold rounded-lg border border-[#E2E8F0] bg-white text-[#0F172A]"
+                                    aria-label="Date to filter by"
+                                >
+                                    <option value="requested">Requested</option>
+                                    <option value="assigned">Assigned</option>
+                                </select>
+                            </DateRangeFilter>
                         </div>
                     </div>
                     {loading ? (
@@ -1028,9 +1241,7 @@ export default function AdminFullAudits() {
                                     {pageRequests.map((req) => {
                                         const readyAudits = auditsReadyForRequest(req, audits);
                                         const hasReadyAudit = readyAudits.length > 0;
-                                        const isAssigned =
-                                            req.status === 'completed' &&
-                                            Boolean(req.assignedToUserId || req.assignedAgentName);
+                                        const isAssigned = isAssignedRequest(req);
                                         const isOpen =
                                             req.status === 'pending' || req.status === 'in_progress';
                                         const isCustomerEmail =
@@ -1077,6 +1288,12 @@ export default function AdminFullAudits() {
                                                                 {req.assignedAgentEmail}
                                                             </div>
                                                         ) : null}
+                                                        {isAssigned && req.completedAt ? (
+                                                            <div className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 whitespace-nowrap">
+                                                                <CheckCircle2 className="w-3 h-3" />
+                                                                Assigned {formatDateTime(req.completedAt)}
+                                                            </div>
+                                                        ) : null}
                                                     </div>
                                                 ) : (
                                                     <span className="text-xs text-[#94A3B8] italic">Unassigned</span>
@@ -1084,14 +1301,7 @@ export default function AdminFullAudits() {
                                             </td>
                                             <td className="px-4 py-3 text-xs text-[#334155] whitespace-nowrap">{req.toEmail || '—'}</td>
                                             <td className="px-4 py-3 text-xs text-[#64748B] whitespace-nowrap">
-                                                {req.requestedAt
-                                                    ? new Date(req.requestedAt).toLocaleString(undefined, {
-                                                          month: 'short',
-                                                          day: 'numeric',
-                                                          hour: '2-digit',
-                                                          minute: '2-digit'
-                                                      })
-                                                    : '—'}
+                                                {formatDateTime(req.requestedAt)}
                                             </td>
                                             <td className="px-4 py-3.5 whitespace-nowrap">
                                                 {isAssigned ? (
@@ -1483,11 +1693,77 @@ export default function AdminFullAudits() {
                             </p>
                         </div>
                         <span className="text-xs font-semibold text-[#64748B] bg-[#F8FAFC] border border-[#E2E8F0] rounded-full px-2.5 py-1 ml-auto">
-                            {audits.length} reports
+                            {filteredAudits.length === audits.length
+                                ? `${audits.length} reports`
+                                : `${filteredAudits.length} of ${audits.length} reports`}
                         </span>
                     </div>
+                    <div className="px-5 py-2.5 border-b border-[#E2E8F0] bg-[#FCFDFE] flex flex-wrap items-center justify-between gap-2">
+                        <label className="inline-flex items-center gap-2 text-[11px] font-bold text-[#475569] cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                className="w-4 h-4 accent-[#F59E0B]"
+                                checked={allPageSelected}
+                                disabled={!selectablePageAudits.length}
+                                onChange={toggleSelectPage}
+                            />
+                            {selectedAuditIds.size ? `${selectedAuditIds.size} selected` : 'Select page'}
+                        </label>
+                        <DateRangeFilter
+                            from={listFilters.from}
+                            to={listFilters.to}
+                            onChange={(from, to) => patchListFilters({ from, to })}
+                        />
+                    </div>
+
+                    {selectedAuditIds.size ? (
+                        <div className="px-5 py-2.5 border-b border-[#FDE68A] bg-[#FFFBEB] flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-bold text-[#92400E]">
+                                {selectedAuditIds.size} audit{selectedAuditIds.size === 1 ? '' : 's'} selected
+                            </span>
+                            <select
+                                value={bulkAgentId}
+                                onChange={(e) => setBulkAgentId(e.target.value)}
+                                disabled={Boolean(bulkProgress)}
+                                className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-[#E2E8F0] bg-white text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#F59E0B]/30"
+                                aria-label="Sales agent for selected audits"
+                            >
+                                <option value="">Select sales agent…</option>
+                                {salesAgents.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.name || s.email}
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                onClick={handleBulkAssign}
+                                disabled={!bulkAgentId || Boolean(bulkProgress)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-[#0F172A] text-white hover:bg-[#1E293B] disabled:opacity-40"
+                            >
+                                {bulkProgress ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                    <UserCheck className="w-3.5 h-3.5" />
+                                )}
+                                {bulkProgress ? `Assigning ${bulkProgress.done}/${bulkProgress.total}…` : 'Assign selected'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedAuditIds(new Set())}
+                                disabled={Boolean(bulkProgress)}
+                                className="px-2 py-1.5 text-xs font-semibold text-[#64748B] hover:text-[#0F172A] disabled:opacity-40"
+                            >
+                                Clear
+                            </button>
+                        </div>
+                    ) : null}
 
                     {loading ? <p className="p-6 text-sm text-[#64748B]">Loading…</p> : null}
+
+                    {!loading && audits.length > 0 && filteredAudits.length === 0 ? (
+                        <p className="p-6 text-sm text-[#64748B]">No audits created in this date range.</p>
+                    ) : null}
 
                     {!loading && audits.length === 0 ? (
                         <p className="p-6 text-sm text-[#64748B]">
@@ -1508,11 +1784,25 @@ export default function AdminFullAudits() {
                             const share = resolveAuditReportUrl(a.shareUrl || a.reportUrl || a.id);
                             const busy = busyId === a.id;
                             const canShare = Boolean(a.published);
+                            const assignment = assignmentByAuditId.get(a.id);
+                            const agentLabel = assignment
+                                ? assignment.assignedAgentName || assignment.assignedAgentEmail || 'Sales agent'
+                                : '';
                             return (
                                 <li
                                     key={a.id}
                                     className="group p-4 sm:p-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between transition-colors"
                                 >
+                                    <div className="min-w-0 flex-1 flex items-start gap-3">
+                                    <input
+                                        type="checkbox"
+                                        className="mt-1.5 w-4 h-4 shrink-0 accent-[#F59E0B] disabled:opacity-30"
+                                        checked={selectedAuditIds.has(a.id)}
+                                        disabled={!isReadyAudit(a)}
+                                        onChange={() => toggleSelectAudit(a.id)}
+                                        aria-label={`Select ${a.businessName || 'audit'}`}
+                                        title={isReadyAudit(a) ? 'Select for bulk assign' : 'Publish before assigning'}
+                                    />
                                     <div className="min-w-0 flex-1 space-y-2">
                                         <div className="flex flex-wrap items-center gap-2">
                                             <p className="text-base font-semibold text-[#0F172A] truncate group-hover:font-bold">
@@ -1544,11 +1834,19 @@ export default function AdminFullAudits() {
                                             >
                                                 {a.published ? 'Published' : 'Draft'}
                                             </span>
+                                            <span
+                                                className="inline-flex items-center gap-1 rounded-md bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-0.5 text-[11px] font-semibold text-[#475569]"
+                                                title="Audit created"
+                                            >
+                                                <CalendarDays className="w-3 h-3 text-[#94A3B8]" />
+                                                {formatDateTime(a.createdAt)}
+                                            </span>
                                         </div>
                                         <p className="text-xs text-[#94A3B8] truncate">
                                             {[a.email, a.phone].filter(Boolean).join(' · ') || 'No contact'}
                                             {a.website ? ` · ${a.website}` : ''}
                                         </p>
+                                    </div>
                                     </div>
 
                                     <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -1608,15 +1906,29 @@ export default function AdminFullAudits() {
                                         >
                                             <Trash2 className="w-4 h-4" />
                                         </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => openAssignModalForAudit(a)}
-                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white hover:bg-[#F8FAFC] text-[#0F172A] border border-[#CBD5E1] text-xs font-bold shadow-2xs transition-colors cursor-pointer"
-                                            title="Assign or edit sales agent assignment for this audit"
-                                        >
-                                            <UserCheck className="w-3.5 h-3.5 text-[#F59E0B]" />
-                                            <span>Assign / Edit</span>
-                                        </button>
+                                        {assignment ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => openAssignModalForAudit(a)}
+                                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold shadow-2xs transition-colors cursor-pointer max-w-[220px]"
+                                                title={`Assigned to ${agentLabel}${
+                                                    assignment.completedAt ? ` on ${formatDateTime(assignment.completedAt)}` : ''
+                                                } — click to view or change`}
+                                            >
+                                                <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                                                <span className="truncate">{agentLabel}</span>
+                                            </button>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => openAssignModalForAudit(a)}
+                                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white hover:bg-[#F8FAFC] text-[#0F172A] border border-[#CBD5E1] text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+                                                title="Assign this audit to a sales agent"
+                                            >
+                                                <UserCheck className="w-3.5 h-3.5 text-[#F59E0B]" />
+                                                <span>Assign</span>
+                                            </button>
+                                        )}
                                         <button
                                             type="button"
                                             onClick={() => setActiveLead(auditToLeadRef(a))}
@@ -1631,10 +1943,10 @@ export default function AdminFullAudits() {
                         })}
                     </ul>
 
-                    {!loading && audits.length > 0 ? (
+                    {!loading && filteredAudits.length > 0 ? (
                         <div className="px-4 sm:px-5 py-3 border-t border-[#E2E8F0] bg-[#FCFDFE] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                             <p className="text-xs text-[#64748B]">
-                                Showing {rangeStart}–{rangeEnd} of {audits.length}
+                                Showing {rangeStart}–{rangeEnd} of {filteredAudits.length}
                             </p>
                             <div className="flex items-center gap-2">
                                 <button
@@ -1694,7 +2006,7 @@ export default function AdminFullAudits() {
                                     id="assign-full-audit-title"
                                     className="text-base font-black text-[#0F172A] mt-0.5"
                                 >
-                                    Assign &amp; complete
+                                    {isAssignedRequest(assignModalReq) ? 'Edit assignment' : 'Assign & complete'}
                                 </h3>
                                 <p className="text-xs text-[#64748B] mt-1 truncate max-w-[240px]">
                                     {assignModalReq.businessName || 'Lead'}
@@ -1708,6 +2020,23 @@ export default function AdminFullAudits() {
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
+
+                        {isAssignedRequest(assignModalReq) ? (
+                            <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                                <div className="min-w-0 text-xs">
+                                    <p className="font-bold text-emerald-800">
+                                        Assigned to {assignModalReq.assignedAgentName || assignModalReq.assignedAgentEmail || 'sales agent'}
+                                    </p>
+                                    {assignModalReq.assignedAgentEmail && assignModalReq.assignedAgentName ? (
+                                        <p className="text-emerald-700 truncate">{assignModalReq.assignedAgentEmail}</p>
+                                    ) : null}
+                                    {assignModalReq.completedAt ? (
+                                        <p className="text-emerald-700">on {formatDateTime(assignModalReq.completedAt)}</p>
+                                    ) : null}
+                                </div>
+                            </div>
+                        ) : null}
 
                         <div className="space-y-2.5">
                             {error ? (
@@ -1781,7 +2110,7 @@ export default function AdminFullAudits() {
                                 ) : (
                                     <Check className="w-3.5 h-3.5" />
                                 )}
-                                Assign &amp; complete
+                                {isAssignedRequest(assignModalReq) ? 'Save assignment' : 'Assign & complete'}
                             </button>
                         </div>
                     </div>
