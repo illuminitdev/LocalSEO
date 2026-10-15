@@ -84,7 +84,6 @@ export default function RankTracker() {
     const [suggestions, setSuggestions] = useState<string[]>([]);
     // The business's one keyword list, shared with the Visibility Tracker and AI Insights.
     const [sharedKeywords, setSharedKeywords] = useState<string[]>([]);
-    const [keywordLimit, setKeywordLimit] = useState<number | null>(null);
     const [grid, setGrid] = useState<number[][]>([]);
     const [share, setShare] = useState<ShareRow[]>([]);
     const [trackedKeywords, setTrackedKeywords] = useState<TrackedKeyword[]>([]);
@@ -97,8 +96,6 @@ export default function RankTracker() {
     const [progress, setProgress] = useState({ done: 0, total: 0 });
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
-    // Monthly 3x3 scan allowance for the business (all addresses); each keyword+address runs once a month.
-    const [gridUsage, setGridUsage] = useState<{ used: number; limit: number; periodEnd: string } | null>(null);
 
     const [businessName, setBusinessName] = useState('');
     const [businessCategory, setBusinessCategory] = useState('');
@@ -124,10 +121,6 @@ export default function RankTracker() {
 
     const applyLocations = (data: any) => {
         if (data && Array.isArray(data.sharedKeywords)) setSharedKeywords(data.sharedKeywords);
-        if (data && typeof data.keywordLimit === 'number') setKeywordLimit(data.keywordLimit);
-        if (data && typeof data.gridScanLimit === 'number') {
-            setGridUsage({ used: Number(data.gridScansUsed) || 0, limit: data.gridScanLimit, periodEnd: String(data.periodEnd || '') });
-        }
         const list: SavedLocation[] = Array.isArray(data?.locations) ? data.locations : [];
         setLocations(list);
         setLocationId(data?.location?.id || list[0]?.id || '');
@@ -335,7 +328,6 @@ export default function RankTracker() {
                 }
                 throw err;
             }
-            setGridUsage((u) => (u ? { ...u, used: u.used + 1 } : u));
             setSharedKeywords((list) => (list.some((k) => k.toLowerCase() === kw.toLowerCase()) ? list : [kw.toLowerCase(), ...list]));
             refreshCredits();
             const total = gridSize * gridSize;
@@ -624,17 +616,6 @@ export default function RankTracker() {
                     {lastScan && (
                         <p className="mt-1 min-h-[16px] text-[10px] font-semibold leading-4 text-gray-500 lg:text-right">
                             Last scanned: {ago(lastScan.updatedAt)}
-                        </p>
-                    )}
-                    {gridUsage && (
-                        <p className="mt-0.5 text-[10px] font-semibold leading-4 text-gray-500 lg:text-right">
-                            {gridUsage.used} of {gridUsage.limit} scans used this month
-                            {gridUsage.periodEnd ? ` · resets ${fmtDay(gridUsage.periodEnd)}` : ''}
-                        </p>
-                    )}
-                    {keywordLimit != null && (
-                        <p className="mt-0.5 text-[10px] font-semibold leading-4 text-gray-500 lg:text-right">
-                            Keywords: {sharedKeywords.length} of {keywordLimit} (shared with Visibility Tracker)
                         </p>
                     )}
                 </div>
