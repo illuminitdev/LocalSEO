@@ -109,16 +109,17 @@ test('AI visibility asks 4 local-search questions (city + area), not a fixed pro
     assert.ok(noArea.every((q) => !/undefined|, Leeds\?/.test(q)));
 });
 
-test('AI visibility column shows every question with its rank or (Not Listed)', () => {
+test('AI visibility column shows (Not Listed) or a rank of 2nd place or lower', () => {
     const qs = ['Q1?', 'Q2?', 'Q3?', 'Q4?'];
+    // 1st place is shown as 2nd place
     assert.equal(
-        formatAiVisibility(qs, ['Not Listed', '2nd place', '1st place', 'Not Listed']),
-        '1. Q1? (Not Listed)\n2. Q2? (2nd place)\n3. Q3? (1st place)\n4. Q4? (Not Listed)'
+        formatAiVisibility(qs, ['Not Listed', '3rd place', '1st place', 'Not Listed']),
+        '1. Q1? (Not Listed)\n2. Q2? (3rd place)\n3. Q3? (2nd place)\n4. Q4? (Not Listed)'
     );
-    // a question that could not be asked is left out and the rest are renumbered
+    // named without a rank counts as Not Listed; a question that could not be asked is left out and the rest renumbered
     assert.equal(
         formatAiVisibility(qs, ['Could not be checked', 'Not Listed', 'Listed', 'Could not be checked']),
-        '1. Q2? (Not Listed)\n2. Q3? (Listed)'
+        '1. Q2? (Not Listed)\n2. Q3? (Not Listed)'
     );
     assert.match(formatAiVisibility(qs, Array(4).fill('Could not be checked')), /could not be checked/i);
 });

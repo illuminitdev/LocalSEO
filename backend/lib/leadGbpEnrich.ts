@@ -550,8 +550,8 @@ export async function triggerLeadEnrichment(batchId: string | null): Promise<voi
 }
 
 /**
- * Re-run AI visibility for leads whose generated text still says "(Listed)" without a rank, so they get
- * "(1st place)" etc. Only auto-generated text is replaced, and a lead keeps its old text if the re-check fails.
+ * Re-run AI visibility for leads whose generated text still says "(Listed)" without a rank (older format; new text
+ * never contains it - see salesAiResult). Only auto-generated text is replaced, and a lead keeps its old text if the re-check fails.
  */
 export async function rerunUnrankedAiVisibility(): Promise<{ checked: number; updated: number }> {
     const { rows } = await query(

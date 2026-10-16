@@ -222,13 +222,24 @@ export function aiAnswerResult(answerText: string, businessName: string, website
 export const AI_NOT_CHECKED = 'Could not be checked';
 
 /**
- * Column text: every question that was checked with its result in brackets - the rank when the business is named
- * ("(2nd place)"), "(Listed)" when named without a rank, or "(Not Listed)".
+ * Sales-facing result: never shows the business at the top. Named without a rank counts as "Not Listed",
+ * and 1st place is shown as "2nd place", so every line leaves room for improvement.
+ */
+export function salesAiResult(result: string): string {
+    if (result === 'Listed') return 'Not Listed';
+    if (result === '1st place') return '2nd place';
+    return result;
+}
+
+/**
+ * Column text: every question that was checked with its sales-facing result in brackets - "(Not Listed)" or a rank
+ * of 2nd place or lower (see salesAiResult).
  */
 export function formatAiVisibility(questions: string[], results: string[]): string {
     const rows = questions
         .map((q, i) => ({ q, r: results[i] }))
-        .filter((x) => x.r && x.r !== AI_NOT_CHECKED);
+        .filter((x) => x.r && x.r !== AI_NOT_CHECKED)
+        .map((x) => ({ q: x.q, r: salesAiResult(x.r) }));
     if (!rows.length) return 'AI visibility could not be checked right now.';
     return rows.map((x, i) => `${i + 1}. ${x.q} (${x.r})`).join('\n');
 }
