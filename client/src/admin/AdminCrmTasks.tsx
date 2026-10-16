@@ -23,6 +23,7 @@ import {
     ListTodo,
     Loader2,
     CheckCircle2,
+    UserCheck,
     X
 } from 'lucide-react';
 import {
@@ -36,6 +37,7 @@ import {
     adminGet
 } from './adminApi';
 import LeadStatusHistoryModal from './LeadStatusHistoryModal';
+import BulkAssignTasksModal from './BulkAssignTasksModal';
 import {
     normalizeBusinessCategory,
     matchesStatusDateFilter,
@@ -618,10 +620,13 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
     const rangeStart = dedupedTasks.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
     const rangeEnd = Math.min(safePage * PAGE_SIZE, dedupedTasks.length);
 
-    // Bulk "email observations" selection (keyed by lead — one row per lead)
+    // Bulk selection (keyed by lead — one row per lead)
     const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(() => new Set());
     const [bulkEmailProgress, setBulkEmailProgress] = useState<{ done: number; total: number } | null>(null);
     const [bulkEmailReport, setBulkEmailReport] = useState<{ summary: string; details: string[] } | null>(null);
+    const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
+    const [bulkAssignLeadIds, setBulkAssignLeadIds] = useState<string[]>([]);
+    const [bulkAssignToast, setBulkAssignToast] = useState<string | null>(null);
     const isAllFilteredSelected =
         dedupedTasks.length > 0 && dedupedTasks.every((g) => selectedLeadIds.has(g.leadId));
 
@@ -704,6 +709,23 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         <span>{error}</span>
                     </div>
                     <button onClick={loadData} className="text-xs font-semibold underline">Retry</button>
+                </div>
+            )}
+
+            {bulkAssignToast && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-950 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 font-semibold min-w-0">
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-amber-600" />
+                        <span className="truncate">{bulkAssignToast}</span>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setBulkAssignToast(null)}
+                        className="p-0.5 text-amber-700 hover:text-amber-950"
+                        aria-label="Dismiss"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
                 </div>
             )}
 
@@ -1264,6 +1286,19 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                     <button
                         type="button"
                         disabled={Boolean(bulkEmailProgress)}
+                        onClick={() => {
+                            setBulkAssignLeadIds(Array.from(selectedLeadIds));
+                            setIsBulkAssignModalOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-sm whitespace-nowrap disabled:opacity-60"
+                        title="Assign all selected leads to a sales agent"
+                    >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        <span>Assign to agent ({selectedLeadIds.size})</span>
+                    </button>
+                    <button
+                        type="button"
+                        disabled={Boolean(bulkEmailProgress)}
                         onClick={handleBulkEmailSelected}
                         className="inline-flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-400 text-white font-bold text-xs rounded-xl transition-all shadow-sm whitespace-nowrap disabled:opacity-60"
                         title="Email GBP & AI visibility observations to each selected business"
@@ -1285,6 +1320,20 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                     </button>
                 </div>
             )}
+
+            <BulkAssignTasksModal
+                isOpen={isBulkAssignModalOpen}
+                leadIds={bulkAssignLeadIds}
+                salesAgents={salesAgents}
+                onClose={() => setIsBulkAssignModalOpen(false)}
+                onSuccess={async (res) => {
+                    setBulkAssignToast(res.message);
+                    setSelectedLeadIds(new Set());
+                    setBulkAssignLeadIds([]);
+                    await loadData();
+                    setTimeout(() => setBulkAssignToast(null), 4000);
+                }}
+            />
 
             {selectedStatusTask && (
                 <LeadStatusHistoryModal
