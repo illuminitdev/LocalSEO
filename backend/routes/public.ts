@@ -63,6 +63,7 @@ import {
 } from '../lib/auditEmailSends';
 import {
     markLeadObservationEmailOpened,
+    markLeadObservationEmailClicked,
     getLeadObservationEmailSendByToken
 } from '../lib/leadObservationEmailSends';
 import { ensureCrmTables } from '../sales-agent/sales';
@@ -1012,7 +1013,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         try {
             await ensureCrmTables();
             if (token) {
-                await markLeadObservationEmailOpened(token).catch(() => false);
+                // Landing here means the "Request a full main audit" email button was clicked
+                await markLeadObservationEmailClicked(token).catch(() => false);
                 details = await resolveLeadAuditRequestDetails(token);
             }
         } catch (err) {

@@ -165,6 +165,8 @@ export async function ensureCrmTables() {
             );
             CREATE INDEX IF NOT EXISTS idx_lead_obs_email_lead ON lead_observation_email_sends(lead_id, sent_at DESC);
             CREATE INDEX IF NOT EXISTS idx_lead_obs_email_token ON lead_observation_email_sends(token);
+            ALTER TABLE lead_observation_email_sends ADD COLUMN IF NOT EXISTS clicked_at TIMESTAMPTZ;
+            ALTER TABLE lead_observation_email_sends ADD COLUMN IF NOT EXISTS click_count INT NOT NULL DEFAULT 0;
 
             CREATE TABLE IF NOT EXISTS full_audit_requests (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

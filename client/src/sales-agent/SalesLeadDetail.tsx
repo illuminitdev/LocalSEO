@@ -346,7 +346,7 @@ export default function SalesLeadDetail() {
                         );
                     })()}
                     {emailShareStatusLabel(lead.observationEmailShareStatus) ? (
-                        <div className="flex flex-col items-end gap-0.5">
+                        <div className="group relative flex flex-col items-end">
                             <span
                                 className={cn(
                                     'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
@@ -358,11 +358,18 @@ export default function SalesLeadDetail() {
                             >
                                 Email: {emailShareStatusLabel(lead.observationEmailShareStatus)}
                             </span>
-                            {obsTimeLines.map((line) => (
-                                <span key={line} className="text-[10px] font-medium text-[#64748B] whitespace-nowrap">
-                                    {line}
-                                </span>
-                            ))}
+                            {obsTimeLines.length > 0 ? (
+                                <div
+                                    className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 flex flex-col items-end gap-0.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                    aria-hidden
+                                >
+                                    {obsTimeLines.map((line) => (
+                                        <span key={line} className="text-[10px] font-medium text-slate-500">
+                                            {line}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : null}
                         </div>
                     ) : null}
                     <button
@@ -393,7 +400,7 @@ export default function SalesLeadDetail() {
                     {lead.auditId ? (
                         <>
                             {emailShareStatusLabel(lead.emailShareStatus) ? (
-                                <div className="flex flex-col items-end gap-0.5">
+                                <div className="group relative flex flex-col items-end">
                                     <span
                                         className={cn(
                                             'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
@@ -405,11 +412,18 @@ export default function SalesLeadDetail() {
                                     >
                                         PDF: {emailShareStatusLabel(lead.emailShareStatus)}
                                     </span>
-                                    {auditTimeLines.map((line) => (
-                                        <span key={line} className="text-[10px] font-medium text-[#64748B] whitespace-nowrap">
-                                            {line}
-                                        </span>
-                                    ))}
+                                    {auditTimeLines.length > 0 ? (
+                                        <div
+                                            className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 flex flex-col items-end gap-0.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                            aria-hidden
+                                        >
+                                            {auditTimeLines.map((line) => (
+                                                <span key={line} className="text-[10px] font-medium text-slate-500">
+                                                    {line}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : null}
                                 </div>
                             ) : null}
                             <button
