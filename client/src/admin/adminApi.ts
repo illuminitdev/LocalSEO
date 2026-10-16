@@ -129,6 +129,7 @@ export type LeadTask = {
     observationEmailShareStatus?: 'none' | 'sent' | 'opened';
     observationEmailSentAt?: string | null;
     observationEmailOpenedAt?: string | null;
+    observationEmailClickedAt?: string | null;
 };
 
 export type LeadActivity = {
@@ -238,6 +239,7 @@ export type AdminLeadCrmDetail = {
         observationEmailShareStatus?: 'none' | 'sent' | 'opened';
         observationEmailSentAt?: string | null;
         observationEmailOpenedAt?: string | null;
+        observationEmailClickedAt?: string | null;
     };
     tasks: LeadTask[];
     activities: LeadActivity[];
