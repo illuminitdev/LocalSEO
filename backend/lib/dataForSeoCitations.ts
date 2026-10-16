@@ -1,3 +1,4 @@
+import { logDfsCost } from './dfsCost';
 export type CitationScanBusiness = {
     name?: string;
     address?: string;
@@ -199,6 +200,7 @@ export async function dfsTask(path: string, task: Record<string, unknown>, timeo
         signal: AbortSignal.timeout(timeoutMs)
     });
     const data: any = await res.json().catch(() => ({}));
+    logDfsCost(path, data);
     if (!res.ok) {
         throw new Error(String(data?.status_message || `DataForSEO HTTP ${res.status}`));
     }
@@ -443,6 +445,7 @@ async function dfsJson(path: string, init: RequestInit) {
         signal: AbortSignal.timeout(12000)
     });
     const data: any = await res.json().catch(() => ({}));
+    logDfsCost(path, data);
     if (!res.ok) {
         throw new Error(String(data?.status_message || `DataForSEO HTTP ${res.status}`));
     }

@@ -33,6 +33,7 @@ import { apiGet, cn } from './utils';
 import { clearToken, getMustChangePassword } from '../features/auth/auth';
 import { hasRouteAccess, routeRequiresFeatures } from './planCatalog';
 import { useEntitlements } from './EntitlementsContext';
+import LowCreditsBanner from './LowCreditsBanner';
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 380;
@@ -661,6 +662,7 @@ export default function Layout() {
                     </div>
                 </header>
                 <main className="flex-1 overflow-auto overscroll-contain p-4 sm:p-5 lg:p-6">
+                    <LowCreditsBanner />
                     <Outlet />
                 </main>
             </div>

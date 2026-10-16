@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
     MessageSquareWarning,
@@ -20,8 +20,11 @@ import {
     Check,
     X
 } from 'lucide-react';
-import { apiDelete, apiGet, apiPost } from '../../shared/utils';
+import { apiDelete, apiGet, apiPost, type ApiError } from '../../shared/utils';
+import { useCredits } from '../../shared/CreditsContext';
+import { creditErrorMessage } from '../../shared/creditMessages';
 import { downloadElementAsPdf } from '../../shared/downloadElementAsPdf';
+import { getPageCache, setPageCache } from '../../shared/pageCache';
 
 const ACTION_ICONS: Record<string, any> = {
     review: MessageSquareWarning,
@@ -58,8 +61,11 @@ function weekLabelBuckets(history: any[]) {
 
 function InsightsOverview() {
     const navigate = useNavigate();
-    const [data, setData] = useState<any>(null);
+    const cached = getPageCache<any>('ai-insights');
+    const [data, setData] = useState<any>(cached ?? null);
+    const [loaded, setLoaded] = useState(Boolean(cached));
     const [busy, setBusy] = useState(false);
+    const { refresh: refreshCredits } = useCredits();
     const [err, setErr] = useState('');
     const [viewing, setViewing] = useState<any>(null);
     const [showAll, setShowAll] = useState(false);
@@ -69,8 +75,13 @@ function InsightsOverview() {
     useEffect(() => {
         apiGet('/api/ai/insights')
             .then(setData)
-            .catch(() => {});
+            .catch(() => {})
+            .finally(() => setLoaded(true));
     }, []);
+
+    useEffect(() => {
+        if (data) setPageCache('ai-insights', data);
+    }, [data]);
 
     const deleteCheck = async (createdAt: string) => {
         if (!window.confirm('Delete this check? This cannot be undone.')) return;
@@ -102,11 +113,7 @@ function InsightsOverview() {
     };
 
     const refresh = async () => {
-        const savedAt = data?.latest?.createdAt ? new Date(data.latest.createdAt).getTime() : 0;
-        if (savedAt && Date.now() - savedAt < 24 * 3600 * 1000) {
-            const hours = Math.max(1, Math.round((Date.now() - savedAt) / 3600000));
-            if (!window.confirm(`You checked ${hours} hour${hours === 1 ? '' : 's'} ago. A new check runs paid Google Maps lookups. Run it again?`)) return;
-        }
+        // One refresh per billing month: the server checks that and takes the credits when the check starts.
         setBusy(true);
         setErr('');
         setProgress('Planning keywords…');
@@ -150,12 +157,29 @@ function InsightsOverview() {
             setProgress('Writing your recommendation…');
             setData(await apiPost('/api/ai/insights/finish', { packs, trendRows, errors }));
         } catch (e: any) {
-            setErr(e?.message || 'Could not refresh insights');
+            const apiErr = e as ApiError;
+            if (apiErr?.code === 'insufficient_credits') {
+                setErr(creditErrorMessage(apiErr));
+            } else {
+                setErr(apiErr?.message || 'Could not refresh insights');
+            }
         } finally {
             setBusy(false);
             setProgress('');
+            refreshCredits();
         }
     };
+
+    const fmtResetDay = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '');
+    const coolingDown = Boolean(data?.nextCheckAt && new Date(data.nextCheckAt).getTime() > Date.now());
+
+    if (!loaded) {
+        return (
+            <div className="flex justify-center py-24">
+                <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+            </div>
+        );
+    }
 
     const actions: any[] = data?.actions || [];
     const visibleActions = showAll ? actions : actions.slice(0, 3);
@@ -278,7 +302,7 @@ function InsightsOverview() {
                             <button
                                 type="button"
                                 onClick={refresh}
-                                disabled={busy}
+                                disabled={busy || coolingDown}
                                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0F172A] text-white text-xs font-bold cursor-pointer disabled:opacity-70"
                             >
                                 {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
@@ -407,11 +431,16 @@ function InsightsOverview() {
                         <button
                             type="button"
                             onClick={refresh}
-                            disabled={busy}
+                            disabled={busy || coolingDown}
+                            title={coolingDown ? `Refreshed this month. You can refresh again after ${fmtResetDay(data?.nextCheckAt)}.` : undefined}
                             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0F172A] text-white text-[11px] font-bold hover:bg-[#1E293B] cursor-pointer disabled:opacity-70"
                         >
                             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                            {busy ? progress || 'Checking Google Maps…' : hasChart ? 'Refresh' : 'Run Map Pack check'}
+                            {busy
+                                ? progress || 'Checking Google Maps…'
+                                : coolingDown
+                                  ? `Next refresh ${fmtResetDay(data?.nextCheckAt)}`
+                                  : hasChart ? 'Refresh' : 'Run Map Pack check'}
                         </button>
                     </div>
                 </div>

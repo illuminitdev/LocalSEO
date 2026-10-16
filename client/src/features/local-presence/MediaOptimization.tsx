@@ -16,6 +16,7 @@ import {
     Trash2
 } from 'lucide-react';
 import { apiPost, logDashboardActivity } from '../../shared/utils';
+import { useCredits } from '../../shared/CreditsContext';
 
 interface CategoryStatus {
     id: string;
@@ -34,6 +35,7 @@ const CATEGORIES: CategoryStatus[] = [
 ];
 
 export default function MediaOptimization() {
+    const { refresh: refreshCredits } = useCredits();
     const [activeTab, setActiveTab] = useState('Exterior');
     const [isGenerating, setIsGenerating] = useState(false);
     const [categories, setCategories] = useState<CategoryStatus[]>(CATEGORIES);
@@ -61,6 +63,7 @@ export default function MediaOptimization() {
             setError(err.message || 'Image generation failed');
         } finally {
             setIsGenerating(false);
+            refreshCredits();
         }
     };
 

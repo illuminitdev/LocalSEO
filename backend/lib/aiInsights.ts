@@ -1,3 +1,4 @@
+import { logDfsCost } from './dfsCost';
 import { countryName, locationCodeFor, type GeoHint } from './geo';
 
 
@@ -15,9 +16,11 @@ export type RawAnswer = {
     text: string; 
     present: boolean; 
     sources: Array<{ title: string; url: string; domain: string }>;
+    /** When the LLM was actually asked (kept when an answer is reused from the shared store). */
+    askedAt?: string;
 };
 
-type RowAnalysis = {
+export type RowAnalysis = {
     mentioned: boolean;
     position: number; 
     sentiment: 'positive' | 'neutral' | 'negative';
@@ -45,6 +48,7 @@ async function dfs(path: string, task: Record<string, unknown>, timeoutMs: numbe
         signal: AbortSignal.timeout(timeoutMs)
     });
     const data: any = await res.json().catch(() => ({}));
+    logDfsCost(path, data);
     if (!res.ok) throw new Error(String(data?.status_message || `DataForSEO HTTP ${res.status}`));
     const t = Array.isArray(data?.tasks) ? data.tasks[0] : null;
     if (!t || t.status_code !== 20000) throw new Error(String(t?.status_message || 'DataForSEO task failed'));
@@ -188,9 +192,9 @@ export async function askGoogleOverview(prompt: string, geo?: GeoHint): Promise<
     return { prompt, ok: true, text: text.trim().slice(0, MAX_TEXT), present: true, sources: [...sources.values()].slice(0, 10) };
 }
 
-const norm = (v: string) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+export const norm = (v: string) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
-function nameMentioned(answer: RawAnswer, business: VisibilityBusiness) {
+export function nameMentioned(answer: RawAnswer, business: VisibilityBusiness) {
     const name = norm(business.name || '');
     const host = hostOf(String(business.website || ''));
     const text = norm(answer.text);
@@ -202,6 +206,7 @@ function sanitizeAnswers(list: any): RawAnswer[] {
     return (Array.isArray(list) ? list : []).slice(0, 8).map((a: any) => ({
         prompt: String(a?.prompt || '').slice(0, 500),
         ok: a?.ok !== false,
+        askedAt: a?.askedAt ? String(a.askedAt).slice(0, 40) : undefined,
         text: String(a?.text || '').slice(0, MAX_TEXT),
         present: Boolean(a?.present),
         sources: (Array.isArray(a?.sources) ? a.sources : []).slice(0, 10).map((s: any) => ({
@@ -278,7 +283,7 @@ const BUSINESS_RE = new RegExp(
 // Text-only fallback used when the Gemini analysis is missing or incomplete.
 // It finds business-like names (links, bold text, list entries, names ending in words like
 // "Clinic"/"Dental"/"Aesthetics") in the order they appear. Position = how early this business is named.
-function textAnalysis(answer: RawAnswer, business: VisibilityBusiness) {
+export function textAnalysis(answer: RawAnswer, business: VisibilityBusiness) {
     const text = answer.text;
     const ourName = String(business.name || '').trim();
     const ourKey = norm(ourName);
@@ -358,6 +363,36 @@ function fallbackOpportunities(business: VisibilityBusiness, ownCitations: numbe
     return out.slice(0, 3);
 }
 
+/**
+ * The one rule for "is this business named in this answer": the Gemini row (when there is one) OR a name/website match,
+ * with the position from Gemini else from the text. Used by LLM Visibility and LLM Tracking so they always agree.
+ */
+export function verdictFor(answer: RawAnswer, business: VisibilityBusiness, geminiRow?: any): RowAnalysis {
+    const a = geminiRow || {};
+    const fb = textAnalysis(answer, business);
+    const sentiment = ['positive', 'neutral', 'negative'].includes(a.sentiment) ? a.sentiment : 'neutral';
+    const mentioned = Boolean(a.mentioned) || nameMentioned(answer, business);
+    const aiCompetitors = (Array.isArray(a.competitors) ? a.competitors : []).map((c: any) => String(c).slice(0, 80)).filter(Boolean);
+    return {
+        mentioned,
+        position: mentioned ? Math.max(0, Number(a.position) || fb.position) : 0,
+        sentiment,
+        context: mentioned ? cleanMarkdown(String(a.context || fb.context || '')).slice(0, 160) : '',
+        competitors: (aiCompetitors.length ? aiCompetitors : fb.competitors).slice(0, 6)
+    };
+}
+
+/** Verdict for every answer in a platform -> answers input, using the same ids `analysisJobs` gave the Gemini rows. */
+export function answerVerdicts(business: VisibilityBusiness, input: Partial<Record<Platform | 'google', any>>, analysis: any) {
+    const byId = new Map<string, any>();
+    for (const r of Array.isArray(analysis?.rows) ? analysis.rows : []) byId.set(String(r?.id), r);
+    const out: Partial<Record<Platform, Array<{ answer: RawAnswer; verdict: RowAnalysis }>>> = {};
+    for (const p of LLM_PLATFORMS) {
+        out[p] = sanitizeAnswers(input[p]).map((answer, i) => ({ answer, verdict: verdictFor(answer, business, byId.get(`${PLATFORM_ID[p]}${i}`)) }));
+    }
+    return out;
+}
+
 export function buildReport(business: VisibilityBusiness, input: Partial<Record<Platform | 'google', any>>, analysis: any, previous: any) {
     const answers = {} as AnswerSet;
     for (const p of [...LLM_PLATFORMS, 'google'] as Array<Platform | 'google'>) answers[p] = sanitizeAnswers(input[p]);
@@ -365,20 +400,7 @@ export function buildReport(business: VisibilityBusiness, input: Partial<Record<
     const byId = new Map<string, any>();
     for (const r of Array.isArray(analysis?.rows) ? analysis.rows : []) byId.set(String(r?.id), r);
 
-    const rowFor = (id: string, answer: RawAnswer): RowAnalysis => {
-        const a = byId.get(id) || {};
-        const fb = textAnalysis(answer, business);
-        const sentiment = ['positive', 'neutral', 'negative'].includes(a.sentiment) ? a.sentiment : 'neutral';
-        const mentioned = Boolean(a.mentioned) || nameMentioned(answer, business);
-        const aiCompetitors = (Array.isArray(a.competitors) ? a.competitors : []).map((c: any) => String(c).slice(0, 80)).filter(Boolean);
-        return {
-            mentioned,
-            position: mentioned ? Math.max(0, Number(a.position) || fb.position) : 0,
-            sentiment,
-            context: mentioned ? cleanMarkdown(String(a.context || fb.context || '')).slice(0, 160) : '',
-            competitors: (aiCompetitors.length ? aiCompetitors : fb.competitors).slice(0, 6)
-        };
-    };
+    const rowFor = (id: string, answer: RawAnswer): RowAnalysis => verdictFor(answer, business, byId.get(id));
     const rowsOf = (p: Platform | 'google') => {
         const prefix = p === 'google' ? 'g' : PLATFORM_ID[p];
         return answers[p].map((a, i) => ({ a, r: rowFor(`${prefix}${i}`, a) }));

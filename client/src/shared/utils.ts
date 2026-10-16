@@ -23,6 +23,25 @@ export function restrictEmailOrPhoneInput(value: string, maxDigits = 11): string
     return restrictPhoneInput(value, maxDigits);
 }
 
+/** Errors from the API carry the HTTP status, the server's `code` (e.g. `insufficient_credits`, `cooldown`) and the JSON body. */
+export type ApiError = Error & {
+    status?: number;
+    code?: string;
+    body?: Record<string, any>;
+};
+
+/** "just now", "5 min ago", "3h ago", "2d ago". */
+export function ago(iso: string | null | undefined) {
+    if (!iso) return '';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 60_000) return 'just now';
+    const min = Math.round(ms / 60_000);
+    if (min < 60) return `${min} min ago`;
+    const h = Math.round(min / 60);
+    if (h < 48) return `${h}h ago`;
+    return `${Math.round(h / 24)}d ago`;
+}
+
 async function readError(res: Response, path: string): Promise<Error> {
     const status = res.status;
     try {
@@ -48,7 +67,13 @@ async function readError(res: Response, path: string): Promise<Error> {
             err.requiredPlanHint = data.requiredPlanHint;
             return err;
         }
-        if (data?.error) return new Error(String(data.error));
+        if (data?.error) {
+            const err = new Error(String(data.error)) as ApiError;
+            err.status = status;
+            if (data.code) err.code = String(data.code);
+            err.body = data;
+            return err;
+        }
         if (status === 504 || status === 503) {
             return new Error(
                 `API timed out (${status}) on ${path}. The request exceeded the ~30s gateway limit — try again in a moment.`

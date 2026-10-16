@@ -38,14 +38,75 @@ export const PLAN_FEATURES: Record<string, FeatureKey[]> = {
     'complete-growth-system': ['local_presence', 'local_growth', 'reporting', 'bookings']
 };
 
+/** One-line pitch shown on plan cards in Account → Plan. */
+export const PLAN_DESCRIPTIONS: Record<string, string> = {
+    'website-essential': 'A professional website for your business, hosted and maintained for you.',
+    'booking-solo': 'Online bookings for a solo business, with your own booking page.',
+    'booking-solo-plus': 'Everything in Booking Solo with more room to grow your bookings.',
+    'booking-pro': 'Bookings for growing teams, with member-level schedules.',
+    'local-presence': 'Manage your Google Business Profile, reviews and posts in one place.',
+    'local-growth': 'Local presence plus search-grid rank tracking, insights and reporting.',
+    'complete-growth-system': 'Every ZappSites tool: local presence, growth, reporting and bookings.'
+};
+
+/** Credit cost of each paid action. The API sends the live values; these are the fallback. Keep in sync with backend/lib/planCatalog.ts. */
+export const CREDIT_COSTS = {
+    rankScan: 9,
+    trackerKeyword: 1,
+    keywordSuggest: 1,
+    aiInsights: 6,
+    llmVisibility: 20,
+    llmTrackerAnswer: 1,
+    citations: 4,
+    reviewSync: 1,
+    aiText: 1,
+    aiImage: 2
+} as const;
+
+export type CreditFeature = keyof typeof CREDIT_COSTS;
+
+export const CREDIT_FEATURE_LABELS: Record<CreditFeature, string> = {
+    rankScan: 'Rank Tracker scans',
+    trackerKeyword: 'Keyword rank checks',
+    keywordSuggest: 'Keyword suggestions',
+    aiInsights: 'AI Insights',
+    llmVisibility: 'LLM Visibility',
+    llmTrackerAnswer: 'LLM Tracking',
+    citations: 'Citations scans',
+    reviewSync: 'Google review sync',
+    aiText: 'AI writing (audit, posts, replies, Q&A)',
+    aiImage: 'AI images'
+};
+
+/** Keywords a business can track in the Visibility Tracker. */
+export const TRACKED_KEYWORD_LIMIT = 10;
+
+/** Per-plan keyword limit. Keep in sync with TRACKED_KEYWORD_LIMITS in backend/lib/planCatalog.ts. */
+export const TRACKED_KEYWORD_LIMITS: Record<string, number> = {
+    'local-presence': 5,
+    'local-growth': 10,
+    'complete-growth-system': 10
+};
+
+/** Local Search Grid scans per billing month. Keep in sync with GRID_SCAN_LIMITS in backend/lib/planCatalog.ts. */
+export const GRID_SCAN_LIMITS: Record<string, number> = {
+    'local-presence': 5,
+    'local-growth': 10,
+    'complete-growth-system': 10
+};
+
+export function getTrackedKeywordLimit(planId: string | null | undefined) {
+    return TRACKED_KEYWORD_LIMITS[String(planId || '')] ?? 5;
+}
+
 export type RouteFeature = FeatureKey | FeatureKey[] | null;
 
 export const ROUTE_FEATURES: Record<string, RouteFeature> = {
     '/dashboard': null,
-    '/rank-tracker': 'local_growth',
-    '/visibility-tracker': 'local_growth',
+    '/rank-tracker': 'local_presence',
+    '/visibility-tracker': 'local_presence',
     '/report': ['local_growth', 'reporting'],
-    '/llm-visibility': ['local_growth', 'reporting'],
+    '/llm-visibility': 'local_presence',
     '/profile': 'local_presence',
     '/citations': 'local_presence',
     '/posts': 'local_presence',

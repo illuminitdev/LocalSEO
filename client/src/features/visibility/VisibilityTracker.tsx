@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Loader2, Plus, RefreshCw, Sparkles, Trash2, AlertCircle, CheckCircle2, X, ArrowUp, ArrowDown } from 'lucide-react';
-import { apiGet, apiPost, cn } from '../../shared/utils';
+import { ago, apiDelete, apiGet, apiPost, cn, type ApiError } from '../../shared/utils';
+import LocationPicker, { type SavedLocation } from '../../shared/LocationPicker';
+import { useCredits } from '../../shared/CreditsContext';
+import { creditErrorMessage } from '../../shared/creditMessages';
 
 type Point = { date: string; rank: number };
 type TrackedKeyword = {
@@ -17,6 +20,17 @@ type TrackerInfo = {
     configured: boolean;
     business: { name: string; category: string; city: string; connected: boolean };
     max: number;
+    /** Billing period: each keyword is checked once inside it; after that the saved rank is shown. */
+    periodStart?: string;
+    periodEnd?: string;
+    /** New keywords added this billing month (removing one does not free its slot before the month resets). */
+    addedThisMonth?: number;
+    costPerKeyword?: number;
+    location: SavedLocation | null;
+    locations: SavedLocation[];
+    locationLimit: number;
+    canAddLocation: boolean;
+    needsAddress?: boolean;
 };
 
 const NOT_RANKED = 21;
@@ -186,6 +200,13 @@ export default function VisibilityTracker() {
     const [notice, setNotice] = useState('');
 
     const busy = checking.total > 0;
+    const { refresh: refreshCredits } = useCredits();
+    const locationId = info?.location?.id || '';
+    const maxKeywords = info?.max ?? 10;
+    // A keyword is checked once per billing month at this location; after that its saved rank is shown (no charge).
+    const periodStartMs = info?.periodStart ? new Date(info.periodStart).getTime() : 0;
+    const resetsOn = info?.periodEnd ? new Date(info.periodEnd).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+    const isDue = (k: TrackedKeyword) => !k.checkedAt || new Date(k.checkedAt).getTime() < periodStartMs;
 
     useEffect(() => {
         if (!notice) return;
@@ -251,6 +272,24 @@ export default function VisibilityTracker() {
         };
     }, [input]);
 
+    // Paid lookups only run from these buttons; the GET calls above just show what was saved earlier.
+    const [lookingUp, setLookingUp] = useState(false);
+    const lookUpSuggestions = async (q?: string) => {
+        setLookingUp(true);
+        setError('');
+        try {
+            const d = await apiPost('/api/visibility-tracker/suggestions', q ? { q } : {});
+            const list = Array.isArray(d?.suggestions) ? d.suggestions : [];
+            if (q) setTypedSuggestions(list);
+            else setSuggestions(list);
+        } catch (e: any) {
+            setError(e?.code === 'insufficient_credits' ? creditErrorMessage(e) : e?.message || 'Could not load suggestions.');
+        } finally {
+            setLookingUp(false);
+            refreshCredits();
+        }
+    };
+
     const refreshSuggestions = () =>
         apiGet('/api/visibility-tracker/suggestions')
             .then((d) => setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []))
@@ -261,19 +300,65 @@ export default function VisibilityTracker() {
         setError('');
         setChecking({ done: 0, total: targets.length });
         let failed = 0;
+        let skipped = 0;
         try {
             for (let i = 0; i < targets.length; i += CHECK_BATCH) {
                 const batch = targets.slice(i, i + CHECK_BATCH);
-                const data = await apiPost('/api/visibility-tracker/check', { keywords: batch });
-                setKeywords(data.keywords || []);
-                failed += Array.isArray(data.failed) ? data.failed.length : 0;
+                try {
+                    const data = await apiPost('/api/visibility-tracker/check', { keywords: batch, locationId });
+                    setKeywords(data.keywords || []);
+                    failed += Array.isArray(data.failed) ? data.failed.length : 0;
+                    skipped += Array.isArray(data.skipped) ? data.skipped.length : 0;
+                } catch (err: any) {
+                    // A batch already checked this month is skipped (saved ranks shown); any other error stops the run.
+                    if ((err as ApiError)?.code !== 'already_checked') throw err;
+                    const saved = (err as ApiError)?.body?.keywords;
+                    if (Array.isArray(saved)) setKeywords(saved);
+                    skipped += batch.length;
+                }
                 setChecking({ done: Math.min(targets.length, i + batch.length), total: targets.length });
             }
-            setNotice(failed ? `Rank updated, ${failed} keyword${failed > 1 ? 's' : ''} could not be checked.` : 'Rank updated');
+            const parts = [failed ? `${failed} could not be checked` : '', skipped ? `${skipped} already checked this month` : ''].filter(Boolean);
+            setNotice(parts.length ? `Rank updated (${parts.join(', ')}).` : 'Rank updated');
         } catch (err: any) {
-            setError(err?.message || 'Rank check failed.');
+            const e = err as ApiError;
+            if (e?.code === 'insufficient_credits') {
+                setError(creditErrorMessage(e));
+            } else {
+                setError(e?.message || 'Rank check failed.');
+            }
         } finally {
             setChecking({ done: 0, total: 0 });
+            refreshCredits();
+        }
+    };
+
+    const reloadForLocation = async (id: string) => {
+        setError('');
+        try {
+            const data: TrackerInfo = await apiGet(`/api/visibility-tracker?locationId=${encodeURIComponent(id)}`);
+            setInfo(data);
+            setKeywords(data.keywords || []);
+        } catch (err: any) {
+            setError(err?.message || 'Could not load that location.');
+        }
+    };
+
+    const addLocation = async (address: string, label: string) => {
+        try {
+            const data = await apiPost('/api/locations', { address, label });
+            await reloadForLocation(data?.location?.id || data?.added?.id);
+        } catch (err: any) {
+            return err?.message || 'Could not add that location.';
+        }
+    };
+
+    const removeLocation = async (id: string) => {
+        try {
+            await apiDelete(`/api/locations/${encodeURIComponent(id)}`);
+            await reloadForLocation(info?.locations.find((l) => l.isPrimary)?.id || '');
+        } catch (err: any) {
+            return err?.message || 'Could not remove that location.';
         }
     };
 
@@ -285,7 +370,7 @@ export default function VisibilityTracker() {
         setNotice('');
         try {
             const before = new Set(keywords.map((k) => k.keyword));
-            const data = await apiPost('/api/visibility-tracker/keywords', { keywords: clean });
+            const data = await apiPost('/api/visibility-tracker/keywords', { keywords: clean, locationId });
             const next: TrackedKeyword[] = data.keywords || [];
             setKeywords(next);
             setInput('');
@@ -293,8 +378,13 @@ export default function VisibilityTracker() {
             setPage(0);
             refreshSuggestions();
             const fresh = next.filter((k) => !before.has(k.keyword)).map((k) => k.keyword);
-            if (info?.configured && fresh.length) await runChecks(fresh);
-            else if (fresh.length) setNotice('Keywords added. Live rank checks are not configured yet.');
+            // Refresh the "added this month" count from the server (a re-added keyword does not use a new slot).
+            apiGet(`/api/visibility-tracker${locationId ? `?locationId=${encodeURIComponent(locationId)}` : ''}`)
+                .then((d: TrackerInfo) => setInfo((i) => (i ? { ...i, addedThisMonth: d.addedThisMonth } : i)))
+                .catch(() => {});
+            // Adding only saves the keyword (it also shows in the Local Search Grid). Its rank is checked
+            // when the user clicks Check, so no paid call happens here.
+            if (fresh.length) setNotice(`Saved ${fresh.length} keyword${fresh.length === 1 ? '' : 's'}. Click Check to see the rank.`);
         } catch (err: any) {
             setError(err?.message || 'Could not add keywords.');
         } finally {
@@ -304,7 +394,7 @@ export default function VisibilityTracker() {
 
     const removeKeyword = async (keyword: string) => {
         try {
-            const data = await apiPost('/api/visibility-tracker/remove', { keyword });
+            const data = await apiPost('/api/visibility-tracker/remove', { keyword, locationId });
             setKeywords(data.keywords || []);
             refreshSuggestions();
         } catch (err: any) {
@@ -426,12 +516,21 @@ export default function VisibilityTracker() {
                     </select>
                     {info?.configured && keywords.length > 0 && (
                         <button
-                            onClick={() => runChecks(keywords.map((k) => k.keyword))}
-                            disabled={busy}
+                            onClick={() => runChecks(keywords.filter(isDue).map((k) => k.keyword))}
+                            disabled={busy || !keywords.some(isDue)}
+                            title={
+                                keywords.some(isDue)
+                                    ? `Checks ${keywords.filter(isDue).length} keyword${keywords.filter(isDue).length === 1 ? '' : 's'}`
+                                    : `All keywords were already checked this month${resetsOn ? `. They can be checked again after ${resetsOn}` : ''}`
+                            }
                             className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                         >
                             <RefreshCw className={cn('w-3.5 h-3.5', busy && 'animate-spin')} />
-                            {busy ? `Checking ${checking.done}/${checking.total}` : 'Refresh ranks'}
+                            {busy
+                                ? `Checking ${checking.done}/${checking.total}`
+                                : keywords.some(isDue)
+                                  ? 'Refresh ranks'
+                                  : 'Up to date'}
                         </button>
                     )}
                     <button
@@ -526,6 +625,24 @@ export default function VisibilityTracker() {
                 )}
             </div>
 
+            {info && !info.needsAddress && info.locations.length > 0 && (
+                <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm p-4">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Location</div>
+                    <div className="max-w-md">
+                        <LocationPicker
+                            locations={info.locations}
+                            selectedId={locationId}
+                            onSelect={reloadForLocation}
+                            limit={info.locationLimit}
+                            canAdd={info.canAddLocation}
+                            disabled={busy}
+                            onAdd={addLocation}
+                            onRemove={removeLocation}
+                        />
+                    </div>
+                </div>
+            )}
+
             <div ref={trackBoxRef} className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm p-4">
                 <form
                     className="flex flex-wrap gap-2"
@@ -550,6 +667,32 @@ export default function VisibilityTracker() {
                         {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Track
                     </button>
                 </form>
+                <p className="mt-2 text-[11px] text-slate-500">
+                    {keywords.length} of {maxKeywords} keywords tracked
+                    {typeof info?.addedThisMonth === 'number' ? ` · ${info.addedThisMonth} of ${maxKeywords} added this month` : ''}
+                </p>
+                {suggestOpen && input.split(/[,\n]/).pop()!.trim().length >= 3 && !typedLoading && typedSuggestions.length === 0 && (
+                    <button
+                        type="button"
+                        disabled={lookingUp}
+                        onClick={() => lookUpSuggestions(input.split(/[,\n]/).pop()!.trim())}
+                        className="mt-3 inline-flex items-center gap-1.5 text-xs font-bold text-[var(--brand-primary)] hover:underline disabled:opacity-50"
+                    >
+                        {lookingUp ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        Get keyword ideas for “{input.split(/[,\n]/).pop()?.trim()}” (uses credits)
+                    </button>
+                )}
+                {suggestOpen && suggestions.length === 0 && (
+                    <button
+                        type="button"
+                        disabled={lookingUp}
+                        onClick={() => lookUpSuggestions()}
+                        className="mt-3 block inline-flex items-center gap-1.5 text-xs font-bold text-[var(--brand-primary)] hover:underline disabled:opacity-50"
+                    >
+                        {lookingUp ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        Get suggested keywords for {info?.business.category || 'your industry'}
+                    </button>
+                )}
                 {suggestOpen && (typedLoading || typedSuggestions.length > 0) && (
                     <div className="mt-3">
                         <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
@@ -583,7 +726,7 @@ export default function VisibilityTracker() {
                             <div className="flex items-center gap-3">
                             <button
                                 disabled={adding || busy}
-                                onClick={() => addKeywords(suggestions.slice(0, 10).map((s) => s.keyword))}
+                                onClick={() => addKeywords(suggestions.slice(0, Math.max(0, Math.min(10, maxKeywords - keywords.length))).map((s) => s.keyword))}
                                 className="text-xs font-bold text-[var(--brand-primary)] hover:underline disabled:opacity-50"
                             >
                                 Track top 10
@@ -639,7 +782,10 @@ export default function VisibilityTracker() {
                         <tbody>
                             {visible.map(({ k, now, change }) => (
                                 <tr key={k.keyword} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
-                                    <td className="px-5 py-3 font-semibold text-[#0F172A]">{k.keyword}</td>
+                                    <td className="px-5 py-3 font-semibold text-[#0F172A]">
+                                        {k.keyword}
+                                        {k.checkedAt && <div className="text-[10px] font-medium text-slate-400">Checked {ago(k.checkedAt)}</div>}
+                                    </td>
                                     <td className="px-3 py-2 font-bold text-[#0F172A]">{rankLabel(now)}</td>
                                     <td className="px-3 py-2">
                                         <ChangeChip change={change} rank={now} />

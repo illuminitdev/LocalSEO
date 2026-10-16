@@ -66,3 +66,7 @@ Mention rate can differ between runs (for example 40% then 100%): LLM answers ar
 ## History
 
 The Past checks box shows the latest 5 runs. Each row has a delete (trash) icon: `DELETE /api/llm/visibility/history?createdAt=...`.
+
+## Credits
+
+Each new answer costs 1 credit (up to 20 for a full run: 5 questions x ChatGPT, Claude, Perplexity and Google). Answers reused from the last 24 hours are free, and failed answers are refunded. LLM Tracking charges 1 credit per new platform answer the same way. See [usage-credits.md](usage-credits.md).

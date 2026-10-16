@@ -1,3 +1,4 @@
+import { logDfsCost } from './dfsCost';
 import { dataForSeoConfigured } from './dataForSeoCitations';
 import { locationCodeFor, type GeoHint } from './geo';
 
@@ -35,6 +36,7 @@ export async function startReviewTask(placeId: string, geo: GeoHint, depth = 100
         signal: AbortSignal.timeout(20000)
     });
     const data: any = await res.json().catch(() => ({}));
+    logDfsCost('reviews/task_post', data);
     const task = Array.isArray(data?.tasks) ? data.tasks[0] : null;
     if (!res.ok || !task || task.status_code !== 20100 || !task.id) {
         throw new Error(String(task?.status_message || data?.status_message || `DataForSEO HTTP ${res.status}`));
@@ -51,6 +53,7 @@ export async function fetchReviewTask(
         signal: AbortSignal.timeout(20000)
     });
     const data: any = await res.json().catch(() => ({}));
+    logDfsCost('reviews/task_get', data);
     const task = Array.isArray(data?.tasks) ? data.tasks[0] : null;
     if (!task) throw new Error(String(data?.status_message || `DataForSEO HTTP ${res.status}`));
     // 40601 = task handed over, 40602 = in queue

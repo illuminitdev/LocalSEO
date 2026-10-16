@@ -28,6 +28,9 @@ function emptyEntitlements() {
             currentPeriodEnd: string | null;
             cancelAtPeriodEnd: boolean;
             status: string;
+            pendingPlanId: string | null;
+            pendingPlanName: string | null;
+            pendingPlanStartsAt: string | null;
         }>
     };
 }
@@ -48,7 +51,10 @@ function dedupeActiveSubscriptions(rows: any[]) {
             currentPeriodStart: r.current_period_start ?? null,
             currentPeriodEnd: r.current_period_end ?? null,
             cancelAtPeriodEnd: Boolean(r.cancel_at_period_end),
-            status: r.status
+            status: r.status,
+            pendingPlanId: r.pending_plan_id || null,
+            pendingPlanName: r.pending_plan_id ? getPlanById(r.pending_plan_id)?.name || r.pending_plan_id : null,
+            pendingPlanStartsAt: r.pending_plan_id ? r.pending_plan_starts_at ?? null : null
         });
     }
     return list;
@@ -60,18 +66,14 @@ function periodStillValid(periodEnd: any) {
 }
 
 
-
-
-
-
 async function loadOrgEntitlements(orgId: any, email?: any) {
     if (!orgId && !email) {
         return emptyEntitlements();
     }
 
     const { rows } = await query(
-        `SELECT s.id, s.plan_id, s.status, s.current_period_start, s.current_period_end,
-                s.cancel_at_period_end,
+        `SELECT s.id, s.plan_id, s.status, s.created_at, s.current_period_start, s.current_period_end,
+                s.cancel_at_period_end, s.pending_plan_id, s.pending_plan_starts_at,
                 p.name AS plan_name, p.price_cents, p.currency,
                 pf.feature_key
          FROM subscriptions s
@@ -119,8 +121,16 @@ async function loadOrgEntitlements(orgId: any, email?: any) {
 
     
     
-    const primary = validRows[0];
-    for (const r of validRows) {
+    // One plan per account: the earliest active subscription is the current plan. A later one can only come from a
+    // duplicate checkout, so it is not shown and grants nothing (plan changes go through a schedule on this one).
+    const primary = validRows.reduce((a, b) =>
+        new Date(b.created_at).getTime() < new Date(a.created_at).getTime() ? b : a
+    );
+    const primaryRows = validRows.filter((r) => r.id === primary.id);
+    if (validRows.some((r) => r.id !== primary.id)) {
+        console.warn('[entitlements] account has more than one active subscription; using', primary.id, { orgId, email });
+    }
+    for (const r of primaryRows) {
         if (r.feature_key) featureSet.add(r.feature_key);
     }
 
@@ -130,7 +140,7 @@ async function loadOrgEntitlements(orgId: any, email?: any) {
     }
 
     const cancelAtPeriodEnd = Boolean(primary.cancel_at_period_end);
-    const activeSubscriptions = dedupeActiveSubscriptions(validRows);
+    const activeSubscriptions = dedupeActiveSubscriptions(primaryRows);
 
     return {
         planId: primary.plan_id,
@@ -339,17 +349,38 @@ async function syncStripeSubscriptionRecord(stripeSub: any) {
               ? 'canceled'
               : String(stripeSub.status || 'active');
 
+    // Plan follows the subscription's price (lookup_key = planId), so a scheduled plan change lands here when it starts.
+    const price = stripeSub.items?.data?.[0]?.price;
+    const pricePlanId = String(price?.lookup_key || price?.metadata?.planId || stripeSub.metadata?.plan_id || '').trim();
+    const planId = isValidPlanId(pricePlanId) ? pricePlanId : null;
+    // No schedule left = the scheduled change has started or was released, so nothing is pending any more.
+    const scheduleId = typeof stripeSub.schedule === 'string' ? stripeSub.schedule : stripeSub.schedule?.id || null;
+
+    const { rows: before } = await query(
+        `SELECT plan_id, org_id FROM subscriptions WHERE stripe_subscription_id = $1 LIMIT 1`,
+        [stripeSub.id]
+    );
+
     const { rows } = await query(
         `UPDATE subscriptions
          SET status = $2,
              cancel_at_period_end = $3,
              current_period_start = COALESCE($4, current_period_start),
              current_period_end = COALESCE($5, current_period_end),
+             plan_id = COALESCE($6, plan_id),
+             pending_plan_id = CASE WHEN $7::text IS NULL OR pending_plan_id = COALESCE($6, plan_id) THEN NULL ELSE pending_plan_id END,
+             pending_plan_starts_at = CASE WHEN $7::text IS NULL OR pending_plan_id = COALESCE($6, plan_id) THEN NULL ELSE pending_plan_starts_at END,
+             stripe_schedule_id = $7,
              updated_at = NOW()
          WHERE stripe_subscription_id = $1
          RETURNING *`,
-        [stripeSub.id, status, cancelAtPeriodEnd, periodStart, periodEnd]
+        [stripeSub.id, status, cancelAtPeriodEnd, periodStart, periodEnd, planId, scheduleId]
     );
+
+    const previousPlanId = String(before[0]?.plan_id || '');
+    if (planId && before[0]?.org_id && isBookingOnlyPlan(previousPlanId) && planId === 'complete-growth-system') {
+        await markLocalSeoUpgradePending(String(before[0].org_id)).catch(() => {});
+    }
     return rows[0] || null;
 }
 

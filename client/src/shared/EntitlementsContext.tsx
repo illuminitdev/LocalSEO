@@ -14,6 +14,10 @@ export type ActiveSubscription = {
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
     status: string;
+    /** Plan the subscription switches to when the current period ends (scheduled in Stripe). */
+    pendingPlanId?: string | null;
+    pendingPlanName?: string | null;
+    pendingPlanStartsAt?: string | null;
 };
 
 export type EntitlementsState = {
