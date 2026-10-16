@@ -536,11 +536,6 @@ async function resolvePlanStripePriceId(stripe: Stripe, planId: string): Promise
         ) || search.data[0];
     return match?.id || null;
 }
-
-/**
- * Opens Stripe Checkout for the selected plan (same hosted page as marketing pricing).
- * Authenticated portal users — no OTP; email/customer come from the signed-in account.
- */
 router.post('/subscription/checkout', requireAuth, async (req: Request, res: Response) => {
     try {
         const planId = String(req.body?.planId || '').trim();

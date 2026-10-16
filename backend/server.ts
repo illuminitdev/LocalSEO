@@ -1738,7 +1738,7 @@ app.get('/api/rank/state', requireAuth, hydrateOrgFromDb, requireFeature('local_
 
 type MonthlyAdds = { periodStart: string; keywords: string[]; prompts: string[]; locations: number };
 
-
+/** What this business has added this billing month. */
 async function monthlyAdds(req: any, dash: any): Promise<{ adds: MonthlyAdds; period: { start: string; end: string } }> {
     const period = await billingPeriod(req);
     let adds: MonthlyAdds = dash.monthlyAdds;
@@ -3017,21 +3017,6 @@ app.post('/api/llm/tracker/check', ...llmGate, async (req, res) => {
 });
 
 // ── AI Insights overview (prioritized actions, growth strategy, pack share vs competitors) ──
-// Everything the AI Insights page needs in one shape; used by every route that returns the page data.
-/** When the next AI Insights refresh is allowed: the end of the billing month once this month's refresh is done. */
-function insightsNextCheck(dash: any): string | null {
-    const period = dash?.insightsPeriod;
-    // The paid refresh time (kept even if the report is deleted from history), else the latest report's date.
-    const at = dash?.insightsRefreshAt || dash?.aiInsights?.createdAt;
-    if (!period?.start || !at) return null;
-    return new Date(at).getTime() >= new Date(period.start).getTime() ? period.end : null;
-}
-
-/** Stamps the billing month on the dashboard so the insights payload and the refresh check use the same month. */
-async function stampInsightsPeriod(req: any, dash: any) {
-    dash.insightsPeriod = await billingPeriod(req);
-}
-
 function insightsPayload(dash: any, trackerKeywords: TrackerKeyword[] = trackerList(dash)) {
     const state = dash.insightActionState || {};
     const now = Date.now();
@@ -3052,8 +3037,8 @@ function insightsPayload(dash: any, trackerKeywords: TrackerKeyword[] = trackerL
         ...computeChanges(history),
         trackerMoves: summarizeTracker(trackerKeywords).moves,
         cost: CREDIT_COSTS.aiInsights,
-        // One refresh per billing month: after it, the saved insights are shown until the month resets.
-        nextCheckAt: insightsNextCheck(dash)
+        cooldownHours: SCAN_COOLDOWN_HOURS,
+        nextCheckAt: cooldownEnds(dash.aiInsights?.createdAt, SCAN_COOLDOWN_HOURS)
     };
 }
 
@@ -3067,9 +3052,7 @@ async function insightsTracker(req: any): Promise<TrackerKeyword[]> {
 
 app.get('/api/ai/insights', ...growthReportingGate, async (_req, res) => {
     try {
-        const dash: any = (_req as any).dashboardState || dashboardState;
-        await stampInsightsPeriod(_req, dash);
-        res.json(insightsPayload(dash, await insightsTracker(_req)));
+        res.json(insightsPayload((_req as any).dashboardState || dashboardState, await insightsTracker(_req)));
     } catch (err: any) {
         res.status(500).json({ error: errMessage(err) });
     }
@@ -3085,7 +3068,6 @@ app.post('/api/ai/insights/action', ...growthReportingGate, async (req, res) => 
     else next[id] = { status, at: new Date().toISOString() };
     dash.insightActionState = next;
     await saveOrgToDb(req);
-    await stampInsightsPeriod(req, dash);
     res.json(insightsPayload(dash, await insightsTracker(req)));
 });
 
@@ -3111,19 +3093,11 @@ app.post('/api/ai/insights/plan', ...growthReportingGate, async (req, res) => {
     try {
         const keywords = await insightsPlan(String((req as any).orgId || ''));
         if (!keywords.length) return res.status(400).json({ error: 'Add a business category on the Business profile page first.' });
-        await stampInsightsPeriod(req, dash);
-        const next = insightsNextCheck(dash);
-        if (next) {
-            return res.status(409).json({
-                error: `AI Insights were already refreshed this month. Showing the saved insights. You can refresh again after ${resetDay(next)}.`,
-                code: 'already_refreshed',
-                nextAvailableAt: next
-            });
-        }
+        const next = cooldownEnds(dash.aiInsights?.createdAt, SCAN_COOLDOWN_HOURS);
+        if (next) return sendCooldown(res, next, 'The Map Pack check');
         const ref = `insights:${randomUUID()}`;
         await spend(req, 'aiInsights', CREDIT_COSTS.aiInsights, ref);
         dash.insightRun = { ref, at: new Date().toISOString() };
-        dash.insightsRefreshAt = dash.insightRun.at;
         await saveOrgToDb(req);
         res.json({ keywords, cost: CREDIT_COSTS.aiInsights });
     } catch (err: any) {
@@ -3223,7 +3197,6 @@ app.post('/api/ai/insights/finish', ...growthReportingGate, async (req, res) => 
         dash.aiInsightsHistory = [latest, ...history].slice(0, 30);
         dash.insightRun = null;
         await saveOrgToDb(req);
-        await stampInsightsPeriod(req, dash);
         res.json(insightsPayload(dash, trackerForPrompt));
     } catch (err: any) {
         // The refresh did not produce a result: give the credits back (once) and close the paid window.
@@ -3231,8 +3204,6 @@ app.post('/api/ai/insights/finish', ...growthReportingGate, async (req, res) => 
         if (runRef) {
             await refundOnce(req, 'aiInsights', CREDIT_COSTS.aiInsights, runRef, 'refresh failed').catch(() => undefined);
             dash.insightRun = null;
-            // Refunded, so it does not use up this month's refresh.
-            delete dash.insightsRefreshAt;
             await saveOrgToDb(req).catch(() => undefined);
         }
         console.error('AI insights finish error:', errMessage(err));
@@ -3247,7 +3218,6 @@ app.delete('/api/ai/insights/history', ...growthReportingGate, async (req, res) 
     dash.aiInsightsHistory = history;
     dash.aiInsights = history.find((h: any) => h?.share) || null;
     await saveOrgToDb(req);
-    await stampInsightsPeriod(req, dash);
     res.json(insightsPayload(dash, await insightsTracker(req)));
 });
 
@@ -3280,8 +3250,6 @@ app.post('/api/dashboard/update-stats', requireAuth, hydrateOrgFromDb, requireFe
     await saveOrgToDb(req);
     res.json({ success: true, stats: dashboardState });
 });
-
-
 
 
 app.use('/api/auth', authRouter);
