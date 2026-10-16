@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { API_BASE } from '../../shared/apiConfig';
+import { API_BASE, resolveMarketingUrl } from '../../shared/apiConfig';
 
 type ResultState = {
     ok: boolean;
@@ -14,6 +14,7 @@ export default function PublicRequestFullAudit() {
     const { token } = useParams();
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
+    const [redirecting, setRedirecting] = useState(false);
     const [result, setResult] = useState<ResultState | null>(null);
 
     useEffect(() => {
@@ -73,6 +74,14 @@ export default function PublicRequestFullAudit() {
         };
     }, [token]);
 
+    useEffect(() => {
+        if (!redirecting) return;
+        const timer = window.setTimeout(() => {
+            window.location.replace(resolveMarketingUrl());
+        }, 2000);
+        return () => window.clearTimeout(timer);
+    }, [redirecting]);
+
     const handleConfirmRequest = async () => {
         const t = String(token || '').trim();
         if (!t || submitting) return;
@@ -106,6 +115,7 @@ export default function PublicRequestFullAudit() {
                     alreadyRequested: true,
                     businessName: String(data.businessName || result?.businessName || '')
                 });
+                setRedirecting(true);
             }
         } catch {
             setResult({
@@ -189,7 +199,9 @@ export default function PublicRequestFullAudit() {
                 ) : null}
 
                 <div className="px-7 pt-5 pb-7">
-                    <p className="text-[13px] leading-relaxed text-[#9CA3AF] m-0">You can close this tab.</p>
+                    <p className="text-[13px] leading-relaxed text-[#9CA3AF] m-0">
+                        {redirecting ? 'Redirecting you to ZappSites…' : 'You can close this tab.'}
+                    </p>
                 </div>
             </div>
         </div>

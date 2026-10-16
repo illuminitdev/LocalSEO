@@ -66,6 +66,7 @@ import {
     markLeadObservationEmailClicked,
     getLeadObservationEmailSendByToken
 } from '../lib/leadObservationEmailSends';
+import { zappSitesOrigin } from '../lib/zappSitesAuditProxy';
 import { ensureCrmTables } from '../sales-agent/sales';
 
 function frontendOrigin() {
@@ -1240,8 +1241,11 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             });
         }
 
-        // If standard browser form POST, redirect back to GET view so user sees confirmed state
-        return res.redirect(303, `${apiPublicOrigin()}/api/public/lead-full-audit-request/${token}`);
+        // Invalid link → confirmation/error page; success → marketing home
+        if (!details) {
+            return res.redirect(303, `${apiPublicOrigin()}/api/public/lead-full-audit-request/${token}`);
+        }
+        return res.redirect(303, `${zappSitesOrigin()}/`);
     });
 
     router.post('/:hostSlug/upload-url', async (req: Request, res: Response) => {
