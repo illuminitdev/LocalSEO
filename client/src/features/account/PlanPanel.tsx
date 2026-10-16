@@ -59,9 +59,20 @@ function StatusBadge({ status, cancelsOn }: { status: string; cancelsOn: string 
     );
 }
 
-function PlanCard({ sub, onAdjust }: { sub: ActiveSubscription; onAdjust: () => void }) {
+function PlanCard({
+    sub,
+    onAdjust,
+    onKeepCurrent,
+    keepBusy
+}: {
+    sub: ActiveSubscription;
+    onAdjust: () => void;
+    onKeepCurrent: () => void;
+    keepBusy: boolean;
+}) {
     const periodEnd = formatDate(sub.currentPeriodEnd, 'long');
     const price = sub.priceLabel || formatPlanPrice(PLANS.find((p) => p.id === sub.planId) || null);
+    const pendingStarts = formatDate(sub.pendingPlanStartsAt, 'long');
     return (
         <div className={cn(cardClass, 'flex flex-wrap items-center justify-between gap-4')}>
             <div className="min-w-0 flex-1">
@@ -76,12 +87,30 @@ function PlanCard({ sub, onAdjust }: { sub: ActiveSubscription; onAdjust: () => 
                 {PLAN_DESCRIPTIONS[sub.planId] && (
                     <p className="mt-2 text-sm text-[#475569]">{PLAN_DESCRIPTIONS[sub.planId]}</p>
                 )}
-                {periodEnd && (
-                    <p className="mt-1.5 text-sm text-[#475569]">
-                        {sub.cancelAtPeriodEnd
-                            ? `Your subscription will cancel on ${periodEnd}.`
-                            : `Your plan renews on ${periodEnd}.`}
-                    </p>
+                {sub.pendingPlanId ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        <span>
+                            Switching to <span className="font-semibold">{sub.pendingPlanName || sub.pendingPlanId}</span>
+                            {pendingStarts ? ` on ${pendingStarts}` : ' when this period ends'}. You keep {sub.planName}{' '}
+                            until then.
+                        </span>
+                        <button
+                            type="button"
+                            onClick={onKeepCurrent}
+                            disabled={keepBusy}
+                            className="font-semibold underline underline-offset-2 hover:no-underline disabled:opacity-60"
+                        >
+                            {keepBusy ? 'Cancelling…' : 'Keep current plan'}
+                        </button>
+                    </div>
+                ) : (
+                    periodEnd && (
+                        <p className="mt-1.5 text-sm text-[#475569]">
+                            {sub.cancelAtPeriodEnd
+                                ? `Your subscription will cancel on ${periodEnd}.`
+                                : `Your plan renews on ${periodEnd}.`}
+                        </p>
+                    )
                 )}
             </div>
             <button type="button" onClick={onAdjust} className={buttonClass}>
@@ -93,12 +122,15 @@ function PlanCard({ sub, onAdjust }: { sub: ActiveSubscription; onAdjust: () => 
 
 function PlansModal({
     currentPlanIds,
+    switching,
     busyPlanId,
     error,
     onChoose,
     onClose
 }: {
     currentPlanIds: string[];
+    /** Changing an existing plan: the new one starts when the current period ends. */
+    switching?: { periodEnd: string; pendingPlanId: string | null } | null;
     busyPlanId: string | null;
     error?: string;
     onChoose: (planId: string) => void;
@@ -111,6 +143,10 @@ function PlansModal({
     }, [onClose]);
 
     const anyBusy = Boolean(busyPlanId);
+    /** Plan picked while changing an existing plan, waiting for the user to confirm the start date. */
+    const [confirmId, setConfirmId] = useState<string | null>(null);
+    const confirmPlan = PLANS.find((p) => p.id === confirmId) || null;
+    const startsOn = switching?.periodEnd || '';
 
     return (
         <div
@@ -127,9 +163,11 @@ function PlansModal({
                     <div>
                         <h2 className="text-xl font-black tracking-tight text-[#0F172A]">Choose your plan</h2>
                         <p className="text-sm text-[#64748B] mt-1">
-                            Plan changes are handled securely by Stripe.
+                            {switching
+                                ? `Your current plan stays active${startsOn ? ` until ${startsOn}` : ' until this billing period ends'}. A new plan starts after that.`
+                                : 'Plan changes are handled securely by Stripe.'}
                         </p>
-                        {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+                        {error && !confirmPlan && <p className="text-sm text-red-600 mt-2">{error}</p>}
                     </div>
                     <button
                         type="button"
@@ -144,6 +182,7 @@ function PlansModal({
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     {PLANS.map((p) => {
                         const current = currentPlanIds.includes(p.id);
+                        const scheduled = !current && switching?.pendingPlanId === p.id;
                         const features = PLAN_FEATURES[p.id] || [];
                         const opening = busyPlanId === p.id;
                         return (
@@ -156,9 +195,9 @@ function PlansModal({
                             >
                                 <div className="flex items-start justify-between gap-2">
                                     <p className="text-base font-bold text-[#0F172A]">{p.name}</p>
-                                    {current && (
+                                    {(current || scheduled) && (
                                         <span className="shrink-0 rounded-md bg-[var(--brand-primary-soft,#FEF3C7)] px-2 py-0.5 text-[11px] font-semibold text-[#92400E]">
-                                            Current plan
+                                            {current ? 'Current plan' : 'Scheduled'}
                                         </span>
                                     )}
                                 </div>
@@ -186,30 +225,90 @@ function PlansModal({
                                 </ul>
                                 <button
                                     type="button"
-                                    disabled={current || anyBusy}
-                                    onClick={() => onChoose(p.id)}
+                                    disabled={current || scheduled || anyBusy}
+                                    onClick={() => (switching ? setConfirmId(p.id) : onChoose(p.id))}
                                     className={cn(
                                         'mt-5 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors',
-                                        current
+                                        current || scheduled
                                             ? 'border border-[#E2E8F0] bg-white text-[#94A3B8] cursor-default'
                                             : 'text-white shadow-sm hover:opacity-90',
                                         // Only the clicked plan fades; other plans stay solid while disabled.
                                         opening && 'opacity-60'
                                     )}
-                                    style={current ? undefined : { background: 'var(--brand-primary, #F59E0B)' }}
+                                    style={current || scheduled ? undefined : { background: 'var(--brand-primary, #F59E0B)' }}
                                 >
-                                    {current ? 'Your current plan' : opening ? 'Opening…' : 'Choose plan'}
+                                    {current
+                                        ? 'Your current plan'
+                                        : scheduled
+                                          ? `Starts ${startsOn || 'next period'}`
+                                          : opening && !switching
+                                            ? 'Opening…'
+                                            : switching
+                                              ? 'Change plan'
+                                              : 'Choose plan'}
                                 </button>
                             </div>
                         );
                     })}
                 </div>
             </div>
+
+            {confirmPlan && (
+                <div
+                    className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/40 p-4"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (!anyBusy) setConfirmId(null);
+                    }}
+                >
+                    <div
+                        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+                        role="alertdialog"
+                        aria-modal="true"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <p className="text-lg font-black tracking-tight text-[#0F172A]">Change to {confirmPlan.name}?</p>
+                        <ul className="mt-3 space-y-2 text-sm text-[#475569]">
+                            <li>
+                                Your current plan stays active{startsOn ? ` until ${startsOn}` : ' until this billing period ends'}.
+                            </li>
+                            <li>
+                                <span className="font-semibold text-[#0F172A]">{confirmPlan.name}</span> starts
+                                {startsOn ? ` on ${startsOn}` : ' when it ends'}, after your current plan.
+                            </li>
+                            <li>
+                                You'll be charged £{(confirmPlan.priceCents / 100).toFixed(0)}/mo from that date with your
+                                saved card. Nothing is charged today.
+                            </li>
+                        </ul>
+                        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+                        <div className="mt-6 flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setConfirmId(null)}
+                                disabled={anyBusy}
+                                className={buttonClass}
+                            >
+                                Back
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => onChoose(confirmPlan.id)}
+                                disabled={anyBusy}
+                                className="rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-60"
+                                style={{ background: 'var(--brand-primary, #F59E0B)' }}
+                            >
+                                {anyBusy ? 'Saving…' : 'Confirm change'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
 
-/** Account → Plan: current plan, payment, included credit usage and invoice history. */
+
 export default function PlanPanel() {
     const {
         planId,
@@ -219,13 +318,17 @@ export default function PlanPanel() {
         currentPeriodEnd,
         cancelAtPeriodEnd,
         activeSubscriptions,
-        entitlementsDisabled
+        entitlementsDisabled,
+        refresh
     } = useEntitlements();
     const { summary, hasPool } = useCredits();
     const [portalBusy, setPortalBusy] = useState(false);
     const [checkoutBusyPlanId, setCheckoutBusyPlanId] = useState<string | null>(null);
     const [portalErr, setPortalErr] = useState('');
     const [plansOpen, setPlansOpen] = useState(false);
+    /** The plan card whose "Adjust plan" opened the modal (null = no plan yet, so checkout). */
+    const [adjustingSub, setAdjustingSub] = useState<ActiveSubscription | null>(null);
+    const [keepBusyId, setKeepBusyId] = useState<string | null>(null);
     const [invoices, setInvoices] = useState<Invoice[] | null>(null);
 
     const subs: ActiveSubscription[] =
@@ -269,7 +372,7 @@ export default function PlanPanel() {
         }
     };
 
-    /** Same hosted Checkout as ZappSites pricing (plan left, card form right). */
+    
     const openPlanCheckout = async (planId: string) => {
         setCheckoutBusyPlanId(planId);
         setPortalErr('');
@@ -285,19 +388,69 @@ export default function PlanPanel() {
         }
     };
 
+    /** Existing plan: schedule the new one for the end of the current period instead of a second subscription. */
+    const choosePlan = async (planId: string) => {
+        const sub = adjustingSub;
+        // Fallback card built from the primary plan has no real subscription id.
+        if (!sub || !activeSubscriptions.some((s) => s.id === sub.id)) return openPlanCheckout(planId);
+        setCheckoutBusyPlanId(planId);
+        setPortalErr('');
+        try {
+            await apiPost('/api/auth/subscription/change', { subscriptionId: sub.id, planId });
+            await refresh();
+            setCheckoutBusyPlanId(null);
+            setPlansOpen(false);
+            setAdjustingSub(null);
+        } catch (err: any) {
+            setPortalErr(err?.message || 'Could not change the plan');
+            setCheckoutBusyPlanId(null);
+        }
+    };
+
+    const keepCurrentPlan = async (sub: ActiveSubscription) => {
+        setKeepBusyId(sub.id);
+        setPortalErr('');
+        try {
+            await apiPost('/api/auth/subscription/change/cancel', { subscriptionId: sub.id });
+            await refresh();
+        } catch (err: any) {
+            setPortalErr(err?.message || 'Could not cancel the plan change');
+        } finally {
+            setKeepBusyId(null);
+        }
+    };
+
     const usageRows = hasPool && summary ? summary.breakdown.filter((r) => r.credits > 0) : [];
     const pct = (n: number) => `${((n / Math.max(1, summary?.allowance || 1)) * 100).toFixed(1)}%`;
 
     return (
         <div className="space-y-5">
             {subs.length ? (
-                subs.map((sub) => <PlanCard key={sub.id} sub={sub} onAdjust={() => setPlansOpen(true)} />)
+                subs.map((sub) => (
+                    <PlanCard
+                        key={sub.id}
+                        sub={sub}
+                        onAdjust={() => {
+                            setAdjustingSub(sub);
+                            setPlansOpen(true);
+                        }}
+                        onKeepCurrent={() => keepCurrentPlan(sub)}
+                        keepBusy={keepBusyId === sub.id}
+                    />
+                ))
             ) : (
                 <div className={cn(cardClass, 'flex flex-wrap items-center justify-between gap-4')}>
                     <p className="text-sm text-[#64748B]">
                         No active plan on this account. Choose a plan to unlock local SEO and booking tools.
                     </p>
-                    <button type="button" onClick={() => setPlansOpen(true)} className={buttonClass}>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setAdjustingSub(null);
+                            setPlansOpen(true);
+                        }}
+                        className={buttonClass}
+                    >
                         View plans
                     </button>
                 </div>
@@ -429,13 +582,22 @@ export default function PlanPanel() {
 
             {plansOpen && (
                 <PlansModal
-                    currentPlanIds={subs.map((s) => s.planId)}
+                    currentPlanIds={adjustingSub ? [adjustingSub.planId] : subs.map((s) => s.planId)}
+                    switching={
+                        adjustingSub
+                            ? {
+                                  periodEnd: formatDate(adjustingSub.currentPeriodEnd, 'long'),
+                                  pendingPlanId: adjustingSub.pendingPlanId || null
+                              }
+                            : null
+                    }
                     busyPlanId={checkoutBusyPlanId}
                     error={portalErr}
-                    onChoose={openPlanCheckout}
+                    onChoose={choosePlan}
                     onClose={() => {
                         if (checkoutBusyPlanId) return;
                         setPlansOpen(false);
+                        setAdjustingSub(null);
                         setPortalErr('');
                     }}
                 />
