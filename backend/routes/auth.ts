@@ -12,7 +12,14 @@ import {
     allowDevSubscriptionWrites,
     setOrgAutopay
 } from '../middleware/entitlements';
-import { PLANS, getPlanById, formatPrice, FEATURE_LABELS, getFeaturesForPlan } from '../lib/planCatalog';
+import {
+    PLANS,
+    getPlanById,
+    formatPrice,
+    FEATURE_LABELS,
+    getFeaturesForPlan,
+    isValidPlanId
+} from '../lib/planCatalog';
 import Stripe from 'stripe';
 import {
     industryIdFromPaymentCheckoutSession,
@@ -506,6 +513,112 @@ async function resolveStripeCustomer(stripe: any, req: Request): Promise<{ custo
     }
     return { customerId, stripeSubId };
 }
+
+/** Resolve Stripe Price id for a plan (lookup_key = planId, same as ZappSites). */
+async function resolvePlanStripePriceId(stripe: Stripe, planId: string): Promise<string | null> {
+    const byLookup = await stripe.prices.list({ lookup_keys: [planId], active: true, limit: 1 });
+    if (byLookup.data[0]?.id) return byLookup.data[0].id;
+
+    const plan = getPlanById(planId);
+    if (!plan) return null;
+    const search = await stripe.prices
+        .search({
+            query: `active:'true' AND metadata['planId']:'${planId}'`,
+            limit: 5
+        })
+        .catch(() => ({ data: [] as Stripe.Price[] }));
+    const match =
+        search.data.find(
+            (p) =>
+                p.unit_amount === plan.priceCents &&
+                p.currency === 'gbp' &&
+                p.recurring?.interval === 'month'
+        ) || search.data[0];
+    return match?.id || null;
+}
+
+/**
+ * Opens Stripe Checkout for the selected plan (same hosted page as marketing pricing).
+ * Authenticated portal users — no OTP; email/customer come from the signed-in account.
+ */
+router.post('/subscription/checkout', requireAuth, async (req: Request, res: Response) => {
+    try {
+        const planId = String(req.body?.planId || '').trim();
+        if (!planId || !isValidPlanId(planId)) {
+            return res.status(400).json({ error: 'A valid planId is required.' });
+        }
+
+        const stripe = getStripeClient();
+        if (!stripe) return res.status(400).json({ error: 'Billing is not configured.' });
+
+        const orgId = (req as any).orgId as string | undefined;
+        const email = String((req as any).user?.email || '').trim();
+        const fullName = String((req as any).user?.name || email.split('@')[0] || 'Customer').trim();
+        if (!email) {
+            return res.status(400).json({ error: 'Your account has no email for checkout.' });
+        }
+
+        let bookingIndustryId: string | null = null;
+        if (isBookingPlanId(planId) && orgId) {
+            const { rows } = await query(
+                `SELECT booking_industry_id FROM organizations WHERE id = $1`,
+                [orgId]
+            ).catch(() => ({ rows: [] as any[] }));
+            bookingIndustryId = normalizeBookingIndustryId(rows[0]?.booking_industry_id);
+            if (!bookingIndustryId) {
+                return res.status(400).json({
+                    error: 'Select your business type in Account settings before switching to a booking plan.'
+                });
+            }
+        }
+
+        const { customerId: stripeCustomerId } = await resolveStripeCustomer(stripe, req);
+        const priceId = await resolvePlanStripePriceId(stripe, planId);
+        if (!priceId) {
+            return res.status(404).json({
+                error: 'Stripe price not found for this plan. Sync plans in ZappSites Payment first.'
+            });
+        }
+
+        const returnUrl = String(req.body?.returnUrl || req.headers.origin || '').trim();
+        const base = returnUrl ? returnUrl.split('#')[0] : '';
+        const successUrl = base
+            ? `${base}${base.includes('?') ? '&' : '?'}plan_checkout=1&session_id={CHECKOUT_SESSION_ID}#plan`
+            : undefined;
+        const cancelUrl = returnUrl || undefined;
+
+        // Metadata matches ZappSites Payment webhook (checkout.session.completed).
+        const meta: Record<string, string> = {
+            plan_id: planId,
+            customer_email: email,
+            full_name: fullName,
+            phone: '',
+            ...(bookingIndustryId ? { booking_industry_id: bookingIndustryId } : {}),
+            ...(orgId ? { org_id: orgId } : {})
+        };
+
+        const session = await stripe.checkout.sessions.create({
+            mode: 'subscription',
+            allow_promotion_codes: true,
+            ...(stripeCustomerId
+                ? { customer: stripeCustomerId }
+                : { customer_email: email }),
+            line_items: [{ price: priceId, quantity: 1 }],
+            metadata: meta,
+            subscription_data: { metadata: meta },
+            ...(successUrl ? { success_url: successUrl } : {}),
+            ...(cancelUrl ? { cancel_url: cancelUrl } : {})
+        });
+
+        if (!session.url) {
+            return res.status(500).json({ error: 'Stripe did not return a checkout URL.' });
+        }
+        res.json({ url: session.url });
+    } catch (err: any) {
+        console.error('Subscription checkout error:', err);
+        res.status(400).json({ error: err.message || 'Could not open Stripe checkout' });
+    }
+});
 
 router.post('/subscription/portal', requireAuth, async (req: Request, res: Response) => {
     try {

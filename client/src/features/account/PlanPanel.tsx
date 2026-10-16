@@ -93,13 +93,15 @@ function PlanCard({ sub, onAdjust }: { sub: ActiveSubscription; onAdjust: () => 
 
 function PlansModal({
     currentPlanIds,
-    busy,
+    busyPlanId,
+    error,
     onChoose,
     onClose
 }: {
     currentPlanIds: string[];
-    busy: boolean;
-    onChoose: () => void;
+    busyPlanId: string | null;
+    error?: string;
+    onChoose: (planId: string) => void;
     onClose: () => void;
 }) {
     useEffect(() => {
@@ -107,6 +109,8 @@ function PlansModal({
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
     }, [onClose]);
+
+    const anyBusy = Boolean(busyPlanId);
 
     return (
         <div
@@ -125,12 +129,14 @@ function PlansModal({
                         <p className="text-sm text-[#64748B] mt-1">
                             Plan changes are handled securely by Stripe.
                         </p>
+                        {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
                     </div>
                     <button
                         type="button"
                         onClick={onClose}
                         aria-label="Close"
-                        className="rounded-lg p-1.5 text-[#64748B] hover:bg-white hover:text-[#0F172A]"
+                        disabled={anyBusy}
+                        className="rounded-lg p-1.5 text-[#64748B] hover:bg-white hover:text-[#0F172A] disabled:opacity-50"
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -139,6 +145,7 @@ function PlansModal({
                     {PLANS.map((p) => {
                         const current = currentPlanIds.includes(p.id);
                         const features = PLAN_FEATURES[p.id] || [];
+                        const opening = busyPlanId === p.id;
                         return (
                             <div
                                 key={p.id}
@@ -179,17 +186,19 @@ function PlansModal({
                                 </ul>
                                 <button
                                     type="button"
-                                    disabled={current || busy}
-                                    onClick={onChoose}
+                                    disabled={current || anyBusy}
+                                    onClick={() => onChoose(p.id)}
                                     className={cn(
                                         'mt-5 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors',
                                         current
                                             ? 'border border-[#E2E8F0] bg-white text-[#94A3B8] cursor-default'
-                                            : 'text-white shadow-sm hover:opacity-90 disabled:opacity-60'
+                                            : 'text-white shadow-sm hover:opacity-90',
+                                        // Only the clicked plan fades; other plans stay solid while disabled.
+                                        opening && 'opacity-60'
                                     )}
                                     style={current ? undefined : { background: 'var(--brand-primary, #F59E0B)' }}
                                 >
-                                    {current ? 'Your current plan' : busy ? 'Opening…' : 'Choose plan'}
+                                    {current ? 'Your current plan' : opening ? 'Opening…' : 'Choose plan'}
                                 </button>
                             </div>
                         );
@@ -214,6 +223,7 @@ export default function PlanPanel() {
     } = useEntitlements();
     const { summary, hasPool } = useCredits();
     const [portalBusy, setPortalBusy] = useState(false);
+    const [checkoutBusyPlanId, setCheckoutBusyPlanId] = useState<string | null>(null);
     const [portalErr, setPortalErr] = useState('');
     const [plansOpen, setPlansOpen] = useState(false);
     const [invoices, setInvoices] = useState<Invoice[] | null>(null);
@@ -245,19 +255,33 @@ export default function PlanPanel() {
             .catch(() => setInvoices([]));
     }, [entitlementsDisabled]);
 
-    const openBillingPortal = async (flow?: 'update') => {
+    const openBillingPortal = async () => {
         setPortalBusy(true);
         setPortalErr('');
         try {
             const { url } = await apiPost('/api/auth/subscription/portal', {
-                returnUrl: window.location.href,
-                ...(flow ? { flow } : {})
+                returnUrl: window.location.href
             });
             window.location.href = url;
         } catch (err: any) {
             setPortalErr(err?.message || 'Could not open billing portal');
             setPortalBusy(false);
-            setPlansOpen(false);
+        }
+    };
+
+    /** Same hosted Checkout as ZappSites pricing (plan left, card form right). */
+    const openPlanCheckout = async (planId: string) => {
+        setCheckoutBusyPlanId(planId);
+        setPortalErr('');
+        try {
+            const { url } = await apiPost('/api/auth/subscription/checkout', {
+                planId,
+                returnUrl: window.location.href
+            });
+            window.location.href = url;
+        } catch (err: any) {
+            setPortalErr(err?.message || 'Could not open Stripe checkout');
+            setCheckoutBusyPlanId(null);
         }
     };
 
@@ -286,8 +310,13 @@ export default function PlanPanel() {
                         <p className="text-sm text-[#475569] mt-1">Update your payment details</p>
                         {portalErr && <p className="text-xs text-red-600 mt-1.5">{portalErr}</p>}
                     </div>
-                    <button type="button" onClick={() => openBillingPortal()} disabled={portalBusy} className={buttonClass}>
-                        {portalBusy && !plansOpen ? 'Opening…' : 'Manage in Stripe'}
+                    <button
+                        type="button"
+                        onClick={() => openBillingPortal()}
+                        disabled={portalBusy || Boolean(checkoutBusyPlanId)}
+                        className={buttonClass}
+                    >
+                        {portalBusy ? 'Opening…' : 'Manage in Stripe'}
                     </button>
                 </div>
             )}
@@ -401,9 +430,14 @@ export default function PlanPanel() {
             {plansOpen && (
                 <PlansModal
                     currentPlanIds={subs.map((s) => s.planId)}
-                    busy={portalBusy}
-                    onChoose={() => openBillingPortal('update')}
-                    onClose={() => setPlansOpen(false)}
+                    busyPlanId={checkoutBusyPlanId}
+                    error={portalErr}
+                    onChoose={openPlanCheckout}
+                    onClose={() => {
+                        if (checkoutBusyPlanId) return;
+                        setPlansOpen(false);
+                        setPortalErr('');
+                    }}
                 />
             )}
         </div>
