@@ -36,6 +36,7 @@ import {
     deleteAdminCrmLead,
     bulkDeleteAdminCrmLeads,
     fetchAdminExcelBatches,
+    resumeAdminLeadEnrichment,
     type ExcelImportBatch
 } from './adminApi';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
@@ -864,6 +865,23 @@ export default function AdminGrowthAuditLeads() {
         }
     };
 
+    const [isResumingEnrich, setIsResumingEnrich] = useState(false);
+
+    // Restart GBP analysis for leads stuck on "Analyzing" (the selected Excel file, or every upload).
+    const handleResumeEnrich = async () => {
+        setIsResumingEnrich(true);
+        setError('');
+        try {
+            const res = await resumeAdminLeadEnrichment(selectedExcelBatch ? excelBatchFilter : null);
+            window.alert(res.message);
+            await load();
+        } catch (err: any) {
+            setError(err.message || 'Failed to resume analysis');
+        } finally {
+            setIsResumingEnrich(false);
+        }
+    };
+
     const handleAssignThisExcel = () => {
         if (excelBatchFilter === 'all' || !excelBatchLeadIds.length) {
             setError('Select one Excel file that has leads to assign.');
@@ -974,6 +992,19 @@ export default function AdminGrowthAuditLeads() {
                                 >
                                     <Trash2 className="w-3.5 h-3.5 text-red-600" />
                                     <span>{isDeletingExcel ? 'Deleting...' : 'Delete this Excel'}</span>
+                                </button>
+                            )}
+
+                            {hasEnriching && (
+                                <button
+                                    type="button"
+                                    onClick={handleResumeEnrich}
+                                    disabled={isResumingEnrich}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 transition-colors shadow-2xs disabled:opacity-60"
+                                    title="Restart GBP analysis for leads stuck on Analyzing. Only leads not yet analysed are processed."
+                                >
+                                    <Loader2 className={cn('w-3.5 h-3.5 text-indigo-600', isResumingEnrich && 'animate-spin')} />
+                                    <span>Resume analysis</span>
                                 </button>
                             )}
 

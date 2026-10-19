@@ -389,12 +389,27 @@ export class LocalSeoApiStack extends cdk.Stack {
       vpc,
       vpcSubnets: { subnets: privateSubnets },
       securityGroups: [lambdaSg],
-      environment: apiEnvironment,
+      // Needed so a run that hits its ~12 min budget can re-invoke itself for the remaining leads.
+      environment: { ...apiEnvironment, LEAD_ENRICH_FN: `localseo-lead-enrich-${stage}` },
     });
     dbSecret.grantRead(leadEnrichFn);
     dataForSeoLogin.grantRead(leadEnrichFn);
     dataForSeoPassword.grantRead(leadEnrichFn);
     leadEnrichFn.grantInvoke(fn);
+    // Self-invoke permission by name (grantInvoke on itself would create a circular dependency).
+    leadEnrichFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['lambda:InvokeFunction'],
+        resources: [
+          this.formatArn({
+            service: 'lambda',
+            resource: 'function',
+            resourceName: `localseo-lead-enrich-${stage}`,
+            arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+          }),
+        ],
+      })
+    );
 
     const integration = new HttpLambdaIntegration('ApiIntegration', fn);
 

@@ -83,6 +83,11 @@ Every check result + evidence is saved in `sales_leads.enrich_checks`.
 4. Status per lead: `pending` -> `running` -> `done` | `failed` (reason in `enrich_error`).
    The leads page shows "Analyzing" / "GBP failed" and refreshes every 8 s while any lead is in progress.
    `GET /api/admin/crm/leads/enrich-status?batchId=` returns counts for a batch.
+5. The worker Lambda has `LEAD_ENRICH_FN` set to its own name and permission to invoke itself; without that, the
+   ~12 min continuation never runs and the rest of the batch stays on "Analyzing".
+6. **Resume analysis** (leads page, shown while any lead is analysing) calls `POST /api/admin/crm/leads/enrich-resume`
+   (`{ batchId }`, or all batches when no Excel file is selected). It restarts the worker for `pending` leads and
+   `running` leads with no progress for 20+ min; leads already analysed are never re-run.
 
 ## Timing
 About 20-40 s per lead (reviews and posts run in parallel with the website fetch), 5 leads at a time:

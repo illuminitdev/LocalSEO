@@ -15,7 +15,7 @@ import {
     shareInfoForLeadObservation
 } from '../lib/leadObservationEmailSends';
 import { sendLeadObservationsEmail } from '../lib/bookingEmail';
-import { triggerLeadEnrichment, enrichStatusForBatch } from '../lib/leadGbpEnrich';
+import { triggerLeadEnrichment, enrichStatusForBatch, countStuckEnrichment } from '../lib/leadGbpEnrich';
 import { reportShareUrl } from '../lib/zappSitesAuditProxy';
 
 const router = Router();
@@ -1204,6 +1204,25 @@ router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Re
     } catch (err: any) {
         console.error('Admin bulk import error:', err);
         res.status(500).json({ error: err.message || 'Failed to import leads' });
+    }
+});
+
+/**
+ * Admin: restart GBP auto-analysis for leads left pending / stuck running (e.g. the worker stopped).
+ * Only leads not yet analysed are picked up, so nothing is charged twice.
+ */
+router.post('/crm/leads/enrich-resume', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const batchId = String(req.body?.batchId || '').trim() || null;
+        const waiting = await countStuckEnrichment(batchId);
+        if (!waiting) return res.json({ resumed: 0, message: 'No leads are waiting for analysis.' });
+        const ok = await triggerLeadEnrichment(batchId);
+        if (!ok) return res.status(502).json({ error: 'Could not start the analysis worker. Check the lead-enrich Lambda logs.' });
+        res.json({ resumed: waiting, message: `Analysis restarted for ${waiting} lead${waiting === 1 ? '' : 's'}.` });
+    } catch (err: any) {
+        console.error('Enrich resume error:', err);
+        res.status(500).json({ error: err.message || 'Failed to resume analysis' });
     }
 });
 
