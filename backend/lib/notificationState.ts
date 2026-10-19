@@ -8,7 +8,7 @@ export type NotificationItem = {
     body: string;
     time: string;
     link: string;
-    
+    /** Pre-read by source (e.g. review already opened elsewhere). */
     read?: boolean;
 };
 
