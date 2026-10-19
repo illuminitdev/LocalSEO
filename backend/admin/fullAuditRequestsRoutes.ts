@@ -3,6 +3,7 @@ import { requireAdmin } from './adminAuth';
 import { query } from '../lib/db';
 import { ensureCrmTables } from '../sales-agent/sales';
 import { reportShareUrl } from '../lib/zappSitesAuditProxy';
+import { trustedCity } from '../audit-worker/src/lib/searchArea';
 
 const router = Router();
 
@@ -65,10 +66,11 @@ function leadPrefillFromRow(row: any) {
         payload.primaryService,
         payload.businessType
     );
+    const address = firstText(row.lead_address, payload.address);
     return {
         businessName,
-        address: firstText(row.lead_address, payload.address),
-        city: firstText(payload.city, payload.town, payload.area),
+        address,
+        city: trustedCity(firstText(payload.city, payload.town, payload.area), address),
         website: firstText(row.lead_website, payload.website),
         phone: firstText(row.lead_phone, payload.phone, customer.phone),
         email: firstText(row.to_email, row.lead_email, payload.email, customer.email),

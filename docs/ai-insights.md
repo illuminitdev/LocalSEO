@@ -57,4 +57,6 @@ The Past Map Pack checks box shows the latest 5 runs. Each row has a delete (tra
 
 ## Credits and cooldown
 
-A refresh costs **6 credits**, taken when the check starts (`/plan`) and refunded if `/finish` fails. The check can be run once every 24 hours (the server answers 429 `cooldown`; the old browser confirm was removed). `/pack` and `/trends` only run inside the 15-minute window opened by `/plan`. Rank movers in the actions come from the `rank_checks` table. See [usage-credits.md](usage-credits.md).
+A refresh costs **6 credits**, taken when the check starts (`/plan`) and refunded if `/finish` fails. The check can be run once a week: 7 days after the last successful refresh (`INSIGHTS_COOLDOWN_HOURS` in `planCatalog.ts`; the server answers 429 `cooldown` and the button shows "Next refresh Mon 26 Oct"). A failed refresh is refunded and does not lock the button.
+
+Saved results survive other requests: `saveOrgToDb` writes only the dashboard keys a request changed (`dashboardPatch` / `saveOrgDashboardPatch` in `orgAppState.ts`), so a slower request that loaded older state (for example a retried `/pack`) cannot overwrite the `aiInsights` result that `/finish` saved. `/pack` and `/trends` only run inside the 15-minute window opened by `/plan`. Rank movers in the actions come from the `rank_checks` table. See [usage-credits.md](usage-credits.md).
