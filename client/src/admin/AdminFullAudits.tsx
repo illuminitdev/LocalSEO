@@ -304,20 +304,25 @@ async function copyText(text: string) {
     }
 }
 
+/** Post town of a UK address (mirrors townFromAddress in the audit worker's searchArea.ts). */
 function cityFromAddress(address: string): string {
     const postcode = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
-    const street = /\b(street|road|lane|avenue|drive|close|way|terrace|crescent|grove)\b|^\d+\b/i;
-    const parts = String(address || '')
-        .split(',')
-        .map((part) => part.trim())
-        .filter(
-            (part) =>
-                part &&
-                !postcode.test(part) &&
-                !/^(uk|united kingdom|england|scotland|wales)$/i.test(part) &&
-                !street.test(part)
-        );
-    return parts[parts.length - 1] || '';
+    const street =
+        /\b(street|st|road|rd|lane|ln|avenue|ave|drive|dr|close|way|terrace|crescent|grove|gardens|mews|parade|park|estate|industrial|trading|retail|centre|center|works|yard|quay|wharf|mill|court|square|place|row|moss)\b|^\d+\b/i;
+    const unit = /^(unit|flat|suite|floor|apartment|apt|building|block|room|office|ground floor|first floor|second floor)\b/i;
+    const region =
+        /^(uk|u\.k\.|united kingdom|great britain|gb|england|scotland|wales|northern ireland|greater manchester|greater london|merseyside|(west|south|north) yorkshire|east riding of yorkshire|(west|east) midlands|tyne and wear|county durham|cumbria|kent|essex|surrey|(east|west) sussex|norfolk|suffolk|devon|cornwall|somerset|dorset|middlesex|(north|south) (west|east)|.*shire)$/i;
+    const places: Array<{ text: string; hadPostcode: boolean }> = [];
+    for (const raw of String(address || '').split(',')) {
+        const hadPostcode = postcode.test(raw);
+        const text = raw.replace(postcode, ' ').replace(/\s+/g, ' ').trim();
+        if (!text || region.test(text) || unit.test(text)) continue;
+        if (street.test(text.replace(/^st\.?\s+/i, ''))) continue;
+        if (!/^[A-Za-z][A-Za-z\s\-']{1,47}$/.test(text)) continue;
+        places.push({ text, hadPostcode });
+    }
+    if (!places.length) return '';
+    return (places.find((p) => p.hadPostcode) || places[places.length - 1]).text;
 }
 
 function websiteForForm(raw: string): string {

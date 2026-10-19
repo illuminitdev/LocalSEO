@@ -102,6 +102,9 @@ const AUTO_CHECK_EVERY_DAYS: Record<string, number> = {};
 
 const SCAN_COOLDOWN_HOURS = 24;
 
+/** AI Insights Map Pack check: one refresh per week. */
+const INSIGHTS_COOLDOWN_HOURS = 7 * 24;
+
 function getCreditAllowance(planId: string | null | undefined) {
     return CREDIT_ALLOWANCES[String(planId || '')] ?? 0;
 }
@@ -192,6 +195,7 @@ export {
     GRID_SCAN_LIMITS,
     getGridScanLimit,
     SCAN_COOLDOWN_HOURS,
+    INSIGHTS_COOLDOWN_HOURS,
     getCreditAllowance,
     getLocationLimit,
     getAutoCheckEveryDays,

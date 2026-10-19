@@ -170,7 +170,8 @@ function InsightsOverview() {
         }
     };
 
-    const fmtResetDay = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '');
+    const fmtResetDay = (iso?: string | null) =>
+        iso ? new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '';
     const coolingDown = Boolean(data?.nextCheckAt && new Date(data.nextCheckAt).getTime() > Date.now());
 
     if (!loaded) {
@@ -404,8 +405,8 @@ function InsightsOverview() {
                             </p>
                         )}
                     </div>
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
                             {[
                                 ['You', 'bg-[var(--brand-primary)]'],
                                 [names?.compA?.name || 'Competitor A', 'bg-[#BEC6DB]'],
@@ -432,7 +433,7 @@ function InsightsOverview() {
                             type="button"
                             onClick={refresh}
                             disabled={busy || coolingDown}
-                            title={coolingDown ? `Refreshed this month. You can refresh again after ${fmtResetDay(data?.nextCheckAt)}.` : undefined}
+                            title={coolingDown ? `Refreshed this week. You can refresh again on ${fmtResetDay(data?.nextCheckAt)}.` : undefined}
                             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0F172A] text-white text-[11px] font-bold hover:bg-[#1E293B] cursor-pointer disabled:opacity-70"
                         >
                             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
@@ -450,7 +451,7 @@ function InsightsOverview() {
                         <span>50%</span>
                         <span>0%</span>
                     </div>
-                    <div className="flex-1 grid grid-cols-4 gap-6 items-end h-56 border-b border-[#E2E8F0]">
+                    <div className="flex-1 min-w-0 grid grid-cols-4 gap-2 sm:gap-6 items-end h-56 border-b border-[#E2E8F0]">
                         {buckets.map((b) => (
                             <div key={b.key} className="flex flex-col items-center justify-end h-full">
                                 <div className="w-14 sm:w-20 h-[calc(100%-1.5rem)] flex flex-col justify-end">

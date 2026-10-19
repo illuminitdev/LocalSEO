@@ -42,7 +42,7 @@ import {
   gbpFieldsFromPlaceDetails,
   photoUrlsFromPlace
 } from '../lib/placesGbp.js';
-import { looksLikeStreet, resolveSearchArea } from '../lib/searchArea.js';
+import { looksLikeStreet, resolveSearchArea, trustedCity } from '../lib/searchArea.js';
 
 async function staticMapDataUrl(lat: number, lng: number): Promise<string | null> {
   const key = String(process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '').trim();
@@ -251,9 +251,9 @@ async function enrichFromDataForSeo(audit: any) {
     String(business.service || business.serviceLabel || business.primaryService || '').trim() ||
     'local business';
 
-  const intakeCity = String(business.city || '').trim();
+  const intakeCity = trustedCity(business.city, business.address);
   const area = resolveSearchArea({
-    city: business.searchAreaLabel || business.city,
+    city: business.searchAreaLabel || intakeCity,
     address: business.address
   });
   const searchArea = String(business.searchAreaLabel || area.label || '').trim();

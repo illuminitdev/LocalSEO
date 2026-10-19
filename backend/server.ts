@@ -52,7 +52,16 @@ import {
     trackerConfigured,
     type TrackerKeyword
 } from './lib/visibilityTracker';
-import { ensureLocalSeoBusiness, getLocalSeoUpgradeChoice, loadOrgAppState, saveOrgAppState, setLocalSeoUpgradeChoice } from './lib/orgAppState';
+import {
+    dashboardPatch,
+    ensureLocalSeoBusiness,
+    getLocalSeoUpgradeChoice,
+    loadOrgAppState,
+    saveOrgAppState,
+    saveOrgDashboardPatch,
+    setLocalSeoUpgradeChoice,
+    snapshotDashboard
+} from './lib/orgAppState';
 import {
     analysisJobs,
     askLlm,
@@ -80,6 +89,7 @@ import {
 import {
     CREDIT_COSTS,
     SCAN_COOLDOWN_HOURS,
+    INSIGHTS_COOLDOWN_HOURS,
     getTrackedKeywordLimit,
     getGridScanLimit,
     getLlmTrackerPromptLimit,
@@ -397,6 +407,8 @@ async function hydrateOrgFromDb(req: any, res: Response, next: NextFunction) {
         dashboardState = state.dashboard;
         req.connectedBusiness = state.business;
         req.dashboardState = state.dashboard;
+        req.dashboardLoaded = snapshotDashboard(state.dashboard);
+        req.businessLoaded = JSON.stringify(state.business);
         req.orgStateHydrated = true;
         next();
     } catch (err: any) {
@@ -417,10 +429,17 @@ async function saveOrgToDb(req: any) {
             req.connectedBusiness = connectedBusiness;
         }
     }
-    await saveOrgAppState(req.orgId, {
-        business,
-        dashboard
-    });
+    if (!req.dashboardLoaded) {
+        await saveOrgAppState(req.orgId, { business, dashboard });
+        return;
+    }
+    // Only what this request changed, so an older in-flight request cannot undo another request's save.
+    const { patch, removed } = dashboardPatch(req.dashboardLoaded, dashboard);
+    const businessJson = JSON.stringify(business);
+    const businessChanged = businessJson !== req.businessLoaded;
+    await saveOrgDashboardPatch(req.orgId, { business: businessChanged ? business : null, patch, removed });
+    req.dashboardLoaded = snapshotDashboard(dashboard);
+    req.businessLoaded = businessJson;
 }
 
 function hydrateAppState(raw: any) {
@@ -3038,8 +3057,8 @@ function insightsPayload(dash: any, trackerKeywords: TrackerKeyword[] = trackerL
         ...computeChanges(history),
         trackerMoves: summarizeTracker(trackerKeywords).moves,
         cost: CREDIT_COSTS.aiInsights,
-        cooldownHours: SCAN_COOLDOWN_HOURS,
-        nextCheckAt: cooldownEnds(dash.aiInsights?.createdAt, SCAN_COOLDOWN_HOURS)
+        cooldownHours: INSIGHTS_COOLDOWN_HOURS,
+        nextCheckAt: cooldownEnds(dash.aiInsights?.createdAt, INSIGHTS_COOLDOWN_HOURS)
     };
 }
 
@@ -3094,7 +3113,7 @@ app.post('/api/ai/insights/plan', ...growthReportingGate, async (req, res) => {
     try {
         const keywords = await insightsPlan(String((req as any).orgId || ''));
         if (!keywords.length) return res.status(400).json({ error: 'Add a business category on the Business profile page first.' });
-        const next = cooldownEnds(dash.aiInsights?.createdAt, SCAN_COOLDOWN_HOURS);
+        const next = cooldownEnds(dash.aiInsights?.createdAt, INSIGHTS_COOLDOWN_HOURS);
         if (next) return sendCooldown(res, next, 'The Map Pack check');
         const ref = `insights:${randomUUID()}`;
         await spend(req, 'aiInsights', CREDIT_COSTS.aiInsights, ref);
