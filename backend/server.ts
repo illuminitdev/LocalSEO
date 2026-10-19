@@ -15,6 +15,7 @@ import authRouter from './routes/auth';
 import adminRouter from './admin/routes';
 import salesRouter from './sales-agent/routes';
 import integrationsRouter from './routes/integrations';
+import { hostNotificationsRouter } from './routes/notifications';
 import { migrate } from './lib/db';
 import { sendSms } from './lib/inbox';
 import { fetchReviewTask, reviewSyncConfigured, startReviewTask } from './lib/googleReviewSync';
@@ -3259,6 +3260,7 @@ app.use('/api/host', createHostRouter({ stripeClient }));
 app.use('/api/public/review', createPublicReviewRouter());
 app.use('/api/public', createPublicRouter({ stripeClient }));
 app.use('/api/integrations', integrationsRouter);
+app.use('/api/notifications', hostNotificationsRouter);
 
 app.post('/api/ops/process-booking-reminders', async (req, res) => {
     const secret = process.env.OPS_SECRET || process.env.ZAPP_OPS_SECRET || 'zappsites-ops-dev';

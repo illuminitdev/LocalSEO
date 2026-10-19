@@ -29,11 +29,22 @@ import {
     Bot,
     LineChart
 } from 'lucide-react';
-import { apiGet, cn } from './utils';
-import { clearToken, getMustChangePassword } from '../features/auth/auth';
+import { apiGet, apiPost, cn } from './utils';
+import { timeAgo, useNotificationFeed, type FeedNotification } from './useNotificationFeed';
+import { clearToken } from '../features/auth/auth';
 import { hasRouteAccess, routeRequiresFeatures } from './planCatalog';
 import { useEntitlements } from './EntitlementsContext';
 import LowCreditsBanner from './LowCreditsBanner';
+
+const HOST_NOTIF_ICON: Record<string, { icon: ComponentType<any>; cls: string }> = {
+    booking: { icon: CalendarClock, cls: 'bg-emerald-50 text-emerald-600' },
+    review: { icon: Star, cls: 'bg-amber-50 text-amber-600' },
+    quote: { icon: FileText, cls: 'bg-blue-50 text-blue-600' },
+    rank: { icon: BadgeCheck, cls: 'bg-purple-50 text-purple-600' },
+    message: { icon: MessageSquare, cls: 'bg-sky-50 text-sky-600' },
+    billing: { icon: Wallet, cls: 'bg-rose-50 text-rose-600' },
+    security: { icon: KeyRound, cls: 'bg-amber-50 text-amber-700' }
+};
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 380;
@@ -156,100 +167,35 @@ export default function Layout() {
     const [notifOpen, setNotifOpen] = useState(false);
     const notifRef = useRef<HTMLDivElement | null>(null);
 
-    type NotificationItem = {
-        id: string;
-        title: string;
-        desc: string;
-        time: string;
-        unread: boolean;
-        link: string;
-        type: 'review' | 'quote' | 'rank' | 'booking' | 'security';
-    };
-
-    const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-
-    const unreadCount = notifications.filter((n) => n.unread).length;
-    const PW_NOTIF_ID = 'must-change-password';
-    const PW_NOTIF_READ_KEY = 'lp.must-change-pw-notif-read';
-
-    const syncPasswordNotification = () => {
-        const mustChange = getMustChangePassword();
-        setNotifications((prev) => {
-            const without = prev.filter((n) => n.id !== PW_NOTIF_ID);
-            if (!mustChange) {
-                try {
-                    sessionStorage.removeItem(PW_NOTIF_READ_KEY);
-                    sessionStorage.removeItem('lp.customer.clearedNotifs');
-                } catch {
-                    /* ignore */
-                }
-                return without;
-            }
-            let read = false;
-            let cleared = false;
-            try {
-                read = sessionStorage.getItem(PW_NOTIF_READ_KEY) === '1';
-                cleared = sessionStorage.getItem('lp.customer.clearedNotifs') === '1';
-            } catch {
-                read = false;
-            }
-            if (cleared) return without;
-            return [
-                {
-                    id: PW_NOTIF_ID,
-                    title: 'Change your temporary password',
-                    desc: 'You signed in with a ZappSites invite password — set a new one in Settings.',
-                    time: 'Now',
-                    unread: !read,
-                    link: '/account#password',
-                    type: 'security' as const
-                },
-                ...without
-            ];
-        });
-    };
+    // Live feed (bookings, reviews, quotes, inbox, rank scans, billing, security) built by the API;
+    // cleared/read state is saved per user in the DB so it survives reloads and other devices.
+    const {
+        items: notifications,
+        unreadCount,
+        refresh: refreshNotifications,
+        markRead,
+        markAllRead,
+        clearAll
+    } = useNotificationFeed({
+        fetchFeed: () => apiGet('/api/notifications'),
+        postState: (action) => apiPost('/api/notifications/state', action),
+        refreshKey: location.pathname
+    });
 
     useEffect(() => {
-        syncPasswordNotification();
-        const onAuth = () => syncPasswordNotification();
+        const onAuth = () => refreshNotifications();
         window.addEventListener('localpulse-auth', onAuth);
         return () => window.removeEventListener('localpulse-auth', onAuth);
-    }, []);
+    }, [refreshNotifications]);
 
-    const clearAll = () => {
-        try {
-            if (notifications.some((n) => n.id === PW_NOTIF_ID)) {
-                sessionStorage.setItem(PW_NOTIF_READ_KEY, '1');
-                sessionStorage.setItem('lp.customer.clearedNotifs', '1');
-            }
-        } catch {
-            /* ignore */
-        }
-        setNotifications([]);
-    };
+    useEffect(() => {
+        if (notifOpen) refreshNotifications();
+    }, [notifOpen, refreshNotifications]);
 
-    const markAllRead = () => {
-        try {
-            if (notifications.some((n) => n.id === PW_NOTIF_ID)) {
-                sessionStorage.setItem(PW_NOTIF_READ_KEY, '1');
-            }
-        } catch {
-            /* ignore */
-        }
-        setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
-    };
-
-    const handleNotificationClick = (item: NotificationItem) => {
-        if (item.id === PW_NOTIF_ID) {
-            try {
-                sessionStorage.setItem(PW_NOTIF_READ_KEY, '1');
-            } catch {
-                /* ignore */
-            }
-        }
-        setNotifications((prev) => prev.map((n) => (n.id === item.id ? { ...n, unread: false } : n)));
+    const handleNotificationClick = (item: FeedNotification) => {
+        markRead(item.id);
         setNotifOpen(false);
-        navigate(item.link);
+        if (item.link) navigate(item.link);
     };
 
     useEffect(() => {
@@ -597,37 +543,21 @@ export default function Layout() {
                                             </div>
                                         ) : (
                                             notifications.map((n) => {
-                                                const IconComponent =
-                                                    n.type === 'review'
-                                                        ? Star
-                                                        : n.type === 'quote'
-                                                        ? FileText
-                                                        : n.type === 'rank'
-                                                        ? BadgeCheck
-                                                        : n.type === 'security'
-                                                        ? KeyRound
-                                                        : CalendarClock;
+                                                const cfg = HOST_NOTIF_ICON[n.type] || HOST_NOTIF_ICON.booking;
+                                                const IconComponent = cfg.icon;
                                                 return (
                                                     <div
                                                         key={n.id}
                                                         onClick={() => handleNotificationClick(n)}
                                                         className={cn(
                                                             'p-3.5 flex items-start gap-3 cursor-pointer transition-colors hover:bg-[#F8FAFC]',
-                                                            n.unread && 'bg-amber-50/40'
+                                                            !n.read && 'bg-amber-50/40'
                                                         )}
                                                     >
                                                         <div
                                                             className={cn(
                                                                 'h-9 w-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm',
-                                                                n.type === 'review'
-                                                                    ? 'bg-amber-50 text-amber-600'
-                                                                    : n.type === 'quote'
-                                                                    ? 'bg-blue-50 text-blue-600'
-                                                                    : n.type === 'rank'
-                                                                    ? 'bg-purple-50 text-purple-600'
-                                                                    : n.type === 'security'
-                                                                    ? 'bg-amber-50 text-amber-700'
-                                                                    : 'bg-emerald-50 text-emerald-600'
+                                                                cfg.cls
                                                             )}
                                                         >
                                                             <IconComponent className="w-4 h-4" strokeWidth={2} />
@@ -638,14 +568,14 @@ export default function Layout() {
                                                                     {n.title}
                                                                 </p>
                                                                 <span className="text-[10px] text-[#94A3B8] shrink-0">
-                                                                    {n.time}
+                                                                    {timeAgo(n.time)}
                                                                 </span>
                                                             </div>
                                                             <p className="text-[11px] text-[#64748B] mt-0.5 leading-snug line-clamp-2">
-                                                                {n.desc}
+                                                                {n.body}
                                                             </p>
                                                         </div>
-                                                        {n.unread && (
+                                                        {!n.read && (
                                                             <span
                                                                 className="w-2 h-2 rounded-full shrink-0 mt-1.5"
                                                                 style={{ background: 'var(--brand-primary, #F59E0B)' }}
