@@ -3,6 +3,12 @@ import { query } from '../lib/db';
 import { requireAdmin } from './adminAuth';
 import { ensureCrmTables } from '../sales-agent/sales';
 import { ADMIN_LEAD_TYPES, growthAuditTablesMissing } from './leadHelpers';
+import {
+    applyNotificationAction,
+    applyStateToFeed,
+    getNotificationState,
+    parseNotificationAction
+} from '../routes/notifications';
 
 const router = Router();
 
@@ -45,7 +51,11 @@ function isDeepAuditRow(data: any): boolean {
 }
 
 /** Aggregate telecaller CRM updates + ZappSites growth/full audit events for the admin bell. */
-router.get('/notifications', requireAdmin, async (_req: Request, res: Response) => {
+function adminOwnerKey(req: Request) {
+    return `admin:${String((req as any).admin?.email || 'admin').toLowerCase()}`;
+}
+
+router.get('/notifications', requireAdmin, async (req: Request, res: Response) => {
     try {
         await ensureCrmTables().catch(() => {});
 
@@ -154,7 +164,7 @@ router.get('/notifications', requireAdmin, async (_req: Request, res: Response) 
                     'Business';
                 const status = String(row.status || data.status || '').trim() || 'updated';
                 items.push({
-                    id: `audit:${row.id}`,
+                    id: `audit:${row.id}:${status}`,
                     type: 'audit',
                     title: status === 'completed' || status === 'ready' || status === 'done'
                         ? 'Full growth audit ready'
@@ -198,15 +208,80 @@ router.get('/notifications', requireAdmin, async (_req: Request, res: Response) 
             console.warn('[admin-notifications] full_audit_requests query failed:', err?.message || err);
         }
 
-        items.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+        // 5) New CRM leads added to the sales pipeline
+        try {
+            const { rows } = await query(
+                `SELECT id, name, source, created_at
+                 FROM sales_leads
+                 WHERE created_at >= $1::timestamptz
+                 ORDER BY created_at DESC
+                 LIMIT 30`,
+                [since]
+            );
+            for (const row of rows) {
+                items.push({
+                    id: `sales-lead:${row.id}`,
+                    type: 'lead',
+                    title: 'New CRM lead added',
+                    body: [String(row.name || '').trim() || 'Lead', String(row.source || '').trim()]
+                        .filter(Boolean)
+                        .join(' · '),
+                    time: new Date(row.created_at).toISOString(),
+                    link: `/admin/leads/${encodeURIComponent(String(row.id))}`
+                });
+            }
+        } catch (err: any) {
+            console.warn('[admin-notifications] sales_leads query failed:', err?.message || err);
+        }
 
-        res.json({
-            notifications: items.slice(0, 50),
-            generatedAt: new Date().toISOString()
-        });
+        // 6) Tasks completed by telecallers
+        try {
+            const { rows } = await query(
+                `SELECT t.id, t.lead_id, t.title, t.completed_at, u.name AS user_name
+                 FROM lead_tasks t
+                 LEFT JOIN users u ON u.id = t.assigned_to_user_id
+                 WHERE t.status = 'completed'
+                   AND t.completed_at >= $1::timestamptz
+                 ORDER BY t.completed_at DESC
+                 LIMIT 30`,
+                [since]
+            );
+            for (const row of rows) {
+                const who = String(row.user_name || '').trim() || 'Telecaller';
+                items.push({
+                    id: `task-done:${row.id}`,
+                    type: 'task',
+                    title: `${who} completed a task`,
+                    body: String(row.title || 'Task'),
+                    time: new Date(row.completed_at).toISOString(),
+                    link:
+                        row.lead_id && row.lead_id !== 'general'
+                            ? `/admin/leads/${encodeURIComponent(String(row.lead_id))}`
+                            : '/admin/tasks'
+                });
+            }
+        } catch (err: any) {
+            console.warn('[admin-notifications] completed tasks query failed:', err?.message || err);
+        }
+
+        const state = await getNotificationState(adminOwnerKey(req), 'admin');
+        res.json(applyStateToFeed(items, state));
     } catch (err: any) {
         console.error('Admin notifications error:', err);
         res.status(500).json({ error: err.message || 'Failed to load notifications' });
+    }
+});
+
+/** Persist "clear all" / read state for the admin bell. */
+router.post('/notifications/state', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        const action = parseNotificationAction(req.body);
+        if (!action) return res.status(400).json({ error: 'Invalid notification action' });
+        await applyNotificationAction(adminOwnerKey(req), 'admin', action);
+        res.json({ success: true });
+    } catch (err: any) {
+        console.error('Admin notification state error:', err);
+        res.status(500).json({ error: err.message || 'Failed to save notification state' });
     }
 });
 
