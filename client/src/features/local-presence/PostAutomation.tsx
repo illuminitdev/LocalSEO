@@ -311,7 +311,7 @@ export default function PostAutomation() {
                                     <button
                                         onClick={handleGenerateCopy}
                                         disabled={isGenerating}
-                                        className="absolute right-2 bottom-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-ink)] text-white rounded-md text-xs font-semibold transition-colors disabled:opacity-70 cursor-pointer"
+                                        className="absolute right-2 bottom-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-ink)] text-[var(--brand-primary-foreground)] rounded-md text-xs font-semibold transition-colors disabled:opacity-70 cursor-pointer"
                                     >
                                         <Sparkles className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
                                         {isGenerating ? 'Generating...' : 'Generate with AI'}

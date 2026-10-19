@@ -810,7 +810,7 @@ export default function AdminLeadProfile() {
                                                     ? 'bg-emerald-600 text-white border-emerald-700'
                                                     : oppLevel === 'low'
                                                       ? 'bg-slate-200 text-slate-700 border-slate-300'
-                                                      : 'bg-amber-500 text-white border-amber-600'
+                                                      : 'bg-amber-500 text-[var(--brand-primary-foreground)] border-amber-600'
                                             )}
                                         >
                                             {lead.opportunityLevel} Opportunity

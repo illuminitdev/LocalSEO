@@ -1,8 +1,8 @@
 ﻿import { Fragment, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowDown, ArrowLeft, ArrowUp, Download, Loader2, Plus, RefreshCw, Sparkles, Trash2, Trophy, Users } from 'lucide-react';
+import { ArrowDown, ArrowUp, Download, Loader2, Plus, RefreshCw, Sparkles, Trash2, Trophy, Users } from 'lucide-react';
 import { apiGet, apiPost, cn } from '../../shared/utils';
 import { getPageCache, setPageCache } from '../../shared/pageCache';
+import { LlmTabs } from './LlmVisibility';
 
 type Platform = 'chatgpt' | 'claude' | 'perplexity';
 type PlatformResult = {
@@ -475,9 +475,6 @@ export default function LlmTracker() {
 
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
-            <Link to="/llm-visibility" className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-[#0F172A] mb-3">
-                <ArrowLeft className="w-3.5 h-3.5" /> LLM Visibility
-            </Link>
             <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-4 mb-6">
                 <div>
                     <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#0F172A]">LLM Prompt Tracking</h1>
@@ -507,6 +504,8 @@ export default function LlmTracker() {
                     </button>
                 </div>
             </div>
+
+            <LlmTabs active="tracking" trackedCount={prompts.length} />
 
             {info && !info.configured && (
                 <p className="mb-4 text-sm text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-4 py-2.5">
@@ -575,7 +574,7 @@ export default function LlmTracker() {
                         <button
                             type="submit"
                             disabled={full || adding || input.trim().length < 5}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[var(--brand-primary)] text-white text-xs font-bold rounded-xl disabled:opacity-50 cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] text-xs font-bold rounded-xl disabled:opacity-50 cursor-pointer"
                         >
                             {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Add
                         </button>

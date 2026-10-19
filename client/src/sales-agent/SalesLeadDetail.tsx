@@ -483,7 +483,7 @@ export default function SalesLeadDetail() {
                         {lead.phone && (
                             <a
                                 href={`tel:${lead.phone}`}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-white font-extrabold text-xs rounded-xl transition-colors shadow-sm"
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-[#0F172A] font-extrabold text-xs rounded-xl transition-colors shadow-sm"
                             >
                                 <Phone className="w-3.5 h-3.5" />
                                 Call {lead.phone}
@@ -594,7 +594,7 @@ export default function SalesLeadDetail() {
                                     "font-black uppercase tracking-wider text-[10px] px-2 py-0.5 rounded-md",
                                     lead.opportunityLevel === 'high'
                                         ? "bg-emerald-600 text-white"
-                                        : "bg-amber-600 text-white"
+                                        : "bg-amber-600 text-[var(--brand-primary-foreground)]"
                                 )}>
                                     {lead.opportunityLevel?.toUpperCase() || 'MEDIUM'} OPPORTUNITY
                                 </span>
@@ -1017,7 +1017,7 @@ export default function SalesLeadDetail() {
                                                         <button
                                                             type="button"
                                                             onClick={() => handleOpenToggleModal(t)}
-                                                            className="inline-flex items-center justify-center px-2.5 h-7 text-[11px] font-bold rounded-lg bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-white transition-all shadow-2xs cursor-pointer whitespace-nowrap"
+                                                            className="inline-flex items-center justify-center px-2.5 h-7 text-[11px] font-bold rounded-lg bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-[#0F172A] transition-all shadow-2xs cursor-pointer whitespace-nowrap"
                                                             title="Update Status"
                                                         >
                                                             <span>Update Status</span>

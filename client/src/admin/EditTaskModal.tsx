@@ -242,7 +242,7 @@ export default function EditTaskModal({
                                     className={cn(
                                         "px-2.5 py-1.5 rounded-lg border font-medium transition-all flex items-center gap-1.5 text-xs",
                                         isSelected
-                                            ? "bg-amber-500 text-white border-amber-600 shadow-2xs font-semibold"
+                                            ? "bg-amber-500 text-[var(--brand-primary-foreground)] border-amber-600 shadow-2xs font-semibold"
                                             : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                                     )}
                                 >
@@ -383,7 +383,7 @@ export default function EditTaskModal({
                             <button
                                 type="submit"
                                 disabled={loading || deleting}
-                                className="px-5 py-2 text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 rounded-xl transition-colors shadow-sm disabled:opacity-50 flex items-center gap-1.5"
+                                className="px-5 py-2 text-xs font-bold text-[var(--brand-primary-foreground)] bg-amber-500 hover:bg-amber-600 rounded-xl transition-colors shadow-sm disabled:opacity-50 flex items-center gap-1.5"
                             >
                                 {loading ? (
                                     <span>Saving…</span>

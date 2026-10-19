@@ -480,7 +480,7 @@ export default function AdminLeadDetail() {
                                 </span>
                             )}
                             {lead.scoreTotal != null && (
-                                <span className="bg-amber-500 text-white text-xs font-black px-2.5 py-0.5 rounded-lg">
+                                <span className="bg-amber-500 text-[var(--brand-primary-foreground)] text-xs font-black px-2.5 py-0.5 rounded-lg">
                                     Score: {lead.scoreTotal}/100
                                 </span>
                             )}
@@ -745,7 +745,7 @@ export default function AdminLeadDetail() {
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setConfirmModalTask({ task: t })}
-                                                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-amber-500 hover:bg-amber-600 text-white"
+                                                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-amber-500 hover:bg-amber-600 text-[var(--brand-primary-foreground)]"
                                                             >
                                                                 Update
                                                             </button>

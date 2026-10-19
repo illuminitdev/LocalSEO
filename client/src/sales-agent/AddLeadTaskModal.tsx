@@ -218,7 +218,7 @@ export default function AddLeadTaskModal({
                         <button
                             type="submit"
                             disabled={busy}
-                            className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                            className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-[var(--brand-primary-foreground)] text-xs font-bold rounded-xl shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
                         >
                             {busy ? (
                                 <Clock className="w-3.5 h-3.5 animate-spin" />

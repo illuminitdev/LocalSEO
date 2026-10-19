@@ -209,7 +209,7 @@ export default function Citations() {
                         type="button"
                         onClick={runAudit}
                         disabled={loading}
-                        className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
+                        className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
                     >
                         <BadgeCheck className="w-3.5 h-3.5" />
                         Run first audit

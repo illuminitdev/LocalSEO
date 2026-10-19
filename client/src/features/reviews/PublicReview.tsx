@@ -149,7 +149,7 @@ export default function PublicReview() {
                         <button
                             type="submit"
                             disabled={busy}
-                            className="w-full rounded-lg bg-[var(--brand-primary)] py-2.5 text-sm font-bold text-white disabled:opacity-60 cursor-pointer"
+                            className="w-full rounded-lg bg-[var(--brand-primary)] py-2.5 text-sm font-bold text-[var(--brand-primary-foreground)] disabled:opacity-60 cursor-pointer"
                         >
                             {busy ? 'Sending…' : 'Submit review'}
                         </button>

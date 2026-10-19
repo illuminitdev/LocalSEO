@@ -276,7 +276,7 @@ function TimeWindowsEditor({
                                     { startTime: h(nextStart), endTime: h(Math.max(nextEnd, nextStart + 30)) }
                                 ]);
                             }}
-                            className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-xl bg-[var(--brand-primary)] text-white"
+                            className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-xl bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)]"
                             aria-label="Add time window"
                             title="Add another time window"
                         >
@@ -739,7 +739,7 @@ export default function AvailabilityEditor({
                                     className={cn(
                                         'min-w-[3.25rem] px-3 py-2.5 rounded-xl border text-xs font-bold transition',
                                         on
-                                            ? 'bg-[var(--brand-primary)] text-white border-[var(--brand-primary)]'
+                                            ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] border-[var(--brand-primary)]'
                                             : isSunday
                                               ? 'bg-slate-50 text-slate-400 border-dashed border-slate-200'
                                               : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
@@ -977,7 +977,7 @@ export default function AvailabilityEditor({
                                     type="button"
                                     disabled={saving}
                                     onClick={requestDayApply}
-                                    className="w-full px-3 py-2 rounded-xl bg-[var(--brand-primary)] text-white text-xs font-bold disabled:opacity-50"
+                                    className="w-full px-3 py-2 rounded-xl bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] text-xs font-bold disabled:opacity-50"
                                 >
                                     Apply hours for this day…
                                 </button>
@@ -1067,7 +1067,7 @@ export default function AvailabilityEditor({
                                                                 setMemberError('');
                                                                 setOverlapWarn(null);
                                                             }}
-                                                            className="inline-flex items-center gap-1 shrink-0 px-2.5 py-1.5 rounded-lg bg-[var(--brand-primary)] text-white text-[11px] font-bold"
+                                                            className="inline-flex items-center gap-1 shrink-0 px-2.5 py-1.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] text-[11px] font-bold"
                                                         >
                                                             <Plus className="w-3 h-3" /> Set hours
                                                         </button>
@@ -1132,7 +1132,7 @@ export default function AvailabilityEditor({
                                                     type="button"
                                                     disabled={memberBusy}
                                                     onClick={() => saveMemberForDay(false)}
-                                                    className="px-3 py-1.5 rounded-lg bg-[var(--brand-primary)] text-white text-[11px] font-bold disabled:opacity-50"
+                                                    className="px-3 py-1.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] text-[11px] font-bold disabled:opacity-50"
                                                 >
                                                     {memberBusy ? 'Saving…' : 'Save for member'}
                                                 </button>
@@ -1226,7 +1226,7 @@ export default function AvailabilityEditor({
                                 type="button"
                                 disabled={memberBusy}
                                 onClick={() => saveMemberForDay(true)}
-                                className="px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold disabled:opacity-50"
+                                className="px-4 py-2 rounded-xl bg-amber-600 text-[var(--brand-primary-foreground)] text-xs font-bold disabled:opacity-50"
                             >
                                 Apply anyway
                             </button>

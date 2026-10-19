@@ -131,7 +131,7 @@ function SignaturePad({ onSave, busy }: { onSave: (url: string) => Promise<void>
                 <button
                     type="button"
                     disabled={busy}
-                    className="rounded-xl bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 text-xs font-bold transition disabled:opacity-50"
+                    className="rounded-xl bg-orange-500 hover:bg-orange-600 text-[var(--brand-primary-foreground)] px-4 py-2 text-xs font-bold transition disabled:opacity-50"
                     onClick={async () => {
                         const canvas = canvasRef.current;
                         if (!canvas) return;
@@ -235,7 +235,7 @@ function FieldJobDetail() {
                         <button
                             type="button"
                             disabled={busy}
-                            className="rounded-2xl bg-orange-500 hover:bg-orange-600 text-white px-4 py-3.5 text-xs font-bold shadow-sm transition disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                            className="rounded-2xl bg-orange-500 hover:bg-orange-600 text-[var(--brand-primary-foreground)] px-4 py-3.5 text-xs font-bold shadow-sm transition disabled:opacity-50 inline-flex items-center justify-center gap-2"
                             onClick={async () => {
                                 setBusy(true);
                                 setError('');
@@ -521,7 +521,7 @@ export default function Field() {
                     <button
                         type="button"
                         onClick={() => setShowCreateModal(true)}
-                        className="inline-flex items-center gap-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm transition shrink-0"
+                        className="inline-flex items-center gap-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-[var(--brand-primary-foreground)] text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm transition shrink-0"
                     >
                         <Plus className="w-4 h-4" /> New field job
                     </button>
@@ -927,7 +927,7 @@ export default function Field() {
                             </button>
                             <button
                                 type="submit"
-                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold shadow-sm transition"
+                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] text-xs font-bold shadow-sm transition"
                             >
                                 Save Field Job
                             </button>

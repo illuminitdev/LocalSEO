@@ -584,7 +584,7 @@ export default function ProfileAudit() {
                             type="button"
                             onClick={handleSaveChanges}
                             disabled={isSaving}
-                            className="inline-flex items-center gap-2 px-5 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-colors disabled:opacity-70"
+                            className="inline-flex items-center gap-2 px-5 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-colors disabled:opacity-70"
                         >
                             {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                             {isSaving ? 'Saving...' : 'Save business info'}

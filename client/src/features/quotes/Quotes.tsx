@@ -75,7 +75,7 @@ function QuotesList() {
                 <button
                     type="button"
                     onClick={() => navigate('/quotes/new')}
-                    className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-5 py-2.5 text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+                    className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] px-5 py-2.5 text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
                 >
                     <Plus className="w-4 h-4 stroke-[2.5]" /> New quote
                 </button>
@@ -171,7 +171,7 @@ function QuotesList() {
                                 <line x1="16" y1="17" x2="8" y2="17" />
                                 <line x1="10" y1="9" x2="8" y2="9" />
                             </svg>
-                            <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[var(--brand-primary)] text-white flex items-center justify-center shadow-xs">
+                            <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] flex items-center justify-center shadow-xs">
                                 <Plus className="w-3 h-3 stroke-[3]" />
                             </div>
                         </div>
@@ -182,7 +182,7 @@ function QuotesList() {
                         <button
                             type="button"
                             onClick={() => navigate('/quotes/new')}
-                            className="mt-5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-6 py-2.5 text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 cursor-pointer"
+                            className="mt-5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] px-6 py-2.5 text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 cursor-pointer"
                         >
                             <Plus className="w-4 h-4 stroke-[2.5]" /> New quote
                         </button>
@@ -627,7 +627,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                                 type="button"
                                 disabled={busy}
                                 onClick={send}
-                                className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-5 py-2.5 text-sm font-bold transition shadow-sm disabled:opacity-50 cursor-pointer"
+                                className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] px-5 py-2.5 text-sm font-bold transition shadow-sm disabled:opacity-50 cursor-pointer"
                             >
                                 <Send className="w-3.5 h-3.5" /> {busy ? 'Sending…' : 'Send to client'}
                             </button>
@@ -637,7 +637,7 @@ function QuoteEditor({ isNew }: { isNew?: boolean }) {
                                 type="button"
                                 disabled={busy}
                                 onClick={save}
-                                className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-5 py-2.5 text-sm font-bold transition shadow-sm disabled:opacity-50 cursor-pointer"
+                                className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] px-5 py-2.5 text-sm font-bold transition shadow-sm disabled:opacity-50 cursor-pointer"
                             >
                                 {busy ? 'Creating…' : 'Create quote'}
                             </button>
