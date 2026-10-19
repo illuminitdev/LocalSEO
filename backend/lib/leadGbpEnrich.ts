@@ -525,8 +525,11 @@ export async function runEnrichment(batchId: string | null = null): Promise<{ pr
     }
 }
 
-/** Kick off enrichment without blocking the HTTP request (own Lambda in AWS, in-process locally). */
-export async function triggerLeadEnrichment(batchId: string | null): Promise<void> {
+/**
+ * Kick off enrichment without blocking the HTTP request (own Lambda in AWS, in-process locally).
+ * Returns false when the Lambda could not be invoked.
+ */
+export async function triggerLeadEnrichment(batchId: string | null): Promise<boolean> {
     const fn = process.env.LEAD_ENRICH_FN;
     if (fn) {
         try {
@@ -538,15 +541,28 @@ export async function triggerLeadEnrichment(batchId: string | null): Promise<voi
                     Payload: Buffer.from(JSON.stringify({ batchId }))
                 })
             );
-            return;
+            return true;
         } catch (err) {
             console.error('[lead-enrich] async invoke failed:', (err as Error)?.message);
-            return;
+            return false;
         }
     }
     setImmediate(() => {
         runEnrichment(batchId).catch((e) => console.error('[lead-enrich] run failed:', e?.message || e));
     });
+    return true;
+}
+
+/** Leads waiting for analysis: pending, or running with no progress for 20+ min (worker died). */
+export async function countStuckEnrichment(batchId: string | null): Promise<number> {
+    const { rows } = await query(
+        `SELECT COUNT(*)::int AS n FROM sales_leads
+         WHERE (enrich_status = 'pending'
+                OR (enrich_status = 'running' AND updated_at < NOW() - INTERVAL '20 minutes'))
+           AND ($1::uuid IS NULL OR import_batch_id = $1::uuid)`,
+        [batchId]
+    );
+    return rows[0]?.n || 0;
 }
 
 /**

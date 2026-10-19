@@ -556,6 +556,13 @@ export async function deleteAdminExcelLeads(
     return adminDelete(`/api/admin/crm/leads/excel?batchId=${encodeURIComponent(batchId)}`);
 }
 
+/** Restart GBP auto-analysis for uploaded leads stuck on "Analyzing" (all batches when batchId is omitted). */
+export async function resumeAdminLeadEnrichment(
+    batchId?: string | null
+): Promise<{ resumed: number; message: string }> {
+    return adminPost('/api/admin/crm/leads/enrich-resume', { batchId: batchId || null });
+}
+
 export async function bulkDeleteAdminCrmLeads(
     leadIds: string[]
 ): Promise<{ success: boolean; count: number; message: string }> {
