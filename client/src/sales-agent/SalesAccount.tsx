@@ -242,7 +242,7 @@ export default function SalesAccount() {
             {mustChange && (
                 <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4 mb-6 flex flex-wrap items-center justify-between gap-3 shadow-sm">
                     <div className="flex items-center gap-2.5">
-                        <span className="bg-[#F59E0B] text-white text-[10px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider">
+                        <span className="bg-[#F59E0B] text-[#0F172A] text-[10px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider">
                             MANDATORY
                         </span>
                         <div className="flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-amber-950">

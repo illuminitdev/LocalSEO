@@ -18,7 +18,7 @@ import {
     ArrowUpRight,
     Trash2
 } from 'lucide-react';
-import { apiDelete, apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
+import { apiDelete, apiGet, apiPost, cn, logDashboardActivity } from '../../shared/utils';
 import { useCredits } from '../../shared/CreditsContext';
 import { downloadElementAsPdf } from '../../shared/downloadElementAsPdf';
 
@@ -347,6 +347,47 @@ function PlatformLogo({ id }: { id: string }) {
 }
 
 type VisibilityCache = { report: any; history: any[]; tracked: string[] };
+/** Tabs shared by LLM Visibility and LLM Prompt Tracking so users always see both views. */
+export function LlmTabs({ active, trackedCount }: { active: 'check' | 'tracking'; trackedCount?: number }) {
+    const tabs = [
+        { key: 'check', to: '/llm-visibility', label: 'Visibility Check', icon: Bot },
+        { key: 'tracking', to: '/llm-visibility/tracking', label: 'Prompt Tracking', icon: LineChart },
+    ] as const;
+
+    return (
+        <div className="inline-flex gap-1 p-1 mb-6 bg-white border border-[#E2E8F0] rounded-xl shadow-xs print:hidden">
+            {tabs.map(({ key, to, label, icon: Icon }) => {
+                const isActive = key === active;
+                return (
+                    <Link
+                        key={key}
+                        to={to}
+                        className={cn(
+                            'inline-flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-lg text-sm sm:text-base font-bold transition-colors',
+                            isActive
+                                ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] shadow-sm'
+                                : 'text-slate-500 hover:text-[#0F172A] hover:bg-slate-50'
+                        )}
+                    >
+                        <Icon className="w-4 h-4" />
+                        {label}
+                        {key === 'tracking' && !!trackedCount && (
+                            <span
+                                className={cn(
+                                    'px-2 py-0.5 rounded-full text-[11px] font-bold',
+                                    isActive ? 'bg-white/40 text-[var(--brand-primary-foreground)]' : 'bg-slate-100 text-slate-600'
+                                )}
+                            >
+                                {trackedCount}
+                            </span>
+                        )}
+                    </Link>
+                );
+            })}
+        </div>
+    );
+}
+
 const CACHE_KEY = 'llm-visibility';
 
 export default function LlmVisibility() {
@@ -485,13 +526,6 @@ export default function LlmVisibility() {
                     </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                    <Link
-                        to="/llm-visibility/tracking"
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 border border-[#E2E8F0] text-[#0F172A] text-xs font-bold rounded-xl"
-                    >
-                        <LineChart className="w-3.5 h-3.5" />
-                        LLM Tracking
-                    </Link>
                     {report && (
                         <button
                             onClick={handleExport}
@@ -512,6 +546,8 @@ export default function LlmVisibility() {
                     </button>
                 </div>
             </div>
+
+            <LlmTabs active="check" trackedCount={tracked.length} />
 
             {period && (() => {
                 const doneThisMonth = Boolean(report?.createdAt) && new Date(report.createdAt).getTime() >= new Date(period.start).getTime();
@@ -557,7 +593,7 @@ export default function LlmVisibility() {
                     <button
                         type="button"
                         onClick={() => handleGenerate()}
-                        className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-sm font-bold cursor-pointer"
+                        className="inline-flex items-center gap-2 px-6 py-3 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] rounded-xl text-sm font-bold cursor-pointer"
                     >
                         Run your first check
                     </button>
@@ -689,7 +725,7 @@ export default function LlmVisibility() {
                                 setShowHowItWorks(false);
                                 handleGenerate();
                             }}
-                            className="w-full mt-6 py-2.5 px-4 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold cursor-pointer"
+                            className="w-full mt-6 py-2.5 px-4 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] rounded-xl text-xs font-bold cursor-pointer"
                         >
                             Run a check now
                         </button>

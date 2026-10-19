@@ -865,7 +865,7 @@ export default function BookingSettingsPanel({ embedded, onBack, onLoggedOut, in
                                         type="button"
                                         disabled={addingEvent || !newSlotName.trim()}
                                         onClick={addAppointmentSlot}
-                                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] text-white text-sm font-bold disabled:opacity-40"
+                                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] text-sm font-bold disabled:opacity-40"
                                     >
                                         <Plus className="w-4 h-4" />
                                         {addingEvent

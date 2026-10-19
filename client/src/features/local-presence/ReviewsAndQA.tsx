@@ -510,7 +510,7 @@ export function ReviewManagement() {
                     <button
                         type="button"
                         onClick={() => setCampaignOpen(true)}
-                        className="px-4 py-2 rounded-xl bg-[var(--brand-primary)] text-xs font-bold text-white hover:opacity-90 cursor-pointer"
+                        className="px-4 py-2 rounded-xl bg-[var(--brand-primary)] text-xs font-bold text-[var(--brand-primary-foreground)] hover:opacity-90 cursor-pointer"
                     >
                         Launch Campaign
                     </button>
@@ -873,7 +873,7 @@ export function ReviewManagement() {
                                 type="button"
                                 onClick={sendCampaign}
                                 disabled={sending || (!campaign.emails.trim() && !campaign.phones.trim())}
-                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--brand-primary)] text-xs font-bold text-white disabled:opacity-50 cursor-pointer"
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[var(--brand-primary)] text-xs font-bold text-[var(--brand-primary-foreground)] disabled:opacity-50 cursor-pointer"
                             >
                                 {sending && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Send requests
                             </button>
@@ -1070,7 +1070,7 @@ export function QAAutoResponder() {
                                 type="button"
                                 onClick={handleSaveKB}
                                 disabled={isSavingKB}
-                                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer shrink-0 disabled:opacity-70"
+                                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer shrink-0 disabled:opacity-70"
                             >
                                 {isSavingKB ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                                 {isSavingKB ? 'Saving...' : 'Save knowledge'}
@@ -1186,7 +1186,7 @@ export function QAAutoResponder() {
                                                         type="button"
                                                         onClick={() => handleAutoAnswer(q.id, q.text)}
                                                         disabled={isGenerating === q.id}
-                                                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-xs disabled:opacity-70"
+                                                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-xs disabled:opacity-70"
                                                     >
                                                         {isGenerating === q.id ? (
                                                             <Loader2 className="w-3.5 h-3.5 animate-spin" />

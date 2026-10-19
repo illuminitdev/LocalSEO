@@ -134,7 +134,7 @@ export default function LocationPicker({ locations, selectedId, onSelect, limit,
                         onClick={add}
                         disabled={busy}
                         className={cn(
-                            'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--brand-primary)] text-white text-xs font-bold cursor-pointer',
+                            'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] text-xs font-bold cursor-pointer',
                             busy && 'opacity-70'
                         )}
                     >

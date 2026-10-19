@@ -433,12 +433,12 @@ export default function LeadCrmDrawer({
                                                 className={cn(
                                                     'text-xs px-3 py-2 rounded-lg border font-medium transition-all flex items-center gap-1.5',
                                                     selected
-                                                        ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
+                                                        ? 'bg-amber-500 text-[var(--brand-primary-foreground)] border-amber-500 shadow-sm'
                                                         : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300'
                                                 )}
                                             >
                                                 {preset.type !== 'custom' && (
-                                                    <Icon className={cn('w-3.5 h-3.5', selected ? 'text-white' : 'text-slate-400')} />
+                                                    <Icon className={cn('w-3.5 h-3.5', selected ? 'text-[var(--brand-primary-foreground)]' : 'text-slate-400')} />
                                                 )}
                                                 <span>{preset.label}</span>
                                             </button>
@@ -532,7 +532,7 @@ export default function LeadCrmDrawer({
                                         <button
                                             type="submit"
                                             disabled={submittingTask || !taskTitle.trim()}
-                                            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-semibold text-sm rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+                                            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-[var(--brand-primary-foreground)] font-semibold text-sm rounded-xl shadow-sm transition-all flex items-center gap-1.5"
                                         >
                                             <Plus className="w-4 h-4" />
                                             {submittingTask ? 'Assigning...' : 'Assign task'}

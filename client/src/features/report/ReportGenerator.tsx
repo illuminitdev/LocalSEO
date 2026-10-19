@@ -37,7 +37,7 @@ const ACTION_ICONS: Record<string, any> = {
 };
 const ACTION_TONES: Record<string, string> = {
     review: 'bg-rose-50 text-rose-500',
-    clock: 'bg-orange-500 text-white',
+    clock: 'bg-orange-500 text-[var(--brand-primary-foreground)]',
     photo: 'bg-[#0F172A] text-white',
     post: 'bg-blue-50 text-blue-600',
     profile: 'bg-emerald-50 text-emerald-600',
@@ -272,7 +272,7 @@ function InsightsOverview() {
                                 <button
                                     type="button"
                                     onClick={() => navigate('/posts')}
-                                    className="mt-3 w-full py-2 rounded-lg bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold cursor-pointer"
+                                    className="mt-3 w-full py-2 rounded-lg bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] text-xs font-bold cursor-pointer"
                                 >
                                     Apply Optimization
                                 </button>
@@ -381,7 +381,7 @@ function InsightsOverview() {
                     ['3', 'Repeat weekly', 'Each run saves a snapshot. After a few weeks the chart shows whether you are gaining or losing ground.']
                 ].map(([n, t, d]) => (
                     <div key={n} className="flex gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3.5">
-                        <span className="w-6 h-6 rounded-full bg-[var(--brand-primary)] text-white text-xs font-bold flex items-center justify-center shrink-0">{n}</span>
+                        <span className="w-6 h-6 rounded-full bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] text-xs font-bold flex items-center justify-center shrink-0">{n}</span>
                         <div>
                             <div className="text-xs font-bold text-[#0F172A]">{t}</div>
                             <p className="text-[11px] text-gray-500 mt-0.5">{d}</p>
@@ -460,7 +460,7 @@ function InsightsOverview() {
                                             {[
                                                 [b.share.compB, 'bg-[#4B5563] text-white rounded-t-sm'],
                                                 [b.share.compA, 'bg-[#BEC6DB] text-slate-700'],
-                                                [{ name: 'You', pct: b.share.you }, 'bg-[var(--brand-primary)] text-white']
+                                                [{ name: 'You', pct: b.share.you }, 'bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)]']
                                             ].map(([seg, cls]: any, i) => (
                                                 <div
                                                     key={i}

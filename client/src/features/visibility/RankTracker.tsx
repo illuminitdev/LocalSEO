@@ -543,7 +543,7 @@ export default function RankTracker() {
                         id="run-scan-btn"
                         onClick={handleRunScan}
                         disabled={scanning}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-ink)] text-white rounded-lg text-sm font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-70"
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-ink)] text-[var(--brand-primary-foreground)] rounded-lg text-sm font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-70"
                     >
                         {scanning
                             ? <Loader2 className="w-4 h-4 animate-spin" />

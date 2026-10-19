@@ -999,7 +999,7 @@ export default function AdminGrowthAuditLeads() {
                             <button
                                 type="button"
                                 onClick={() => setIsAddLeadModalOpen(true)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[#F59E0B] text-white hover:bg-[#D97706] transition-colors shadow-2xs"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[#F59E0B] text-[#0F172A] hover:bg-[#D97706] transition-colors shadow-2xs"
                             >
                                 <Plus className="w-3.5 h-3.5" />
                                 <span>Add Lead</span>

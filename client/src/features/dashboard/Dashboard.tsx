@@ -722,7 +722,7 @@ function LocalSeoOnlyDashboard({
 
                 <Link
                     to="/rank-tracker"
-                    className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-5 py-2.5 text-xs sm:text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+                    className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] px-5 py-2.5 text-xs sm:text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
                 >
                     <Search className="w-4 h-4" /> Run Grid Scan
                 </Link>
@@ -1056,7 +1056,7 @@ function HybridDashboard({
                 <div className="flex items-center gap-2">
                     <Link
                         to="/booking"
-                        className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white px-4 py-2.5 text-xs sm:text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 cursor-pointer"
+                        className="rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] px-4 py-2.5 text-xs sm:text-sm font-bold transition shadow-sm hover:shadow active:scale-95 inline-flex items-center gap-1.5 cursor-pointer"
                     >
                         <CalendarClock className="w-4 h-4" /> Booking Board
                     </Link>
@@ -1277,7 +1277,7 @@ function HybridDashboard({
                                 <Link
                                     to={`/book/${orgSlug}`}
                                     target="_blank"
-                                    className="bg-[var(--brand-primary)] text-white font-bold px-2.5 py-1 rounded-lg hover:bg-[var(--brand-primary-hover)] text-xs inline-flex items-center gap-1 shadow-2xs transition"
+                                    className="bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] font-bold px-2.5 py-1 rounded-lg hover:bg-[var(--brand-primary-hover)] text-xs inline-flex items-center gap-1 shadow-2xs transition"
                                 >
                                     <ExternalLink className="w-3 h-3" /> View
                                 </Link>

@@ -201,7 +201,7 @@ export default function TaskCompletionModal({
                             className={cn(
                                 "flex items-center gap-2 p-2 rounded-xl border text-xs font-bold transition-all text-left",
                                 selectedStatus === 'in_progress'
-                                    ? "bg-amber-500 text-white border-amber-500 shadow-sm ring-2 ring-amber-500/30"
+                                    ? "bg-amber-500 text-[var(--brand-primary-foreground)] border-amber-500 shadow-sm ring-2 ring-amber-500/30"
                                     : "bg-amber-50/60 hover:bg-amber-100/70 text-amber-950 border-amber-200"
                             )}
                         >

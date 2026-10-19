@@ -662,7 +662,7 @@ export default function VisibilityTracker() {
                     <button
                         type="submit"
                         disabled={adding || busy || !input.trim()}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--brand-primary)] px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--brand-primary)] px-4 py-2 text-sm font-bold text-[var(--brand-primary-foreground)] disabled:opacity-50"
                     >
                         {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Track
                     </button>
