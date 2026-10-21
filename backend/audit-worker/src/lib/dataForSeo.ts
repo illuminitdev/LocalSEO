@@ -2426,10 +2426,11 @@ export async function writeAeoQuestionsWithChatGpt(opts: {
   if (!businessName || !requireDataForSeoConfigured()) return [];
 
   const systemMessage =
-    'Write exactly 3 Google questions that bring up a People Also Ask box, one per line, nothing else. ' +
-    'Lines 1 and 2: about two different services this business offers (price, where to get it, how long, what is included), ' +
-    'naming the service and the town, never a business name. Line 3: about reviews or trust, with the exact business name and a service. ' +
-    'Never use the business category as a service. Natural UK English, under 90 characters each.';
+    'Write exactly 3 Google questions as shown in People Also Ask, one per line, nothing else. ' +
+    'Lines 1-2: two different services, never a business name. Add the town only for price or where to get it; ' +
+    'what is included, how long, how often: no town. ' +
+    'Line 3: short, as people search a business: "<exact business name> reviews" or "Is <exact business name> any good?". ' +
+    'Never use the category as a service. UK English, under 90 characters.';
   const userPrompt = (
     `Business: ${businessName.slice(0, 80)}. Town: ${city.slice(0, 50) || 'near me'}. ` +
     `Category (not a service): ${category.slice(0, 50) || 'unknown'}. ` +

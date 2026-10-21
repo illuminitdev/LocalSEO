@@ -176,10 +176,14 @@ services:
 questions: exactly 3 questions real customers type into Google that bring up a "People also ask" box.
 - 2 with kind "service": each about a DIFFERENT service from "services", with different intents
   (service_cost = price, service_best = where to get it / who is best, service_howto = how long, what is included,
-  how often, when it is needed). Each one names the service and says "${where}". Never any business name.
-- 1 with kind "brand", intent "brand_trust": about reviews or trust, using the exact name "${name}" and one of its services.
-- Natural, correct UK English, written the way people really search. Never use the category as if it were a service
-  (wrong: "How much does ${category || 'garage'} cost").`;
+  how often, when it is needed). Each one names the service. Never any business name.
+- Add "${where}" ONLY when the answer depends on the place (price, where to get it, who is best). Questions whose
+  answer is the same everywhere (what is included, how long, how often, when it is needed) have no town
+  (right: "What is included in a full car service?", wrong: "What is included in car servicing in Maidenhead?").
+- 1 with kind "brand", intent "brand_trust": the way people really search a business, short, with the exact name
+  "${name}", e.g. "${name} reviews" or "Is ${name} any good?". Not a long sentence about its reviews.
+- Natural, correct UK English, the wording Google really shows in "People also ask". Never use the category as if it
+  were a service (wrong: "How much does ${category || 'garage'} cost").`;
 }
 
 function wordsOn(service: string, text: string) {
@@ -340,6 +344,10 @@ async function dataForSeoQuestions(opts: {
   const rest = [...services.filter((s) => !covered.includes(s.toLowerCase())), ...services.filter((s) => covered.includes(s.toLowerCase()))];
   const lines = await writeAeoQuestionsWithChatGpt({ businessName: name, city, category, services: rest });
   const mentionsCovered = (q: string) => covered.some((s) => q.toLowerCase().includes(s));
+  const repeats = (q: { query: string; kind: string; intent: AeoQueryIntent }) =>
+    q.kind !== 'service'
+      ? 0
+      : Number(mentionsCovered(q.query)) + Number(paa.some((p) => p.intent === q.intent));
   // ChatGPT sometimes adds "... at <business>" to a service question; that part is dropped.
   const atName = new RegExp(`\\s*\\b(at|near|from|by|with)\\s+${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
   const written = lines
@@ -348,7 +356,8 @@ async function dataForSeoQuestions(opts: {
       kind: (i === 2 ? 'brand' : 'service') as 'brand' | 'service',
       intent: i === 2 ? ('brand_trust' as const) : guessIntent(query)
     }))
-    .sort((a, b) => Number(a.kind === 'service' && mentionsCovered(a.query)) - Number(b.kind === 'service' && mentionsCovered(b.query)));
+    // Prefer a top-up about another service and another intent (not two price questions).
+    .sort((a, b) => repeats(a) - repeats(b));
   if (!written.some((q) => q.kind === 'brand') && city) {
     written.push({ query: `${name} reviews ${city}`, kind: 'brand', intent: 'brand_trust' });
   }
