@@ -26,13 +26,12 @@ import {
     serviceFromBusiness,
     templateGbpObservation
 } from './leadGbpScore';
+import { MIN_READABLE_CHARS, UA, fetchPage, type Page } from './serviceDetect';
 
 const POSTING_WINDOW_DAYS = 30;
 const CONCURRENCY = 5;
 /** Leave headroom under the 15 min Lambda limit before handing the rest to a fresh invocation. */
 const SOFT_DEADLINE_MS = 12 * 60 * 1000;
-const UA =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 /**
  * share.google links only redirect to the business when the client is NOT a browser (a browser UA is sent to a
@@ -163,77 +162,6 @@ function titleLooksLikeLead(title: string, leadName: string, urlName: string): b
 }
 
 /* -------------------------------- Website NAP ------------------------------ */
-
-const NAMED_ENTITIES: Record<string, string> = {
-    nbsp: ' ',
-    amp: '&',
-    quot: '"',
-    apos: "'",
-    lsquo: "'",
-    rsquo: "'",
-    ldquo: '"',
-    rdquo: '"',
-    ndash: '-',
-    mdash: '-',
-    hellip: '...',
-    pound: '£'
-};
-
-/** "Smith&#039;s", "Smith&rsquo;s" and "Smith &amp; Sons" must read like the name on the GBP. */
-function decodeEntities(s: string): string {
-    return s
-        .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-        .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
-        .replace(/&([a-z]+);/gi, (m, n) => NAMED_ENTITIES[n.toLowerCase()] ?? m);
-}
-
-function htmlToText(html: string): string {
-    return decodeEntities(
-        html
-            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-            .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
-            .replace(/<[^>]+>/g, ' ')
-    ).replace(/\s+/g, ' ');
-}
-
-/** Text the visible page does not show but that still names the business: <title>, meta tags, JSON-LD (telephone, address). */
-function hiddenBusinessText(html: string): string {
-    const parts: string[] = [];
-    const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    if (title) parts.push(title[1]);
-    for (const m of html.matchAll(/<meta[^>]+(?:property|name)=["'](?:og:site_name|og:title|application-name|twitter:title)["'][^>]*>/gi)) {
-        const c = m[0].match(/content=["']([^"']*)["']/i);
-        if (c) parts.push(c[1]);
-    }
-    for (const m of html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
-        parts.push(m[1].replace(/[{}\[\]",:]/g, ' '));
-    }
-    // tel: links often carry the phone number even when the visible text is formatted oddly
-    parts.push((html.match(/href=["']tel:([^"']+)["']/gi) || []).join(' '));
-    return decodeEntities(parts.join(' '));
-}
-
-type Page = { text: string; visibleChars: number };
-
-async function fetchPage(url: string): Promise<Page | null> {
-    try {
-        const res = await fetch(url, {
-            redirect: 'follow',
-            headers: { 'User-Agent': UA, Accept: 'text/html', 'Accept-Language': 'en-GB,en;q=0.9' },
-            signal: AbortSignal.timeout(9000)
-        });
-        if (!res.ok) return null;
-        const html = (await res.text()).slice(0, 800_000);
-        const visible = htmlToText(html);
-        return { text: `${visible} ${hiddenBusinessText(html)}`, visibleChars: visible.length };
-    } catch {
-        return null;
-    }
-}
-
-/** Below this much text the page is almost certainly built by JavaScript (or blocked), so it cannot be judged. */
-const MIN_READABLE_CHARS = 400;
 
 const CONTACT_PATHS = ['/contact', '/contact-us', '/contact-us/', '/contact.html', '/about', '/about-us', '/about-us/'];
 

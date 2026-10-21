@@ -1,4 +1,4 @@
-﻿import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import Stripe from 'stripe';
@@ -48,6 +48,7 @@ import {
     fetchSearchVolumes,
     industryKeywordIdeas,
     industryTerms,
+    keywordServices,
     makeRelevanceFilter,
     trackerConfigured,
     type TrackerKeyword
@@ -57,6 +58,7 @@ import {
     ensureLocalSeoBusiness,
     getLocalSeoUpgradeChoice,
     loadOrgAppState,
+    saveDetectedServices,
     saveOrgAppState,
     saveOrgDashboardPatch,
     setLocalSeoUpgradeChoice,
@@ -72,6 +74,7 @@ import {
     summarizeTracker,
     buildActions as buildInsightActions,
     buildPrompts,
+    businessServices,
     cityFromAddress,
     suggestKeywords,
     buildReport as buildVisibilityReport,
@@ -124,6 +127,7 @@ import {
     trackedFromScans
 } from './lib/rankHistory';
 import { randomUUID } from 'crypto';
+import { detectServices } from './lib/serviceDetect';
 import { appendPoint, checkPrompts, cleanPrompt, pointFromEntries, suggestPrompts, type TrackedPrompt } from './lib/llmTracker';
 import { cachedAnswer, putAnswer, setAnswerPeriod, type StoredAnswer } from './lib/llmAnswers';
 import { CitationScanError,collectCitationScan, startCitationScan } from './lib/dataForSeoCitations';
@@ -226,7 +230,10 @@ const emptyBusiness = () => ({
     lat: null,
     lng: null,
     placeId: '',
-    mapsUrl: ''
+    mapsUrl: '',
+    services: [] as string[],
+    servicesFor: '',
+    aiPrompts: [] as Array<{ prompt: string; topic: string }>
 });
 
 const emptyDashboard = () => ({
@@ -440,6 +447,16 @@ async function saveOrgToDb(req: any) {
     await saveOrgDashboardPatch(req.orgId, { business: businessChanged ? business : null, patch, removed });
     req.dashboardLoaded = snapshotDashboard(dashboard);
     req.businessLoaded = businessJson;
+}
+
+/** Bump when detection gets better: every business then re-reads its website once. */
+const SERVICES_VERSION = 'v3';
+const servicesKey = (website: string) => `${SERVICES_VERSION} ${website}`;
+
+/** True when the services have not been read from the current website yet (pages then call /api/business/detect-services). */
+function servicesPending(b: any = connectedBusiness) {
+    const website = String(b?.website || '').trim();
+    return Boolean(aiClient && website && b?.servicesFor !== servicesKey(website));
 }
 
 function hydrateAppState(raw: any) {
@@ -942,8 +959,40 @@ app.post('/api/business/connect', requireAuth, hydrateOrgFromDb, requireFeature(
         icon: 'CheckCircle',
         color: 'text-[#F59E0B]'
     });
+    // Nothing was found last time (no services or no AI prompts): saving the profile again tries the website again.
+    if (!connectedBusiness.services?.length || !connectedBusiness.aiPrompts?.length) connectedBusiness.servicesFor = '';
     await saveOrgToDb(req);
     res.json({ success: true, business: connectedBusiness, stats: dashboardState });
+});
+
+const servicesRunning = new Set<string>();
+
+/**
+ * Reads the services from the business website (free fetch + one Gemini call, not charged) so keyword and AI-prompt
+ * suggestions cover every service. Pages call it when their data says `servicesPending`; runs once per website.
+ */
+app.post('/api/business/detect-services', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req: any, res) => {
+    const b = connectedBusiness;
+    const website = String(b.website || '').trim();
+    if (!servicesPending(b) || !req.orgId) return res.json({ services: b.services || [], updated: false });
+    if (servicesRunning.has(req.orgId)) return res.json({ services: b.services || [], updated: false, running: true });
+    servicesRunning.add(req.orgId);
+    let detected: Awaited<ReturnType<typeof detectServices>> = { services: [], prompts: [] };
+    try {
+        detected = await withTimeout(detectServices({ name: b.name, category: b.category, address: b.address, website }, generateText), 60_000, 'Detect services');
+        console.log(`[services] ${req.orgId}: ${detected.services.length} services, ${detected.prompts.length} prompts from ${website}`);
+    } catch (err: any) {
+        // Still marked as done for this website so it is not retried on every page load; saving the profile retries.
+        console.warn(`[services] ${req.orgId} detection failed:`, errMessage(err));
+    }
+    try {
+        await saveDetectedServices(req.orgId, detected, website, servicesKey(website));
+        res.json({ services: detected.services, updated: true });
+    } catch (err: any) {
+        res.status(500).json({ error: errMessage(err) });
+    } finally {
+        servicesRunning.delete(req.orgId);
+    }
 });
 
 app.post('/api/places/search', requireAuth, requireFeature('local_presence'), async (req, res) => {
@@ -1858,16 +1907,8 @@ app.post('/api/rank/scan-start', requireAuth, hydrateOrgFromDb, requireFeature('
 });
 
 app.get('/api/rank/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), (_req, res) => {
-    const category = String(connectedBusiness.category || '').trim().toLowerCase();
-    const city = cityFromAddress(String(connectedBusiness.address || '')).toLowerCase();
-    const services = String(connectedBusiness.attributes || '')
-        .split(/[,;\n]/)
-        .map((x: string) => x.trim().toLowerCase())
-        .filter((x: string) => x.length > 2 && x.length < 50 && x !== category)
-        .slice(0, 5);
-    const list = [...suggestKeywords(connectedBusiness as any)];
-    for (const svc of services) list.push(city ? `${svc} ${city}` : `${svc} near me`);
-    if (city) for (const svc of services.slice(0, 3)) list.push(`best ${svc} in ${city}`);
+    // Category keywords alternated with keywords for every service (typed + read from the website).
+    const list = suggestKeywords(connectedBusiness as any);
     const seen = new Set<string>();
     const keywords = list.filter((k) => {
         const key = k.toLowerCase();
@@ -1875,7 +1916,7 @@ app.get('/api/rank/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('
         seen.add(key);
         return true;
     });
-    res.json({ keywords: keywords.slice(0, 12) });
+    res.json({ keywords: keywords.slice(0, 12), services: businessServices(connectedBusiness), servicesPending: servicesPending() });
 });
 
 app.post('/api/rank/scan-row', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
@@ -2233,17 +2274,17 @@ const trackerSuggestions = (allowPaid: boolean): express.RequestHandler => async
         return res.json({ suggestions: list.slice(0, 16), query: typed });
     }
     const terms = industryTerms(String(connectedBusiness.category || ''));
-    const services = String(connectedBusiness.attributes || '')
-        .split(/[,;\n]/)
-        .map(cleanKeyword)
-        .filter((x: string) => x.length > 2 && x.length < 50)
-        .slice(0, 6);
+    const services = keywordServices(connectedBusiness as any);
     const seeds = [...terms, ...services].flatMap((t) => (city ? [t, `${t} ${city}`] : [t]));
+    const servicesKey = services.join('|');
 
     // The starting list makes two paid lookups, so it is kept for a week instead of being rebuilt on every page load.
+    // A paid refresh also rebuilds it when the services changed since it was made.
     let all: Record<string, number | null>;
-    if (cache.initial && (!allowPaid || fresh(cache.initial.at))) {
-        all = cache.initial.all;
+    if (cache.initial && (!allowPaid || (fresh(cache.initial.at) && (cache.initial as any).services === servicesKey))) {
+        all = { ...cache.initial.all };
+        // Services found after the list was made: show their keyword ideas (volume unknown until the next paid refresh).
+        for (const k of industryKeywordIdeas(connectedBusiness as any)) if (!(k in all)) all[k] = null;
     } else if (!allowPaid) {
         return res.json({ suggestions: [], needsLookup: true });
     } else {
@@ -2264,7 +2305,7 @@ const trackerSuggestions = (allowPaid: boolean): express.RequestHandler => async
         all = { ...related };
         for (const k of templates) if (!(k in all)) all[k] = k in templateVolumes ? templateVolumes[k] : null;
         if (Object.keys(related).length || Object.keys(templateVolumes).length) {
-            cache.initial = { at: new Date().toISOString(), all };
+            cache.initial = { at: new Date().toISOString(), all, services: servicesKey } as any;
             await saveOrgToDb(req).catch(() => undefined);
         } else if (charged) {
             await refund(req, 'keywordSuggest', CREDIT_COSTS.keywordSuggest, startRef, 'lookup failed').catch(() => undefined);
@@ -2278,7 +2319,11 @@ const trackerSuggestions = (allowPaid: boolean): express.RequestHandler => async
         // real demand first; keywords with zero volume are not worth tracking
         .filter((x) => x.volume == null || x.volume > 0)
         .sort((x, y) => (y.volume ?? -1) - (x.volume ?? -1));
-    res.json({ suggestions: suggestions.slice(0, 24) });
+    // Highest volume first, but every service keeps at least one keyword in the list.
+    const picks = [...new Set(services.map((svc) => suggestions.find((s) => s.keyword.includes(svc))).filter(Boolean))] as typeof suggestions;
+    const rest = suggestions.filter((s) => !picks.includes(s)).slice(0, Math.max(0, 24 - picks.length));
+    const top = [...rest, ...picks].sort((x, y) => (y.volume ?? -1) - (x.volume ?? -1));
+    res.json({ suggestions: top, servicesPending: servicesPending() });
 };
 app.get('/api/visibility-tracker/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), trackerSuggestions(false));
 app.post('/api/visibility-tracker/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), trackerSuggestions(true));
@@ -2722,7 +2767,10 @@ function visibilityBusiness() {
         address: connectedBusiness.address,
         category: connectedBusiness.category,
         website: connectedBusiness.website,
-        completenessScore: dashboardState.completenessScore
+        completenessScore: dashboardState.completenessScore,
+        attributes: connectedBusiness.attributes,
+        services: Array.isArray(connectedBusiness.services) ? connectedBusiness.services : [],
+        aiPrompts: Array.isArray(connectedBusiness.aiPrompts) ? connectedBusiness.aiPrompts : []
     };
 }
 
@@ -2943,7 +2991,8 @@ function llmTrackerPayload(dash: any, req: any) {
             connected: Boolean(connectedBusiness.connected && connectedBusiness.name)
         },
         max: llmTrackerLimit(req),
-        planName: req.entitlements?.planName || ''
+        planName: req.entitlements?.planName || '',
+        servicesPending: servicesPending()
     };
 }
 

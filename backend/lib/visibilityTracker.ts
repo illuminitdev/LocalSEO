@@ -1,5 +1,5 @@
 import { logDfsCost } from './dfsCost';
-import { cityFromAddress } from './aiInsights';
+import { businessServices, cityFromAddress } from './aiInsights';
 import { dataForSeoConfigured } from './dataForSeoCitations';
 import { locationCodeFor, type GeoHint } from './geo';
 import { TRACKED_KEYWORD_LIMIT } from './planCatalog';
@@ -140,17 +140,21 @@ export function makeRelevanceFilter(category: string, services: string[]) {
     };
 }
 
-type SuggestBusiness = { category?: string; address?: string; attributes?: string };
+type SuggestBusiness = { category?: string; address?: string; attributes?: string; services?: string[] };
+
+/** Typed + website-detected services as keyword phrases (see businessServices). */
+export function keywordServices(business: SuggestBusiness): string[] {
+    const terms = industryTerms(String(business.category || ''));
+    return businessServices(business)
+        .map(cleanKeyword)
+        .filter((x) => x.length > 2 && !terms.includes(x));
+}
 
 /** Keyword ideas built from the business industry, services and city. */
 export function industryKeywordIdeas(business: SuggestBusiness): string[] {
     const terms = industryTerms(String(business.category || ''));
     const city = cleanKeyword(cityFromAddress(String(business.address || '')));
-    const services = String(business.attributes || '')
-        .split(/[,;\n]/)
-        .map(cleanKeyword)
-        .filter((x) => x.length > 2 && x.length < 50 && !terms.includes(x))
-        .slice(0, 8);
+    const services = keywordServices(business);
 
     const ideas: string[] = [];
     for (const t of [...terms, ...services]) {

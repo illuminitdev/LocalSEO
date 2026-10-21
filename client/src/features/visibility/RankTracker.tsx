@@ -25,6 +25,7 @@ import PlacesMap, { mapsJsConfigured, type MapMarker } from '../../shared/Places
 import LocationPicker, { type SavedLocation } from '../../shared/LocationPicker';
 import { useCredits } from '../../shared/CreditsContext';
 import { creditErrorMessage } from '../../shared/creditMessages';
+import { useServiceDetection } from '../../shared/useServiceDetection';
 
 type TrackedKeyword = {
     keyword: string;
@@ -100,6 +101,7 @@ export default function RankTracker() {
     const [businessName, setBusinessName] = useState('');
     const [businessCategory, setBusinessCategory] = useState('');
     const [services, setServices] = useState<string[]>([]);
+    const [servicesPending, setServicesPending] = useState(false);
 
     // Scans always run from one of the saved locations (the business address is the first one).
     const { refresh: refreshCredits } = useCredits();
@@ -139,6 +141,19 @@ export default function RankTracker() {
         }
     };
 
+    // Keyword ideas + services (typed on the profile and read from the website).
+    const loadSuggestions = (isCancelled: () => boolean = () => false) =>
+        apiGet('/api/rank/suggestions')
+            .then((d) => {
+                if (isCancelled()) return;
+                setSuggestions(Array.isArray(d?.keywords) ? d.keywords : []);
+                setServices(Array.isArray(d?.services) ? d.services.slice(0, 6) : []);
+                setServicesPending(Boolean(d?.servicesPending));
+            })
+            .catch(() => {});
+
+    useServiceDetection(servicesPending, () => loadSuggestions());
+
     useEffect(() => {
         let cancelled = false;
         (async () => {
@@ -155,20 +170,9 @@ export default function RankTracker() {
                     setBusinessCategory(biz.category);
                     defaultKeyword = `${biz.category} near me`;
                 }
-                if (typeof biz.attributes === 'string') {
-                    setServices(
-                        biz.attributes
-                            .split(/[,;\n]/)
-                            .map((x: string) => x.trim())
-                            .filter((x: string) => x.length > 2 && x.length < 60)
-                            .slice(0, 6)
-                    );
-                }
             }
 
-            apiGet('/api/rank/suggestions')
-                .then((d) => !cancelled && setSuggestions(Array.isArray(d?.keywords) ? d.keywords : []))
-                .catch(() => {});
+            loadSuggestions(() => cancelled);
             applyLocations(state);
             const runs: GapRun[] = Array.isArray(state?.gapAnalyses) ? state.gapAnalyses : [];
             setGapRuns(runs);

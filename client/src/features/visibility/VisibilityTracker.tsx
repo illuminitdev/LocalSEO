@@ -4,6 +4,7 @@ import { ago, apiDelete, apiGet, apiPost, cn, type ApiError } from '../../shared
 import LocationPicker, { type SavedLocation } from '../../shared/LocationPicker';
 import { useCredits } from '../../shared/CreditsContext';
 import { creditErrorMessage } from '../../shared/creditMessages';
+import { useServiceDetection } from '../../shared/useServiceDetection';
 
 type Point = { date: string; rank: number };
 type TrackedKeyword = {
@@ -198,6 +199,7 @@ export default function VisibilityTracker() {
     const [checking, setChecking] = useState({ done: 0, total: 0 });
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
+    const [servicesPending, setServicesPending] = useState(false);
 
     const busy = checking.total > 0;
     const { refresh: refreshCredits } = useCredits();
@@ -228,7 +230,11 @@ export default function VisibilityTracker() {
                 if (!cancelled) setLoading(false);
             }
             apiGet('/api/visibility-tracker/suggestions')
-                .then((d) => !cancelled && setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []))
+                .then((d) => {
+                    if (cancelled) return;
+                    setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []);
+                    setServicesPending(Boolean(d?.servicesPending));
+                })
                 .catch(() => {});
         })();
         return () => {
@@ -292,8 +298,14 @@ export default function VisibilityTracker() {
 
     const refreshSuggestions = () =>
         apiGet('/api/visibility-tracker/suggestions')
-            .then((d) => setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []))
+            .then((d) => {
+                setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []);
+                setServicesPending(Boolean(d?.servicesPending));
+            })
             .catch(() => {});
+
+    // Keyword ideas cover each service once they have been read from the website (free).
+    useServiceDetection(servicesPending, refreshSuggestions);
 
     const runChecks = async (targets: string[]) => {
         if (!targets.length) return;
