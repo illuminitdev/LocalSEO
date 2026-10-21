@@ -1,4 +1,4 @@
-﻿import { LLM_PLATFORMS, answerVerdicts, askLlm, cityFromAddress, type Platform, type RawAnswer, type VisibilityBusiness } from './aiInsights';
+﻿import { LLM_PLATFORMS, answerVerdicts, askLlm, type Platform, type RawAnswer, type VisibilityBusiness } from './aiInsights';
 import { cachedAnswer, putAnswer, type StoredAnswer } from './llmAnswers';
 
 const MAX_HISTORY_POINTS = 60;
@@ -153,25 +153,4 @@ export function appendPoint(item: TrackedPrompt, point: PromptPoint) {
     item.checkedAt = point.date;
 }
 
-/** Ready-made customer-style prompts for the business category and city (no API cost). */
-export function suggestPrompts(business: VisibilityBusiness, exclude: string[] = []): string[] {
-    const category = String(business.category || 'local business').trim().toLowerCase();
-    const city = cityFromAddress(String(business.address || ''));
-    const where = city ? ` in ${city}` : ' near me';
-    const list = [
-        `Who is the best ${category}${where}?`,
-        `Can you recommend a good ${category}${where}?`,
-        `Top rated ${category}${where} with good reviews`,
-        `Which ${category}${where} should I choose and why?`,
-        `Best local ${category}${where} for first-time customers`,
-        `Most affordable ${category}${where}`,
-        `Who is the most trusted ${category}${where}?`,
-        `${category} open on weekends${where}`,
-        `Emergency ${category}${where} available today`,
-        `Which ${category}${where} do locals recommend?`,
-        `${category} with the best customer service${where}`,
-        `Compare the top ${category}s${where}`
-    ];
-    const taken = new Set(exclude.map((p) => p.toLowerCase()));
-    return list.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).filter((p) => !taken.has(p.toLowerCase()));
-}
+export { suggestPrompts } from './aiInsights';

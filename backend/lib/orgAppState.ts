@@ -19,7 +19,12 @@ export function emptyBusinessProfile() {
         lat: null,
         lng: null,
         placeId: '',
-        mapsUrl: ''
+        mapsUrl: '',
+        services: [] as string[],
+        /** "<version> <website>" the services were read from; detection runs again when either changes. */
+        servicesFor: '',
+        /** Customer questions written by AI for this business, used as its LLM prompts. */
+        aiPrompts: [] as Array<{ prompt: string; topic: string }>
     };
 }
 
@@ -285,6 +290,25 @@ export async function saveOrgDashboardPatch(
              dashboard = (COALESCE(org_app_state.dashboard, '{}'::jsonb) - $4::text[]) || $3::jsonb,
              updated_at = NOW()`,
         [orgId, data.business == null ? null : JSON.stringify(data.business), JSON.stringify(data.patch), data.removed]
+    );
+}
+
+/**
+ * Stores services read from the website without touching the rest of the profile (runs in the background after the
+ * request). Skipped when the website was changed again in the meantime: that change starts its own detection.
+ */
+export async function saveDetectedServices(
+    orgId: string,
+    detected: { services: string[]; prompts: Array<{ prompt: string; topic: string }> },
+    website: string,
+    servicesFor: string
+) {
+    await query(
+        `UPDATE org_app_state
+         SET profile = profile || jsonb_build_object('services', $2::jsonb, 'aiPrompts', $5::jsonb, 'servicesFor', $4::text),
+             updated_at = NOW()
+         WHERE org_id = $1 AND TRIM(COALESCE(profile->>'website', '')) = $3`,
+        [orgId, JSON.stringify(detected.services), website, servicesFor, JSON.stringify(detected.prompts)]
     );
 }
 

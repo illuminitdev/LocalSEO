@@ -1,7 +1,8 @@
-﻿import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Download, Loader2, Plus, RefreshCw, Sparkles, Trash2, Trophy, Users } from 'lucide-react';
 import { apiGet, apiPost, cn } from '../../shared/utils';
 import { getPageCache, setPageCache } from '../../shared/pageCache';
+import { useServiceDetection } from '../../shared/useServiceDetection';
 import { LlmTabs } from './LlmVisibility';
 
 type Platform = 'chatgpt' | 'claude' | 'perplexity';
@@ -28,6 +29,7 @@ type TrackerInfo = {
     configured: boolean;
     business: { name: string; category: string; city: string; connected: boolean };
     max: number;
+    servicesPending?: boolean;
 };
 
 const NOT_RANKED = 21;
@@ -378,12 +380,18 @@ export default function LlmTracker() {
         if (info) setPageCache('llm-tracker', info);
     }, [info]);
 
-    useEffect(() => {
+    const load = () =>
         apiGet('/api/llm/tracker')
             .then((data: TrackerInfo) => setInfo(data))
             .catch((e: any) => setError(e?.message || 'Could not load LLM tracking'))
             .finally(() => setLoading(false));
+
+    useEffect(() => {
+        load();
     }, []);
+
+    // Suggestions cover each service once they have been read from the website.
+    useServiceDetection(info?.servicesPending, load);
 
     const add = async (text: string) => {
         const prompt = text.trim();
@@ -399,6 +407,7 @@ export default function LlmTracker() {
             setAdding(false);
         }
     };
+
 
     const remove = async (prompt: string) => {
         if (!window.confirm('Stop tracking this prompt? Its history will be deleted.')) return;
