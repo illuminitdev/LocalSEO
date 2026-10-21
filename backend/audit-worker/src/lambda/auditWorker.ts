@@ -6,6 +6,8 @@ import { runLighthouse } from '../audit/lighthouseRunner.js';
 import { captureHomepageScreenshot } from '../audit/homepageScreenshot.js';
 import { fallbackPillarDecks } from '../audit/pillarFixDecks.js';
 import { buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
+import { extractSiteServices, generateAeoQuestions } from '../audit/aeoQuestionsAi.js';
+import { auditContext } from '../audit/deckShared.js';
 import { buildGeoChecklist, applyGeoChecklistToChecks } from '../audit/geoChecklist.js';
 import { buildAeoCoreChecklist } from '../audit/aeoCoreChecklist.js';
 import { buildLocalSeoCoreChecklist } from '../audit/localSeoCoreChecklist.js';
@@ -820,8 +822,6 @@ async function enrichFromDataForSeo(audit: any) {
     }
   }
 
-  // AEO questions come from the service and city. No ChatGPT prompts, Google search, or screenshots.
-  audit.aeoQuerySpecs = buildAeoQuerySpecs(audit);
   audit.aeoSerpScreenshots = [];
 }
 
@@ -858,6 +858,37 @@ export const main: SQSHandler = async (event: SQSEvent) => {
         const err = rankErr as Error;
         console.warn('[auditWorker] DataForSEO/GBP enrich failed:', err.message);
       }
+
+      // AEO questions: Gemini writes them fresh from the services on the website (or Google Search when the site
+      // can't be read). The services read from the crawl are a hint; the fixed wording is only a last resort.
+      const aeoCity = auditContext(audit).city;
+      const aeoCategory = audit.business?.serviceLabel || audit.business?.service;
+      const crawledServices = extractSiteServices(crawl.pages, {
+        businessName: audit.business?.businessName,
+        city: aeoCity,
+        category: aeoCategory
+      });
+      const aeoAi = await generateAeoQuestions({
+        businessName: audit.business?.businessName,
+        category: aeoCategory,
+        city: aeoCity,
+        address: audit.business?.address,
+        website: crawl.finalUrl || website,
+        pages: crawl.pages,
+        siteServices: crawledServices
+      }).catch((err: Error) => {
+        console.warn('[auditWorker] AEO questions failed:', err?.message || err);
+        return null;
+      });
+      audit.siteServices = aeoAi?.services.length ? aeoAi.services : crawledServices;
+      const aeoSpecs = aeoAi?.specs ?? buildAeoQuerySpecs(audit);
+      audit.aeoQuerySpecs = aeoSpecs;
+      console.log(
+        '[auditWorker] AEO questions from',
+        aeoAi?.source || 'fallback',
+        '|',
+        aeoSpecs.map((s) => s.query).join(' | ')
+      );
 
       applyWebsiteChecks(audit.checklist.checks, crawl, lhMetrics, {
         city: audit.business.searchAreaLabel || audit.business.city,

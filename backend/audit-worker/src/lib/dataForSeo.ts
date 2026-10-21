@@ -2408,51 +2408,79 @@ async function fetchChatGptPlain(opts: {
   }
 }
 
-/** Four Google search lines for AEO Visual. */
-export async function suggestAeoGoogleSearches(opts: {
-  service: string;
-  city: string;
+/**
+ * Three AEO questions written by ChatGPT (DataForSEO LLM Responses), used when Gemini can't write them.
+ * Lines 1-2 are about the services, line 3 about the business. Prompts are capped at 500 characters, so the
+ * services read from the website are passed in; without them ChatGPT looks the business up (web search).
+ */
+export async function writeAeoQuestionsWithChatGpt(opts: {
   businessName: string;
+  city: string;
+  category?: string;
+  services: string[];
 }): Promise<string[]> {
-  const service = String(opts.service || '').replace(/\s+/g, ' ').trim();
-  const city = String(opts.city || '').replace(/\s+/g, ' ').trim();
   const businessName = String(opts.businessName || '').replace(/\s+/g, ' ').trim();
-  if (!service || !city || !businessName || !requireDataForSeoConfigured()) return [];
+  const city = String(opts.city || '').replace(/\s+/g, ' ').trim();
+  const category = String(opts.category || '').replace(/\s+/g, ' ').trim();
+  const services = (opts.services || []).map((s) => String(s || '').trim()).filter(Boolean).slice(0, 5);
+  if (!businessName || !requireDataForSeoConfigured()) return [];
 
   const systemMessage =
-    'Return exactly 4 Google search lines and nothing else. No numbering or commentary. ' +
-    'Lines 1 and 2 are questions a local customer would type about this service in this city. Do not put the business name in lines 1 or 2. ' +
-    'Lines 3 and 4 include the business name, the service, and the city. ' +
-    'Make the questions specific to this service, such as cost, how to choose, repair, install, or whether this company is a good choice. ' +
-    'Each line under 90 characters.';
-  const userPrompt = `Service: ${service.slice(0, 80)}. City: ${city.slice(0, 60)}. Business: ${businessName.slice(0, 80)}.`;
+    'Write exactly 3 Google questions that bring up a People Also Ask box, one per line, nothing else. ' +
+    'Lines 1 and 2: about two different services this business offers (price, where to get it, how long, what is included), ' +
+    'naming the service and the town, never a business name. Line 3: about reviews or trust, with the exact business name and a service. ' +
+    'Never use the business category as a service. Natural UK English, under 90 characters each.';
+  const userPrompt = (
+    `Business: ${businessName.slice(0, 80)}. Town: ${city.slice(0, 50) || 'near me'}. ` +
+    `Category (not a service): ${category.slice(0, 50) || 'unknown'}. ` +
+    (services.length
+      ? `Services: ${services.join(', ')}.`
+      : 'Services: look up this business and use the services it really offers.')
+  ).slice(0, 500);
   const models = ['gpt-4.1-mini', 'gpt-4o-mini'];
 
   for (const modelName of models) {
-    const first = await fetchChatGptPlain({
+    const { text, retryModel } = await fetchChatGptPlain({
       modelName,
       systemMessage,
       userPrompt,
-      webSearch: false
+      webSearch: services.length === 0
     });
-    let text = first.text;
-    if (!text) {
-      const second = await fetchChatGptPlain({
-        modelName,
-        systemMessage,
-        userPrompt,
-        webSearch: true
-      });
-      text = second.text;
-    }
     const lines = String(text || '')
       .split(/\r?\n/)
       .map((line) => line.replace(/^(\d+[\).\]]\s*|[-*•]\s*)/, '').replace(/^["']|["']$/g, '').trim())
-      .filter((line) => line && !/^(here|these|sure|google searches)\b/i.test(line));
-    if (lines.length >= 4) return lines.slice(0, 4);
-    if (!first.retryModel && text) break;
+      .filter((line) => line && !/^(here|these|sure|line \d)\b/i.test(line));
+    if (lines.length >= 3) return lines.slice(0, 3);
+    if (!retryModel && text) break;
   }
   return [];
+}
+
+/** Google's real "People also ask" questions for a search (UK results). [] when there are none. */
+export async function fetchPeopleAlsoAskQuestions(keyword: string, timeoutMs = 35000): Promise<string[]> {
+  const q = String(keyword || '').replace(/\s+/g, ' ').trim();
+  if (!q || !requireDataForSeoConfigured()) return [];
+  try {
+    const res = await fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
+      method: 'POST',
+      headers: { Authorization: basicAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ keyword: q, language_code: 'en', location_code: 2826, depth: 10, device: 'desktop' }]),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    const data: any = await res.json().catch(() => ({}));
+    const taskResult = Array.isArray(data?.tasks) ? data.tasks[0] : null;
+    if (!res.ok || !taskResult || taskResult.status_code !== 20000) {
+      console.warn('[dataForSeo] People also ask failed:', taskResult?.status_message || `HTTP ${res.status}`);
+      return [];
+    }
+    const result = Array.isArray(taskResult.result) ? taskResult.result[0] : taskResult.result;
+    return extractAeoSerpFacts(result?.items || [], '')
+      .peopleAlsoAsk.map((p) => p.question)
+      .filter(Boolean);
+  } catch (err: any) {
+    console.warn('[dataForSeo] People also ask failed:', err?.message || err);
+    return [];
+  }
 }
 
 /** Answers sampled per engine and prompt; a mention counts when it appears in the majority. */
