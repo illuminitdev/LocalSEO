@@ -672,13 +672,20 @@ export default function AdminFullAudits() {
     };
 
     const openAssignModalForAudit = (audit: FullAuditListItem) => {
+        // A same-name request already fulfilled by another audit belongs to that audit, not this row.
         const existingReq =
             assignmentByAuditId.get(audit.id) ||
             requests.find(
-                (r) => r.fulfilledAuditId === audit.id || (r.businessName && r.businessName.toLowerCase() === (audit.businessName || '').toLowerCase())
+                (r) =>
+                    r.fulfilledAuditId === audit.id ||
+                    (!r.fulfilledAuditId &&
+                        r.businessName &&
+                        r.businessName.toLowerCase() === (audit.businessName || '').toLowerCase())
             );
         if (existingReq) {
             openAssignModal(existingReq);
+            // Always assign the audit whose row was clicked.
+            setFulfillAuditId(audit.id);
         } else {
             const virtualReq: FullAuditRequest = {
                 id: `audit-${audit.id}`,
@@ -833,7 +840,9 @@ export default function AdminFullAudits() {
                 requests.find(
                     (r) =>
                         r.fulfilledAuditId === audit.id ||
-                        (r.businessName && r.businessName.toLowerCase() === (audit.businessName || '').toLowerCase())
+                        (!r.fulfilledAuditId &&
+                            r.businessName &&
+                            r.businessName.toLowerCase() === (audit.businessName || '').toLowerCase())
                 );
             try {
                 await assignFullAuditToAgent({
