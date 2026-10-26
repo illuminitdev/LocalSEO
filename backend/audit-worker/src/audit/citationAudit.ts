@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { geminiGenerate } from '../lib/gemini.js';
 
 export type CitationAuditResult = {
   ok: boolean;
@@ -83,25 +83,20 @@ Return JSON only:
 score is 0-100. status mismatch means NAP does not match. brandMentions = true if the brand appears on local news/blogs/directories beyond the main site.`;
 
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const modelNames = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
     let parsed: any = null;
-    let lastErr = '';
-    for (const modelName of modelNames) {
-      try {
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          generationConfig: { temperature: 0.2, responseMimeType: 'application/json' },
-          tools: [{ googleSearch: {} }] as any
-        });
-        const result = await model.generateContent(prompt);
-        parsed = extractJson(result.response.text());
-        if (parsed) break;
-      } catch (err) {
-        lastErr = (err as Error)?.message || String(err);
-      }
+    try {
+      // Google Search grounding does not allow a JSON response type, so the JSON is read from the text.
+      parsed = (
+        await geminiGenerate('citations', {
+          prompt,
+          generationConfig: { temperature: 0.2 },
+          tools: [{ googleSearch: {} }],
+          parse: extractJson
+        })
+      ).value;
+    } catch {
+      return empty('Directory listings could not be checked on this run');
     }
-    if (!parsed) return empty(lastErr || 'Gemini citation audit returned no JSON');
 
     const citations = Array.isArray(parsed.citations) ? parsed.citations : [];
     const found = Number(parsed.found ?? citations.filter((c: any) => c.status === 'found').length) || 0;

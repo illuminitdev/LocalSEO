@@ -29,6 +29,7 @@ import {
 import {
     assignFullAuditToAgent,
     deleteFullAudit,
+    fetchAdminCrmIndustries,
     fetchFullAudit,
     fetchFullAuditRequests,
     fetchFullAudits,
@@ -265,9 +266,16 @@ const EMPTY_FORM = {
     showExtraContact: false,
     address: '',
     city: '',
+    businessType: '',
     serviceId: '',
     serviceOther: '',
-    contactName: ''
+    contactName: '',
+    googleMapsUrl: '',
+    noGoogleProfile: false,
+    serviceArea: '' as '' | 'premises' | 'travel',
+    topServices: '',
+    otherAreas: '',
+    teamSize: '' as '' | 'solo' | 'small' | 'large'
 };
 
 function isValidEmailOrPhone(raw: string): boolean {
@@ -349,6 +357,7 @@ function formFromAuditRequest(req: FullAuditRequest) {
         extraContact: emailOk && phoneOk ? phone : '',
         showExtraContact: emailOk && phoneOk,
         contactName: req.contactName || '',
+        businessType: String(req.industry || '').trim(),
         serviceId: service.serviceId,
         serviceOther: service.serviceOther
     };
@@ -471,9 +480,16 @@ export default function AdminFullAudits() {
     const [audits, setAudits] = useState<FullAuditListItem[]>([]);
     const [requests, setRequests] = useState<FullAuditRequest[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
+    const [crmIndustries, setCrmIndustries] = useState<string[]>([]);
     const [activeLead, setActiveLead] = useState<GrowthAuditLeadRef | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [qualityNotice, setQualityNotice] = useState<{
+        businessName: string;
+        passed: boolean;
+        errors: string[];
+        warnings: string[];
+    } | null>(null);
     const [busyId, setBusyId] = useState('');
     const [busyAction, setBusyAction] = useState<'share' | 'delete' | ''>('');
     const [fulfillAuditId, setFulfillAuditId] = useState('');
@@ -525,6 +541,30 @@ export default function AdminFullAudits() {
     useEffect(() => {
         load();
     }, [load]);
+
+    // Business types come from CRM leads in the current environment (dev → dev DB, prod → prod DB).
+    useEffect(() => {
+        if (!showForm) return;
+        fetchAdminCrmIndustries()
+            .then((rows) => setCrmIndustries(rows.map((r) => String(r.name || '').trim())))
+            .catch(() => setCrmIndustries([]));
+    }, [showForm]);
+
+    const businessTypeOptions = useMemo(() => {
+        const fromCrm = crmIndustries.filter((n) => n && n.toLowerCase() !== 'general');
+        const base = fromCrm.length
+            ? fromCrm
+            : AUDIT_SERVICE_OPTIONS.filter((o) => o.id !== 'other').map((o) => o.label);
+        const seen = new Set<string>();
+        const out: string[] = [];
+        for (const name of [...base, form.businessType]) {
+            const key = name.trim().toLowerCase();
+            if (!key || seen.has(key)) continue;
+            seen.add(key);
+            out.push(name.trim());
+        }
+        return out.sort((a, b) => a.localeCompare(b));
+    }, [crmIndustries, form.businessType]);
 
     // Support old /admin/full-audits/new → redirect with ?new=1
     useEffect(() => {
@@ -833,7 +873,7 @@ export default function AdminFullAudits() {
 
     const requestRangeStart = filteredRequests.length === 0 ? 0 : (safeRequestPage - 1) * PAGE_SIZE + 1;
     const requestRangeEnd = Math.min(safeRequestPage * PAGE_SIZE, filteredRequests.length);
-    const showOther = form.serviceId === 'other';
+    const showOther = form.serviceId === 'other' && !form.businessType;
     const progressPct = ringPct;
     const activeStepIndex =
         progressPct >= 100
@@ -862,25 +902,38 @@ export default function AdminFullAudits() {
 
     const finishAndOpenReport = async (auditId: string) => {
         let reportUrl = '';
+        let held = false;
         try {
             const auditRes = await fetchFullAudit(auditId);
             const data = auditRes.data || {};
             reportUrl = resolveAuditReportUrl(
                 String(data.shareUrl || data.reportUrl || auditId).trim()
             );
+            const gate = data.qualityGate as { passed?: boolean; errors?: string[]; warnings?: string[] } | undefined;
+            if (gate && (gate.passed === false || (gate.warnings || []).length)) {
+                held = gate.passed === false;
+                setQualityNotice({
+                    businessName: String(data.business?.businessName || form.businessName || 'Audit'),
+                    passed: gate.passed !== false,
+                    errors: Array.isArray(gate.errors) ? gate.errors : [],
+                    warnings: Array.isArray(gate.warnings) ? gate.warnings : []
+                });
+            }
         } catch {
             /* fall through */
         }
-        if (reportUrl) {
+        if (reportUrl && !held) {
             window.open(reportUrl, '_blank', 'noopener,noreferrer');
         }
         setForm(EMPTY_FORM);
         setShowForm(false);
         setCreateMessage('');
         show(
-            prefillRequestId
-                ? 'Full audit ready — pick a sales agent to assign.'
-                : 'Full audit ready — report opened in a new tab.'
+            held
+                ? 'Full audit finished, but the report is held for review — see the reasons above.'
+                : prefillRequestId
+                  ? 'Full audit ready — pick a sales agent to assign.'
+                  : 'Full audit ready — report opened in a new tab.'
         );
         if (prefillRequestId) {
             const req = requests.find((r) => r.id === prefillRequestId);
@@ -975,7 +1028,23 @@ export default function AdminFullAudits() {
                 service: resolved.service,
                 primaryService: resolved.serviceLabel,
                 operatorNotes: '',
-                skipLighthouse: false
+                skipLighthouse: false,
+                intake: {
+                    googleMapsUrl: form.noGoogleProfile ? '' : form.googleMapsUrl.trim(),
+                    noGoogleProfile: form.noGoogleProfile,
+                    serviceArea: form.serviceArea || null,
+                    topServices: form.topServices
+                        .split(/[,\n;]/)
+                        .map((s) => s.trim())
+                        .filter(Boolean)
+                        .slice(0, 3),
+                    otherAreas: form.otherAreas
+                        .split(/[,\n;]/)
+                        .map((s) => s.trim())
+                        .filter(Boolean)
+                        .slice(0, 5),
+                    teamSize: form.teamSize || null
+                }
             });
 
             const auditIdOut = res.data?.auditId || res.data?.id;
@@ -1170,6 +1239,46 @@ export default function AdminFullAudits() {
                 <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
                     {error}
                 </p>
+            ) : null}
+
+            {qualityNotice ? (
+                <div
+                    className={cn(
+                        'text-sm rounded-xl px-4 py-3 border',
+                        qualityNotice.passed
+                            ? 'text-amber-900 bg-amber-50 border-amber-200'
+                            : 'text-red-900 bg-red-50 border-red-200'
+                    )}
+                >
+                    <div className="flex items-start justify-between gap-3">
+                        <p className="font-bold">
+                            {qualityNotice.passed
+                                ? `${qualityNotice.businessName}: report ready, with data warnings`
+                                : `${qualityNotice.businessName}: report held for review (not published)`}
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => setQualityNotice(null)}
+                            className="text-xs font-bold opacity-70 hover:opacity-100"
+                        >
+                            Dismiss
+                        </button>
+                    </div>
+                    {qualityNotice.errors.length ? (
+                        <ul className="list-disc pl-5 mt-1.5 space-y-0.5">
+                            {qualityNotice.errors.map((e) => (
+                                <li key={e}>{e}</li>
+                            ))}
+                        </ul>
+                    ) : null}
+                    {qualityNotice.warnings.length ? (
+                        <ul className="list-disc pl-5 mt-1.5 space-y-0.5 opacity-80">
+                            {qualityNotice.warnings.map((w) => (
+                                <li key={w}>{w}</li>
+                            ))}
+                        </ul>
+                    ) : null}
+                </div>
             ) : null}
 
             {activeTab === 'requests' ? (
@@ -1548,9 +1657,10 @@ export default function AdminFullAudits() {
                     ) : (
                         <form className="grid grid-cols-1 sm:grid-cols-2 gap-4" onSubmit={handleCreate}>
                             <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
-                                Business name <span className="text-red-500">*</span>
+                                What is your business name on Google? <span className="text-red-500">*</span>
                                 <input
                                     required
+                                    placeholder="Exactly as it shows on Google Maps"
                                     value={form.businessName}
                                     onChange={(e) => setForm({ ...form, businessName: e.target.value })}
                                     className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
@@ -1567,7 +1677,7 @@ export default function AdminFullAudits() {
                                 />
                             </label>
                             <label className="block text-sm font-semibold text-[#0F172A]">
-                                City <span className="text-red-500">*</span>
+                                Which town or area do you serve? <span className="text-red-500">*</span>
                                 <input
                                     required
                                     value={form.city}
@@ -1621,7 +1731,7 @@ export default function AdminFullAudits() {
                                 ) : null}
                             </div>
                             <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
-                                Website <span className="text-red-500">*</span>
+                                What is your website address? <span className="text-red-500">*</span>
                                 <input
                                     required
                                     placeholder="https://"
@@ -1631,19 +1741,29 @@ export default function AdminFullAudits() {
                                 />
                             </label>
                             <label className="block text-sm font-semibold text-[#0F172A] sm:col-span-2">
-                                Service <span className="text-red-500">*</span>
+                                What type of business do you run? <span className="text-red-500">*</span>
                                 <select
                                     required
-                                    value={form.serviceId}
-                                    onChange={(e) => setForm({ ...form, serviceId: e.target.value })}
+                                    value={showOther ? '__other__' : form.businessType}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (value === '__other__') {
+                                            setForm({ ...form, businessType: '', serviceId: 'other', serviceOther: '' });
+                                        } else if (!value) {
+                                            setForm({ ...form, businessType: '', serviceId: '', serviceOther: '' });
+                                        } else {
+                                            setForm({ ...form, businessType: value, ...matchAuditServiceOption(value) });
+                                        }
+                                    }}
                                     className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal bg-white focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
                                 >
-                                    <option value="">Select a service…</option>
-                                    {AUDIT_SERVICE_OPTIONS.map((o) => (
-                                        <option key={o.id} value={o.id}>
-                                            {o.label}
+                                    <option value="">Select a business type…</option>
+                                    {businessTypeOptions.map((name) => (
+                                        <option key={name} value={name}>
+                                            {name}
                                         </option>
                                     ))}
+                                    <option value="__other__">Other (type it in)</option>
                                 </select>
                             </label>
                             {showOther ? (
@@ -1664,6 +1784,19 @@ export default function AdminFullAudits() {
                                     onChange={(e) => setForm({ ...form, contactName: e.target.value })}
                                     className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
                                 />
+                            </label>
+                            <label className="block text-sm font-semibold text-[#0F172A]">
+                                Are you working alone or do you have a team?
+                                <select
+                                    value={form.teamSize}
+                                    onChange={(e) => setForm({ ...form, teamSize: e.target.value as typeof form.teamSize })}
+                                    className="mt-1.5 w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm font-normal bg-white focus:outline-none focus:border-[#F59E0B] focus:ring-2 focus:ring-[#F59E0B]/25"
+                                >
+                                    <option value="">Not asked</option>
+                                    <option value="solo">Working alone</option>
+                                    <option value="small">Small team (2–5)</option>
+                                    <option value="large">Larger team (6+)</option>
+                                </select>
                             </label>
                             <div className="sm:col-span-2 pt-1 flex flex-wrap gap-2">
                                 <button
