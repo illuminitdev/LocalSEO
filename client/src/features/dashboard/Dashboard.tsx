@@ -989,10 +989,13 @@ function HybridDashboard({
     const reviewCount = businessData?.reviewsCount ?? businessData?.review_count ?? reviews.length;
     const rating = businessData?.rating ?? (reviews.length ? Number((reviews.reduce((acc: number, r: any) => acc + (Number(r.rating) || 5), 0) / reviews.length).toFixed(1)) : null);
     const orgSlug = bookingData?.organization?.slug || '';
+    // Same link the View button opens (and the one shown in Booking Settings).
+    const bookingUrl = orgSlug ? `${window.location.origin}/book/${orgSlug}` : '';
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
-        navigator.clipboard.writeText(`https://zappsites.co/${orgSlug}`);
+        if (!bookingUrl) return;
+        navigator.clipboard.writeText(bookingUrl);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
@@ -1264,7 +1267,7 @@ function HybridDashboard({
                         <div className="p-3 rounded-xl bg-amber-50/60 border border-amber-100 flex items-center justify-between text-xs gap-2">
                             <div className="min-w-0">
                                 <p className="font-bold text-slate-900">Your Booking Page</p>
-                                <p className="text-slate-500 text-[11px] truncate">zappsites.co/{orgSlug}</p>
+                                <p className="text-slate-500 text-[11px] truncate">{bookingUrl.replace(/^https?:\/\//, '') || 'Set up bookings to get your link'}</p>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
                                 <button

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Download, Loader2, Plus, RefreshCw, Sparkles, Trash2, AlertCircle, CheckCircle2, X, ArrowUp, ArrowDown } from 'lucide-react';
 import { ago, apiDelete, apiGet, apiPost, cn, type ApiError } from '../../shared/utils';
 import LocationPicker, { type SavedLocation } from '../../shared/LocationPicker';
@@ -18,6 +19,8 @@ type TrackedKeyword = {
 type Suggestion = { keyword: string; volume: number | null };
 type TrackerInfo = {
     keywords: TrackedKeyword[];
+    /** Keywords scanned in the Local Search Grid but not tracked; they don't use a keyword slot until tracked. */
+    gridSuggestions?: string[];
     configured: boolean;
     business: { name: string; category: string; city: string; connected: boolean };
     max: number;
@@ -77,33 +80,94 @@ function visibility(items: Array<{ rank: number | null; volume: number | null }>
 const rankLabel = (rank: number | null) => (rank == null ? '—' : rank >= NOT_RANKED ? '>20' : String(rank));
 const fmtVolume = (v: number | null) => (v == null ? '—' : v.toLocaleString());
 
-function Delta({ value, suffix = '' }: { value: number | null; suffix?: string }) {
-    if (value == null || Math.abs(value) < 0.05) return null;
-    const up = value > 0;
+const places = (n: number) => `${n} place${n === 1 ? '' : 's'}`;
+
+type Tone = 'good' | 'bad' | 'neutral';
+const TONE_DOT: Record<Tone, string> = { good: 'bg-emerald-500', bad: 'bg-red-500', neutral: 'bg-slate-400' };
+const TIP_WIDTH = 248;
+
+/** Small hover card in the site's style. Rendered on <body> so the table's scroll box can't clip it. */
+function Tip({ title, text, note, tone = 'neutral', children }: { title: string; text: string; note?: string; tone?: Tone; children: React.ReactNode }) {
+    const ref = useRef<HTMLSpanElement>(null);
+    const [pos, setPos] = useState<{ left: number; top: number; above: boolean } | null>(null);
+    const show = () => {
+        const r = ref.current?.getBoundingClientRect();
+        if (!r) return;
+        const left = Math.max(8, Math.min(window.innerWidth - TIP_WIDTH - 8, r.left + r.width / 2 - TIP_WIDTH / 2));
+        const above = r.bottom + 120 > window.innerHeight;
+        setPos({ left, top: above ? r.top - 6 : r.bottom + 6, above });
+    };
     return (
-        <span className={cn('inline-flex items-center gap-0.5 text-xs font-bold', up ? 'text-emerald-600' : 'text-red-500')}>
-            {up ? <ArrowUp className="w-3 h-3" strokeWidth={3} /> : <ArrowDown className="w-3 h-3" strokeWidth={3} />}
-            {Math.abs(value).toFixed(1)}
-            {suffix}
+        <span ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)} className="inline-flex">
+            {children}
+            {pos &&
+                createPortal(
+                    <div
+                        role="tooltip"
+                        style={{ left: pos.left, top: pos.top, width: TIP_WIDTH, transform: pos.above ? 'translateY(-100%)' : undefined }}
+                        className="fixed z-50 pointer-events-none rounded-lg border border-[#E2E8F0] bg-white px-3 py-2.5 shadow-lg text-left"
+                    >
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-[#0F172A]">
+                            <i className={cn('w-2 h-2 rounded-full shrink-0', TONE_DOT[tone])} />
+                            {title}
+                        </div>
+                        <p className="mt-1 text-[11px] leading-snug text-slate-600 font-normal">{text}</p>
+                        {note && <p className="mt-1.5 text-[10px] font-semibold text-slate-400">{note}</p>}
+                    </div>,
+                    document.body
+                )}
         </span>
     );
 }
 
-function ChangeChip({ change, rank }: { change: number | null; rank: number | null }) {
+function Delta({ value, suffix = '', what, days }: { value: number | null; suffix?: string; what: string; days: number }) {
+    if (value == null || Math.abs(value) < 0.05) return null;
+    const up = value > 0;
+    const amount = `${Math.abs(value).toFixed(1)}${suffix}`;
+    return (
+        <Tip
+            tone={up ? 'good' : 'bad'}
+            title={up ? `Improved by ${amount}` : `Got worse by ${amount}`}
+            text={`${what} ${up ? 'improved' : 'got worse'} by ${amount} over the last ${days} days.`}
+            note={up ? 'Green = better' : 'Red = worse'}
+        >
+            <span className={cn('inline-flex items-center gap-0.5 text-xs font-bold', up ? 'text-emerald-600' : 'text-red-500')}>
+                {up ? <ArrowUp className="w-3 h-3" strokeWidth={3} /> : <ArrowDown className="w-3 h-3" strokeWidth={3} />}
+                {Math.abs(value).toFixed(1)}
+                {suffix}
+            </span>
+        </Tip>
+    );
+}
+
+function ChangeChip({ change, rank, days }: { change: number | null; rank: number | null; days: number }) {
     if (rank == null) return <span className="text-xs text-slate-400">—</span>;
     if (change == null || change === 0) {
         return (
-            <span
-                className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold"
-                title={change == null ? 'First check — no earlier rank to compare' : 'No change in this period'}
+            <Tip
+                title={change == null ? 'First check' : 'No change'}
+                text={
+                    change == null
+                        ? `Currently ranked ${rankLabel(rank)}. There's no earlier rank to compare with yet.`
+                        : `Still ranked ${rankLabel(rank)}, same as ${days} days ago.`
+                }
             >
-                {change == null ? 'New · ' : 'Same · '}
-                {rankLabel(rank)}
-            </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
+                    {change == null ? 'New · ' : 'Same · '}
+                    {rankLabel(rank)}
+                </span>
+            </Tip>
         );
     }
     const up = change > 0;
+    const before = rankLabel((rank as number) + change);
     return (
+        <Tip
+            tone={up ? 'good' : 'bad'}
+            title={up ? `Up ${places(change)}` : `Down ${places(Math.abs(change))}`}
+            text={`${up ? 'Moved up' : 'Dropped'} from ${before} to ${rankLabel(rank)} on Google Maps in the last ${days} days.`}
+            note={up ? 'Green = better rank' : 'Red = worse rank'}
+        >
         <span
             className={cn(
                 'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold',
@@ -113,6 +177,7 @@ function ChangeChip({ change, rank }: { change: number | null; rank: number | nu
             {up ? <ArrowUp className="w-3 h-3" strokeWidth={3} /> : <ArrowDown className="w-3 h-3" strokeWidth={3} />}
             {Math.abs(change)}
         </span>
+        </Tip>
     );
 }
 
@@ -123,9 +188,11 @@ function Sparkline({ history }: { history: Point[] }) {
     const h = 24;
     if (pts.length < 2) {
         return (
-            <svg width={w} height={h} aria-hidden>
-                <line x1="1" y1={h / 2} x2={w - 1} y2={h / 2} stroke="#CBD5E1" strokeWidth="1.5" strokeDasharray="3 3" />
-            </svg>
+            <Tip title="No trend yet" text="The line appears once the rank has been checked at least twice in 30 days.">
+                <svg width={w} height={h} aria-hidden>
+                    <line x1="1" y1={h / 2} x2={w - 1} y2={h / 2} stroke="#CBD5E1" strokeWidth="1.5" strokeDasharray="3 3" />
+                </svg>
+            </Tip>
         );
     }
     const ranks = pts.map((p) => p.rank);
@@ -153,10 +220,18 @@ function Sparkline({ history }: { history: Point[] }) {
     }
     const delta = pts[0].rank - pts[pts.length - 1].rank;
     const stroke = delta > 0 ? '#10B981' : delta < 0 ? '#EF4444' : '#94A3B8';
+    const verdict = delta > 0 ? 'Green = improved overall' : delta < 0 ? 'Red = dropped overall' : 'Grey = ended where it started';
     return (
-        <svg width={w} height={h} aria-hidden>
-            <path d={line} fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Tip
+            tone={delta > 0 ? 'good' : delta < 0 ? 'bad' : 'neutral'}
+            title={`30-day trend: ${rankLabel(pts[0].rank)} → ${rankLabel(pts[pts.length - 1].rank)}`}
+            text={`${pts.length} rank checks in the last 30 days. Best rank was ${rankLabel(lo)}. When the line goes up, the rank got better.`}
+            note={verdict}
+        >
+            <svg width={w} height={h} aria-hidden>
+                <path d={line} fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+        </Tip>
     );
 }
 
@@ -185,6 +260,7 @@ function StatCard({ label, children }: { label: string; children: React.ReactNod
 export default function VisibilityTracker() {
     const [info, setInfo] = useState<TrackerInfo | null>(null);
     const [keywords, setKeywords] = useState<TrackedKeyword[]>([]);
+    const [gridSuggestions, setGridSuggestions] = useState<string[]>([]);
     const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
     const [typedSuggestions, setTypedSuggestions] = useState<Suggestion[]>([]);
     const [typedLoading, setTypedLoading] = useState(false);
@@ -224,6 +300,7 @@ export default function VisibilityTracker() {
                 if (cancelled) return;
                 setInfo(data);
                 setKeywords(data.keywords || []);
+                setGridSuggestions(data.gridSuggestions || []);
             } catch (err: any) {
                 if (!cancelled) setError(err?.message || 'Could not load the visibility tracker.');
             } finally {
@@ -351,6 +428,7 @@ export default function VisibilityTracker() {
             const data: TrackerInfo = await apiGet(`/api/visibility-tracker?locationId=${encodeURIComponent(id)}`);
             setInfo(data);
             setKeywords(data.keywords || []);
+            setGridSuggestions(data.gridSuggestions || []);
         } catch (err: any) {
             setError(err?.message || 'Could not load that location.');
         }
@@ -385,6 +463,7 @@ export default function VisibilityTracker() {
             const data = await apiPost('/api/visibility-tracker/keywords', { keywords: clean, locationId });
             const next: TrackedKeyword[] = data.keywords || [];
             setKeywords(next);
+            if (Array.isArray(data.gridSuggestions)) setGridSuggestions(data.gridSuggestions);
             setInput('');
             setSuggestions((s) => s.filter((x) => !clean.map((c) => c.toLowerCase()).includes(x.keyword)));
             setPage(0);
@@ -408,9 +487,20 @@ export default function VisibilityTracker() {
         try {
             const data = await apiPost('/api/visibility-tracker/remove', { keyword, locationId });
             setKeywords(data.keywords || []);
+            if (Array.isArray(data.gridSuggestions)) setGridSuggestions(data.gridSuggestions);
             refreshSuggestions();
         } catch (err: any) {
             setError(err?.message || 'Could not remove keyword.');
+        }
+    };
+
+    const dismissGridSuggestion = async (keyword: string) => {
+        setGridSuggestions((list) => list.filter((k) => k !== keyword));
+        try {
+            const data = await apiPost('/api/visibility-tracker/dismiss-suggestion', { keyword });
+            if (Array.isArray(data.gridSuggestions)) setGridSuggestions(data.gridSuggestions);
+        } catch (err: any) {
+            setError(err?.message || 'Could not dismiss that suggestion.');
         }
     };
 
@@ -587,7 +677,7 @@ export default function VisibilityTracker() {
                         <StatCard label="Average Position">
                             <div className="flex items-end gap-3">
                                 <span className="text-4xl font-black tracking-tight text-[#0F172A]">{stats.avg != null ? stats.avg.toFixed(1) : '—'}</span>
-                                <Delta value={stats.avgDelta} />
+                                <Delta value={stats.avgDelta} what="Your average position" days={days} />
                             </div>
                         </StatCard>
                         <StatCard label="Visibility Score">
@@ -595,7 +685,7 @@ export default function VisibilityTracker() {
                                 <span className="text-4xl font-black tracking-tight text-[#0F172A]">
                                     {stats.vis != null ? `${Math.round(stats.vis)}%` : '—'}
                                 </span>
-                                <Delta value={stats.visDelta} suffix="%" />
+                                <Delta value={stats.visDelta} suffix="%" what="Your visibility score" days={days} />
                             </div>
                         </StatCard>
                         <StatCard label={`Keyword Movement (${days}d)`}>
@@ -792,6 +882,38 @@ export default function VisibilityTracker() {
                             </tr>
                         </thead>
                         <tbody>
+                            {/* Scanned in the Local Search Grid but not tracked: not counted until the user tracks it. */}
+                            {safePage === 0 &&
+                                gridSuggestions.map((kw) => (
+                                    <tr key={`grid-${kw}`} className="border-b border-slate-100 bg-amber-50/40">
+                                        <td className="px-5 py-3 font-semibold text-slate-600">
+                                            {kw}
+                                            <div className="text-[10px] font-medium text-amber-700">From Local Search Grid · not tracked yet</div>
+                                        </td>
+                                        <td colSpan={view === 'you' ? 4 : 5} className="px-3 py-2">
+                                            <button
+                                                type="button"
+                                                disabled={adding || busy || keywords.length >= maxKeywords}
+                                                onClick={() => addKeywords([kw])}
+                                                title={keywords.length >= maxKeywords ? `Your plan allows ${maxKeywords} keywords` : 'Track this keyword'}
+                                                className="inline-flex items-center gap-1 rounded-lg border border-[var(--brand-primary)]/40 bg-white px-2.5 py-1 text-xs font-bold text-[var(--brand-primary)] hover:bg-amber-50 disabled:opacity-50"
+                                            >
+                                                <Plus className="w-3 h-3" /> Track
+                                            </button>
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => dismissGridSuggestion(kw)}
+                                                className="text-slate-300 hover:text-slate-500"
+                                                title="Dismiss suggestion"
+                                                aria-label={`Dismiss ${kw}`}
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
                             {visible.map(({ k, now, change }) => (
                                 <tr key={k.keyword} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
                                     <td className="px-5 py-3 font-semibold text-[#0F172A]">
@@ -800,7 +922,7 @@ export default function VisibilityTracker() {
                                     </td>
                                     <td className="px-3 py-2 font-bold text-[#0F172A]">{rankLabel(now)}</td>
                                     <td className="px-3 py-2">
-                                        <ChangeChip change={change} rank={now} />
+                                        <ChangeChip change={change} rank={now} days={days} />
                                     </td>
                                     {view === 'you' ? (
                                         <td className="px-3 py-2 text-slate-600">{fmtVolume(k.volume)}</td>
@@ -811,12 +933,25 @@ export default function VisibilityTracker() {
                                                 {now == null ? (
                                                     <span className="text-xs text-slate-400">—</span>
                                                 ) : now === 1 ? (
-                                                    <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-600">Leading</span>
+                                                    <Tip tone="good" title="You're #1" text="You hold the top Google Maps spot for this keyword." note="Green = leading">
+                                                        <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-600">Leading</span>
+                                                    </Tip>
                                                 ) : (
+                                                    <Tip
+                                                        tone="bad"
+                                                        title={now >= NOT_RANKED ? 'Not in the top 20' : `${places(now - 1)} behind #1`}
+                                                        text={
+                                                            now >= NOT_RANKED
+                                                                ? `${k.top[0] || 'Another business'} is #1 for this keyword and you're not in the top 20 yet.`
+                                                                : `You're at ${now}. ${k.top[0] || 'Another business'} is #1 for this keyword.`
+                                                        }
+                                                        note="Red = you're not leading yet"
+                                                    >
                                                     <span className="inline-flex items-center gap-0.5 rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-bold text-red-500">
                                                         <ArrowDown className="w-3 h-3" strokeWidth={3} />
                                                         {now >= NOT_RANKED ? '20+' : now - 1}
                                                     </span>
+                                                    </Tip>
                                                 )}
                                             </td>
                                         </>
@@ -836,7 +971,7 @@ export default function VisibilityTracker() {
                                     </td>
                                 </tr>
                             ))}
-                            {!visible.length && (
+                            {!visible.length && !gridSuggestions.length && (
                                 <tr>
                                     <td colSpan={7} className="px-5 py-12 text-center text-sm text-slate-500">
                                         No keywords tracked yet. Add your own above or pick from the suggestions for your industry.

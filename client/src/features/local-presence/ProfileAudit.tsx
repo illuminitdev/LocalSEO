@@ -20,6 +20,7 @@ import { apiGet, apiPost, logDashboardActivity, updateDashboardStats } from '../
 import { useToast } from '../../shared/Toast';
 import { useCredits } from '../../shared/CreditsContext';
 import { getPageCache, setPageCache } from '../../shared/pageCache';
+import HoursPicker from './HoursPicker';
 
 const REQUIRED_FIELDS = ['name', 'category', 'address', 'phone'] as const;
 
@@ -535,13 +536,9 @@ export default function ProfileAudit() {
 
                         <div className="md:col-span-2">
                             <label className="block font-bold text-gray-700 mb-1">Hours / Schedule</label>
-                            <input
-                                type="text"
-                                name="hours"
+                            <HoursPicker
                                 value={formData.hours}
-                                onChange={handleChange}
-                                className="w-full px-3.5 py-2 bg-white border border-[#E2E8F0] rounded-xl font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)]/20 focus:border-[var(--brand-primary)]"
-                                placeholder="e.g. Mon–Fri 9:00 AM – 5:00 PM"
+                                onChange={(hours) => setFormData((prev) => ({ ...prev, hours }))}
                             />
                         </div>
 
