@@ -22,7 +22,7 @@ const SERVICE_PATH = /\/(services?|our-services|what-we-do|treatments?|prices?|p
 const MAX_TEXT = 12_000;
 /** Below this much text the site is almost certainly built by JavaScript (or blocked), so it cannot be read. */
 const MIN_READABLE_CHARS = 400;
-const INTENTS: AeoQueryIntent[] = ['service_cost', 'service_best', 'service_howto', 'brand_trust'];
+const INTENTS: AeoQueryIntent[] = ['service_best', 'service_cost', 'service_where'];
 
 /* ---------------- Services named on the website (free, from the audit crawl) ---------------- */
 
@@ -164,26 +164,28 @@ function siteText(pages: CrawlPage[], siteServices: string[]): string {
 
 function rules(name: string, category: string, where: string) {
   return `Return only JSON:
-{"services": ["..."], "questions": [{"query": "...", "kind": "service|brand", "intent": "service_cost|service_best|service_howto|brand_trust"}]}
+{"services": ["..."], "questions": [{"query": "...", "intent": "service_best|service_cost|service_where"}]}
 
 services:
-- Up to 6 specific services a customer can book or buy from this business, most important first,
-  e.g. "car servicing", "MOT", "brake repair", "boiler repair", "teeth whitening".
+- Up to 6 specific services a customer can book or buy from this business, most important first: the core,
+  most-searched services for a "${category || 'local business'}", not niche extras,
+  e.g. "car servicing", "MOT", "brake repair", "boiler repair", "teeth whitening", "laser hair removal".
 - Never the business type or category ("${category || 'unknown'}"), never generic words such as "services", "repairs",
   "maintenance", "solutions", and no prices, locations or brand names.
 - Only services this business really offers.
 
-questions: exactly 3 questions real customers type into Google that bring up a "People also ask" box.
-- 2 with kind "service": each about a DIFFERENT service from "services", with different intents
-  (service_cost = price, service_best = where to get it / who is best, service_howto = how long, what is included,
-  how often, when it is needed). Each one names the service. Never any business name.
-- Add "${where}" ONLY when the answer depends on the place (price, where to get it, who is best). Questions whose
-  answer is the same everywhere (what is included, how long, how often, when it is needed) have no town
-  (right: "What is included in a full car service?", wrong: "What is included in car servicing in Maidenhead?").
-- 1 with kind "brand", intent "brand_trust": the way people really search a business, short, with the exact name
-  "${name}", e.g. "${name} reviews" or "Is ${name} any good?". Not a long sentence about its reviews.
-- Natural, correct UK English, the wording Google really shows in "People also ask". Never use the category as if it
-  were a service (wrong: "How much does ${category || 'garage'} cost").`;
+questions: exactly 3 local questions, written as an AEO specialist would pick them: the questions a customer ${where}
+asks Google, ChatGPT or Gemini when choosing a local business, where the answer names local businesses.
+- Every question ends with or contains "${where}". Never a question without the town, never national or general
+  questions ("How long do eyelash extensions last?" is wrong).
+- One question per intent, each about one of the top services, using at least 2 different services:
+  1. service_best: who is best, e.g. "Who is the best place for laser hair removal ${where}?"
+  2. service_cost: local price, e.g. "How much does teeth whitening cost ${where}?"
+  3. service_where: where to get it / who to trust, e.g. "Where can I get a car service ${where}?" or
+     "Which clinic is recommended for Botox ${where}?"
+- Never any business name, never the word "reviews", never the category used as a service
+  (wrong: "How much does ${category || 'garage'} cost").
+- Short (under 90 characters), natural, correct UK English, the way people really type or ask it.`;
 }
 
 function wordsOn(service: string, text: string) {
@@ -197,11 +199,12 @@ function wordsOn(service: string, text: string) {
 
 function validate(
   parsed: any,
-  opts: { name: string; category: string; text: string | null }
+  opts: { name: string; category: string; city: string; text: string | null }
 ): { services: string[]; specs: AeoQuerySpec[] } | null {
   if (!parsed || typeof parsed !== 'object') return null;
   const name = opts.name.toLowerCase();
   const category = opts.category.toLowerCase();
+  const town = opts.city.toLowerCase();
 
   const services = (Array.isArray(parsed.services) ? parsed.services : [])
     .map((s: unknown) => String(s || '').replace(/\s+/g, ' ').trim())
@@ -218,20 +221,16 @@ function validate(
     if (/https?:\/\/|\b(chatgpt|gemini|claude|dataforseo|api)\b/i.test(query)) continue;
     // "How much does garage cost": the category used as a service.
     if (category && new RegExp(`\\b(does|do|is|for|get|book)\\s+(a\\s+|an\\s+)?${category.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+(cost|take|in|near)\\b`, 'i').test(query)) continue;
-    const kind: AeoQuerySpec['kind'] = row?.kind === 'brand' ? 'brand' : 'service';
-    const named = Boolean(name) && lower.includes(name);
-    if (kind === 'service' && named) continue;
-    if (kind === 'brand' && !named) continue;
-    const intent: AeoQueryIntent =
-      kind === 'brand' ? 'brand_trust' : INTENTS.includes(row?.intent) && row.intent !== 'brand_trust' ? row.intent : 'service_best';
+    // Local questions only: the town is in every question, and no business is named.
+    if (town ? !lower.includes(town) : !/\bnear me\b/.test(lower)) continue;
+    if ((name && lower.includes(name)) || /\breviews?\b/.test(lower)) continue;
+    const intent: AeoQueryIntent = INTENTS.includes(row?.intent) ? row.intent : guessIntent(query);
     seen.add(lower);
-    specs.push({ query, intent, kind });
+    specs.push({ query, intent, kind: 'service' });
   }
 
-  const service = specs.filter((s) => s.kind === 'service').slice(0, 2);
-  const brand = specs.filter((s) => s.kind === 'brand').slice(0, 1);
-  if (service.length < 2 || brand.length < 1) return null;
-  return { services, specs: [...service, ...brand] };
+  if (specs.length < 3) return null;
+  return { services, specs: specs.slice(0, 3) };
 }
 
 /**
@@ -254,7 +253,8 @@ export async function generateAeoQuestions(opts: {
 
   const category = String(opts.category || '').trim();
   const city = String(opts.city || '').trim();
-  const where = city && city !== 'the local area' ? `in ${city}` : 'near me';
+  const localTown = city && city !== 'the local area' ? city : '';
+  const where = localTown ? `in ${localTown}` : 'near me';
   const pages = Array.isArray(opts.pages) ? opts.pages : [];
   const visible = pages.reduce((n, p) => n + String(p.bodyText || '').length, 0);
   const text = visible >= MIN_READABLE_CHARS ? siteText(pages, opts.siteServices || []) : null;
@@ -286,7 +286,7 @@ Website: ${opts.website || 'unknown'}`;
       `Find the services this local business offers, using only its website text below, and write People Also Ask questions about them.\n\n${about}\n\n${rules(name, category, where)}\n\nWebsite text:\n${text}`,
       false
     );
-    const ok = validate(parsed, { name, category, text });
+    const ok = validate(parsed, { name, category, city: localTown, text });
     if (ok) return { ...ok, source: 'site' };
   }
 
@@ -294,14 +294,14 @@ Website: ${opts.website || 'unknown'}`;
     `Find the services this local business offers (look up its website and Google Business Profile), and write People Also Ask questions about them.\n\n${about}\n\n${rules(name, category, where)}`,
     true
   );
-  const ok = validate(parsed, { name, category, text: null });
+  const ok = validate(parsed, { name, category, city: localTown, text: null });
   if (ok) return { ...ok, source: 'search' };
 
   // Gemini unavailable (quota, outage): DataForSEO instead.
   const viaDataForSeo = await dataForSeoQuestions({
     name,
     category,
-    city: city && city !== 'the local area' ? city : '',
+    city: localTown,
     services: opts.siteServices || []
   });
   return viaDataForSeo ? { ...viaDataForSeo, source: 'dataforseo' } : null;
@@ -309,13 +309,13 @@ Website: ${opts.website || 'unknown'}`;
 
 function guessIntent(query: string): AeoQueryIntent {
   if (/\b(cost|price|prices|how much|cheap|charge)\b/i.test(query)) return 'service_cost';
-  if (/\b(where|best|who|near me|recommend)\b/i.test(query)) return 'service_best';
-  return 'service_howto';
+  if (/\b(best|top|who)\b/i.test(query)) return 'service_best';
+  return 'service_where';
 }
 
 /**
- * Service questions from Google's real "People also ask" box for "<service> <town>" (one per service, first two
- * services that have one), topped up with ChatGPT-written questions; the business question comes from ChatGPT.
+ * Local questions from Google's real "People also ask" box for "<service> <town>" (only ones that name the town),
+ * topped up with ChatGPT-written local questions.
  */
 async function dataForSeoQuestions(opts: {
   name: string;
@@ -324,37 +324,25 @@ async function dataForSeoQuestions(opts: {
   services: string[];
 }): Promise<{ services: string[]; specs: AeoQuerySpec[] } | null> {
   const { name, category, city, services } = opts;
-  const paa: Array<{ query: string; kind: 'service'; intent: AeoQueryIntent }> = [];
-  const covered: string[] = [];
-  for (const service of services.slice(0, 3)) {
-    if (paa.length >= 2) break;
-    const questions = await fetchPeopleAlsoAskQuestions(`${service} ${city}`.trim());
-    const pick = questions.find((q) => !paa.some((p) => p.query.toLowerCase() === q.toLowerCase()));
-    if (!pick) continue;
-    paa.push({ query: pick, kind: 'service', intent: guessIntent(pick) });
-    covered.push(service.toLowerCase());
+  const paa: Array<{ query: string; intent: AeoQueryIntent }> = [];
+  if (city) {
+    for (const service of services.slice(0, 3)) {
+      if (paa.length >= 2) break;
+      const questions = await fetchPeopleAlsoAskQuestions(`${service} ${city}`);
+      const pick = questions.find(
+        (q) => q.toLowerCase().includes(city.toLowerCase()) && !paa.some((p) => p.query.toLowerCase() === q.toLowerCase())
+      );
+      if (pick) paa.push({ query: pick, intent: guessIntent(pick) });
+    }
   }
 
-  // Services Google already gave a question for go last, so ChatGPT's top-up covers a different service.
-  const rest = [...services.filter((s) => !covered.includes(s.toLowerCase())), ...services.filter((s) => covered.includes(s.toLowerCase()))];
-  const lines = await writeAeoQuestionsWithChatGpt({ businessName: name, city, category, services: rest });
-  const mentionsCovered = (q: string) => covered.some((s) => q.toLowerCase().includes(s));
-  const repeats = (q: { query: string; kind: string; intent: AeoQueryIntent }) =>
-    q.kind !== 'service'
-      ? 0
-      : Number(mentionsCovered(q.query)) + Number(paa.some((p) => p.intent === q.intent));
-  // ChatGPT sometimes adds "... at <business>" to a service question; that part is dropped.
+  const lines = await writeAeoQuestionsWithChatGpt({ businessName: name, city, category, services });
+  // ChatGPT sometimes adds "... at <business>" to a question; that part is dropped.
   const atName = new RegExp(`\\s*\\b(at|near|from|by|with)\\s+${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
   const written = lines
-    .map((query, i) => ({
-      query: i === 2 ? query : query.replace(atName, ''),
-      kind: (i === 2 ? 'brand' : 'service') as 'brand' | 'service',
-      intent: i === 2 ? ('brand_trust' as const) : guessIntent(query)
-    }))
-    // Prefer a top-up about another service and another intent (not two price questions).
-    .sort((a, b) => repeats(a) - repeats(b));
-  if (!written.some((q) => q.kind === 'brand') && city) {
-    written.push({ query: `${name} reviews ${city}`, kind: 'brand', intent: 'brand_trust' });
-  }
-  return validate({ services, questions: [...paa, ...written] }, { name, category, text: null });
+    .map((line) => line.replace(atName, ''))
+    // Prefer intents Google's questions did not cover (not two price questions).
+    .map((query) => ({ query, intent: guessIntent(query) }))
+    .sort((a, b) => Number(paa.some((p) => p.intent === a.intent)) - Number(paa.some((p) => p.intent === b.intent)));
+  return validate({ services, questions: [...paa, ...written] }, { name, category, city, text: null });
 }

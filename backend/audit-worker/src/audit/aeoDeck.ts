@@ -8,6 +8,8 @@ import {
 export type AeoQueryIntent =
   | 'service_cost'
   | 'service_best'
+  | 'service_where'
+  // Audits saved before the questions became local-only.
   | 'service_howto'
   | 'brand_trust';
 
@@ -56,46 +58,28 @@ export function buildAeoQuerySpecs(audit: AeoQueryAudit): AeoQuerySpec[] {
     .map((s) => String(s || '').trim())
     .filter(Boolean);
 
+  // All three are local: each names the town, none names the business.
   if (services.length) {
     const first = services[0];
     const second = services[1] || first;
+    const third = services[2] || first;
     return [
+      { query: `Who is the best for ${first} in ${city}?`, intent: 'service_best', kind: 'service' },
       {
-        query: `How much ${isPlural(first) ? 'do' : 'does'} ${first} cost in ${city}?`,
+        query: `How much ${isPlural(second) ? 'do' : 'does'} ${second} cost in ${city}?`,
         intent: 'service_cost',
         kind: 'service'
       },
-      {
-        query: `Where can I get ${second} in ${city}?`,
-        intent: 'service_best',
-        kind: 'service'
-      },
-      {
-        query: `Is ${name} good for ${first}?`,
-        intent: 'brand_trust',
-        kind: 'brand'
-      }
+      { query: `Where can I get ${third} in ${city}?`, intent: 'service_where', kind: 'service' }
     ];
   }
 
   const business =
     category && !/^local (services|business)$/i.test(category) ? category.toLowerCase() : 'local business';
   return [
-    {
-      query: `How much does ${withArticle(business)} in ${city} charge?`,
-      intent: 'service_cost',
-      kind: 'service'
-    },
-    {
-      query: `How do I choose a good ${business} in ${city}?`,
-      intent: 'service_howto',
-      kind: 'service'
-    },
-    {
-      query: `${name} reviews ${city}`,
-      intent: 'brand_trust',
-      kind: 'brand'
-    }
+    { query: `Who is the best ${business} in ${city}?`, intent: 'service_best', kind: 'service' },
+    { query: `How much does ${withArticle(business)} in ${city} charge?`, intent: 'service_cost', kind: 'service' },
+    { query: `Which ${business} in ${city} is recommended?`, intent: 'service_where', kind: 'service' }
   ];
 }
 
@@ -115,7 +99,11 @@ function storedAeoQuerySpecs(audit: { aeoQuerySpecs?: unknown } | null): AeoQuer
       const kind = (row as AeoQuerySpec)?.kind === 'brand' ? 'brand' : 'service';
       const intent = (row as AeoQuerySpec)?.intent;
       const safeIntent: AeoQueryIntent =
-        intent === 'service_cost' || intent === 'service_howto' || intent === 'service_best' || intent === 'brand_trust'
+        intent === 'service_cost' ||
+        intent === 'service_howto' ||
+        intent === 'service_best' ||
+        intent === 'service_where' ||
+        intent === 'brand_trust'
           ? intent
           : kind === 'brand'
             ? 'brand_trust'

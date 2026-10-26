@@ -2464,7 +2464,7 @@ async function fetchChatGptPlain(opts: {
 
 /**
  * Three AEO questions written by ChatGPT (DataForSEO LLM Responses), used when Gemini can't write them.
- * Lines 1-2 are about the services, line 3 about the business. Prompts are capped at 500 characters, so the
+ * All three are local questions that name the town. Prompts are capped at 500 characters, so the
  * services read from the website are passed in; without them ChatGPT looks the business up (web search).
  */
 export async function writeAeoQuestionsWithChatGpt(opts: {
@@ -2480,11 +2480,12 @@ export async function writeAeoQuestionsWithChatGpt(opts: {
   if (!businessName || !requireDataForSeoConfigured()) return [];
 
   const systemMessage =
-    'Write exactly 3 Google questions as shown in People Also Ask, one per line, nothing else. ' +
-    'Lines 1-2: two different services, never a business name. Add the town only for price or where to get it; ' +
-    'what is included, how long, how often: no town. ' +
-    'Line 3: short, as people search a business: "<exact business name> reviews" or "Is <exact business name> any good?". ' +
-    'Never use the category as a service. UK English, under 90 characters.';
+    'Write exactly 3 local questions a customer asks Google or ChatGPT when choosing a local business, one per line, nothing else. ' +
+    'Every line names the town and one of the main services (use at least 2 different services). ' +
+    'Line 1: who is best ("Who is the best place for <service> in <town>?"). ' +
+    'Line 2: local price ("How much does <service> cost in <town>?"). ' +
+    'Line 3: where to get it ("Where can I get <service> in <town>?"). ' +
+    'Never a business name, never "reviews", never the category as a service. UK English, under 90 characters.';
   const userPrompt = (
     `Business: ${businessName.slice(0, 80)}. Town: ${city.slice(0, 50) || 'near me'}. ` +
     `Category (not a service): ${category.slice(0, 50) || 'unknown'}. ` +
