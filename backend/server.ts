@@ -1786,7 +1786,6 @@ app.get('/api/rank/state', requireAuth, hydrateOrgFromDb, requireFeature('local_
         const orgId = String((req as any).orgId);
         const period = await billingPeriod(req);
         const dash: any = (req as any).dashboardState || dashboardState;
-        await mergeOldGridKeywords(req, dash);
         res.json({
             ...base,
             ...locationPayload(req, loc),
@@ -1829,7 +1828,8 @@ async function billingPeriod(req: any): Promise<{ start: string; end: string }> 
 }
 
 // Starts a scan: reserves the keyword for the month, checks the plan's monthly grid limit, takes the credits
-// and returns a scan id the point requests must carry.
+// and returns a scan id the point requests must carry. The keyword is NOT added to the tracked list: the
+// Visibility Tracker shows it as a suggestion, and it only uses a keyword slot once the user tracks it.
 app.post('/api/rank/scan-start', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     if (!requireBusiness(res)) return;
     if (!gridConfigured()) {
@@ -1841,12 +1841,6 @@ app.post('/api/rank/scan-start', requireAuth, hydrateOrgFromDb, requireFeature('
         const loc = await requestLocation(req, req.body?.locationId);
         if (!loc) return res.status(400).json({ error: 'Your business needs a full address so we can locate the grid center.' });
         const orgId = String((req as any).orgId);
-        // The grid uses the same keyword list as the Visibility Tracker: a new keyword is saved to it first
-        // (blocked when the plan's keyword limit is reached), so it then shows in both sections.
-        const dash: any = (req as any).dashboardState || dashboardState;
-        const listed = addSharedKeywords(req, dash, [keyword], await monthlyAdds(req, dash));
-        if ('error' in listed) return res.status(400).json(listed);
-        if (listed.added.length) await saveOrgToDb(req);
         const period = await billingPeriod(req);
         const scanId = randomUUID();
         // The keyword+address is reserved for the whole billing month BEFORE any DataForSEO call, so a refresh,
@@ -2040,10 +2034,7 @@ app.post('/api/rank/scan-finish', requireAuth, hydrateOrgFromDb, requireFeature(
         dashboardState.visibilityRank = avgRank;
         dashboardState.top3Percentage = top3Percentage;
     }
-    const byLoc = { ...((dashboardState as any).rankInsightsByLocation || {}) };
-    delete byLoc[location.id];
-    (dashboardState as any).rankInsightsByLocation = byLoc;
-    (dashboardState as any).rankInsights = null;
+    // Saved insights are kept until rank-insights replaces them for this scan, so a failed refresh never leaves the page empty.
     await saveOrgToDb(req);
 
     const gapAnalyses = await latestRuns(orgId, location.id);
@@ -2060,13 +2051,22 @@ app.post('/api/ai/rank-insights', requireAuth, hydrateOrgFromDb, requireFeature(
     if (!location) return res.json(empty);
     const tracked: any[] = await trackedFromScans(orgId, location.id);
     const runs: any[] = await latestRuns(orgId, location.id);
-    // Saved insights per location. Without `refresh` this only reads them: opening the page never calls Gemini.
+    // Saved insights per location, tagged with the scan they were built from.
     const legacy = (dashboardState as any).rankInsights;
     const cached =
         (dashboardState as any).rankInsightsByLocation?.[location.id] ||
         (legacy && legacy.locationId === location.id ? legacy : null);
-    if (!req.body?.refresh) return res.json(cached || empty);
-    if (!tracked.length) return res.json(empty);
+    if (!tracked.length || !runs.length) return res.json(cached || empty);
+    const scanStamp = String(runs[0].updatedAt || '');
+    const upToDate =
+        cached &&
+        (cached.scanStamp
+            ? cached.scanStamp === scanStamp
+            : cached.generatedAt && new Date(cached.generatedAt).getTime() >= new Date(scanStamp).getTime());
+    // Already built for the latest scan: return it, so Gemini runs at most once per scan whatever the client sends.
+    if (upToDate) return res.json(cached);
+    // Gemini only rewords insights right after a scan the user clicked; page loads and retries get the free computed text.
+    const useAi = Boolean(req.body?.refresh);
 
     const opportunities = tracked
         .filter((k) => k.avgRank >= 4 && k.avgRank <= 10)
@@ -2139,13 +2139,18 @@ app.post('/api/ai/rank-insights', requireAuth, hydrateOrgFromDb, requireFeature(
     });
 
     let insights = plain;
-    if (aiClient && facts.length) {
+    if (useAi && aiClient && facts.length) {
         try {
-            const text = await generateText(
-                `You are a local SEO analyst for "${connectedBusiness.name}" (${connectedBusiness.category || 'local business'}).
+            // Capped so a slow Gemini reply falls back to the computed text instead of timing out the whole request.
+            const text = await withTimeout(
+                generateText(
+                    `You are a local SEO analyst for "${connectedBusiness.name}" (${connectedBusiness.category || 'local business'}).
 Write one short insight (max 35 words, plain, no invented facts) for each fact below, in the same order.
 Facts: ${JSON.stringify(facts)}
 Return JSON only: {"bodies": ["..."]}`
+                ),
+                8000,
+                'rank insights'
             );
             const parsed = parseJsonFromText(text);
             if (Array.isArray(parsed?.bodies) && parsed.bodies.length === plain.length) {
@@ -2156,7 +2161,7 @@ Return JSON only: {"bodies": ["..."]}`
         }
     }
 
-    const payload = { insights, opportunities, generatedAt: new Date().toISOString(), locationId: location.id };
+    const payload = { insights, opportunities, generatedAt: new Date().toISOString(), locationId: location.id, scanStamp };
     (dashboardState as any).rankInsights = payload;
     (dashboardState as any).rankInsightsByLocation = {
         ...((dashboardState as any).rankInsightsByLocation || {}),
@@ -2193,11 +2198,11 @@ async function trackerWithHistory(orgId: string, locationId: string | null, dash
 app.get('/api/visibility-tracker', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     try {
         const dash: any = (req as any).dashboardState || dashboardState;
-        await mergeOldGridKeywords(req, dash);
         const loc = await requestLocation(req, req.query?.locationId);
         const orgId = String((req as any).orgId || '');
         res.json({
             keywords: await trackerWithHistory(orgId, loc?.location.id || null, dash),
+            gridSuggestions: await gridSuggestions(orgId, dash),
             configured: trackerConfigured(),
             business: {
                 name: connectedBusiness.name || '',
@@ -2340,25 +2345,37 @@ app.post('/api/visibility-tracker/keywords', requireAuth, hydrateOrgFromDb, requ
     if ('error' in result) return res.status(400).json(result);
     await saveOrgToDb(req);
     const loc = await requestLocation(req, req.body?.locationId);
-    res.json({ keywords: await trackerWithHistory(String((req as any).orgId || ''), loc?.location.id || null, dash), added: result.added.length });
+    const orgId = String((req as any).orgId || '');
+    res.json({
+        keywords: await trackerWithHistory(orgId, loc?.location.id || null, dash),
+        gridSuggestions: await gridSuggestions(orgId, dash),
+        added: result.added.length
+    });
 });
 
 /**
- * One-time join of the old separate lists: keywords scanned in the grid before the lists were shared are added
- * to the shared list while there is room under the plan limit (never over it). Database only, no paid call.
+ * Keywords scanned in the Local Search Grid that are not tracked: shown in the Visibility Tracker as suggestions
+ * and not counted against the keyword limit until the user tracks them. Database only, no paid call.
  */
-async function mergeOldGridKeywords(req: any, dash: any) {
-    if (dash.sharedKeywordsMergedAt) return;
-    const orgId = String(req.orgId || '');
-    if (!orgId) return;
+async function gridSuggestions(orgId: string, dash: any): Promise<string[]> {
+    if (!orgId) return [];
     const scanned = await scannedKeywords(orgId).catch(() => [] as string[]);
-    const room = Math.max(0, trackedKeywordLimit(req) - trackerList(dash).length);
-    const have = new Set(trackerList(dash).map((k) => k.keyword));
-    const extra = scanned.map(cleanKeyword).filter((k) => k && !have.has(k)).slice(0, room);
-    if (extra.length) addSharedKeywords(req, dash, extra);
-    dash.sharedKeywordsMergedAt = new Date().toISOString();
-    await saveOrgToDb(req).catch(() => undefined);
+    const skip = new Set([
+        ...trackerList(dash).map((k) => k.keyword),
+        ...(Array.isArray(dash.dismissedGridSuggestions) ? dash.dismissedGridSuggestions : [])
+    ]);
+    return Array.from(new Set(scanned.map(cleanKeyword))).filter((k) => k && !skip.has(k)).slice(0, 10);
 }
+
+app.post('/api/visibility-tracker/dismiss-suggestion', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    const dash: any = (req as any).dashboardState || dashboardState;
+    const target = cleanKeyword(req.body?.keyword);
+    if (!target) return res.status(400).json({ error: 'Keyword is required.' });
+    const dismissed: string[] = Array.isArray(dash.dismissedGridSuggestions) ? dash.dismissedGridSuggestions : [];
+    dash.dismissedGridSuggestions = [...dismissed.filter((k) => k !== target), target].slice(-100);
+    await saveOrgToDb(req);
+    res.json({ gridSuggestions: await gridSuggestions(String((req as any).orgId || ''), dash) });
+});
 
 /** Search volume already known for free from saved keyword suggestions (no DataForSEO call). */
 function cachedVolume(dash: any, keyword: string): number | null {
@@ -2406,7 +2423,11 @@ app.post('/api/visibility-tracker/remove', requireAuth, hydrateOrgFromDb, requir
     setTrackerList(trackerList(dash).filter((k) => k.keyword !== target), dash);
     await saveOrgToDb(req);
     const loc = await requestLocation(req, req.body?.locationId);
-    res.json({ keywords: await trackerWithHistory(String((req as any).orgId || ''), loc?.location.id || null, dash) });
+    const orgId = String((req as any).orgId || '');
+    res.json({
+        keywords: await trackerWithHistory(orgId, loc?.location.id || null, dash),
+        gridSuggestions: await gridSuggestions(orgId, dash)
+    });
 });
 
 app.post('/api/visibility-tracker/check', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {

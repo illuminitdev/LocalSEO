@@ -458,7 +458,8 @@ export default function Layout() {
 
                     {/* Right action icons: Quotes + Notifications */}
                     <div className="flex items-center gap-1.5 sm:gap-2">
-                        {/* Quotes quick button */}
+                        {/* Quotes quick button: booking plans and Complete Growth only (not Local Presence / Local Growth) */}
+                        {entitlementsDisabled || features.includes('bookings') ? (
                         <button
                             type="button"
                             onClick={() => navigate('/quotes')}
@@ -472,6 +473,7 @@ export default function Layout() {
                         >
                             <MessageSquarePlus className="w-5 h-5" strokeWidth={1.75} />
                         </button>
+                        ) : null}
 
                         {/* Notifications Bell + Popover */}
                         <div className="relative" ref={notifRef}>
