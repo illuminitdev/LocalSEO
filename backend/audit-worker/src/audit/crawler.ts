@@ -354,7 +354,8 @@ function extractPage(html, pageUrl, headers = null) {
 
 
 
-const AI_CRAWLERS = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'Google-Extended', 'PerplexityBot'];
+// The AI engines the report measures: ChatGPT, Claude and Gemini (Google-Extended).
+const AI_CRAWLERS = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'Google-Extended'];
 
 /** Groups of robots.txt rules per user agent ("*" included). */
 function parseRobots(text) {

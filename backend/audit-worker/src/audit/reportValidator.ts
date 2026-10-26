@@ -15,7 +15,7 @@ const PLACEHOLDERS = [
   /how do i choose a local tradesperson/i,
   /\bundefined\b|\bNaN\b|\[object Object\]|\{\{|\}\}/,
   /\b(local services|local business) (in|near) the local area\b/i,
-  /perplexity/i,
+  /\bperplexity\b/i,
   /losing (ai )?(search )?customers|losing (enquiries|business|revenue)/i
 ];
 
