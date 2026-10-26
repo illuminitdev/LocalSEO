@@ -42,9 +42,9 @@ export function buildGeoFixes(audit) {
 
   return {
     title: 'GEO: AI mentions and citations',
-    visualIntro: `Whether ChatGPT, Claude, and Perplexity name ${name} in the top 5 for ${geoPromptSummary}. ${areaNote}`,
-    goalLine: `Get ${name} named in the top 5 on ChatGPT, Claude, and Perplexity for ${geoPromptSummary}. ${areaNote}`,
-    verifyHint: `Ask ChatGPT, Claude, and Perplexity: ${geoPromptSummary}. ${areaNote}`,
+    visualIntro: `Whether ChatGPT, Claude and Gemini name ${name} in the top 5 for ${geoPromptSummary}. ${areaNote}`,
+    goalLine: `Get ${name} named in the top 5 on ChatGPT, Claude and Gemini for ${geoPromptSummary}. ${areaNote}`,
+    verifyHint: `Ask ChatGPT, Claude and Gemini: ${geoPromptSummary}. ${areaNote}`,
     queryCards: [
       {
         query: measuredQuery,

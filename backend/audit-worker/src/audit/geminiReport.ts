@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { geminiGenerate } from '../lib/gemini.js';
 import { fallbackPillarDecks } from './pillarFixDecks.js';
 import { buildLocalSeoInconsistencies } from './localSeoDeck.js';
 
@@ -126,9 +127,9 @@ function buildMeasuredRoadmap(audit) {
       title: 'AI visibility',
       items: pick(isGeoRoadmapCheck, [
         `Use the same trading name for ${name} on the website, Google listing, and citations in ${city}`,
-        `Add sameAs links for ${name} so ChatGPT, Claude, and Perplexity can connect the ${service} entity in ${city}`,
+        `Add sameAs links for ${name} so ChatGPT, Claude and Gemini can connect the ${service} entity in ${city}`,
         `Publish ${name} on the directories those AI answers already cite for ${service} in ${city}`,
-        `Recheck the measured prompts and record whether ChatGPT, Claude, and Perplexity name ${name}`
+        `Recheck the measured prompts and record whether ChatGPT, Claude and Gemini name ${name}`
       ])
     }
   ];
@@ -737,8 +738,6 @@ export async function generateDeepAiReport(audit) {
     throw new Error('GEMINI_API_KEY is not configured');
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const modelNames = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
 
   const business = audit.business || {};
   const score = audit.score || {};
@@ -763,24 +762,24 @@ Use only the measured JSON. Structure the narrative like a client deck: overall 
 For every issue use Issue → Evidence → Impact → Recommendation → Priority (fill evidence/recommendation/priority fields; keep title/detail/impact too).
 
 PILLAR CONTENT RULES (must follow):
-- Local SEO is the Google Business Profile, NAP, citations, website local pages, and the measured Google Maps query. Do not mention FAQ schema, ChatGPT, Claude, Perplexity, or AI visibility in local_seo comments, localSeoFixes, or Local SEO issues.
+- Local SEO is the Google Business Profile, NAP, citations, website local pages, and the measured Google Maps query. Do not mention FAQ schema, ChatGPT, Claude, Gemini, or AI visibility in local_seo comments, localSeoFixes, or Local SEO issues.
 - AEO is whether the website answers the measured Google question searches with FAQ blocks, 40–60 word direct answers, and FAQPage schema. Do not explain an AEO gap as a Maps or Local Pack position.
-- GEO is whether ChatGPT, Claude, and Perplexity name, recommend, or cite this business on the measured prompts. Write GEO from those AI excerpts. Do not describe the Local Pack as the GEO result, and do not invent an AI Overview block. Maps may appear only as a one-sentence Local SEO cross-reference.
+- GEO is whether ChatGPT, Claude and Gemini name, recommend, or cite this business on the measured prompts. Write GEO from those AI excerpts. Do not describe the Local Pack as the GEO result, and do not invent an AI Overview block. Maps may appear only as a one-sentence Local SEO cross-reference.
 - executiveSummary is exactly three sentences, in this order: Local SEO, then AEO, then GEO.
 - pillarComments.local_seo, pillarComments.aeo, and pillarComments.geo are each one sentence and stay inside that pillar.
 
-NEGATIVES-ONLY RULE (must follow, applies to the whole report):
-- Write only what is missing, failing, weak or risky, using the Failed checks. Never praise the business and never state a positive finding.
-- Forbidden in executiveSummary, overallVerdict, scoreComment, pillarComments, gbpNote, headline: words such as strong, solid, good, great, well optimised, verified, healthy, robust, maintains, and any "however" that follows a positive.
-- Each summary sentence and each pillar comment starts with what the business lacks or does not have, e.g. "Local SEO: the business lacks X and does not have Y". Never mention what the business already has, not even before a "but".
-- strengths must be an empty array [].
+HONESTY RULES (must follow, applies to the whole report):
+- State verified strengths first (rating, review count, Maps position, AI mentions), then the verified gaps from the Failed checks.
+- Never claim lost customers, lost revenue or lost enquiries; describe point-in-time opportunities instead.
+- Use exact counts for AI results, e.g. "named in 2 of 9 answers"; never say the business is absent from AI when any engine named it.
+- If gbpLookup.listedOnMaps is false, never give the business a Maps position or describe a Google listing as theirs.
+- Mention only the audited town; never another town.
 
 CRITICAL ISSUES RULES (must follow):
 - criticalIssues must be REAL gaps from Failed checks only — never invent issues.
 - Include exactly 4 criticalIssues. When a pillar has a failed check, include at least one Local SEO issue, one AEO issue, and one GEO issue. Evidence for each issue comes only from that pillar.
-- NEVER list a Passed check (or positive GBP fact) as a critical issue. Forbidden titles include: "Photos present", "Business description present", "Opening hours present", "Categories present", "Services listed".
+- NEVER list a Passed check (or positive GBP fact) as a critical issue.
 - If photos/description/hours are present on GBP, do not claim they are missing.
-- strengths must be an empty array [].
 - priorityFixes must address Failed checks only.
 
 EMOJI RULE (must follow):
@@ -789,13 +788,13 @@ EMOJI RULE (must follow):
 
 SOURCE RULE (must follow):
 - Never name DataForSEO, scrapers, consumer UI, Top 5, LLM Responses, scraped UI, or any API used to measure results.
-- Say ChatGPT, Claude, and Perplexity only. Do not say how the answers were collected.
+- Say ChatGPT, Claude and Gemini only. Do not say how the answers were collected.
 
 ROADMAP RULES (must follow):
 - Exactly 3 months, and each month has 4 concrete tasks for this business.
 - Month 1 is Google Business Profile, NAP, and the measured Maps query. No FAQ tasks and no AI tasks.
 - Month 2 is FAQ blocks and on-page answers for the failed AEO checks only.
-- Month 3 is the GEO prompts where the brand was not mentioned: the same trading name, sameAs links, and the third-party sources those ChatGPT, Claude, and Perplexity answers already cited.
+- Month 3 is the GEO prompts where the brand was not mentioned: the same trading name, sameAs links, and the third-party sources those ChatGPT, Claude and Gemini answers already cited.
 - Name the business, the service, and the city in the tasks. Do not write generic tasks such as "monitor rankings" or "improve SEO".
 
 CRITICAL PHONE RULES (must follow):
@@ -845,7 +844,7 @@ Return ONLY JSON:
   "pillarComments": {
     "local_seo": "one sentence on GBP, NAP, citations, and the measured Maps query only",
     "aeo": "one sentence on FAQ and direct answers for the measured question searches only",
-    "geo": "one sentence on whether ChatGPT, Claude, and Perplexity name or cite this business only"
+    "geo": "one sentence on whether ChatGPT, Claude and Gemini name or cite this business only"
   },
   "strengths": [],
   "criticalIssues": [
@@ -882,8 +881,8 @@ Return ONLY JSON:
   },
   "geoFixes": {
     "title": "GEO: AI mentions and citations",
-    "visualIntro": "one sentence on whether ChatGPT, Claude, and Perplexity name this business for the measured prompts — do not describe the Local Pack",
-    "verifyHint": "Ask ChatGPT, Claude, and Perplexity the measured prompts and record whether this business is named.",
+    "visualIntro": "one sentence on whether ChatGPT, Claude and Gemini name this business for the measured prompts — do not describe the Local Pack",
+    "verifyHint": "Ask ChatGPT, Claude and Gemini the measured prompts and record whether this business is named.",
     "queryCards": [
       {
         "query": "MUST equal gbpLookup.localRank.query exactly",
@@ -897,7 +896,7 @@ Return ONLY JSON:
         "measured": true
       }
     ],
-    "goalLine": "get named and cited by ChatGPT, Claude, and Perplexity for the measured prompts",
+    "goalLine": "get named and cited by ChatGPT, Claude and Gemini for the measured prompts",
     "opportunity": "one sentence leading with which engines mentioned or missed this business — Maps only as a short Local SEO cross-reference — never invent AI Overview",
     "actions": [
       { "title": "", "detail": "", "howTo": "concrete how-to steps", "priority": "High|Medium", "issue": "", "evidence": "", "impact": "", "recommendation": "" }
@@ -914,18 +913,19 @@ Include exactly 4 criticalIssues covering Local SEO, AEO, and GEO when those pil
 do NOT generate aeoFixes.queryCards / featuredSnippet / paaQuestions (AEO shows measured People Also Ask and answer visibility, not screenshots). geoFixes.queryCards may keep the single measured Maps query for the existing report layout; do not narrate that card as the GEO finding. 3-4 Local SEO actions on GBP, NAP, citations, or Maps. 3-4 GEO actions on AI mentions and citations. 3-4 AEO priorities on FAQ and direct answers.
 Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (you may refine titles only — never change phone/address facts or invent missing phones).`;
 
-  let lastError;
-  for (const modelName of modelNames) {
-    try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        generationConfig: {
-          temperature: 0.35,
-          responseMimeType: 'application/json'
-        }
-      });
-      const result = await model.generateContent(prompt);
-      const parsedRaw = extractJson(result.response.text());
+  const { value: parsedRaw, model: modelName } = await geminiGenerate('report', {
+    prompt,
+    generationConfig: { temperature: 0.35, responseMimeType: 'application/json' },
+    parse: (text) => {
+      try {
+        return extractJson(text);
+      } catch {
+        return null;
+      }
+    }
+  });
+  {
+    {
       const gbp = audit.gbpLookup || {};
       const passedLabels = passed.map((c) => c.label).filter(Boolean);
       const parsed = sanitizeDeepReportAgainstFacts(parsedRaw, {
@@ -1023,10 +1023,6 @@ Prefer the provided NAP inconsistency cards for localSeoFixes.inconsistencies (y
         )
       )
       );
-    } catch (err) {
-      lastError = err;
     }
   }
-
-  throw new Error(lastError?.message || 'Deep Gemini report generation failed');
 }

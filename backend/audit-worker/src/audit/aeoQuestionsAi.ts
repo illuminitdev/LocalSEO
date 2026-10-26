@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { geminiGenerate } from '../lib/gemini.js';
 import { cleanSearchLine, type AeoQueryIntent, type AeoQuerySpec } from './aeoDeck.js';
 import { fetchPeopleAlsoAskQuestions, writeAeoQuestionsWithChatGpt } from '../lib/dataForSeo.js';
 
@@ -264,26 +264,21 @@ Address: ${opts.address || 'unknown'}
 Town: ${city || 'unknown'}
 Website: ${opts.website || 'unknown'}`;
 
-  const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
-  const modelNames = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
   const ask = async (prompt: string, search: boolean) => {
-    if (!genAI) return null;
-    for (const modelName of modelNames) {
-      try {
-        const model = genAI.getGenerativeModel({
-          model: modelName,
+    if (!apiKey) return null;
+    try {
+      return (
+        await geminiGenerate(search ? 'questions-search' : 'questions', {
+          prompt,
           // Google Search grounding does not allow a JSON response type.
           generationConfig: search ? { temperature: 0.7 } : { temperature: 0.7, responseMimeType: 'application/json' },
-          ...(search ? { tools: [{ googleSearch: {} }] as any } : {})
-        });
-        const result = await model.generateContent(prompt);
-        const parsed = extractJson(result.response.text());
-        if (parsed) return parsed;
-      } catch (err) {
-        console.warn(`[aeoQuestions] ${modelName} failed:`, (err as Error)?.message || err);
-      }
+          ...(search ? { tools: [{ googleSearch: {} }] } : {}),
+          parse: (text) => extractJson(text) || null
+        })
+      ).value;
+    } catch {
+      return null;
     }
-    return null;
   };
 
   if (text) {

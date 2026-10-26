@@ -1,3 +1,5 @@
+import { buildLocalSeoInconsistencies } from './localSeoDeck.js';
+
 export type AeoCheckStatus = 'yes' | 'no' | 'unknown';
 
 export type AeoChecklistItem = {
@@ -62,17 +64,13 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
   const checks: CheckRow[] = audit?.checklist?.checks || audit?.presence?.checks || [];
   const gbp = audit?.gbpLookup || {};
   const business = audit?.business || {};
-  const localRank = gbp.localRank || {};
-  const nap = Array.isArray(audit?.aiReport?.localSeoFixes?.inconsistencies)
-    ? audit.aiReport.localSeoFixes.inconsistencies
-    : [];
+  const nap = gbp.listedOnMaps === true && gbp.gbpName ? buildLocalSeoInconsistencies(audit) : [];
 
   const brand = String(business.businessName || '').trim() || 'The brand';
   const service =
     String(business.serviceLabel || business.service || '').trim() || 'local services';
   const city =
     String(business.searchAreaLabel || business.city || '').trim() || 'the local area';
-  const measuredQuery = String(localRank.query || '').trim();
 
   const aeo1 = fromCheck(checkById(checks, 'aeo_1'), 'FAQPage schema found', 'No FAQPage schema');
   const aeo2 = fromCheck(checkById(checks, 'aeo_2'), 'Visible FAQ / Q&A blocks', 'No visible FAQ / Q&A blocks');
@@ -155,7 +153,13 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
     ? { status: 'no', evidence: 'NAP mismatch between Google and website' }
     : napHasMatch
       ? { status: 'yes', evidence: 'Business information consistent across Google and website' }
-      : { status: 'no', evidence: 'Business information consistency not confirmed' };
+      : {
+          status: 'no',
+          evidence:
+            gbp.listedOnMaps === true
+              ? 'Business details on Google and the website could not be matched'
+              : 'No Google Business Profile to check the business details against'
+        };
 
   const reviewProofSe: StatusEv =
     gbp.reviewCount != null && Number(gbp.reviewCount) > 0
@@ -172,42 +176,57 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
 
   const bookingSe = prefer(contactForm, telLinks, phoneVis, quoteCta);
 
-  const noAnswerSurface: StatusEv = {
-    status: 'no',
-    evidence: 'This answer box was not confirmed for this business'
+  type Shot = {
+    query?: string;
+    serpMeasured?: boolean;
+    businessInAnswerBox?: boolean;
+    businessInPaa?: boolean;
+    answerBox?: { url?: string } | null;
+    organic?: Array<{ domain?: string }>;
   };
-  const competitorCompareSe: StatusEv =
-    Array.isArray(localRank.topResults) && localRank.topResults.length
-      ? {
-          status: 'no',
-          evidence: `Competitors captured for “${measuredQuery || 'local query'}” — question-level answer winner was not confirmed for this business`
-        }
-      : noAnswerSurface;
-
-  const shots = Array.isArray((audit as { aeoSerpScreenshots?: unknown[] }).aeoSerpScreenshots)
-    ? ((audit as { aeoSerpScreenshots?: Array<{ serpMeasured?: boolean; businessInAnswerBox?: boolean; businessInPaa?: boolean }> })
-        .aeoSerpScreenshots as Array<{
-        serpMeasured?: boolean;
-        businessInAnswerBox?: boolean;
-        businessInPaa?: boolean;
-      }>)
-    : [];
+  const shots: Shot[] = Array.isArray(audit?.aeoSerpScreenshots) ? audit.aeoSerpScreenshots : [];
   const measuredShots = shots.filter((shot) => shot && shot.serpMeasured === true);
-  const snippetSe: StatusEv = !measuredShots.length
-    ? { status: 'unknown', evidence: 'Not measured on this run' }
-    : measuredShots.some((shot) => shot.businessInAnswerBox === true)
-      ? { status: 'yes', evidence: `${brand} is visible in a Google answer box for these questions.` }
+  const asked = measuredShots.length;
+  const boxWins = measuredShots.filter((shot) => shot.businessInAnswerBox === true).length;
+  const paaWins = measuredShots.filter((shot) => shot.businessInPaa === true).length;
+  const notMeasured: StatusEv = { status: 'no', evidence: 'Google answers could not be checked on this run' };
+  const snippetSe: StatusEv = !asked
+    ? notMeasured
+    : boxWins
+      ? { status: 'yes', evidence: `${brand} is in Google's answer box for ${boxWins} of ${asked} questions checked` }
+      : { status: 'no', evidence: `${brand} is not in Google's answer box for any of the ${asked} questions checked` };
+  const paaSe: StatusEv = !asked
+    ? notMeasured
+    : paaWins
+      ? { status: 'yes', evidence: `${brand} appears in People Also Ask for ${paaWins} of ${asked} questions checked` }
+      : { status: 'no', evidence: `${brand} does not appear in People Also Ask for any of the ${asked} questions checked` };
+  const answerSe: StatusEv = !asked
+    ? notMeasured
+    : boxWins || paaWins
+      ? { status: 'yes', evidence: `${brand} is named in Google's answers for ${Math.max(boxWins, paaWins)} of ${asked} questions` }
+      : { status: 'no', evidence: `${brand} is not named in Google's answers for the ${asked} customer questions checked` };
+  const winners = [
+    ...new Set(
+      measuredShots
+        .map((shot) => {
+          try {
+            return shot.answerBox?.url ? new URL(shot.answerBox.url).hostname.replace(/^www\./, '') : '';
+          } catch {
+            return '';
+          }
+        })
+        .filter(Boolean)
+    )
+  ];
+  const competitorCompareSe: StatusEv = !asked
+    ? notMeasured
+    : boxWins || paaWins
+      ? { status: 'yes', evidence: `${brand} holds the answer for ${Math.max(boxWins, paaWins)} of ${asked} questions` }
       : {
           status: 'no',
-          evidence: `These questions were measured, and ${brand} is not visible in the answer box.`
-        };
-  const paaSe: StatusEv = !measuredShots.length
-    ? { status: 'unknown', evidence: 'Not measured on this run' }
-    : measuredShots.some((shot) => shot.businessInPaa === true)
-      ? { status: 'yes', evidence: `${brand} is visible in People Also Ask for these questions.` }
-      : {
-          status: 'no',
-          evidence: `These questions were measured, and ${brand} is not visible in People Also Ask.`
+          evidence: winners.length
+            ? `Google's answers for these questions come from ${winners.slice(0, 3).join(', ')}, not ${brand}`
+            : `Other sites answer these ${asked} questions in Google, not ${brand}`
         };
 
   const faqCoverage = prefer(aeo2, onpageFaq, aeo1);
@@ -271,10 +290,7 @@ export function buildAeoCoreChecklist(audit: any): AeoCoreChecklist {
         id: 'aeo_visibility',
         title: 'AEO Visibility',
         items: [
-          item('aeo_vis_ai', 'Google AI/search answer visibility', {
-            status: 'unknown',
-            evidence: 'Not measured on this run'
-          }),
+          item('aeo_vis_ai', 'Google AI/search answer visibility', answerSe),
           item('aeo_vis_snippet', 'Featured snippet visibility', snippetSe),
           item('aeo_vis_paa', 'People Also Ask visibility', paaSe),
           item('aeo_vis_local_q', 'Local question visibility', nearMeSe),
