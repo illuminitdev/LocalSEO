@@ -621,14 +621,17 @@ async function enrichFromDataForSeo(audit: any) {
             depth: 20
           }),
           fetchBacklinksSummary({ website: business.website }),
-          fetchOrganicLocalRank({
-            keyword: organicKw,
-            website: business.website || gbp.websiteOnGbp,
-            businessName: businessName || gbp.gbpName,
-            lat: locOpts.lat,
-            lng: locOpts.lng,
-            locationName: locOpts.locationName
-          }),
+          // Searched from the town as a whole, not from the business's own street; the pin is only a fallback.
+          (async () => {
+            const rankOpts = {
+              keyword: organicKw,
+              website: business.website || gbp.websiteOnGbp,
+              businessName: businessName || gbp.gbpName,
+              locationName: locOpts.locationName
+            };
+            const town = locOpts.locationName ? await fetchOrganicLocalRank({ ...rankOpts, lat: null, lng: null }) : null;
+            return town?.ok ? town : fetchOrganicLocalRank({ ...rankOpts, lat: locOpts.lat, lng: locOpts.lng });
+          })(),
           !profileFound ? noListing({ duplicateLikely: null }) : detectDuplicateListings({
             businessName: businessName || gbp.gbpName || '',
             placeId: placeId || undefined,
@@ -941,15 +944,17 @@ export const main: SQSHandler = async (event: SQSEvent) => {
         const g = audit.gbpLookup || {};
         audit.aeoSerpScreenshots = await Promise.all(
           aeoSpecs.map((spec) =>
-            captureAeoSerpScreenshot({
-              keyword: spec.query,
-              lat: typeof g.latitude === 'number' ? g.latitude : null,
-              lng: typeof g.longitude === 'number' ? g.longitude : null,
-              locationName: aeoCity,
-              businessName: audit.business?.businessName,
-              city: aeoCity,
-              website
-            }).catch((err: Error) => ({
+            (async () => {
+              const aeoOpts = { keyword: spec.query, locationName: aeoCity, businessName: audit.business?.businessName, city: aeoCity, website };
+              // Google's answers as seen from the town as a whole; the business's own pin is only a fallback.
+              const town = aeoCity ? await captureAeoSerpScreenshot({ ...aeoOpts, lat: null, lng: null }) : null;
+              if (town?.serpMeasured) return town;
+              return captureAeoSerpScreenshot({
+                ...aeoOpts,
+                lat: typeof g.latitude === 'number' ? g.latitude : null,
+                lng: typeof g.longitude === 'number' ? g.longitude : null
+              });
+            })().catch((err: Error) => ({
               query: spec.query,
               skipped: true,
               reason: err?.message || 'Google results could not be captured',
