@@ -888,7 +888,13 @@ export const main: SQSHandler = async (event: SQSEvent) => {
       const screenshot = await captureHomepageScreenshot(crawl.finalUrl || website);
 
       const lhMetrics = lighthouse && !(lighthouse as { skipped?: boolean }).skipped ? lighthouse : null;
-      if (!lhMetrics) dataWarnings.push('Page speed (Lighthouse) was not measured; speed checks show No');
+      if (!lhMetrics) {
+        const reason = String((lighthouse as { reason?: string } | null)?.reason || '').trim().slice(0, 160);
+        dataWarnings.push(
+          `Page speed (Lighthouse) was not measured${reason ? ` (${reason})` : ''}; speed checks show No`
+        );
+        console.warn('[auditWorker] Lighthouse not measured:', reason);
+      }
 
       if (!requireDataForSeoConfigured()) {
         dataWarnings.push('DataForSEO is not configured: Google Maps, profile and AI checks were not run');
