@@ -36,9 +36,11 @@ import {
     deleteAdminCrmLead,
     bulkDeleteAdminCrmLeads,
     fetchAdminExcelBatches,
+    fetchAdminExcelExport,
     resumeAdminLeadEnrichment,
     type ExcelImportBatch
 } from './adminApi';
+import { downloadExcelExport } from './excelExport';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import LeadDetailsModal from './LeadDetailsModal';
 import BulkAssignTasksModal from './BulkAssignTasksModal';
@@ -865,6 +867,37 @@ export default function AdminGrowthAuditLeads() {
         }
     };
 
+    const [isExportingExcel, setIsExportingExcel] = useState(false);
+
+    // Download the selected Excel upload: original columns + GBP Observation, AI Visibility, Priority.
+    const handleExportExcel = async () => {
+        if (excelBatchFilter === 'all' || !selectedExcelBatch) {
+            setError('Select one Excel file from the filter before exporting.');
+            return;
+        }
+        setIsExportingExcel(true);
+        setError('');
+        try {
+            const leads = await fetchAdminExcelExport(excelBatchFilter);
+            if (!leads.length) {
+                setError('This Excel has no leads to export.');
+                return;
+            }
+            const analysing = leads.filter((l) => l.enrichStatus === 'pending' || l.enrichStatus === 'running').length;
+            if (
+                analysing > 0 &&
+                !window.confirm(`${analysing} lead(s) are still being analysed, so their cells may be empty. Export anyway?`)
+            ) {
+                return;
+            }
+            downloadExcelExport(leads, selectedExcelBatch.fileName || 'leads');
+        } catch (err: any) {
+            setError(err.message || 'Failed to export this Excel');
+        } finally {
+            setIsExportingExcel(false);
+        }
+    };
+
     const [isResumingEnrich, setIsResumingEnrich] = useState(false);
 
     // Restart GBP analysis for leads stuck on "Analyzing" (the selected Excel file, or every upload).
@@ -979,6 +1012,19 @@ export default function AdminGrowthAuditLeads() {
                                 >
                                     <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
                                     <span>Assign this Excel</span>
+                                </button>
+                            )}
+
+                            {excelBatchFilter !== 'all' && selectedExcelBatch && (
+                                <button
+                                    type="button"
+                                    disabled={isExportingExcel}
+                                    onClick={handleExportExcel}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition-colors shadow-2xs"
+                                    title="Download this Excel with GBP observation, AI visibility and priority filled in"
+                                >
+                                    <Download className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>{isExportingExcel ? 'Exporting...' : `Export this Excel (${selectedExcelBatch.leadCount})`}</span>
                                 </button>
                             )}
 

@@ -44,7 +44,7 @@ national digits, so `+44 (0)121 477 9799`, `0121-477-9799` and `01214779799` all
 `Ltd` and spaces. If the site cannot be read (blocked, down, or almost no text because it is built with JavaScript) NAP is
 **not judged** instead of being reported as missing.
 
-**AI visibility**: 4 local-search questions are asked to ChatGPT per lead (DataForSEO
+**AI visibility**: 3 local-search questions (2 when the address has no area/neighbourhood) are asked to ChatGPT per lead (DataForSEO
 `ai_optimization/chat_gpt/llm_responses/live`, via `askLlm` in `aiInsights.ts`; platform can be changed with
 `LEAD_AI_PLATFORM`). They are built from the lead's own GBP:
 - the **business type** from the Excel "Business" column (e.g. "Windows & Doors" -> "windows and doors", the same for every row of a sheet); the GBP category is only a fallback when the Excel has none,
@@ -53,8 +53,7 @@ national digits, so `+44 (0)121 477 9799`, `0121-477-9799` and `01214779799` all
 ```
 What are the best double glazing in Birmingham?
 Who would you recommend for double glazing in Birmingham?
-Who are the top rated double glazing in West Heath, Birmingham?
-Which double glazing near West Heath should I choose?
+Who are the top rated double glazing in West Heath, Birmingham?   (only when the address has an area)
 ```
 For each answer the business counts as listed only if its full name (or website domain) is in it (a few shared words do
 not match). If it is item N of a numbered list the rank is recorded.

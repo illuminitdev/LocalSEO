@@ -183,6 +183,9 @@ app.use(securityHeaders());
 app.use(cors(corsOptions()));
 app.use(globalRateLimit());
 
+// Admin Excel upload sends every row with its original columns (for "Export this Excel"); allow more than the default.
+app.use('/api/admin/crm/leads/bulk-import', express.json({ limit: process.env.LEAD_IMPORT_BODY_LIMIT || '5mb' }));
+
 app.use(
     express.json({
         limit: process.env.JSON_BODY_LIMIT || '1mb',

@@ -556,6 +556,29 @@ export async function deleteAdminExcelLeads(
     return adminDelete(`/api/admin/crm/leads/excel?batchId=${encodeURIComponent(batchId)}`);
 }
 
+export type ExcelExportLead = {
+    sheetName: string;
+    /** Uploaded row as [header, value] pairs; null for Excels uploaded before rows were kept. */
+    raw: [string, string][] | null;
+    name: string;
+    phone: string;
+    email: string;
+    website: string;
+    address: string;
+    industry: string;
+    gbpUrl: string;
+    gbpObservation: string;
+    aiVisibility: string;
+    priority: string;
+    enrichStatus: string;
+};
+
+/** Leads of one Excel upload, for "Export this Excel". */
+export async function fetchAdminExcelExport(batchId: string): Promise<ExcelExportLead[]> {
+    const res = await adminGet(`/api/admin/crm/leads/excel-export?batchId=${encodeURIComponent(batchId)}`);
+    return res.leads || [];
+}
+
 /** Restart GBP auto-analysis for uploaded leads stuck on "Analyzing" (all batches when batchId is omitted). */
 export async function resumeAdminLeadEnrichment(
     batchId?: string | null
