@@ -34,6 +34,8 @@ export interface ParsedLeadRow {
     notes: string;
     conclusion?: string;
     sheetName: string;
+    /** The uploaded row as [header, value] pairs in sheet order, so the admin can export it back with the filled cells. */
+    rawRow?: [string, string][];
 }
 
 interface ExcelLeadUploadModalProps {
@@ -505,7 +507,8 @@ function parseWorkbookSheet(
             spreadsheetStatus3,
             notes: conclusion,
             conclusion,
-            sheetName: displaySheetName
+            sheetName: displaySheetName,
+            rawRow: keys.filter((k) => !/^__EMPTY/.test(k)).map((k) => [k, String(row[k] ?? '')] as [string, string])
         });
     }
 

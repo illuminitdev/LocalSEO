@@ -156,16 +156,15 @@ export function areaFromGbpAddress(address: string): string {
     return candidates[candidates.length - 1] || '';
 }
 
-/** Local-search questions asked to the AI assistant for one lead (city level, then neighbourhood level). */
+/**
+ * Local-search questions asked to the AI assistant for one lead: 2 city-level, plus 1 neighbourhood-level when the
+ * address has an area (so 3, or 2). Each question is one paid AI call.
+ */
 export function aiQuestions(service: string, city: string, area = ''): string[] {
     const inCity = city ? ` in ${city}` : ' near me';
-    const where = area && city ? `${area}, ${city}` : area || city;
-    return [
-        `What are the best ${service}${inCity}?`,
-        `Who would you recommend for ${service}${inCity}?`,
-        where ? `Who are the top rated ${service} in ${where}?` : `Who has the best reviews for ${service}${inCity}?`,
-        area ? `Which ${service} near ${area} should I choose?` : `Who is the most trusted choice for ${service}${inCity}?`
-    ];
+    const questions = [`What are the best ${service}${inCity}?`, `Who would you recommend for ${service}${inCity}?`];
+    if (area) questions.push(`Who are the top rated ${service} in ${city ? `${area}, ${city}` : area}?`);
+    return questions;
 }
 
 const ordinal = (n: number) => {
@@ -245,6 +244,14 @@ export function formatAiVisibility(questions: string[], results: string[]): stri
 }
 
 
+
+export const NO_GBP_OBSERVATION = 'No GBP found';
+
+/** GBP URL cell that means "no GBP": blank, or a placeholder like NA / N/A / none / -. */
+export function isNoGbpUrl(v: unknown): boolean {
+    const s = String(v ?? '').trim();
+    return !s || /^(n\/?a|none|nil|no|null|-+|not available|no gbp)$/i.test(s);
+}
 
 export type ParsedGbpUrl = {
     name: string;

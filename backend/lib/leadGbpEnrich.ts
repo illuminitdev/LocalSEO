@@ -1,6 +1,7 @@
 /**
- * Admin Excel upload: for each lead with a GBP URL, run the 6 GBP checks and write the
- * "GBP observation", "AI visibility" and priority fields (only the cells that are empty).
+ * Admin Excel upload: for each lead, run the 6 GBP checks and write the "GBP observation", "AI visibility" and
+ * priority fields (only the cells that are empty). Leads with no GBP (blank / NA, or a link that can't be found) get
+ * "No GBP found", High priority, and AI visibility from the Excel business name.
  * See docs/lead-gbp-enrichment.md.
  */
 import { query } from './db';
@@ -17,7 +18,9 @@ import {
     aiQuestions,
     areaFromGbpAddress,
     cityFromGbpAddress,
+    NO_GBP_OBSERVATION,
     formatAiVisibility,
+    isNoGbpUrl,
     nameMatches,
     napGapLines,
     napMissing,
@@ -335,7 +338,7 @@ export async function runChecks(
 const AI_PLATFORM = (process.env.LEAD_AI_PLATFORM as 'chatgpt' | 'claude' | 'perplexity') || 'chatgpt';
 
 /**
- * Ask the AI assistant 4 local-search questions (the Excel business type + city / neighbourhood from the GBP) and report
+ * Ask the AI assistant 2-3 local-search questions (the Excel business type + city / neighbourhood from the GBP) and report
  * whether the business is named. Only the "Not Listed" questions (max 2) are written to the column.
  */
 export async function runAiVisibility(lead: LeadRow, gbp: GbpSummary): Promise<string> {
@@ -372,46 +375,72 @@ export async function runAiVisibility(lead: LeadRow, gbp: GbpSummary): Promise<s
 
 /* ------------------------------- Orchestration ----------------------------- */
 
+/** Write the generated values into the cells that are still empty and mark the lead done. */
+async function saveResult(
+    leadId: string,
+    gbpObservation: string,
+    aiVisibility: string,
+    priority: string,
+    notes: string,
+    checksJson: unknown
+) {
+    await query(
+        `UPDATE sales_leads SET
+            gbp_observation = CASE WHEN COALESCE(TRIM(gbp_observation), '') = '' THEN $2 ELSE gbp_observation END,
+            ai_visibility_observation = CASE WHEN COALESCE(TRIM(ai_visibility_observation), '') = '' THEN $3 ELSE ai_visibility_observation END,
+            opportunity_level = CASE WHEN COALESCE(TRIM(lead_opportunity), '') = '' THEN $5 ELSE opportunity_level END,
+            lead_opportunity = CASE WHEN COALESCE(TRIM(lead_opportunity), '') = '' THEN $4 ELSE lead_opportunity END,
+            enrich_status = 'done',
+            enrich_error = $6,
+            enrich_checks = $7::jsonb,
+            enriched_at = NOW(),
+            updated_at = NOW()
+         WHERE id = $1`,
+        [leadId, gbpObservation, aiVisibility, priority, priority.toLowerCase(), notes, JSON.stringify(checksJson)]
+    );
+}
+
+/** No GBP (blank / NA URL, or the link can't be found): "No GBP found", High, AI visibility from the Excel name. */
+async function saveNoGbpResult(lead: LeadRow, reason: string) {
+    const name = String(lead.name || '').trim();
+    let aiVisibility = '';
+    if (isEmpty(lead.ai_visibility_observation)) {
+        aiVisibility =
+            !name || name.toLowerCase() === 'lead'
+                ? 'AI visibility not checked: add the Business name to the Excel row.'
+                : await runAiVisibility(lead, { title: name, category: '', address: lead.address, website: lead.website });
+    }
+    await saveResult(lead.id, NO_GBP_OBSERVATION, aiVisibility, 'High', reason, { priority: 'High', noGbp: true });
+}
+
 async function processLead(lead: LeadRow) {
     try {
-        if (!requireDataForSeoConfigured()) throw new Error('DataForSEO is not configured');
-        if (isEmpty(lead.gbp_url)) throw new Error('No GBP URL');
-
         // Nothing to fill: all three cells already provided in the Excel.
         if (!isEmpty(lead.gbp_observation) && !isEmpty(lead.ai_visibility_observation) && !isEmpty(lead.lead_opportunity)) {
             await query(`UPDATE sales_leads SET enrich_status = 'done', updated_at = NOW() WHERE id = $1`, [lead.id]);
             return;
         }
 
-        const { checks, gbpName, notes, gbp } = await runChecks(lead);
-        const [gbpObservation, aiVisibility] = await Promise.all([
-            Promise.resolve(templateGbpObservation(checks)),
-            isEmpty(lead.ai_visibility_observation) ? runAiVisibility(lead, gbp) : Promise.resolve('')
-        ]);
-        const priority = priorityFromChecks(checks);
+        if (isNoGbpUrl(lead.gbp_url)) {
+            await saveNoGbpResult(lead, '');
+            return;
+        }
 
-        await query(
-            `UPDATE sales_leads SET
-                gbp_observation = CASE WHEN COALESCE(TRIM(gbp_observation), '') = '' THEN $2 ELSE gbp_observation END,
-                ai_visibility_observation = CASE WHEN COALESCE(TRIM(ai_visibility_observation), '') = '' THEN $3 ELSE ai_visibility_observation END,
-                opportunity_level = CASE WHEN COALESCE(TRIM(lead_opportunity), '') = '' THEN $5 ELSE opportunity_level END,
-                lead_opportunity = CASE WHEN COALESCE(TRIM(lead_opportunity), '') = '' THEN $4 ELSE lead_opportunity END,
-                enrich_status = 'done',
-                enrich_error = $6,
-                enrich_checks = $7::jsonb,
-                enriched_at = NOW(),
-                updated_at = NOW()
-             WHERE id = $1`,
-            [
-                lead.id,
-                gbpObservation,
-                aiVisibility,
-                priority,
-                priority.toLowerCase(),
-                notes.join('; '),
-                JSON.stringify({ priority, checks })
-            ]
-        );
+        if (!requireDataForSeoConfigured()) throw new Error('DataForSEO is not configured');
+
+        let found: Awaited<ReturnType<typeof runChecks>>;
+        try {
+            found = await runChecks(lead);
+        } catch (err: any) {
+            // GBP link given but the profile can't be found: same as no GBP, keep the reason for the admin.
+            await saveNoGbpResult(lead, String(err?.message || 'GBP not found').slice(0, 300));
+            return;
+        }
+
+        const { checks, notes, gbp } = found;
+        const aiVisibility = isEmpty(lead.ai_visibility_observation) ? await runAiVisibility(lead, gbp) : '';
+        const priority = priorityFromChecks(checks);
+        await saveResult(lead.id, templateGbpObservation(checks), aiVisibility, priority, notes.join('; '), { priority, checks });
     } catch (err: any) {
         console.error('[lead-enrich] failed', lead.id, err?.message || err);
         await query(
