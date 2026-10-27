@@ -91,6 +91,8 @@ export default function RankTracker() {
     const [gapRuns, setGapRuns] = useState<GapRun[]>([]);
     const [insights, setInsights] = useState<Insight[]>([]);
     const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+    const [insightsFailed, setInsightsFailed] = useState(false);
+    const [insightsLoading, setInsightsLoading] = useState(false);
     const [showAllKeywords, setShowAllKeywords] = useState(false);
 
     const [scanning, setScanning] = useState(false);
@@ -108,6 +110,9 @@ export default function RankTracker() {
     const [locations, setLocations] = useState<SavedLocation[]>([]);
     const [locationId, setLocationId] = useState('');
     const [locationLimit, setLocationLimit] = useState(1);
+    // Grid scans this billing month and the plan's monthly limit (shown under the keyword box).
+    const [scansUsed, setScansUsed] = useState<number | null>(null);
+    const [scanLimit, setScanLimit] = useState<number | null>(null);
     const [canAddLocation, setCanAddLocation] = useState(false);
     const [needsAddress, setNeedsAddress] = useState(false);
     const selectedLocation = locations.find((l) => l.id === locationId) || null;
@@ -123,6 +128,8 @@ export default function RankTracker() {
 
     const applyLocations = (data: any) => {
         if (data && Array.isArray(data.sharedKeywords)) setSharedKeywords(data.sharedKeywords);
+        if (typeof data?.gridScansUsed === 'number') setScansUsed(data.gridScansUsed);
+        if (typeof data?.gridScanLimit === 'number') setScanLimit(data.gridScanLimit);
         const list: SavedLocation[] = Array.isArray(data?.locations) ? data.locations : [];
         setLocations(list);
         setLocationId(data?.location?.id || list[0]?.id || '');
@@ -131,13 +138,19 @@ export default function RankTracker() {
         setNeedsAddress(Boolean(data?.needsAddress));
     };
 
+    // `refresh` is sent only right after a scan the user clicked; other loads get the saved or free computed insights.
     const loadInsights = async (refresh = false, forLocation = locationId) => {
+        setInsightsLoading(true);
         try {
             const data = await apiPost('/api/ai/rank-insights', { refresh, locationId: forLocation || undefined });
             setInsights(Array.isArray(data?.insights) ? data.insights : []);
             setOpportunities(Array.isArray(data?.opportunities) ? data.opportunities : []);
+            setInsightsFailed(false);
         } catch {
-            // insights are optional
+            // Keep whatever was shown and offer a retry.
+            setInsightsFailed(true);
+        } finally {
+            setInsightsLoading(false);
         }
     };
 
@@ -200,6 +213,7 @@ export default function RankTracker() {
         setPlaces([]);
         setInsights([]);
         setOpportunities([]);
+        setInsightsFailed(false);
         try {
             const state = await apiGet(`/api/rank/state?locationId=${encodeURIComponent(id)}`);
             applyLocations(state);
@@ -324,6 +338,7 @@ export default function RankTracker() {
                 if (err?.code === 'already_scanned') {
                     if (err.body?.run) applyRun(err.body.run as GapRun);
                     setNotice(`${err.message}${err.body?.nextAvailableAt ? ` You can scan it again after ${fmtDay(err.body.nextAvailableAt)}.` : ''}`);
+                    await loadInsights(false);
                     return;
                 }
                 if (err?.code === 'grid_limit' || err?.code === 'keyword_limit') {
@@ -332,7 +347,8 @@ export default function RankTracker() {
                 }
                 throw err;
             }
-            setSharedKeywords((list) => (list.some((k) => k.toLowerCase() === kw.toLowerCase()) ? list : [kw.toLowerCase(), ...list]));
+            // A new scan uses one of this month's grid scans (the keyword is not added to the tracked list).
+            setScansUsed((n) => (n == null ? n : n + 1));
             refreshCredits();
             const total = gridSize * gridSize;
             const rows: number[][] = Array.from({ length: gridSize }, () => new Array(gridSize).fill(21));
@@ -590,6 +606,11 @@ export default function RankTracker() {
                             ))}
                         </datalist>
                     </div>
+                    {scansUsed != null && scanLimit != null ? (
+                        <div className="mt-1 min-h-[16px] text-[10px] font-semibold text-gray-500 leading-4">
+                            {Math.min(scansUsed, scanLimit)} of {scanLimit} scan{scanLimit === 1 ? '' : 's'} used this month
+                        </div>
+                    ) : null}
                 </div>
                 <div className="min-w-0 flex flex-col">
                     <label className={miniLabel}>Location</label>
@@ -732,9 +753,28 @@ export default function RankTracker() {
                         )}
                     </div>
                     {insights.length === 0 ? (
-                        <p className="text-xs text-gray-400 py-6 text-center">
-                            Run a scan to get AI insights on your rankings and competitors.
-                        </p>
+                        insightsLoading ? (
+                            <p className="text-xs text-gray-400 py-6 flex items-center justify-center gap-2">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading insights…
+                            </p>
+                        ) : trackedKeywords.length > 0 ? (
+                            <div className="py-6 text-center">
+                                <p className="text-xs text-gray-400 mb-2">
+                                    {insightsFailed ? 'Couldn’t load insights for your last scan.' : 'No insights for your last scan yet.'}
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => loadInsights(false)}
+                                    className="text-xs font-semibold text-[var(--brand-primary)] hover:underline cursor-pointer"
+                                >
+                                    Retry
+                                </button>
+                            </div>
+                        ) : (
+                            <p className="text-xs text-gray-400 py-6 text-center">
+                                Run a scan to get AI insights on your rankings and competitors.
+                            </p>
+                        )
                     ) : (
                         <div className="space-y-3">
                             {insights.map((item, i) => {
@@ -781,7 +821,11 @@ export default function RankTracker() {
                     </h2>
                     <p className="text-xs text-gray-500 mb-4">Keywords on the cusp of the Local Pack.</p>
                     {opportunities.length === 0 ? (
-                        <p className="text-xs text-gray-400 py-4 text-center">No near-pack keywords yet.</p>
+                        <p className="text-xs text-gray-400 py-4 text-center">
+                            {trackedKeywords.length > 0
+                                ? 'None of your scanned keywords rank 4–10 yet. Those are the ones closest to the Local Pack.'
+                                : 'No near-pack keywords yet.'}
+                        </p>
                     ) : (
                         <div className="space-y-3">
                             {opportunities.map((o) => {
