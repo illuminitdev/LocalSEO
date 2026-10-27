@@ -2539,8 +2539,8 @@ export async function fetchPeopleAlsoAskQuestions(keyword: string, timeoutMs = 3
   }
 }
 
-/** Answers sampled per engine and prompt; a mention counts when it appears in the majority. */
-const GEO_SAMPLES_PER_ENGINE = 3;
+/** Answers sampled per engine and prompt (one run each keeps the audit at 9 paid LLM calls). */
+const GEO_SAMPLES_PER_ENGINE = 1;
 
 const AI_ENGINES: Array<{
   engine: AiEngineCheckResult['engine'];
@@ -2600,7 +2600,7 @@ export async function checkAiEngineMentions(opts: {
     return AI_ENGINES.map((e) => skippedRow(e.engine, e.label, 'Missing prompt or business name'));
   }
 
-  // LLM answers vary from run to run, so each engine is asked several times and the result is the majority.
+  // Each engine is asked the prompt once; that single answer decides whether the business is mentioned.
   const sample = async (platform: LlmPlatform, models: string[]) => {
     const runs: Array<{ text: string; citations: string[]; error?: string }> = [];
     for (let i = 0; i < GEO_SAMPLES_PER_ENGINE; i++) {
