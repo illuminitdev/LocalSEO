@@ -20,7 +20,7 @@ const PROFILE_FIELDS = [
 ];
 
 /** No Google listing belongs to this business: clear every profile field so no section can show one. */
-export function markNoProfile(audit: any, similar: SimilarListing | null) {
+export function markNoProfile(audit: any, similar: SimilarListing | null, tried: string[] = []) {
   const business = audit.business || {};
   const prev = audit.gbpLookup || {};
   const next: Record<string, unknown> = { ...prev };
@@ -36,7 +36,7 @@ export function markNoProfile(audit: any, similar: SimilarListing | null) {
     similarListing: similar,
     evidence: `No Google Business Profile found for “${business.businessName || 'the business'}”${
       business.city ? ` in ${business.city}` : ''
-    }`
+    }${tried.length ? ` (searched by ${tried.join(', ')})` : ''}`
   };
 }
 

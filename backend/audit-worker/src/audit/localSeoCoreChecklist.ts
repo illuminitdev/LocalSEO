@@ -217,7 +217,9 @@ function alignWithProfile(list: LocalSeoCoreChecklist, audit: any): LocalSeoCore
   const city = String(audit?.business?.searchAreaLabel || audit?.business?.city || '').trim();
   const rank = gbp.localRank || {};
   const depth = Number(rank.totalChecked) || (Array.isArray(rank.topResults) ? rank.topResults.length : 0) || 10;
-  const notFound = `No Google Business Profile found for “${name}”${city ? ` in ${city}` : ''}`;
+  // The lookup's own words: what was searched, a name-only candidate, or a failed search.
+  const notFound =
+    (gbp.listedOnMaps !== true && String(gbp.evidence || '').trim()) || `No Google Business Profile found for “${name}”${city ? ` in ${city}` : ''}`;
   const notRanked = rank.query
     ? `Not in the top ${depth} Google Maps results for “${rank.query}”`
     : 'Google Maps ranking could not be measured on this run';

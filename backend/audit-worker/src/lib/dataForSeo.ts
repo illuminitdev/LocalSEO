@@ -816,6 +816,56 @@ export async function fetchMapsLocalPack(opts: {
 }
 
 
+/** DataForSEO's database of Google Maps listings, filtered by website domain or by name (+ town). */
+export async function searchBusinessListings(opts: {
+  domain?: string;
+  name?: string;
+  city?: string;
+  limit?: number;
+  timeoutMs?: number;
+}): Promise<MapsLocalPackResult> {
+  if (!requireDataForSeoConfigured()) return { items: [], taskId: null };
+  const domain = String(opts.domain || '').trim().toLowerCase();
+  const name = String(opts.name || '').replace(/[%"]/g, '').trim();
+  const city = String(opts.city || '').replace(/[%"]/g, '').trim();
+  if (!domain && !name) return { items: [], taskId: null };
+
+  const run = async (filters: unknown[]) => {
+    const res = await fetch('https://api.dataforseo.com/v3/business_data/business_listings/search/live', {
+      method: 'POST',
+      headers: {
+        Authorization: basicAuthHeader(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify([{ filters, limit: opts.limit ?? 20 }]),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 30000)
+    });
+    const data: any = await res.json().catch(() => ({}));
+    const t = Array.isArray(data?.tasks) ? data.tasks[0] : null;
+    if (!res.ok || !t || t.status_code !== 20000) {
+      console.warn('[dataForSeo] business listings:', res.status, t?.status_code, t?.status_message || data?.status_message);
+      return null;
+    }
+    const result = Array.isArray(t.result) ? t.result[0] : null;
+    const items = (Array.isArray(result?.items) ? result.items : [])
+      .map((item: any, idx: number) => normalizeItem(item, idx))
+      .filter(Boolean) as DataForSeoMapsItem[];
+    return { items, taskId: String(t.id || '').trim() || 'business_listings' };
+  };
+
+  try {
+    if (domain) return (await run([['domain', '=', domain]])) || { items: [], taskId: null };
+    const byName = ['title', 'like', `%${name}%`];
+    // The town narrows a common name; if the filter is refused, search the name alone.
+    const withCity = city ? await run([byName, 'and', ['address_info.city', 'like', `%${city}%`]]) : null;
+    if (withCity?.items.length) return withCity;
+    return (await run([byName])) || withCity || { items: [], taskId: null };
+  } catch (err: any) {
+    console.warn('[dataForSeo] business listings failed:', err?.message);
+    return { items: [], taskId: null };
+  }
+}
+
 function digits(s: string) {
   return String(s || '').replace(/\D/g, '');
 }
