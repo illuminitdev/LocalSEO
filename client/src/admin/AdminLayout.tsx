@@ -8,6 +8,7 @@ import {
 import { adminGet, adminPost, clearAdminToken } from './adminApi';
 import { cn } from '../shared/utils';
 import { timeAgo, useNotificationFeed } from '../shared/useNotificationFeed';
+import { SIDEBAR_RAIL_WIDTH, SidebarToggleButton, useSidebarCollapsed } from '../shared/SidebarToggle';
 
 // ─── Notification Types ───────────────────────────────────────────────────────
 type NotifType = 'lead' | 'task' | 'audit' | 'system' | 'alert';
@@ -270,6 +271,7 @@ export default function AdminLayout() {
         } catch {  }
         return SIDEBAR_DEFAULT;
     });
+    const [collapsed, toggleCollapsed] = useSidebarCollapsed('lp.sidebarCollapsed.admin');
     const [resizing, setResizing] = useState(false);
     const resizeRef = useRef<{ startX: number; startW: number } | null>(null);
 
@@ -363,18 +365,26 @@ export default function AdminLayout() {
         navigate('/', { replace: true });
     };
 
-    const logoMaxW = Math.max(120, sidebarWidth - 32);
+    const logoMaxW = Math.max(110, sidebarWidth - 76);
     const logoH = Math.round(Math.min(44, Math.max(32, logoMaxW * 0.22)));
 
-    const sidebar = (
+    const renderSidebar = (rail: boolean) => (
         <>
-            <div className="min-h-14 px-4 py-2.5 shrink-0 flex items-center justify-between gap-2 min-w-0">
-                <img
-                    src="/localseo.png"
-                    alt="Local SEO"
-                    className="w-auto max-w-full object-contain object-left min-w-0"
-                    style={{ height: logoH, maxWidth: logoMaxW }}
-                />
+            <div
+                className={cn(
+                    'min-h-14 py-2.5 shrink-0 flex items-center gap-2 min-w-0',
+                    rail ? 'px-2 justify-center' : 'px-4 justify-between'
+                )}
+            >
+                {!rail && (
+                    <img
+                        src="/localseo.png"
+                        alt="Local SEO"
+                        className="w-auto max-w-full object-contain object-left min-w-0"
+                        style={{ height: logoH, maxWidth: logoMaxW }}
+                    />
+                )}
+                <SidebarToggleButton collapsed={rail} onClick={toggleCollapsed} />
                 <button
                     type="button"
                     className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9] shrink-0"
@@ -392,6 +402,8 @@ export default function AdminLayout() {
                         to={item.to}
                         end={item.end}
                         onClick={() => setNavOpen(false)}
+                        title={rail ? item.name : undefined}
+                        aria-label={rail ? item.name : undefined}
                         className={({ isActive }) => {
                             const active =
                                 item.to === '/admin/users'
@@ -406,7 +418,8 @@ export default function AdminLayout() {
                                             location.pathname.startsWith('/admin/crm/leads/')
                                           : isActive;
                             return cn(
-                                'flex items-center gap-2.5 px-3 py-2 min-h-[38px] rounded-xl text-sm transition-colors min-w-0',
+                                'flex items-center gap-2.5 py-2 min-h-[38px] rounded-xl text-sm transition-colors min-w-0',
+                                rail ? 'justify-center px-0' : 'px-3',
                                 active
                                     ? 'bg-[#F59E0B] text-[#0F172A] font-semibold'
                                     : 'text-[#64748B] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
@@ -414,13 +427,13 @@ export default function AdminLayout() {
                         }}
                     >
                         <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
-                        <span className="truncate">{item.name}</span>
+                        {!rail && <span className="truncate">{item.name}</span>}
                     </NavLink>
                 ))}
             </nav>
 
-            <div className="px-4 pb-4 pt-3 border-t-2 border-[#E2E8F0] shrink-0 space-y-3 safe-pb">
-                <div className="flex items-center gap-3 px-1">
+            <div className={cn('pb-4 pt-3 border-t-2 border-[#E2E8F0] shrink-0 space-y-3 safe-pb', rail ? 'px-2' : 'px-4')}>
+                <div className={cn('flex items-center gap-3', rail ? 'justify-center' : 'px-1')}>
                     {adminAvatarUrl ? (
                         <img
                             src={adminAvatarUrl}
@@ -432,18 +445,22 @@ export default function AdminLayout() {
                             {(adminEmail || 'A').charAt(0).toUpperCase()}
                         </div>
                     )}
-                    <div className="min-w-0 leading-tight">
-                        <p className="text-sm font-semibold text-[#0F172A] truncate">Admin</p>
-                        <p className="text-xs text-[#94A3B8] mt-0.5 truncate">{adminEmail || 'Admin'}</p>
-                    </div>
+                    {!rail && (
+                        <div className="min-w-0 leading-tight">
+                            <p className="text-sm font-semibold text-[#0F172A] truncate">Admin</p>
+                            <p className="text-xs text-[#94A3B8] mt-0.5 truncate">{adminEmail || 'Admin'}</p>
+                        </div>
+                    )}
                 </div>
                 <button
                     type="button"
                     onClick={logout}
+                    title={rail ? 'Log out' : undefined}
+                    aria-label={rail ? 'Log out' : undefined}
                     className="w-full flex items-center justify-center gap-2 px-3 py-2.5 min-h-[44px] rounded-xl border border-[#E2E8F0] bg-white text-sm font-semibold text-[#0F172A] hover:bg-[#F8FAFC] transition-colors"
                 >
                     <LogOut className="w-4 h-4" strokeWidth={1.75} />
-                    Log out
+                    {!rail && 'Log out'}
                 </button>
             </div>
         </>
@@ -453,29 +470,31 @@ export default function AdminLayout() {
         <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden">
             <aside
                 className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden min-w-0"
-                style={{ width: sidebarWidth }}
+                style={{ width: collapsed ? SIDEBAR_RAIL_WIDTH : sidebarWidth }}
             >
-                {sidebar}
-                <div
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label="Resize sidebar"
-                    onPointerDown={(e) => {
-                        if (e.button !== 0) return;
-                        e.preventDefault();
-                        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-                        resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
-                        setResizing(true);
-                    }}
-                    className="absolute inset-y-0 right-0 z-20 w-2 cursor-sidebar-resize touch-none"
-                >
-                    <span
-                        className={cn(
-                            'pointer-events-none absolute inset-y-0 right-0 w-px',
-                            resizing ? 'bg-[#F59E0B]' : 'bg-transparent group-hover:bg-[#CBD5E1]'
-                        )}
-                    />
-                </div>
+                {renderSidebar(collapsed)}
+                {!collapsed && (
+                    <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize sidebar"
+                        onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            e.preventDefault();
+                            (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                            resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
+                            setResizing(true);
+                        }}
+                        className="absolute inset-y-0 right-0 z-20 w-2 cursor-sidebar-resize touch-none"
+                    >
+                        <span
+                            className={cn(
+                                'pointer-events-none absolute inset-y-0 right-0 w-px',
+                                resizing ? 'bg-[#F59E0B]' : 'bg-transparent group-hover:bg-[#CBD5E1]'
+                            )}
+                        />
+                    </div>
+                )}
             </aside>
 
             {navOpen && (
@@ -487,7 +506,7 @@ export default function AdminLayout() {
                         onClick={() => setNavOpen(false)}
                     />
                     <aside className="absolute inset-y-0 left-0 w-[min(288px,88vw)] max-w-full bg-white border-r border-[#E2E8F0] flex flex-col shadow-xl">
-                        {sidebar}
+                        {renderSidebar(false)}
                     </aside>
                 </div>
             )}
