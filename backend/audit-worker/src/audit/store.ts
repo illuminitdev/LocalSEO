@@ -8,6 +8,7 @@ import { computeScore } from './score.js';
 import { buildAeoCoreChecklist } from './aeoCoreChecklist.js';
 import { buildLocalSeoCoreChecklist } from './localSeoCoreChecklist.js';
 import { scrubVendorDeep } from './geminiReport.js';
+import { cleanClientText } from './deckShared.js';
 import { scoreText } from './narrative.js';
 import { isDatabaseEnabled, query } from '../lib/db.js';
 import { resolveSearchArea } from '../lib/searchArea.js';
@@ -173,9 +174,12 @@ export async function saveAudit(audit: AuditRecord) {
       Object.assign(audit.aiReport, scoreText(audit));
     }
   }
+  if (Array.isArray(audit.checklist?.checks)) {
+    audit.checklist.checks = cleanClientText(audit.checklist.checks);
+  }
   audit.topFixes = deriveTopFixes(audit);
   if (audit.aiReport) {
-    audit.aiReport = scrubVendorDeep(audit.aiReport) as AuditRecord['aiReport'];
+    audit.aiReport = cleanClientText(scrubVendorDeep(audit.aiReport)) as AuditRecord['aiReport'];
   }
 
   if (isDatabaseEnabled()) {

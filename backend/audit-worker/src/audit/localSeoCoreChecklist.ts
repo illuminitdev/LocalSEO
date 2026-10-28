@@ -1,5 +1,6 @@
 import { buildLocalSeoInconsistencies } from './localSeoDeck.js';
 import { readIntake } from '../lib/mapsLink.js';
+import { clientEvidence } from './deckShared.js';
 
 export type CoreCheckStatus = 'yes' | 'no' | 'unknown';
 
@@ -190,19 +191,46 @@ function openingHoursMatchStatus(audit: any): StatusEv {
   }
   const websiteSig = hourSignature(websiteLines);
   const gbpSig = hourSignature(gbpLines);
-  if (!websiteSig || !gbpSig) {
-    return {
-      status: 'no',
-      evidence: 'Opening hours are listed, but the website times do not match the Google listing'
-    };
-  }
-  if (websiteSig === gbpSig) {
-    return { status: 'yes', evidence: 'Website opening hours match the Google listing' };
+  const both = [
+    hoursSummary(websiteLines) && `Website: ${hoursSummary(websiteLines)}`,
+    hoursSummary(gbpLines) && `Google: ${hoursSummary(gbpLines)}`
+  ]
+    .filter(Boolean)
+    .join(' | ');
+  if (websiteSig && websiteSig === gbpSig) {
+    return { status: 'yes', evidence: `Website opening hours match the Google profile${both ? ` (${both})` : ''}` };
   }
   return {
     status: 'no',
-    evidence: 'Website opening hours do not match the Google listing'
+    evidence: `Website opening hours do not match the Google profile${both ? ` (${both})` : ''}`
   };
+}
+
+const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/** "Mon–Fri 8:00–18:00, Sat 9:00–13:00, Sun closed": consecutive days with the same hours are grouped. */
+function hoursSummary(lines: string[]): string {
+  const sig = hourSignature(lines.map((l) => String(l || '').trim()).filter(Boolean));
+  if (!sig) return '';
+  const byDay = new Map<number, string>();
+  for (const part of sig.split(';')) {
+    const [day, ranges] = part.split('=');
+    const text = ranges === 'closed' ? 'closed' : ranges === '00:00-23:59' ? 'open 24 hours' : ranges.replace(/-/g, '–').replace(/,/g, ', ');
+    byDay.set(Number(day), text);
+  }
+  const out: string[] = [];
+  let start = -1;
+  for (let day = 0; day <= 7; day++) {
+    const text = byDay.get(day);
+    const prev = start >= 0 ? byDay.get(start) : undefined;
+    if (start >= 0 && text !== prev) {
+      const days = start === day - 1 ? DAY_SHORT[start] : `${DAY_SHORT[start]}–${DAY_SHORT[day - 1]}`;
+      out.push(`${days} ${prev}`);
+      start = -1;
+    }
+    if (start < 0 && text != null) start = day;
+  }
+  return out.join(', ');
 }
 
 /**
@@ -239,8 +267,8 @@ function alignWithProfile(list: LocalSeoCoreChecklist, audit: any): LocalSeoCore
         it.evidence = 'No Google listing to compare the website’s name, address and phone with';
       } else if (it.status === 'unknown') {
         it.status = 'no';
-        it.evidence = it.evidence && !/^not measured/i.test(it.evidence) ? it.evidence : 'Could not be confirmed on this run';
       }
+      if (it.status !== 'yes') it.evidence = clientEvidence(it.id, it.label, it.evidence);
     }
   }
   return list;
@@ -312,9 +340,10 @@ function buildLocalSeoCoreChecklistRaw(audit: any): LocalSeoCoreChecklist {
         ? { status: 'no', evidence: 'No business description on GBP' }
         : fromCheck(checkByLabel(checks, /business description/i) || checkById(checks, 'gbp_15'));
 
+  const gbpHours = hoursSummary(String(gbp.hoursText || '').split(';'));
   const hoursSe: StatusEv =
-    gbp.hasHours === true
-      ? { status: 'yes', evidence: gbp.hoursEvidence || gbp.hoursText || 'Opening hours present' }
+    gbp.hasHours === true || gbpHours
+      ? { status: 'yes', evidence: gbpHours ? `Google profile hours: ${gbpHours}` : 'Opening hours set on the Google profile' }
       : gbp.hasHours === false
         ? { status: 'no', evidence: gbp.hoursEvidence || 'No opening hours on GBP' }
         : fromCheck(checkByLabel(checks, /opening hours|hours correct/i) || checkById(checks, 'gbp_16'));

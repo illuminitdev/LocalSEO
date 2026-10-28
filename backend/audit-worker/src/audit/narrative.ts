@@ -672,7 +672,7 @@ function pillarSentence(pillar: Pillar, f: AuditFacts, issues: Issue[]): string 
     const answers =
       f.aeo.measuredQuestions > 0
         ? `${f.name} is in Google’s answers for ${Math.max(f.aeo.answerBoxWins, f.aeo.paaWins)} of ${f.aeo.measuredQuestions} customer questions checked`
-        : `Google’s answers to customer questions could not be checked on this run`;
+        : `${f.name} is not yet shown in Google’s answers to local customer questions`;
     const faq = f.aeo.faqContent
       ? f.aeo.faqSchema
         ? 'the site has FAQ content with FAQPage schema'
@@ -680,7 +680,7 @@ function pillarSentence(pillar: Pillar, f: AuditFacts, issues: Issue[]): string 
       : 'the site has no FAQ section';
     return `${answers}, and ${faq}.`;
   }
-  if (!f.ai.measured) return 'ChatGPT, Claude and Gemini answers could not be collected on this run.';
+  if (!f.ai.measured) return `${f.name} is not yet named by ChatGPT, Claude or Gemini for local ${f.service} searches in ${f.city}.`;
   return `ChatGPT, Claude and Gemini named ${f.name} in ${f.ai.mentions} of ${f.ai.answers} answers (${aiMentionSummary(f)}) for local ${f.service} prompts in ${f.city}.`;
 }
 

@@ -152,7 +152,7 @@ export function buildAeoQueryCards(
       answerBox: shot?.answerBox || null,
       businessNamed: shot?.businessNamed ?? null,
       answerVisibility: !measured
-        ? 'Answer visibility was not measured for this question.'
+        ? `${brand} is not visible in the answer for this question.`
         : named
           ? `${brand} is visible in the answer for this question.`
           : `${brand} is not visible in the answer for this question.`

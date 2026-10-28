@@ -881,6 +881,7 @@ async function enrichFromDataForSeo(audit: any, crawl: any) {
             ? true
             : null,
         hasHours: info.hasHours ?? gbp.hasHours ?? null,
+        hoursText: gbp.hoursText || info.hoursText || '',
         hoursEvidence: info.hoursEvidence,
         hasServices: info.hasServices,
         servicesCount: info.servicesCount,
