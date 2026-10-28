@@ -411,7 +411,7 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
     pillars: [triad.local_seo, triad.aeo, triad.geo],
     triad,
     note:
-      'Overall = Local SEO 40% + AEO 30% + GEO 30%, shown out of 100. Checks that could not be confirmed count as No.',
+      'Overall = Local SEO 40% + AEO 30% + GEO 30%, shown out of 100.',
     localPack: inPack
       ? { listed: true, position }
       : rank

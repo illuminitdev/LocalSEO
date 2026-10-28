@@ -1,4 +1,5 @@
 import { buildLocalSeoInconsistencies } from './localSeoDeck.js';
+import { clientEvidence } from './deckShared.js';
 
 export type AeoCheckStatus = 'yes' | 'no' | 'unknown';
 
@@ -44,7 +45,8 @@ function fromBool(v: boolean | null | undefined, yesEv: string, noEv: string, un
 }
 
 function item(id: string, label: string, se: StatusEv): AeoChecklistItem {
-  return { id, label, status: se.status, evidence: se.evidence || '' };
+  const evidence = se.status === 'yes' ? se.evidence || '' : clientEvidence(id, label, se.evidence);
+  return { id, label, status: se.status, evidence };
 }
 
 function anyPass(checks: CheckRow[], ids: string[]): boolean {

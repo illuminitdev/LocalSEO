@@ -79,7 +79,7 @@ export function buildGeoFixes(audit) {
         ? `${name} is mentioned in ${mentioned.join(' / ')} across measured GEO prompts.`
         : missed.length
           ? `${name} is not mentioned in ${missed.join(' / ')} across measured GEO prompts.`
-          : 'AI engine checks were unavailable for this run.';
+          : `${name} is not yet named by ChatGPT, Gemini or Claude for local searches.`;
       const mapsBit = inPack
         ? ` Local SEO note: ${name} is in the Google Maps results for “${measuredQuery}”.`
         : mapsResults.length

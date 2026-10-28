@@ -1,3 +1,5 @@
+import { clientEvidence } from './deckShared.js';
+
 export type GeoCheckStatus = 'yes' | 'no' | 'unknown';
 
 export type GeoChecklistItem = {
@@ -392,7 +394,7 @@ export function buildGeoChecklist(opts: {
     label,
     definition: DEF_BY_ID.get(id),
     status,
-    evidence
+    evidence: status === 'yes' ? evidence : clientEvidence(id, label, evidence)
   });
 
   const aiVis: GeoChecklistItem[] = [

@@ -1682,6 +1682,8 @@ export type GbpMyBusinessInfoResult = {
   additionalCategories: string[];
   description: string | null;
   hasHours: boolean | null;
+  /** "Monday: 8:00 AM – 6:00 PM; …", the same shape as Google Places weekday lines. */
+  hoursText: string;
   hoursEvidence: string;
   servicesCount: number;
   hasServices: boolean | null;
@@ -1690,6 +1692,30 @@ export type GbpMyBusinessInfoResult = {
   cid: string | null;
   evidence: string;
 };
+
+/** DataForSEO work_hours.timetable → "Monday: 8:00 AM – 6:00 PM" lines (Closed when a day has no slots). */
+function timetableLines(timetable: any): string[] {
+  if (!timetable || typeof timetable !== 'object') return [];
+  const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  const clock = (t: any) => {
+    const h = Number(t?.hour);
+    const m = Number(t?.minute) || 0;
+    if (!Number.isFinite(h)) return '';
+    const hour12 = h % 12 === 0 ? 12 : h % 12;
+    return `${hour12}:${String(m).padStart(2, '0')} ${h < 12 || h === 24 ? 'AM' : 'PM'}`;
+  };
+  const lines: string[] = [];
+  for (const day of days) {
+    if (!(day in timetable)) continue;
+    const label = day[0].toUpperCase() + day.slice(1);
+    const slots = (Array.isArray(timetable[day]) ? timetable[day] : [])
+      .map((s: any) => [clock(s?.open), clock(s?.close)])
+      .filter(([o, c]: string[]) => o && c)
+      .map(([o, c]: string[]) => `${o} – ${c}`);
+    lines.push(`${label}: ${slots.length ? slots.join(', ') : 'Closed'}`);
+  }
+  return lines;
+}
 
 export async function fetchGbpMyBusinessInfo(opts: {
   keyword?: string;
@@ -1707,6 +1733,7 @@ export async function fetchGbpMyBusinessInfo(opts: {
     additionalCategories: [],
     description: null,
     hasHours: null,
+    hoursText: '',
     hoursEvidence: ev,
     servicesCount: 0,
     hasServices: null,
@@ -1756,6 +1783,7 @@ export async function fetchGbpMyBusinessInfo(opts: {
         (Array.isArray(workDetails?.timetable) && workDetails.timetable.length) ||
         Object.keys(workDetails?.timetable || {}).length
     );
+    const hoursText = timetableLines(workDetails?.timetable).join('; ');
     const services = Array.isArray(info.services) ? info.services : [];
     const attrs = info.attributes || {};
     const availableAttrs = attrs.available_attributes || attrs;
@@ -1781,6 +1809,7 @@ export async function fetchGbpMyBusinessInfo(opts: {
       additionalCategories,
       description,
       hasHours: hasHours || Boolean(work?.work_hours),
+      hoursText,
       hoursEvidence: hasHours || work?.work_hours ? 'Opening hours present on GBP' : 'No opening hours on GBP',
       servicesCount: services.length,
       hasServices,
