@@ -327,7 +327,7 @@ export default function Layout() {
         <>
             <div
                 className={cn(
-                    'min-h-14 py-2.5 shrink-0 flex items-center gap-2 min-w-0',
+                    'min-h-16 pt-5 pb-3 shrink-0 flex items-center gap-2 min-w-0',
                     rail ? 'px-2 justify-center' : 'px-4 justify-between'
                 )}
             >
