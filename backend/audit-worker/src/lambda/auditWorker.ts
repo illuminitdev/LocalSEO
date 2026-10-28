@@ -3,7 +3,6 @@ import { getAudit, saveAudit } from '../audit/store.js';
 import { crawlWebsite } from '../audit/crawler.js';
 import { applyWebsiteChecks } from '../audit/checksWebsite.js';
 import { runLighthouse } from '../audit/lighthouseRunner.js';
-import { captureHomepageScreenshot } from '../audit/homepageScreenshot.js';
 import { fallbackPillarDecks } from '../audit/pillarFixDecks.js';
 import { buildAeoQuerySpecs } from '../audit/aeoDeck.js';
 import { extractSiteServices, generateAeoQuestions } from '../audit/aeoQuestionsAi.js';
@@ -36,9 +35,11 @@ import {
   fetchOrganicBrandImages,
   fetchOrganicLocalRank,
   findMatchingMapsItem,
+  mapsMatchSignals,
   measureGeoGridVisibility,
   pickWorstLocalRank,
   requireDataForSeoConfigured,
+  searchBusinessListings,
   type DataForSeoMapsItem
 } from '../lib/dataForSeo.js';
 import { runCitationAudit } from '../audit/citationAudit.js';
@@ -49,7 +50,23 @@ import {
 } from '../lib/placesGbp.js';
 import { looksLikeStreet, resolveSearchArea, trustedCity } from '../lib/searchArea.js';
 import { alignRankWithProfile, markNoProfile, profileStillMatches, similarListing } from '../audit/profileMatch.js';
-import { readIntake, resolveMapsLink } from '../lib/mapsLink.js';
+import { readIntake, resolveMapsLink, type MapsLinkIds } from '../lib/mapsLink.js';
+
+function hostOf(url: string): string {
+  const u = String(url || '').trim();
+  if (!u) return '';
+  try {
+    return new URL(/^https?:\/\//i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/** UK postcode, upper-cased with no spaces ("M1 1AE" → "M11AE"). */
+function postcodeOf(text: string): string {
+  const m = String(text || '').match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i);
+  return m ? m[0].replace(/\s+/g, '').toUpperCase() : '';
+}
 
 async function staticMapDataUrl(lat: number, lng: number): Promise<string | null> {
   const key = String(process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '').trim();
@@ -250,7 +267,7 @@ async function mergeGbpFromMapsHit(
 
 
 
-async function enrichFromDataForSeo(audit: any) {
+async function enrichFromDataForSeo(audit: any, crawl: any) {
   if (!requireDataForSeoConfigured()) return;
 
   const business = audit.business || {};
@@ -391,12 +408,14 @@ async function enrichFromDataForSeo(audit: any) {
   }
 
   let brandItems: DataForSeoMapsItem[] = [];
+  let brandTaskId: string | null = null;
   if (brandQuery && brandQuery !== packQuery) {
     const brand = await fetchMapsLocalPack({
       ...mapsOptsBase,
       keyword: brandQuery
     });
     brandItems = brand.items;
+    brandTaskId = brand.taskId;
   } else if (brandQuery === packQuery && packItems.length) {
     brandItems = packItems;
   }
@@ -460,58 +479,221 @@ async function enrichFromDataForSeo(audit: any) {
     !(Array.isArray(audit.gbpLookup?.photoUrls) && audit.gbpLookup.photoUrls.length) ||
     !audit.gbpLookup?.placeId;
 
-  const matchTarget = {
+  // What the website says about the business: its phones, its domain and links to its own Google listing.
+  const phones: string[] = [];
+  for (const raw of [business.phone, crawl?.technical?.schemaEntity?.telephone, ...(crawl?.sitePhones || [])]) {
+    const p = String(raw || '').trim();
+    const key = p.replace(/\D/g, '').slice(-9);
+    if (key.length === 9 && !phones.some((q) => q.replace(/\D/g, '').slice(-9) === key)) phones.push(p);
+  }
+  const sitePhones = phones.slice(0, 3);
+  const siteDomain = hostOf(crawl?.finalUrl || business.website || '');
+  const siteMapsUrls: string[] = Array.isArray(crawl?.technical?.mapsUrls) ? crawl.technical.mapsUrls : [];
+  const sitePostcode = postcodeOf(
+    [business.postcode, business.address, crawl?.technical?.schemaEntity?.address].filter(Boolean).join(' ')
+  );
+
+  const baseTarget = {
     businessName,
-    phone: business.phone,
+    phone: business.phone || sitePhones[0],
     website: business.website,
-    placeId: linkIds?.placeId || audit.gbpLookup?.placeId,
-    cid: linkIds?.cid,
-    idOnly: Boolean(linkIds),
     city: formCity || locationLabel
   };
-  const linkMismatch = Boolean(linkIds) && !profileStillMatches(audit.gbpLookup || {}, matchTarget);
+  const stored = audit.gbpLookup || {};
+  const storedOk =
+    stored.listedOnMaps === true &&
+    profileStillMatches(stored, {
+      ...baseTarget,
+      placeId: linkIds?.placeId || stored.placeId,
+      cid: linkIds?.cid,
+      idOnly: Boolean(linkIds)
+    });
+  const matchTarget = {
+    ...baseTarget,
+    placeId: linkIds?.placeId || (storedOk ? stored.placeId : undefined),
+    cid: linkIds?.cid,
+    idOnly: Boolean(linkIds)
+  };
+
+  /** A listing counts as theirs only when its place ID, phone, website or postcode ties it to the website. */
+  const confirmed = (item: DataForSeoMapsItem, target: typeof baseTarget & { placeId?: string; cid?: string }) => {
+    const { signals } = mapsMatchSignals(item, target);
+    if (signals.placeId || signals.phone === 'match' || signals.website === 'match') return true;
+    const pc = postcodeOf(item.address);
+    return Boolean(sitePostcode && pc === sitePostcode && signals.phone !== 'conflict' && signals.website !== 'conflict');
+  };
+  const listingFromIds = (ids: MapsLinkIds) =>
+    ({
+      position: 0,
+      placeId: ids.placeId || '',
+      cid: ids.cid,
+      name: ids.name || businessName,
+      address: '',
+      rating: null,
+      reviewsCount: 0,
+      lat: null,
+      lng: null,
+      mapsUrl: ids.url || '',
+      website: '',
+      phone: '',
+      mainImage: '',
+      totalPhotos: 0,
+      isThisBusiness: true
+    }) as DataForSeoMapsItem;
+  const byIds = (ids: MapsLinkIds) => {
+    const t = { ...baseTarget, placeId: ids.placeId, cid: ids.cid, idOnly: true };
+    return findMatchingMapsItem(brandItems, t) || findMatchingMapsItem(packItems, t) || listingFromIds(ids);
+  };
+
+  const tried: string[] = [];
+  // A search that returned no task ID failed (error or timeout); one with a task ID and no items found nothing.
+  let searches = 0;
+  let failedSearches = 0;
+  for (const [ran, taskId] of [
+    [Boolean(brandQuery && brandQuery !== packQuery), brandTaskId],
+    [packQueryVariants.length > 0, packTaskId]
+  ] as const) {
+    if (!ran) continue;
+    searches += 1;
+    if (!taskId) failedSearches += 1;
+  }
+  const mapsSearch = async (keyword: string) => {
+    const r = await fetchMapsLocalPack({ ...mapsOptsBase, keyword });
+    searches += 1;
+    if (!r.taskId) failedSearches += 1;
+    return r.items;
+  };
+  const merge = async (hit: DataForSeoMapsItem, via: string, how: string) => {
+    await mergeGbpFromMapsHit(audit, hit, { searchPhotoUrls, googleSearchUrl });
+    if (hit.cid) audit.gbpLookup.cid = hit.cid;
+    audit.gbpLookup.matchedVia = via;
+    audit.gbpLookup.evidence = `Matched Google listing “${audit.gbpLookup.gbpName || hit.name}” ${how}`;
+    console.log('[auditWorker] GBP lookup:', via, '→', audit.gbpLookup.gbpName || hit.placeId || hit.cid);
+  };
+
   if (intake.noGoogleProfile) {
     markNoProfile(audit, null);
     audit.gbpLookup.evidence = `${businessName || 'The business'} has told us it has no Google Business Profile yet`;
-  } else if (needsGbp || linkMismatch) {
-    const hit = findMatchingMapsItem(brandItems, matchTarget) || findMatchingMapsItem(packItems, matchTarget);
+  } else if (needsGbp || !storedOk) {
+    let matched = false;
 
-    if (hit) {
-      await mergeGbpFromMapsHit(audit, hit, { searchPhotoUrls, googleSearchUrl });
-      if (hit.cid) audit.gbpLookup.cid = hit.cid;
-    } else if (linkIds) {
-      // Their own link, but the listing is not in these searches: use it as given.
-      const fromLink = {
-        position: 0,
-        placeId: linkIds.placeId || '',
-        cid: linkIds.cid,
-        name: link?.name || businessName,
-        address: '',
-        rating: null,
-        reviewsCount: 0,
-        lat: null,
-        lng: null,
-        mapsUrl: link?.url || '',
-        website: '',
-        phone: '',
-        mainImage: '',
-        totalPhotos: 0,
-        isThisBusiness: true
-      } as DataForSeoMapsItem;
-      await mergeGbpFromMapsHit(audit, fromLink, { searchPhotoUrls, googleSearchUrl });
-      if (linkIds.cid) audit.gbpLookup.cid = linkIds.cid;
-    } else if (!(audit.gbpLookup?.listedOnMaps === true && audit.gbpLookup?.placeId)) {
-      console.warn('[auditWorker] DataForSEO Maps: no GBP match for', businessName);
-      markNoProfile(audit, similarListing([...brandItems, ...packItems], matchTarget));
+    // 1. The Maps link the business gave us names the exact listing.
+    if (linkIds) {
+      await merge(byIds({ ...linkIds, name: link?.name, url: link?.url || '' }), 'form_link', 'from the Maps link provided');
+      matched = true;
     }
-  }
-  if (audit.gbpLookup?.listedOnMaps === true && !profileStillMatches(audit.gbpLookup, matchTarget)) {
-    console.warn('[auditWorker] Stored Google listing does not match the business:', audit.gbpLookup?.gbpName);
-    markNoProfile(audit, {
-      name: String(audit.gbpLookup?.gbpName || ''),
-      phoneConflict: true,
-      websiteConflict: true
-    });
+
+    // 2. A map embed, Maps link or Google review button on their own website.
+    if (!matched && siteMapsUrls.length) {
+      tried.push('the website’s Google map and review links');
+      for (const url of siteMapsUrls) {
+        const ids = await resolveMapsLink(url);
+        if (!ids?.placeId && !ids?.cid) continue;
+        const before = audit.gbpLookup;
+        await merge(byIds(ids), 'site_link', 'from the Google map/review link on the website');
+        // A map of somewhere else (a venue, a partner): its phone and website both differ from the site.
+        const g = audit.gbpLookup;
+        const s = mapsMatchSignals(
+          { ...listingFromIds(ids), phone: g.phone || '', website: g.websiteOnGbp || '' },
+          baseTarget
+        ).signals;
+        if (s.phone === 'conflict' && s.website === 'conflict') {
+          console.log('[auditWorker] GBP lookup: site link is another business →', g.gbpName);
+          audit.gbpLookup = before;
+          continue;
+        }
+        matched = true;
+        break;
+      }
+    }
+
+    // 3. Results already fetched (brand name and service searches) with a phone, website or postcode match.
+    if (!matched) {
+      const hit = [...brandItems, ...packItems].find((item) => confirmed(item, baseTarget));
+      if (hit) {
+        await merge(hit, 'name', 'by name, confirmed by phone, website or postcode');
+        matched = true;
+      }
+    }
+
+    // 4. DataForSEO's listings database: the listing whose website is this site.
+    const listingsSearch = async (opts: Parameters<typeof searchBusinessListings>[0]) => {
+      const r = await searchBusinessListings(opts);
+      searches += 1;
+      if (!r.taskId) failedSearches += 1;
+      return r.items;
+    };
+    if (!matched && siteDomain) {
+      tried.push(`Google listings with website ${siteDomain}`);
+      const items = await listingsSearch({ domain: siteDomain });
+      const hit = items.find((item) => mapsMatchSignals(item, baseTarget).signals.website === 'match');
+      if (hit) {
+        await merge(hit, 'listings_domain', `by its website ${siteDomain}`);
+        matched = true;
+      }
+    }
+
+    // 5. The same database by name and town, confirmed by phone, website or postcode.
+    if (!matched && businessName) {
+      tried.push(`Google listings named “${businessName}”`);
+      const items = await listingsSearch({ name: businessName, city: formCity || locationLabel });
+      const hit = items.find((item) => confirmed(item, baseTarget));
+      if (hit) {
+        await merge(hit, 'listings_name', 'by name, confirmed by phone, website or postcode');
+        matched = true;
+      }
+    }
+
+    // 6. Google Maps search by phone number: one number belongs to one business.
+    for (const phone of matched ? [] : sitePhones) {
+      tried.push(`phone ${phone}`);
+      const items = await mapsSearch(phone);
+      const hit = items.find((item) => mapsMatchSignals(item, { ...baseTarget, phone }).signals.phone === 'match');
+      if (hit) {
+        await merge(hit, 'phone', `by phone number ${phone}`);
+        matched = true;
+        break;
+      }
+    }
+
+    // 7. Google Maps search by website domain.
+    if (!matched && siteDomain) {
+      tried.push(`website ${siteDomain}`);
+      const items = await mapsSearch(siteDomain);
+      const hit = items.find((item) => mapsMatchSignals(item, baseTarget).signals.website === 'match');
+      if (hit) {
+        await merge(hit, 'domain', `by website ${siteDomain}`);
+        matched = true;
+      }
+    }
+
+    if (!matched) {
+      tried.push(`name “${brandQuery || businessName}”`);
+      // A same-name listing with nothing tying it to the website is shown to the admin, never used.
+      const nameOnly = findMatchingMapsItem(brandItems, matchTarget) || findMatchingMapsItem(packItems, matchTarget);
+      const lookupFailed = searches > 0 && failedSearches === searches;
+      if (storedOk) {
+        console.log('[auditWorker] GBP lookup: no new match, keeping stored listing', stored.gbpName);
+      } else if (lookupFailed) {
+        console.warn('[auditWorker] GBP lookup: Google Maps searches failed for', businessName);
+        markNoProfile(audit, null, tried);
+        audit.gbpLookup.lookupFailed = true;
+        audit.gbpLookup.evidence = 'Google Business Profile could not be checked: Google Maps search failed on this run';
+      } else {
+        console.warn('[auditWorker] GBP lookup: no match for', businessName, '| tried', tried.join(', '));
+        markNoProfile(audit, similarListing([...brandItems, ...packItems], matchTarget), tried);
+        if (nameOnly) {
+          audit.gbpLookup.possibleListing = {
+            name: nameOnly.name,
+            address: nameOnly.address || '',
+            phone: nameOnly.phone || '',
+            website: nameOnly.website || '',
+            mapsUrl: nameOnly.mapsUrl || ''
+          };
+          audit.gbpLookup.evidence = `Possible Google listing “${nameOnly.name}” found by name only; its phone and website could not be tied to the business`;
+        }
+      }
+    }
   }
   alignRankWithProfile(audit);
   const profileFound = audit.gbpLookup?.listedOnMaps === true;
@@ -885,8 +1067,6 @@ export const main: SQSHandler = async (event: SQSEvent) => {
         lighthouse = { skipped: true, reason: 'Skipped by operator' };
       }
 
-      const screenshot = await captureHomepageScreenshot(crawl.finalUrl || website);
-
       const lhMetrics = lighthouse && !(lighthouse as { skipped?: boolean }).skipped ? lighthouse : null;
       if (!lhMetrics) {
         const reason = String((lighthouse as { reason?: string } | null)?.reason || '').trim().slice(0, 160);
@@ -900,7 +1080,14 @@ export const main: SQSHandler = async (event: SQSEvent) => {
         dataWarnings.push('DataForSEO is not configured: Google Maps, profile and AI checks were not run');
       }
       try {
-        await enrichFromDataForSeo(audit);
+        await enrichFromDataForSeo(audit, crawl);
+        const g = (audit.gbpLookup || {}) as { lookupFailed?: boolean; possibleListing?: { name: string } };
+        if (g.lookupFailed) dataWarnings.push('Google Business Profile could not be checked: Google Maps search failed');
+        else if (g.possibleListing) {
+          dataWarnings.push(
+            `Possible Google listing “${g.possibleListing.name}” found by name only; confirm it or add the Maps link and re-run`
+          );
+        }
       } catch (rankErr) {
         const err = rankErr as Error;
         console.warn('[auditWorker] DataForSEO/GBP enrich failed:', err.message);
@@ -1058,8 +1245,7 @@ export const main: SQSHandler = async (event: SQSEvent) => {
             (crawl.pages?.[0]?.phonesInText || []).length
         ),
         technical: crawl.technical || null,
-        mode: 'deep-crawl',
-        homepageScreenshot: screenshot
+        mode: 'deep-crawl'
       };
       audit.lighthouseMeta = lighthouse;
 

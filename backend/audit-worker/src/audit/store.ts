@@ -554,27 +554,7 @@ export function publicReportView(audit: AuditRecord | null) {
           schemaTypes: (audit.crawlMeta as Record<string, unknown>).schemaTypes || null,
           spaHeuristic: (audit.crawlMeta as Record<string, unknown>).spaHeuristic || null,
           sitePhones: (audit.crawlMeta as Record<string, unknown>).sitePhones || [],
-          homepageHasTel: (audit.crawlMeta as Record<string, unknown>).homepageHasTel ?? null,
-          homepageScreenshot: (() => {
-            const shot = (audit.crawlMeta as Record<string, unknown>).homepageScreenshot as
-              | { dataUrl?: string; skipped?: boolean; reason?: string; url?: string; capturedAt?: string }
-              | null
-              | undefined;
-            if (!shot) return null;
-            if (shot.dataUrl) {
-              return {
-                dataUrl: shot.dataUrl,
-                url: shot.url || null,
-                capturedAt: shot.capturedAt || null
-              };
-            }
-            return {
-              skipped: true,
-              reason: shot.reason || 'Unavailable',
-              url: shot.url || null,
-              capturedAt: shot.capturedAt || null
-            };
-          })()
+          homepageHasTel: (audit.crawlMeta as Record<string, unknown>).homepageHasTel ?? null
         }
       : null
   });

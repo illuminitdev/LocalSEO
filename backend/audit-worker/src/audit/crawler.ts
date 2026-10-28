@@ -219,6 +219,7 @@ function schemaEntityFrom(jsonLd) {
     telephone: String(node.telephone || '').trim(),
     address: String(address || '').trim(),
     sameAs: [].concat(node.sameAs || []).map(String).slice(0, 12),
+    hasMap: typeof node.hasMap === 'string' ? node.hasMap.trim() : String(node.hasMap?.url || '').trim(),
     hasOpeningHours: Boolean(node.openingHours || node.openingHoursSpecification),
     hasGeo: Boolean(node.geo || node.hasMap),
     hasAreaServed: Boolean(node.areaServed)
@@ -240,6 +241,24 @@ function extractPage(html, pageUrl, headers = null) {
   const hasMapsEmbed =
     $('iframe[src*="google.com/maps"], iframe[src*="maps.google"]').length > 0 ||
     $('a[href*="maps.google"], a[href*="google.com/maps"], a[href*="g.page"], a[href*="maps.app.goo.gl"]').length > 0;
+  // Links that name the business's own Google listing: map embeds, Maps links, review buttons and widgets.
+  const mapsUrls = [
+    ...$('iframe[src*="google.com/maps"], iframe[src*="maps.google"]')
+      .map((_, el) => $(el).attr('src'))
+      .get(),
+    ...$(
+      'a[href*="maps.google"], a[href*="google.com/maps"], a[href*="g.page"], a[href*="maps.app.goo.gl"], a[href*="writereview"]'
+    )
+      .map((_, el) => $(el).attr('href'))
+      .get(),
+    ...[...new Set(html.match(/ChIJ[\w-]{20,}/g) || [])].map(
+      (id) => `https://www.google.com/maps/place/?q=place_id:${id}`
+    )
+  ]
+    .map((u) => String(u || '').trim())
+    .filter((u) => /^(https?:)?\/\//i.test(u))
+    .map((u) => (u.startsWith('//') ? `https:${u}` : u))
+    .slice(0, 8);
   const metaDescription = (
     $('meta[name="description"]').attr('content') ||
     $('meta[property="og:description"]').attr('content') ||
@@ -324,6 +343,7 @@ function extractPage(html, pageUrl, headers = null) {
     xRobotsTag,
     footerText: footerText.slice(0, 2000),
     hasMapsEmbed,
+    mapsUrls,
     schemaEntity: schemaEntityFrom(jsonLd),
     metaDescription,
     canonical,
@@ -622,6 +642,14 @@ export async function crawlWebsite(websiteUrl, { maxPages = 12 } = {}) {
     if (t) titleCounts.set(t, (titleCounts.get(t) || 0) + 1);
   }
   const duplicateTitles = [...titleCounts.entries()].filter(([, n]) => n > 1).map(([t]) => t);
+  const schemaEntity = pages.map((p) => p.schemaEntity).find(Boolean) || null;
+  const isMapsUrl = (u) => /google\.[a-z.]+\/maps|maps\.google|g\.page|maps\.app\.goo\.gl|writereview|place_id/i.test(u);
+  const mapsUrls = [
+    ...new Set([
+      ...pages.flatMap((p) => p.mapsUrls || []),
+      ...[schemaEntity?.hasMap, ...(schemaEntity?.sameAs || [])].filter((u) => u && isMapsUrl(u))
+    ])
+  ].slice(0, 5);
   const technical = {
     robots,
     sitemap,
@@ -632,8 +660,9 @@ export async function crawlWebsite(websiteUrl, { maxPages = 12 } = {}) {
     canonicalValid,
     canonicalMatchesHost: home?.canonical ? canonicalHost === finalHost : null,
     duplicateTitles: duplicateTitles.slice(0, 5),
-    schemaEntity: pages.map((p) => p.schemaEntity).find(Boolean) || null,
+    schemaEntity,
     hasMapsEmbed: pages.some((p) => p.hasMapsEmbed),
+    mapsUrls,
     footerText: home?.footerText || ''
   };
 
