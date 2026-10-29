@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import * as XLSXStyle from 'xlsx-js-style';
 import type { ExcelExportLead } from './adminApi';
 
 const clean = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -59,6 +60,23 @@ function sheetRows(leads: ExcelExportLead[]): string[][] {
         return row;
     });
     return [headers, ...body];
+}
+
+/** Download the leads shown in the admin Leads list as one "Leads" sheet. */
+export function downloadLeadsExport(rows: Record<string, string>[], fileName: string) {
+    const headers = rows.length ? Object.keys(rows[0]) : [];
+    const sheet = XLSXStyle.utils.aoa_to_sheet([headers, ...rows.map((r) => headers.map((h) => r[h] ?? ''))]);
+    sheet['!cols'] = headers.map((h) => ({
+        wch: Math.min(50, Math.max(h.length, ...rows.map((r) => (r[h] ?? '').length)) + 2)
+    }));
+    // Bold header row.
+    headers.forEach((_, c) => {
+        const cell = sheet[XLSXStyle.utils.encode_cell({ r: 0, c })];
+        if (cell) cell.s = { font: { bold: true } };
+    });
+    const wb = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(wb, sheet, 'Leads');
+    XLSXStyle.writeFile(wb, fileName);
 }
 
 /** Download one Excel upload with its original columns plus GBP Observation, AI Visibility and Priority. */
