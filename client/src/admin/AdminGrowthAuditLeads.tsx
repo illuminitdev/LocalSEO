@@ -41,7 +41,7 @@ import {
     resumeAdminLeadEnrichment,
     type ExcelImportBatch
 } from './adminApi';
-import { downloadExcelExport } from './excelExport';
+import { downloadExcelExport, downloadLeadsExport } from './excelExport';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import LeadDetailsModal from './LeadDetailsModal';
 import BulkAssignTasksModal from './BulkAssignTasksModal';
@@ -50,7 +50,14 @@ import ExcelLeadUploadModal, { downloadLeadsExcelTemplate } from '../sales-agent
 import AddLeadModal from '../sales-agent/AddLeadModal';
 import { emailShareStatusLabel, emailShareStatusHint } from '../shared/emailShareStatus';
 import { cn } from '../shared/utils';
-import { matchesAuditClickFilter, matchesEmailFilter, matchesLeadStatusFilter, resolveLeadStatus } from './crmFilters';
+import {
+    matchesAuditClickFilter,
+    matchesEmailFilter,
+    matchesLeadStatusFilter,
+    resolveEmailState,
+    resolveLeadStatus,
+    type LeadStatusKey
+} from './crmFilters';
 
 type ContactFilter = 'any' | 'email' | 'phone' | 'both';
 type SourceCategoryFilter = 'all' | 'growth_audit' | 'added';
@@ -98,6 +105,28 @@ type AdminLead = GrowthAuditLeadRef & {
 };
 
 const PAGE_SIZE = 10;
+
+const LEAD_STATUS_LABELS: Record<LeadStatusKey, string> = {
+    new: 'New',
+    in_progress: 'In Progress',
+    contacted: 'Contacted',
+    follow_up: 'Follow Up',
+    interested: 'Interested',
+    not_interested: 'Not Interested',
+    converted: 'Converted',
+    completed: 'Completed',
+    voicemail: 'Voicemail',
+    cancelled: 'Cancelled'
+};
+
+const EMAIL_STATE_LABELS: Record<string, string> = { not_sent: 'Not sent', sent: 'Sent', opened: 'Opened' };
+
+/** DD/MM/YYYY, or '' when the date is missing or invalid. */
+function formatExportDate(raw?: string | null): string {
+    const d = raw ? new Date(raw) : null;
+    if (!d || isNaN(d.getTime())) return '';
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+}
 
 const TYPE_LABELS: Record<string, string> = {
     growth_audit_lead: 'Growth audit',
@@ -875,6 +904,38 @@ export default function AdminGrowthAuditLeads() {
         }
     };
 
+    // Leads export: ticked rows within the current filters, otherwise every filtered lead (all pages).
+    const exportLeads = useMemo(() => {
+        const ticked = filteredLeads.filter((l) => selectedLeadIds.has(l.id));
+        return ticked.length ? ticked : filteredLeads;
+    }, [filteredLeads, selectedLeadIds]);
+    const exportingTicked = exportLeads !== filteredLeads;
+
+    const handleExportLeads = () => {
+        if (!exportLeads.length) return;
+        const rows = exportLeads.map((lead) => {
+            const agentId = String((lead as any).assignedToUserId || lead.assignedTo || '').trim();
+            const agent = agentId ? salesAgents.find((a) => a.id === agentId) : undefined;
+            const assigned = lead.assignedAgentName || (lead as any).assignedToName || agent?.name || agent?.email || '';
+            const prio = String(lead.opportunityLevel || (lead as any).priority || 'medium').trim().toLowerCase();
+            return {
+                'Business name': String(lead.businessName || lead.name || ''),
+                Phone: String(lead.phone || ''),
+                Email: String(lead.email || ''),
+                'Website URL': String(lead.website || ''),
+                'Assigned to': assigned || 'Unassigned',
+                'Lead status': LEAD_STATUS_LABELS[resolveLeadStatus(lead)],
+                'Date added': formatExportDate(lead.createdAt),
+                Priority: prio.charAt(0).toUpperCase() + prio.slice(1),
+                'Email status': EMAIL_STATE_LABELS[resolveEmailState(lead)],
+                'Audit button clicked': lead.observationEmailClickedAt ? 'Yes' : 'No',
+                'Audit PDF status': EMAIL_STATE_LABELS[lead.emailShareStatus || 'not_sent'] || 'Not sent'
+            };
+        });
+        const today = new Date().toISOString().slice(0, 10);
+        downloadLeadsExport(rows, `leads${exportingTicked ? '-selected' : ''}-${today}.xlsx`);
+    };
+
     const [isExportingExcel, setIsExportingExcel] = useState(false);
 
     // Download the selected Excel upload: original columns + GBP Observation, AI Visibility, Priority.
@@ -1011,6 +1072,23 @@ export default function AdminGrowthAuditLeads() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                            <button
+                                type="button"
+                                disabled={exportLeads.length === 0}
+                                onClick={handleExportLeads}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition-colors shadow-2xs"
+                                title={
+                                    exportingTicked
+                                        ? 'Download the selected leads as an Excel sheet'
+                                        : 'Download all leads matching the current filters (every page) as an Excel sheet'
+                                }
+                            >
+                                <Download className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>
+                                    {exportingTicked ? 'Export selected' : 'Export leads'} ({exportLeads.length})
+                                </span>
+                            </button>
+
                             {excelBatchFilter !== 'all' && excelBatchLeadIds.length > 0 && (
                                 <button
                                     type="button"
