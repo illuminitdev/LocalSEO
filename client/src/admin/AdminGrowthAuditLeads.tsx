@@ -14,6 +14,7 @@ import {
     Plus,
     Phone,
     Mail,
+    MousePointerClick,
     Globe,
     Trash2,
     Eye,
@@ -49,11 +50,12 @@ import ExcelLeadUploadModal, { downloadLeadsExcelTemplate } from '../sales-agent
 import AddLeadModal from '../sales-agent/AddLeadModal';
 import { emailShareStatusLabel, emailShareStatusHint } from '../shared/emailShareStatus';
 import { cn } from '../shared/utils';
-import { matchesEmailFilter, matchesLeadStatusFilter, resolveLeadStatus } from './crmFilters';
+import { matchesAuditClickFilter, matchesEmailFilter, matchesLeadStatusFilter, resolveLeadStatus } from './crmFilters';
 
 type ContactFilter = 'any' | 'email' | 'phone' | 'both';
 type SourceCategoryFilter = 'all' | 'growth_audit' | 'added';
 export type EmailOpenFilter = 'all' | 'sent' | 'opened' | 'not_opened' | 'not_sent';
+export type AuditClickFilter = 'all' | 'clicked' | 'not_clicked';
 
 type AdminLead = GrowthAuditLeadRef & {
     type?: string | null;
@@ -85,6 +87,7 @@ type AdminLead = GrowthAuditLeadRef & {
     observationEmailShareStatus?: 'none' | 'sent' | 'opened' | null;
     observationEmailSentAt?: string | null;
     observationEmailOpenedAt?: string | null;
+    observationEmailClickedAt?: string | null;
     latestActivity?: {
         type?: string;
         disposition?: string | null;
@@ -416,6 +419,7 @@ const LEADS_FILTER_DEFAULTS = (() => {
         statusDate: 'all' as StatusDateFilter,
         statusDateCustom: '',
         email: 'all' as EmailOpenFilter,
+        auditClick: 'all' as AuditClickFilter,
         page: '1'
     };
 })();
@@ -535,6 +539,8 @@ export default function AdminGrowthAuditLeads() {
     const statusDateFilter = filters.statusDate as StatusDateFilter;
     const statusCustomDate = filters.statusDateCustom;
     const emailFilter = filters.email as EmailOpenFilter;
+    // Audit button filter only applies while "Email Opened" is selected.
+    const auditClickFilter = (emailFilter === 'opened' ? filters.auditClick : 'all') as AuditClickFilter;
     const setPage = useCallback(
         (next: number | ((p: number) => number)) => {
             const value = typeof next === 'function' ? next(page) : next;
@@ -761,6 +767,7 @@ export default function AdminGrowthAuditLeads() {
             }
 
             if (!matchesEmailFilter(lead, emailFilter)) return false;
+            if (!matchesAuditClickFilter(lead, auditClickFilter)) return false;
 
             const statusDate = lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt;
             if (!matchesStatusDateFilter(statusDate, statusDateFilter, statusCustomDate)) {
@@ -779,6 +786,7 @@ export default function AdminGrowthAuditLeads() {
         selectedStatus,
         selectedPriority,
         emailFilter,
+        auditClickFilter,
         statusDateFilter,
         statusCustomDate,
         salesAgents
@@ -1098,6 +1106,7 @@ export default function AdminGrowthAuditLeads() {
                                         statusDate: 'all' as StatusDateFilter,
                                         statusDateCustom: '',
                                         email: 'all' as EmailOpenFilter,
+                                        auditClick: 'all' as AuditClickFilter,
                                         page: '1'
                                     };
                                     setDraftQ('');
@@ -1240,7 +1249,14 @@ export default function AdminGrowthAuditLeads() {
                             </label>
                             <select
                                 value={emailFilter}
-                                onChange={(e) => setFilter('email', e.target.value)}
+                                onChange={(e) =>
+                                    // Leaving "Email Opened" also clears the Audit button filter.
+                                    patchFilters(
+                                        e.target.value === 'opened'
+                                            ? { email: e.target.value as EmailOpenFilter }
+                                            : { email: e.target.value as EmailOpenFilter, auditClick: 'all' }
+                                    )
+                                }
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                                 title="Filter by email open status"
                             >
@@ -1251,6 +1267,25 @@ export default function AdminGrowthAuditLeads() {
                                 <option value="not_sent">Not Sent</option>
                             </select>
                         </div>
+
+                        {emailFilter === 'opened' && (
+                            <div>
+                                <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-1">
+                                    <MousePointerClick className="w-3 h-3 text-slate-400 shrink-0" />
+                                    Audit Button
+                                </label>
+                                <select
+                                    value={auditClickFilter}
+                                    onChange={(e) => setFilter('auditClick', e.target.value)}
+                                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                                    title='Filter by whether they clicked "Request a full main audit" in the observation email'
+                                >
+                                    <option value="all">All</option>
+                                    <option value="clicked">Clicked</option>
+                                    <option value="not_clicked">Not clicked</option>
+                                </select>
+                            </div>
+                        )}
 
                         <div>
                             <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-1">

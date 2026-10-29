@@ -286,6 +286,7 @@ router.get('/growth-audit-leads', requireAdmin, async (req: Request, res: Respon
                     (lead as any).observationEmailShareStatus = obs.observationEmailShareStatus;
                     (lead as any).observationEmailSentAt = obs.observationEmailSentAt;
                     (lead as any).observationEmailOpenedAt = obs.observationEmailOpenedAt;
+                    (lead as any).observationEmailClickedAt = obs.observationEmailClickedAt;
                 }
             } catch (actErr) {
                 console.warn('Could not attach lead activities to admin leads:', actErr);

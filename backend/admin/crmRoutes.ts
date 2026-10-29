@@ -272,7 +272,8 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
                     emailShareOpenedAt: share.emailShareOpenedAt,
                     observationEmailShareStatus: obs.observationEmailShareStatus,
                     observationEmailSentAt: obs.observationEmailSentAt,
-                    observationEmailOpenedAt: obs.observationEmailOpenedAt
+                    observationEmailOpenedAt: obs.observationEmailOpenedAt,
+                    observationEmailClickedAt: obs.observationEmailClickedAt
                 };
             });
 

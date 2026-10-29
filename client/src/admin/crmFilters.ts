@@ -84,3 +84,15 @@ export function matchesEmailFilter(lead: EmailInput, filter: string): boolean {
     if (filter === 'not_sent') return state === 'not_sent';
     return true;
 }
+
+/** "Request a full main audit" button in the observation email: clicked / not_clicked. */
+export function matchesAuditClickFilter(
+    lead: { observationEmailClickedAt?: string | null },
+    filter: string
+): boolean {
+    if (!filter || filter === 'all') return true;
+    const clicked = Boolean(lead.observationEmailClickedAt);
+    if (filter === 'clicked') return clicked;
+    if (filter === 'not_clicked') return !clicked;
+    return true;
+}
