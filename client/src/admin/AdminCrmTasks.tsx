@@ -24,6 +24,7 @@ import {
     Loader2,
     CheckCircle2,
     UserCheck,
+    MousePointerClick,
     X
 } from 'lucide-react';
 import {
@@ -44,7 +45,7 @@ import {
     type StatusDateFilter
 } from './AdminGrowthAuditLeads';
 import { cn } from '../shared/utils';
-import { matchesEmailFilter } from './crmFilters';
+import { matchesAuditClickFilter, matchesEmailFilter } from './crmFilters';
 import { emailShareStatusLabel, emailShareStatusHint } from '../shared/emailShareStatus';
 import { getLeadStatusConfig } from '../sales-agent/SalesTasks';
 
@@ -129,6 +130,7 @@ function fmtDate(value?: string | null) {
 const PAGE_SIZE = 10;
 
 type EmailOpenFilter = 'all' | 'sent' | 'opened' | 'not_opened' | 'not_sent';
+type AuditClickFilter = 'all' | 'clicked' | 'not_clicked';
 
 const CRM_TASK_FILTER_DEFAULTS = {
     q: '',
@@ -139,6 +141,7 @@ const CRM_TASK_FILTER_DEFAULTS = {
     priority: 'all',
     business: 'all',
     email: 'all' as EmailOpenFilter,
+    auditClick: 'all' as AuditClickFilter,
     batch: 'all',
     statusDate: 'all' as StatusDateFilter,
     statusDateCustom: '',
@@ -244,6 +247,8 @@ export default function AdminCrmTasks() {
     const selectedPriority = filters.priority;
     const selectedBusiness = filters.business;
     const emailFilter = filters.email as EmailOpenFilter;
+    // Audit button filter only applies while "Email Opened" is selected.
+    const auditClickFilter = (emailFilter === 'opened' ? filters.auditClick : 'all') as AuditClickFilter;
     const excelBatchFilter = filters.batch;
     const statusDateFilter = filters.statusDate as StatusDateFilter;
     const statusCustomDate = filters.statusDateCustom;
@@ -459,6 +464,7 @@ function isLeadAdded(lead: any) {
 
             // 7. Email Status
             if (!matchesEmailFilter(t, emailFilter)) return false;
+            if (!matchesAuditClickFilter(t, auditClickFilter)) return false;
 
             // 8. Status Date
             const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
@@ -484,6 +490,7 @@ function isLeadAdded(lead: any) {
         selectedStatus,
         selectedLeadStatus,
         emailFilter,
+        auditClickFilter,
         statusDateFilter,
         statusCustomDate,
         selectedPriority,
@@ -805,7 +812,12 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                     </button>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-8 gap-2.5 pt-2 border-t border-slate-100">
+                <div
+                    className={cn(
+                        'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 pt-2 border-t border-slate-100',
+                        emailFilter === 'opened' ? 'lg:grid-cols-9' : 'lg:grid-cols-8'
+                    )}
+                >
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Business Category
@@ -942,7 +954,16 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         </label>
                         <select
                             value={emailFilter}
-                            onChange={(e) => setFilter('email', e.target.value)}
+                            onChange={(e) => {
+                                const value = e.target.value;
+                                // Leaving "Email Opened" also clears the Audit button filter.
+                                setFilters((prev) => ({
+                                    ...prev,
+                                    email: value as EmailOpenFilter,
+                                    auditClick: value === 'opened' ? prev.auditClick : 'all',
+                                    page: '1'
+                                }));
+                            }}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             title="Filter tasks by email open status"
                         >
@@ -953,6 +974,25 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             <option value="not_sent">Not Sent</option>
                         </select>
                     </div>
+
+                    {emailFilter === 'opened' && (
+                        <div>
+                            <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-1">
+                                <MousePointerClick className="w-3 h-3 text-slate-400 shrink-0" />
+                                Audit Button
+                            </label>
+                            <select
+                                value={auditClickFilter}
+                                onChange={(e) => setFilter('auditClick', e.target.value)}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                                title='Filter by whether they clicked "Request a full main audit" in the observation email'
+                            >
+                                <option value="all">All</option>
+                                <option value="clicked">Clicked</option>
+                                <option value="not_clicked">Not clicked</option>
+                            </select>
+                        </div>
+                    )}
 
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
