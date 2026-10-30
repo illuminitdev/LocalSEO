@@ -41,17 +41,7 @@ export function leadEmailOpenTrackingUrl(token: string) {
 export function leadFullAuditRequestUrl(token: string) {
     const t = String(token || '').trim();
     if (!t) return '';
-    // Branded app URL — not the raw API Gateway host
-    const appOrigin = (
-        process.env.FRONTEND_URL ||
-        process.env.CLIENT_ORIGIN ||
-        ''
-    )
-        .trim()
-        .replace(/\/$/, '');
-    if (appOrigin) {
-        return `${appOrigin}/request-full-audit/${t}?${FULL_AUDIT_UTM}`;
-    }
+    // Direct 1-click execution endpoint that records the audit and redirects to ZappSites marketing website
     return `${apiPublicOrigin()}/api/public/lead-full-audit-request/${t}?${FULL_AUDIT_UTM}`;
 }
 

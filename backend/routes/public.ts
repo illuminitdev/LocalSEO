@@ -1008,138 +1008,13 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         };
     }
 
-    router.get('/lead-full-audit-request/:token', async (req: Request, res: Response) => {
-        const token = String(req.params.token || '').trim();
+    async function executeLeadFullAuditRequest(token: string) {
         let details: Awaited<ReturnType<typeof resolveLeadAuditRequestDetails>> = null;
-        try {
-            await ensureCrmTables();
-            if (token) {
-                // Landing here means the "Request a full main audit" email button was clicked
-                await markLeadObservationEmailClicked(token).catch(() => false);
-                details = await resolveLeadAuditRequestDetails(token);
-            }
-        } catch (err) {
-            console.warn('[lead-full-audit-request GET] failed:', err);
-        }
-
-        const wantsJson =
-            String(req.query.format || '').toLowerCase() === 'json' ||
-            String(req.headers.accept || '').includes('application/json');
-
-        if (wantsJson) {
-            res.setHeader('Cache-Control', 'no-store');
-            if (!details) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'This request link is invalid or has expired.'
-                });
-            }
-            return res.json({
-                success: true,
-                alreadyRequested: details.alreadyRequested,
-                businessName: details.businessName,
-                title: details.alreadyRequested ? 'Request received' : 'Request Full Audit',
-                message: details.alreadyRequested
-                    ? `We already have an open full main audit request for ${details.businessName}. Our team will complete it and get back to you.`
-                    : `Confirm your request for a full growth audit for ${details.businessName}.`
-            });
-        }
-
-        const okPage = Boolean(details);
-        const safeBiz = String(details?.businessName || 'your business')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
-        const title = okPage
-            ? details?.alreadyRequested
-                ? 'Request received'
-                : 'Confirm Full Growth Audit'
-            : 'Link not found';
-        const body = okPage
-            ? details?.alreadyRequested
-                ? `We already have an open full main audit request for <strong>${safeBiz}</strong>. Our team will complete it and get back to you.`
-                : `Would you like our team to generate a comprehensive Full Growth Audit for <strong>${safeBiz}</strong>?`
-            : 'This request link is invalid or has expired. If you still need a full audit, reply to the email you received from us.';
-        const logoSrc = `${apiPublicOrigin()}/api/public/brand/zappsites-logo.png`;
-
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-store');
-        return res.status(okPage ? 200 : 404).send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>${title} — ZappSites</title>
-</head>
-<body style="margin:0;min-height:100vh;font-family:Arial,Helvetica,sans-serif;background:#F7F7F8;color:#111827;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="min-height:100vh;">
-    <tr>
-      <td align="center" style="padding:48px 16px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:480px;background:#ffffff;border:1px solid #E5E7EB;border-radius:8px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
-          <tr>
-            <td style="padding:20px 28px;border-bottom:1px solid #E5E7EB;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td style="padding-right:12px;vertical-align:middle;">
-                    <img src="${logoSrc}" width="36" height="36" alt="ZappSites" style="display:block;width:36px;height:36px;border:0;border-radius:50%;"/>
-                  </td>
-                  <td style="vertical-align:middle;">
-                    <div style="font-size:16px;font-weight:700;color:#111827;">ZappSites</div>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:28px 28px 8px;">
-              <div style="display:inline-block;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:${okPage ? '#065F46' : '#991B1B'};background:${okPage ? '#ECFDF5' : '#FEF2F2'};border:1px solid ${okPage ? '#A7F3D0' : '#FECACA'};border-radius:999px;padding:5px 10px;margin-bottom:14px;">
-                ${okPage ? (details?.alreadyRequested ? 'Request received' : 'Growth Audit') : 'Unable to process'}
-              </div>
-              <h1 style="font-size:22px;line-height:1.3;margin:0 0 12px;font-weight:700;color:#111827;">${title}</h1>
-              <p style="font-size:15px;line-height:1.65;color:#4B5563;margin:0 0 20px;">${body}</p>
-              ${
-                  okPage && !details?.alreadyRequested
-                      ? `<form method="POST" action="${apiPublicOrigin()}/api/public/lead-full-audit-request/${token}">
-                           <button type="submit" style="background:#2563EB;color:#ffffff;border:none;font-size:15px;font-weight:600;padding:12px 24px;border-radius:6px;cursor:pointer;width:100%;">
-                             Request Full Audit
-                           </button>
-                         </form>`
-                      : ''
-              }
-            </td>
-          </tr>
-          ${
-              okPage && details?.alreadyRequested
-                  ? `<tr>
-            <td style="padding:18px 28px 8px;">
-              <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:#111827;">What happens next</p>
-              <p style="margin:0;font-size:14px;color:#6B7280;line-height:1.55;">Our team will run the full audit and follow up when the report is ready.</p>
-            </td>
-          </tr>`
-                  : ''
-          }
-          <tr>
-            <td style="padding:20px 28px 28px;">
-              <p style="font-size:13px;line-height:1.5;color:#9CA3AF;margin:0;">You can close this tab.</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`);
-    });
-
-    router.post('/lead-full-audit-request/:token', async (req: Request, res: Response) => {
-        const token = String(req.params.token || '').trim();
-        let details: Awaited<ReturnType<typeof resolveLeadAuditRequestDetails>> = null;
-        let newlyCreated = false;
         try {
             await ensureCrmTables();
             if (token) {
                 await markLeadObservationEmailOpened(token).catch(() => false);
+                await markLeadObservationEmailClicked(token).catch(() => false);
                 details = await resolveLeadAuditRequestDetails(token);
                 if (details) {
                     const leadId = details.leadId;
@@ -1208,17 +1083,58 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
                                 'Customer requested Full Growth Audit from observation email CTA.'
                             ]
                         ).catch((err) => {
-                            console.warn('[lead-full-audit-request POST] failed to insert full_audit_requests:', err);
+                            console.warn('[lead-full-audit-request] failed to insert full_audit_requests:', err);
                         });
                     }
 
-                    newlyCreated = true;
                     details.alreadyRequested = true;
                 }
             }
         } catch (err) {
-            console.warn('[lead-full-audit-request POST] failed:', err);
+            console.warn('[lead-full-audit-request] failed:', err);
         }
+        return details;
+    }
+
+    router.get('/lead-full-audit-request/:token', async (req: Request, res: Response) => {
+        const token = String(req.params.token || '').trim();
+        const wantsJson =
+            String(req.query.format || '').toLowerCase() === 'json' ||
+            String(req.headers.accept || '').includes('application/json');
+
+        if (wantsJson) {
+            res.setHeader('Cache-Control', 'no-store');
+            const details = await resolveLeadAuditRequestDetails(token);
+            if (!details) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'This request link is invalid or has expired.'
+                });
+            }
+            return res.json({
+                success: true,
+                alreadyRequested: details.alreadyRequested,
+                businessName: details.businessName,
+                title: details.alreadyRequested ? 'Request received' : 'Request Full Audit',
+                message: details.alreadyRequested
+                    ? `We already have an open full main audit request for ${details.businessName}. Our team will complete it and get back to you.`
+                    : `Confirm your request for a full growth audit for ${details.businessName}.`
+            });
+        }
+
+        // Option A: Direct 1-click execution and immediate redirect to ZappSites marketing website with Chatbot trigger
+        const details = await executeLeadFullAuditRequest(token);
+        const origin = zappSitesOrigin();
+        if (!details) {
+            return res.redirect(303, `${origin}/?audit_link_error=1`);
+        }
+        const biz = encodeURIComponent(details.businessName || '');
+        return res.redirect(303, `${origin}/?audit_requested=true&biz=${biz}`);
+    });
+
+    router.post('/lead-full-audit-request/:token', async (req: Request, res: Response) => {
+        const token = String(req.params.token || '').trim();
+        const details = await executeLeadFullAuditRequest(token);
 
         const wantsJson =
             String(req.query.format || '').toLowerCase() === 'json' ||
@@ -1241,11 +1157,12 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             });
         }
 
-        // Invalid link → confirmation/error page; success → marketing home
+        const origin = zappSitesOrigin();
         if (!details) {
-            return res.redirect(303, `${apiPublicOrigin()}/api/public/lead-full-audit-request/${token}`);
+            return res.redirect(303, `${origin}/?audit_link_error=1`);
         }
-        return res.redirect(303, `${zappSitesOrigin()}/`);
+        const biz = encodeURIComponent(details.businessName || '');
+        return res.redirect(303, `${origin}/?audit_requested=true&biz=${biz}`);
     });
 
     router.post('/:hostSlug/upload-url', async (req: Request, res: Response) => {

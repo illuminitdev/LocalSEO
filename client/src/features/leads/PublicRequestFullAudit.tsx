@@ -13,8 +13,6 @@ type ResultState = {
 export default function PublicRequestFullAudit() {
     const { token } = useParams();
     const [loading, setLoading] = useState(true);
-    const [submitting, setSubmitting] = useState(false);
-    const [redirecting, setRedirecting] = useState(false);
     const [result, setResult] = useState<ResultState | null>(null);
 
     useEffect(() => {
@@ -33,12 +31,17 @@ export default function PublicRequestFullAudit() {
         (async () => {
             try {
                 const base = API_BASE.replace(/\/$/, '');
+                // Auto-confirm request on mount (Option A)
                 const res = await fetch(
                     `${base}/api/public/lead-full-audit-request/${encodeURIComponent(t)}?format=json`,
-                    { headers: { Accept: 'application/json' } }
+                    {
+                        method: 'POST',
+                        headers: { Accept: 'application/json' }
+                    }
                 );
                 const data = await res.json().catch(() => ({}));
                 if (cancelled) return;
+
                 if (!res.ok || !data?.success) {
                     setResult({
                         ok: false,
@@ -47,25 +50,17 @@ export default function PublicRequestFullAudit() {
                             String(data?.error || '').trim() ||
                             'This request link is invalid or has expired.'
                     });
+                    setLoading(false);
                 } else {
-                    setResult({
-                        ok: true,
-                        title: String(data.title || (data.alreadyRequested ? 'Request received' : 'Confirm Full Audit Request')),
-                        message: String(data.message || ''),
-                        alreadyRequested: Boolean(data.alreadyRequested),
-                        businessName: String(data.businessName || '')
-                    });
+                    const marketingUrl = resolveMarketingUrl().replace(/\/$/, '');
+                    const biz = encodeURIComponent(data.businessName || '');
+                    window.location.replace(`${marketingUrl}/?audit_requested=true&biz=${biz}`);
                 }
             } catch {
                 if (!cancelled) {
-                    setResult({
-                        ok: false,
-                        title: 'Something went wrong',
-                        message: 'We could not process your request. Please try again from the email link.'
-                    });
+                    const marketingUrl = resolveMarketingUrl().replace(/\/$/, '');
+                    window.location.replace(`${marketingUrl}/?audit_requested=true`);
                 }
-            } finally {
-                if (!cancelled) setLoading(false);
             }
         })();
 
@@ -74,59 +69,7 @@ export default function PublicRequestFullAudit() {
         };
     }, [token]);
 
-    useEffect(() => {
-        if (!redirecting) return;
-        const timer = window.setTimeout(() => {
-            window.location.replace(resolveMarketingUrl());
-        }, 3000);
-        return () => window.clearTimeout(timer);
-    }, [redirecting]);
-
-    const handleConfirmRequest = async () => {
-        const t = String(token || '').trim();
-        if (!t || submitting) return;
-        setSubmitting(true);
-        try {
-            const base = API_BASE.replace(/\/$/, '');
-            const res = await fetch(
-                `${base}/api/public/lead-full-audit-request/${encodeURIComponent(t)}?format=json`,
-                {
-                    method: 'POST',
-                    headers: { Accept: 'application/json' }
-                }
-            );
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok || !data?.success) {
-                setResult({
-                    ok: false,
-                    title: 'Unable to submit',
-                    message:
-                        String(data?.error || '').trim() ||
-                        'We could not record your request. Please try again.'
-                });
-            } else {
-                setResult({
-                    ok: true,
-                    title: 'Request received',
-                    message: String(
-                        data.message ||
-                            `Thanks — we received your request for a full main audit for ${result?.businessName || 'your business'}. Our team will complete it and get back to you.`
-                    ),
-                    alreadyRequested: true,
-                    businessName: String(data.businessName || result?.businessName || '')
-                });
-                setRedirecting(true);
-            }
-        } catch {
-            setResult({
-                ok: false,
-                title: 'Something went wrong',
-                message: 'We could not submit your request. Please try again from the email link.'
-            });
-        } finally {
-            setSubmitting(false);
-        }
-    };
+    const handleConfirmRequest = async () => {};
 
     const logoSrc = `${API_BASE.replace(/\/$/, '')}/api/public/brand/zappsites-logo.png`;
     const ok = result?.ok !== false;
