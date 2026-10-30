@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { API_BASE, resolveMarketingUrl } from '../../shared/apiConfig';
+import { API_BASE } from '../../shared/apiConfig';
 
 type ResultState = {
     ok: boolean;
@@ -15,7 +15,6 @@ export default function PublicRequestFullAudit() {
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [result, setResult] = useState<ResultState | null>(null);
-    const [redirectCountdown, setRedirectCountdown] = useState<number | null>(null);
 
     useEffect(() => {
         const t = String(token || '').trim();
@@ -74,25 +73,6 @@ export default function PublicRequestFullAudit() {
         };
     }, [token]);
 
-    const getMarketingRedirectUrl = (bizName?: string) => {
-        const marketing = resolveMarketingUrl().replace(/\/$/, '');
-        const biz = encodeURIComponent(bizName || result?.businessName || '');
-        return `${marketing}/?audit_requested=true${biz ? `&biz=${biz}` : ''}`;
-    };
-
-    // Countdown effect to auto-redirect after successful submission
-    useEffect(() => {
-        if (redirectCountdown === null) return;
-        if (redirectCountdown <= 0) {
-            window.location.href = getMarketingRedirectUrl();
-            return;
-        }
-        const timer = setTimeout(() => {
-            setRedirectCountdown((prev) => (prev !== null ? prev - 1 : null));
-        }, 1000);
-        return () => clearTimeout(timer);
-    }, [redirectCountdown]);
-
     const handleConfirmRequest = async () => {
         const t = String(token || '').trim();
         if (!t || submitting) return;
@@ -116,19 +96,16 @@ export default function PublicRequestFullAudit() {
                         'We could not record your request. Please try again.'
                 });
             } else {
-                const confirmedBizName = String(data.businessName || result?.businessName || '');
                 setResult({
                     ok: true,
                     title: 'Request received',
                     message: String(
                         data.message ||
-                            `Thanks — we received your request for a full main audit for ${confirmedBizName || 'your business'}. Our team will complete it and get back to you.`
+                            `Thanks — we received your request for a full main audit for ${result?.businessName || 'your business'}. Our team will complete it and get back to you.`
                     ),
                     alreadyRequested: true,
-                    businessName: confirmedBizName
+                    businessName: String(data.businessName || result?.businessName || '')
                 });
-                // Start a 3-second redirect countdown to the marketing website
-                setRedirectCountdown(3);
             }
         } catch {
             setResult({
@@ -208,24 +185,11 @@ export default function PublicRequestFullAudit() {
                         <p className="text-sm text-[#6B7280] leading-relaxed m-0">
                             Our team will run the full audit and follow up when the report is ready.
                         </p>
-                        <div className="mt-4 pt-3 border-t border-[#F1F5F9] flex flex-col gap-2">
-                            <a
-                                href={getMarketingRedirectUrl()}
-                                className="inline-flex items-center justify-center w-full py-2.5 px-4 text-sm font-semibold rounded-md bg-slate-900 hover:bg-slate-800 text-white transition-colors text-center shadow-sm"
-                            >
-                                Continue to ZappSites {redirectCountdown !== null ? `(${redirectCountdown}s)` : '→'}
-                            </a>
-                            {redirectCountdown !== null && (
-                                <p className="text-xs text-center text-[#64748B] m-0">
-                                    Redirecting automatically to ZappSites...
-                                </p>
-                            )}
-                        </div>
                     </div>
                 ) : null}
 
                 <div className="px-7 pt-5 pb-7">
-                    <p className="text-[13px] leading-relaxed text-[#9CA3AF] m-0">You can close this tab or proceed to our website.</p>
+                    <p className="text-[13px] leading-relaxed text-[#9CA3AF] m-0">You can close this tab.</p>
                 </div>
             </div>
         </div>
