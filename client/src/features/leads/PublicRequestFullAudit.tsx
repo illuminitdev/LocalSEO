@@ -14,6 +14,8 @@ export default function PublicRequestFullAudit() {
     const { token } = useParams();
     const [loading, setLoading] = useState(true);
     const [result, setResult] = useState<ResultState | null>(null);
+    const [redirecting, setRedirecting] = useState(false);
+    const submitting = false;
 
     useEffect(() => {
         const t = String(token || '').trim();
@@ -54,10 +56,12 @@ export default function PublicRequestFullAudit() {
                 } else {
                     const marketingUrl = resolveMarketingUrl().replace(/\/$/, '');
                     const biz = encodeURIComponent(data.businessName || '');
+                    setRedirecting(true);
                     window.location.replace(`${marketingUrl}/?audit_requested=true&biz=${biz}`);
                 }
             } catch {
                 if (!cancelled) {
+                    setRedirecting(true);
                     const marketingUrl = resolveMarketingUrl().replace(/\/$/, '');
                     window.location.replace(`${marketingUrl}/?audit_requested=true`);
                 }
