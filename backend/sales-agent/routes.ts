@@ -43,10 +43,12 @@ import {
     type CallOutcome,
     type LeadStatus
 } from './sales';
+import { salesNotificationsRouter } from '../routes/notifications';
 
 const router = Router();
 
 router.use(requireSalesAgent);
+router.use(salesNotificationsRouter);
 
 function zappSitesOrigin() {
     return zappSitesOriginFromProxy();

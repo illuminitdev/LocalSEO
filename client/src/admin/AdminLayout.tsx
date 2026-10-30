@@ -1,74 +1,17 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
     LayoutDashboard, Users, LogOut, Layers, Settings, Menu, X,
     ClipboardList, CheckSquare, ClipboardCheck, Bell,
     UserPlus, AlertCircle, CheckCheck, FileText, Zap, Building2
 } from 'lucide-react';
-import { adminGet, clearAdminToken } from './adminApi';
+import { adminGet, adminPost, clearAdminToken } from './adminApi';
 import { cn } from '../shared/utils';
+import { timeAgo, useNotificationFeed } from '../shared/useNotificationFeed';
+import { SIDEBAR_RAIL_WIDTH, SidebarToggleButton, useSidebarCollapsed } from '../shared/SidebarToggle';
 
 // ─── Notification Types ───────────────────────────────────────────────────────
 type NotifType = 'lead' | 'task' | 'audit' | 'system' | 'alert';
-
-interface AdminNotification {
-    id: string;
-    type: NotifType;
-    title: string;
-    body: string;
-    time: string;
-    read: boolean;
-    link?: string;
-}
-
-const READ_NOTIFS_KEY = 'lp.admin.readNotifs';
-const CLEARED_NOTIFS_KEY = 'lp.admin.clearedNotifs';
-
-function loadReadNotifIds(): Set<string> {
-    try {
-        const stored = localStorage.getItem(READ_NOTIFS_KEY);
-        if (!stored) return new Set();
-        const arr = JSON.parse(stored);
-        return new Set(Array.isArray(arr) ? arr.map(String) : []);
-    } catch {
-        return new Set();
-    }
-}
-
-function saveReadNotifIds(ids: Set<string>) {
-    try {
-        localStorage.setItem(READ_NOTIFS_KEY, JSON.stringify(Array.from(ids).slice(-200)));
-    } catch {
-        /* ignore */
-    }
-}
-
-function loadClearedNotifIds(): Set<string> {
-    try {
-        const stored = localStorage.getItem(CLEARED_NOTIFS_KEY);
-        if (!stored) return new Set();
-        const arr = JSON.parse(stored);
-        return new Set(Array.isArray(arr) ? arr.map(String) : []);
-    } catch {
-        return new Set();
-    }
-}
-
-function saveClearedNotifIds(ids: Set<string>) {
-    try {
-        localStorage.setItem(CLEARED_NOTIFS_KEY, JSON.stringify(Array.from(ids).slice(-400)));
-    } catch {
-        /* ignore */
-    }
-}
-
-function timeAgo(iso: string): string {
-    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (diff < 60) return 'just now';
-    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-    return Math.floor(diff / 86400) + 'd ago';
-}
 
 type IconConfig = { icon: React.ElementType; bg: string; color: string };
 
@@ -88,74 +31,26 @@ function NotificationBell({ notifRef, notifOpen, setNotifOpen }: {
 }) {
     const navigate = useNavigate();
     const location = useLocation();
-    const [notifications, setNotifications] = useState<AdminNotification[]>([]);
-    const [loading, setLoading] = useState(false);
-
-    const unreadCount = notifications.filter((n) => !n.read).length;
-
-    const loadNotifications = useCallback(async () => {
-        setLoading(true);
-        try {
-            const data = await adminGet('/api/admin/notifications');
-            const list = Array.isArray(data?.notifications) ? data.notifications : [];
-            const readSet = loadReadNotifIds();
-            const cleared = loadClearedNotifIds();
-            setNotifications(
-                list
-                .filter((n: any) => !cleared.has(String(n.id)))
-                .map((n: any) => ({
-                    id: String(n.id),
-                    type: (['lead', 'task', 'audit', 'system', 'alert'].includes(n.type) ? n.type : 'system') as NotifType,
-                    title: String(n.title || 'Update'),
-                    body: String(n.body || ''),
-                    time: String(n.time || new Date().toISOString()),
-                    link: String(n.link || '/admin'),
-                    read: readSet.has(String(n.id))
-                }))
-            );
-        } catch {
-            /* keep prior list */
-        } finally {
-            setLoading(false);
-        }
-    }, []);
+    const {
+        items: notifications,
+        unreadCount,
+        loading,
+        refresh,
+        markRead,
+        markAllRead,
+        clearAll
+    } = useNotificationFeed({
+        fetchFeed: () => adminGet('/api/admin/notifications'),
+        postState: (action) => adminPost('/api/admin/notifications/state', action),
+        refreshKey: location.pathname
+    });
 
     useEffect(() => {
-        loadNotifications();
-        const timer = window.setInterval(loadNotifications, 60000);
-        return () => window.clearInterval(timer);
-    }, [loadNotifications, location.pathname]);
+        if (notifOpen) refresh();
+    }, [notifOpen, refresh]);
 
-    useEffect(() => {
-        if (notifOpen) loadNotifications();
-    }, [notifOpen, loadNotifications]);
-
-    const clearAll = () => {
-        const cleared = loadClearedNotifIds();
-        notifications.forEach((n) => cleared.add(n.id));
-        saveClearedNotifIds(cleared);
-        const readSet = loadReadNotifIds();
-        notifications.forEach((n) => readSet.add(n.id));
-        saveReadNotifIds(readSet);
-        setNotifications([]);
-    };
-
-    const markAllRead = () => {
-        const readSet = loadReadNotifIds();
-        notifications.forEach((n) => readSet.add(n.id));
-        saveReadNotifIds(readSet);
-        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    };
-
-    const markOneRead = (id: string) => {
-        const readSet = loadReadNotifIds();
-        readSet.add(id);
-        saveReadNotifIds(readSet);
-        setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
-    };
-
-    const openNotif = (notif: AdminNotification) => {
-        markOneRead(notif.id);
+    const openNotif = (notif: { id: string; link: string }) => {
+        markRead(notif.id);
         setNotifOpen(false);
         if (notif.link) navigate(notif.link);
     };
@@ -239,7 +134,7 @@ function NotificationBell({ notifRef, notifOpen, setNotifOpen }: {
                             </div>
                         ) : (
                             notifications.map((notif) => {
-                                const cfg = NOTIF_ICON[notif.type];
+                                const cfg = NOTIF_ICON[notif.type as NotifType] || NOTIF_ICON.system;
                                 const IconComp = cfg.icon;
                                 return (
                                     <button
@@ -376,6 +271,7 @@ export default function AdminLayout() {
         } catch {  }
         return SIDEBAR_DEFAULT;
     });
+    const [collapsed, toggleCollapsed] = useSidebarCollapsed('lp.sidebarCollapsed.admin');
     const [resizing, setResizing] = useState(false);
     const resizeRef = useRef<{ startX: number; startW: number } | null>(null);
 
@@ -469,18 +365,26 @@ export default function AdminLayout() {
         navigate('/', { replace: true });
     };
 
-    const logoMaxW = Math.max(120, sidebarWidth - 32);
+    const logoMaxW = Math.max(110, sidebarWidth - 76);
     const logoH = Math.round(Math.min(44, Math.max(32, logoMaxW * 0.22)));
 
-    const sidebar = (
+    const renderSidebar = (rail: boolean) => (
         <>
-            <div className="min-h-14 px-4 py-2.5 shrink-0 flex items-center justify-between gap-2 min-w-0">
-                <img
-                    src="/localseo.png"
-                    alt="Local SEO"
-                    className="w-auto max-w-full object-contain object-left min-w-0"
-                    style={{ height: logoH, maxWidth: logoMaxW }}
-                />
+            <div
+                className={cn(
+                    'min-h-16 pt-5 pb-3 shrink-0 flex items-center gap-2 min-w-0',
+                    rail ? 'px-2 justify-center' : 'px-4 justify-between'
+                )}
+            >
+                {!rail && (
+                    <img
+                        src="/localseo.png"
+                        alt="Local SEO"
+                        className="w-auto max-w-full object-contain object-left min-w-0"
+                        style={{ height: logoH, maxWidth: logoMaxW }}
+                    />
+                )}
+                <SidebarToggleButton collapsed={rail} onClick={toggleCollapsed} />
                 <button
                     type="button"
                     className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9] shrink-0"
@@ -498,6 +402,8 @@ export default function AdminLayout() {
                         to={item.to}
                         end={item.end}
                         onClick={() => setNavOpen(false)}
+                        title={rail ? item.name : undefined}
+                        aria-label={rail ? item.name : undefined}
                         className={({ isActive }) => {
                             const active =
                                 item.to === '/admin/users'
@@ -512,7 +418,8 @@ export default function AdminLayout() {
                                             location.pathname.startsWith('/admin/crm/leads/')
                                           : isActive;
                             return cn(
-                                'flex items-center gap-2.5 px-3 py-2 min-h-[38px] rounded-xl text-sm transition-colors min-w-0',
+                                'flex items-center gap-2.5 py-2 min-h-[38px] rounded-xl text-sm transition-colors min-w-0',
+                                rail ? 'justify-center px-0' : 'px-3',
                                 active
                                     ? 'bg-[#F59E0B] text-[#0F172A] font-semibold'
                                     : 'text-[#64748B] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
@@ -520,13 +427,13 @@ export default function AdminLayout() {
                         }}
                     >
                         <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
-                        <span className="truncate">{item.name}</span>
+                        {!rail && <span className="truncate">{item.name}</span>}
                     </NavLink>
                 ))}
             </nav>
 
-            <div className="px-4 pb-4 pt-3 border-t-2 border-[#E2E8F0] shrink-0 space-y-3 safe-pb">
-                <div className="flex items-center gap-3 px-1">
+            <div className={cn('pb-4 pt-3 border-t-2 border-[#E2E8F0] shrink-0 space-y-3 safe-pb', rail ? 'px-2' : 'px-4')}>
+                <div className={cn('flex items-center gap-3', rail ? 'justify-center' : 'px-1')}>
                     {adminAvatarUrl ? (
                         <img
                             src={adminAvatarUrl}
@@ -538,18 +445,22 @@ export default function AdminLayout() {
                             {(adminEmail || 'A').charAt(0).toUpperCase()}
                         </div>
                     )}
-                    <div className="min-w-0 leading-tight">
-                        <p className="text-sm font-semibold text-[#0F172A] truncate">Admin</p>
-                        <p className="text-xs text-[#94A3B8] mt-0.5 truncate">{adminEmail || 'Admin'}</p>
-                    </div>
+                    {!rail && (
+                        <div className="min-w-0 leading-tight">
+                            <p className="text-sm font-semibold text-[#0F172A] truncate">Admin</p>
+                            <p className="text-xs text-[#94A3B8] mt-0.5 truncate">{adminEmail || 'Admin'}</p>
+                        </div>
+                    )}
                 </div>
                 <button
                     type="button"
                     onClick={logout}
+                    title={rail ? 'Log out' : undefined}
+                    aria-label={rail ? 'Log out' : undefined}
                     className="w-full flex items-center justify-center gap-2 px-3 py-2.5 min-h-[44px] rounded-xl border border-[#E2E8F0] bg-white text-sm font-semibold text-[#0F172A] hover:bg-[#F8FAFC] transition-colors"
                 >
                     <LogOut className="w-4 h-4" strokeWidth={1.75} />
-                    Log out
+                    {!rail && 'Log out'}
                 </button>
             </div>
         </>
@@ -559,29 +470,31 @@ export default function AdminLayout() {
         <div className="flex h-[100dvh] bg-[#F8FAFC] text-[#0F172A] overflow-hidden">
             <aside
                 className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden min-w-0"
-                style={{ width: sidebarWidth }}
+                style={{ width: collapsed ? SIDEBAR_RAIL_WIDTH : sidebarWidth }}
             >
-                {sidebar}
-                <div
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label="Resize sidebar"
-                    onPointerDown={(e) => {
-                        if (e.button !== 0) return;
-                        e.preventDefault();
-                        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-                        resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
-                        setResizing(true);
-                    }}
-                    className="absolute inset-y-0 right-0 z-20 w-2 cursor-sidebar-resize touch-none"
-                >
-                    <span
-                        className={cn(
-                            'pointer-events-none absolute inset-y-0 right-0 w-px',
-                            resizing ? 'bg-[#F59E0B]' : 'bg-transparent group-hover:bg-[#CBD5E1]'
-                        )}
-                    />
-                </div>
+                {renderSidebar(collapsed)}
+                {!collapsed && (
+                    <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize sidebar"
+                        onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            e.preventDefault();
+                            (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                            resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
+                            setResizing(true);
+                        }}
+                        className="absolute inset-y-0 right-0 z-20 w-2 cursor-sidebar-resize touch-none"
+                    >
+                        <span
+                            className={cn(
+                                'pointer-events-none absolute inset-y-0 right-0 w-px',
+                                resizing ? 'bg-[#F59E0B]' : 'bg-transparent group-hover:bg-[#CBD5E1]'
+                            )}
+                        />
+                    </div>
+                )}
             </aside>
 
             {navOpen && (
@@ -593,7 +506,7 @@ export default function AdminLayout() {
                         onClick={() => setNavOpen(false)}
                     />
                     <aside className="absolute inset-y-0 left-0 w-[min(288px,88vw)] max-w-full bg-white border-r border-[#E2E8F0] flex flex-col shadow-xl">
-                        {sidebar}
+                        {renderSidebar(false)}
                     </aside>
                 </div>
             )}

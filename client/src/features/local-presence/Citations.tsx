@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import {
     BadgeCheck,
     CheckCircle2,
@@ -12,13 +12,21 @@ import {
     Loader2
 } from 'lucide-react';
 import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
+import { getPageCache, setPageCache } from '../../shared/pageCache';
+import { useCredits } from '../../shared/CreditsContext';
 
 export default function Citations() {
+    const cached = getPageCache<{ result: any; history: any[] }>('citations');
+    const { refresh: refreshCredits } = useCredits();
     const [loading, setLoading] = useState(false);
-    const [ready, setReady] = useState(false);
+    const [ready, setReady] = useState(Boolean(cached));
     const [error, setError] = useState('');
-    const [result, setResult] = useState<any>(null);
-    const [history, setHistory] = useState<any[]>([]);
+    const [result, setResult] = useState<any>(cached?.result ?? null);
+    const [history, setHistory] = useState<any[]>(cached?.history ?? []);
+
+    useEffect(() => {
+        if (ready) setPageCache('citations', { result, history });
+    }, [ready, result, history]);
 
     const applyPayload = (data: any) => {
         const runs = Array.isArray(data?.history) ? data.history : [];
@@ -60,6 +68,7 @@ export default function Citations() {
             setError(err?.message || 'Citation search did not finish. Run it again.');
         } finally {
             setLoading(false);
+            refreshCredits();
         }
     };
 
@@ -133,6 +142,12 @@ export default function Citations() {
                 </p>
             )}
 
+            {!ready ? (
+                <div className="flex justify-center py-24">
+                    <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                </div>
+            ) : (
+            <>
             {/* Top 4 Metrics Row */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 {/* 1. Directories checked */}
@@ -194,7 +209,7 @@ export default function Citations() {
                         type="button"
                         onClick={runAudit}
                         disabled={loading}
-                        className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
+                        className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
                     >
                         <BadgeCheck className="w-3.5 h-3.5" />
                         Run first audit
@@ -312,6 +327,8 @@ export default function Citations() {
                         })}
                     </ul>
                 </div>
+            )}
+            </>
             )}
         </div>
     );

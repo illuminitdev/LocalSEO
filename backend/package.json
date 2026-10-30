@@ -4,7 +4,7 @@
   "description": "Local SEO (LocalPulse) API — TypeScript Express",
   "main": "dist/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsx watch server.ts",
@@ -25,6 +25,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1151.0",
     "@aws-sdk/client-s3": "^3.1127.0",
     "@aws-sdk/client-secrets-manager": "^3.901.0",
     "@aws-sdk/client-sesv2": "^3.1127.0",
@@ -47,6 +48,7 @@
     "uuid": "^14.0.2"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.9",
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.9",
     "@types/cors": "^2.8.19",
@@ -57,6 +59,7 @@
     "@types/pg": "^8.15.5",
     "nodemon": "^3.1.14",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^2.1.9"
   }
 }

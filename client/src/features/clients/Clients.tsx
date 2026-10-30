@@ -227,7 +227,7 @@ function ClientsList() {
                 <button
                     type="button"
                     onClick={() => setShowCreate((v) => !v)}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white px-4 py-2.5 text-xs font-bold shadow-sm transition shrink-0"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-[var(--brand-primary-foreground)] px-4 py-2.5 text-xs font-bold shadow-sm transition shrink-0"
                 >
                     <Plus className="w-4 h-4" /> Add client
                 </button>
@@ -380,7 +380,7 @@ function ClientsList() {
                         <button
                             type="submit"
                             disabled={busy}
-                            className="px-5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition disabled:opacity-50"
+                            className="px-5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-[var(--brand-primary-foreground)] text-xs font-bold transition disabled:opacity-50"
                         >
                             {busy ? 'Saving…' : 'Save Client'}
                         </button>
@@ -801,7 +801,7 @@ function ClientDetail() {
                             </label>
                             <button
                                 type="submit"
-                                className="w-full py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition"
+                                className="w-full py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-[var(--brand-primary-foreground)] font-bold text-xs transition"
                             >
                                 Save Changes
                             </button>

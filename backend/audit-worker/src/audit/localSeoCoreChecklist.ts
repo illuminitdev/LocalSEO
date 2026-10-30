@@ -1,3 +1,7 @@
+import { buildLocalSeoInconsistencies } from './localSeoDeck.js';
+import { readIntake } from '../lib/mapsLink.js';
+import { clientEvidence } from './deckShared.js';
+
 export type CoreCheckStatus = 'yes' | 'no' | 'unknown';
 
 export type CoreChecklistItem = {
@@ -54,20 +58,20 @@ function itemFixed(id: string, label: string, status: CoreCheckStatus, evidence:
 
 function mobileLayoutStatus(audit: any): StatusEv {
   const layout = audit?.lighthouseMeta?.mobileLayout;
-  if (!layout) return { status: 'unknown', evidence: 'Mobile layout requires Lighthouse' };
+  if (!layout) return { status: 'unknown', evidence: 'Mobile layout could not be measured on this run' };
   if (layout.pass === true) {
     return { status: 'yes', evidence: layout.evidence || 'Viewport is set and the page fits the phone width' };
   }
   if (layout.pass === false) {
     return { status: 'no', evidence: layout.evidence || 'The viewport is missing or the page is wider than the phone' };
   }
-  return { status: 'unknown', evidence: layout.evidence || 'Mobile layout not measured' };
+  return { status: 'unknown', evidence: layout.evidence || 'Mobile layout could not be checked on this run' };
 }
 
 function coreWebVitalsStatus(audit: any): StatusEv {
   const lighthouse = audit?.lighthouseMeta;
   if (!lighthouse || lighthouse.skipped || (lighthouse.lcp == null && lighthouse.cls == null)) {
-    return { status: 'unknown', evidence: 'Core Web Vitals require Lighthouse' };
+    return { status: 'unknown', evidence: 'Core Web Vitals could not be measured on this run' };
   }
   const ok = (lighthouse.lcp == null || lighthouse.lcp <= 4000) && (lighthouse.cls == null || lighthouse.cls <= 0.25);
   return {
@@ -187,31 +191,102 @@ function openingHoursMatchStatus(audit: any): StatusEv {
   }
   const websiteSig = hourSignature(websiteLines);
   const gbpSig = hourSignature(gbpLines);
-  if (!websiteSig || !gbpSig) {
-    return {
-      status: 'no',
-      evidence: 'Opening hours are listed, but the website times do not match the Google listing'
-    };
-  }
-  if (websiteSig === gbpSig) {
-    return { status: 'yes', evidence: 'Website opening hours match the Google listing' };
+  const both = [
+    hoursSummary(websiteLines) && `Website: ${hoursSummary(websiteLines)}`,
+    hoursSummary(gbpLines) && `Google: ${hoursSummary(gbpLines)}`
+  ]
+    .filter(Boolean)
+    .join(' | ');
+  if (websiteSig && websiteSig === gbpSig) {
+    return { status: 'yes', evidence: `Website opening hours match the Google profile${both ? ` (${both})` : ''}` };
   }
   return {
     status: 'no',
-    evidence: 'Website opening hours do not match the Google listing'
+    evidence: `Website opening hours do not match the Google profile${both ? ` (${both})` : ''}`
   };
 }
 
-//Local SEO Core Checklist 
+const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/** "Mon–Fri 8:00–18:00, Sat 9:00–13:00, Sun closed": consecutive days with the same hours are grouped. */
+function hoursSummary(lines: string[]): string {
+  const sig = hourSignature(lines.map((l) => String(l || '').trim()).filter(Boolean));
+  if (!sig) return '';
+  const byDay = new Map<number, string>();
+  for (const part of sig.split(';')) {
+    const [day, ranges] = part.split('=');
+    const text = ranges === 'closed' ? 'closed' : ranges === '00:00-23:59' ? 'open 24 hours' : ranges.replace(/-/g, '–').replace(/,/g, ', ');
+    byDay.set(Number(day), text);
+  }
+  const out: string[] = [];
+  let start = -1;
+  for (let day = 0; day <= 7; day++) {
+    const text = byDay.get(day);
+    const prev = start >= 0 ? byDay.get(start) : undefined;
+    if (start >= 0 && text !== prev) {
+      const days = start === day - 1 ? DAY_SHORT[start] : `${DAY_SHORT[start]}–${DAY_SHORT[day - 1]}`;
+      out.push(`${days} ${prev}`);
+      start = -1;
+    }
+    if (start < 0 && text != null) start = day;
+  }
+  return out.join(', ');
+}
+
+/**
+ * Keeps the checklist in line with the profile decision: with no matching Google listing every Google row
+ * says so, and the Maps rows say the business is not in the results. Nothing is left "unknown".
+ */
+function alignWithProfile(list: LocalSeoCoreChecklist, audit: any): LocalSeoCoreChecklist {
+  const gbp = audit?.gbpLookup || {};
+  const found = gbp.listedOnMaps === true && Boolean(gbp.gbpName);
+  const travels = readIntake(audit).serviceArea === 'travel';
+  const name = String(audit?.business?.businessName || 'the business').trim();
+  const city = String(audit?.business?.searchAreaLabel || audit?.business?.city || '').trim();
+  const rank = gbp.localRank || {};
+  const depth = Number(rank.totalChecked) || (Array.isArray(rank.topResults) ? rank.topResults.length : 0) || 10;
+  // The lookup's own words: what was searched, a name-only candidate, or a failed search.
+  const notFound =
+    (gbp.listedOnMaps !== true && String(gbp.evidence || '').trim()) || `No Google Business Profile found for “${name}”${city ? ` in ${city}` : ''}`;
+  const notRanked = rank.query
+    ? `Not in the top ${depth} Google Maps results for “${rank.query}”`
+    : 'Google Maps ranking could not be measured on this run';
+  for (const group of list.groups) {
+    for (const it of group.items) {
+      if (!found && group.id === 'gbp') {
+        it.status = 'no';
+        it.evidence = notFound;
+      } else if (!found && ['core_vis_maps', 'core_vis_pack', 'core_vis_service'].includes(it.id)) {
+        it.status = 'no';
+        it.evidence = notRanked;
+      } else if (found && travels && !gbp.address && it.id === 'core_gbp_address') {
+        it.status = 'yes';
+        it.evidence = 'Street address hidden, as expected for a business that travels to customers';
+      } else if (!found && it.id === 'core_web_nap') {
+        it.status = 'no';
+        it.evidence = 'No Google listing to compare the website’s name, address and phone with';
+      } else if (it.status === 'unknown') {
+        it.status = 'no';
+      }
+      if (it.status !== 'yes') it.evidence = clientEvidence(it.id, it.label, it.evidence);
+    }
+  }
+  return list;
+}
+
+//Local SEO Core Checklist
 export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
+  return alignWithProfile(buildLocalSeoCoreChecklistRaw(audit), audit);
+}
+
+function buildLocalSeoCoreChecklistRaw(audit: any): LocalSeoCoreChecklist {
   const checks: CheckRow[] = audit?.checklist?.checks || audit?.presence?.checks || [];
   const gbp = audit?.gbpLookup || {};
   const business = audit?.business || {};
   const crawl = audit?.crawlMeta || {};
   const localRank = gbp.localRank || {};
-  const nap = Array.isArray(audit?.aiReport?.localSeoFixes?.inconsistencies)
-    ? audit.aiReport.localSeoFixes.inconsistencies
-    : [];
+  const listedForNap = gbp.listedOnMaps === true && Boolean(gbp.gbpName);
+  const nap = listedForNap ? buildLocalSeoInconsistencies(audit) : [];
 
   const napField = (field: string) => nap.find((c: any) => c.field === field);
   const napOk = (field: string): boolean | null => {
@@ -265,9 +340,10 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
         ? { status: 'no', evidence: 'No business description on GBP' }
         : fromCheck(checkByLabel(checks, /business description/i) || checkById(checks, 'gbp_15'));
 
+  const gbpHours = hoursSummary(String(gbp.hoursText || '').split(';'));
   const hoursSe: StatusEv =
-    gbp.hasHours === true
-      ? { status: 'yes', evidence: gbp.hoursEvidence || gbp.hoursText || 'Opening hours present' }
+    gbp.hasHours === true || gbpHours
+      ? { status: 'yes', evidence: gbpHours ? `Google profile hours: ${gbpHours}` : 'Opening hours set on the Google profile' }
       : gbp.hasHours === false
         ? { status: 'no', evidence: gbp.hoursEvidence || 'No opening hours on GBP' }
         : fromCheck(checkByLabel(checks, /opening hours|hours correct/i) || checkById(checks, 'gbp_16'));
@@ -343,7 +419,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   }
 
   const svcChecks = checks.filter((c) => c.section === 'service_pages');
-  let servicePagesSe: StatusEv = { status: 'unknown', evidence: 'Service pages not measured' };
+  let servicePagesSe: StatusEv = { status: 'unknown', evidence: 'Service pages could not be checked on this run' };
   if (svcChecks.length) {
     const pass = svcChecks.filter((c) => c.status === 'pass').length;
     const fail = svcChecks.filter((c) => c.status === 'fail').length;
@@ -380,7 +456,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   if (addrNap === true && phoneNap === true) napSe = { status: 'yes', evidence: 'Address and phone match' };
   else if (addrNap === false || phoneNap === false) napSe = { status: 'no', evidence: 'NAP mismatch detected' };
 
-  const schemaCheck = fromCheck(checkByLabel(checks, /schema|structured data|localbusiness/i));
+  const schemaCheck = fromCheck(checkById(checks, 'tech_14') || checkByLabel(checks, /localbusiness/i));
   const schemaSe: StatusEv =
     schemaCheck.status !== 'unknown'
       ? schemaCheck
@@ -388,7 +464,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
           hasLocalSchema ? true : schemaTypes.length ? false : null,
           `Schema: ${schemaTypes.slice(0, 4).join(', ') || 'LocalBusiness'}`,
           'No LocalBusiness / Organisation schema detected',
-          'Schema not measured'
+          'Schema could not be checked on this run'
         );
 
   const mapsVis = fromCheck(checkById(checks, 'maps_vis_2') || checkByLabel(checks, /google maps ranking|visible in maps/i));
@@ -396,7 +472,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   if (mapsVis.status === 'unknown') {
     if (inPack) mapsSe = { status: 'yes', evidence: `Maps / pack #${localRank.position}` };
     else if (localRank.query) mapsSe = { status: 'no', evidence: `Not in top results for “${localRank.query}”` };
-    else mapsSe = { status: 'unknown', evidence: 'Maps visibility not measured' };
+    else mapsSe = { status: 'unknown', evidence: 'Maps visibility could not be checked on this run' };
   }
 
   const packVis = fromCheck(checkById(checks, 'maps_vis_1') || checkByLabel(checks, /local pack visibility/i));
@@ -404,7 +480,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
   if (packVis.status === 'unknown') {
     if (inPack) packSe = { status: 'yes', evidence: `In Local Pack at #${localRank.position}` };
     else if (localRank.query) packSe = { status: 'no', evidence: `Not in Local Pack for “${localRank.query}”` };
-    else packSe = { status: 'unknown', evidence: 'Local Pack visibility not measured' };
+    else packSe = { status: 'unknown', evidence: 'Local Pack visibility could not be checked on this run' };
   }
 
   const top = Array.isArray(localRank.topResults) ? localRank.topResults : [];
@@ -412,14 +488,14 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
     ? { status: 'yes', evidence: `${top.length} competitors captured for measured query` }
     : localRank.query
       ? { status: 'no', evidence: `No competitors returned for “${localRank.query}”` }
-      : { status: 'unknown', evidence: 'Competitor comparison not measured' };
+      : { status: 'unknown', evidence: 'Competitor comparison could not be checked on this run' };
 
   const serviceVisSe: StatusEv = localRank.query
     ? {
         status: inPack ? 'yes' : 'no',
         evidence: `Measured query: “${localRank.query}”${inPack ? ` (#${localRank.position})` : ' — not in results'}`
       }
-    : { status: 'unknown', evidence: 'Service-level visibility not measured' };
+    : { status: 'unknown', evidence: 'Service-level visibility could not be checked on this run' };
 
   const ratingSe: StatusEv =
     gbp.rating != null
@@ -549,7 +625,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
               gbp.citationConsistency,
               gbp.citationsEvidence || 'Citations look consistent',
               gbp.citationsEvidence || 'Citation NAP gaps / mismatches',
-              'Citations not measured'
+              'Citations could not be checked on this run'
             )
           ),
           item(
@@ -561,7 +637,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
                 : !gbp.duplicateLikely,
               gbp.duplicateEvidence || 'No duplicate listings detected',
               gbp.duplicateEvidence || 'Possible duplicate Google listings',
-              'Duplicate listings not measured'
+              'Duplicate listings could not be checked on this run'
             )
           ),
           item(
@@ -571,7 +647,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
               gbp.directoriesPresent,
               gbp.citationsEvidence || 'Local directories found',
               gbp.citationsEvidence || 'Few or no local directories found',
-              'Directories not measured'
+              'Directories could not be checked on this run'
             )
           ),
           item(
@@ -581,7 +657,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
               gbp.industryCitations,
               'Industry / trade citations found',
               'No industry citations found',
-              'Industry citations not measured'
+              'Industry citations could not be checked on this run'
             )
           ),
           item(
@@ -591,7 +667,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
               gbp.hasBacklinks,
               gbp.backlinksEvidence || 'Backlinks present',
               gbp.backlinksEvidence || 'No backlinks detected',
-              'Backlinks not measured'
+              'Backlinks could not be checked on this run'
             )
           ),
           item(
@@ -622,7 +698,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
               gbp.inOrganicLocal,
               gbp.organicEvidence || 'In local organic results',
               gbp.organicEvidence || 'Not in local organic results',
-              'Organic local ranking not measured'
+              'Organic local ranking could not be checked on this run'
             )
           ),
           item('core_vis_competitors', 'Competitor comparison', competitorSe),
@@ -633,7 +709,7 @@ export function buildLocalSeoCoreChecklist(audit: any): LocalSeoCoreChecklist {
               gbp.geoGridVisible,
               gbp.geoGridEvidence || 'Visible across geo-grid cells',
               gbp.geoGridEvidence || 'Weak geo-grid visibility',
-              'Geo-grid not measured'
+              'Geo-grid could not be checked on this run'
             )
           ),
           item('core_vis_service', 'Service-level visibility', serviceVisSe)

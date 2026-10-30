@@ -16,6 +16,7 @@ import {
     Trash2
 } from 'lucide-react';
 import { apiPost, logDashboardActivity } from '../../shared/utils';
+import { useCredits } from '../../shared/CreditsContext';
 
 interface CategoryStatus {
     id: string;
@@ -34,6 +35,7 @@ const CATEGORIES: CategoryStatus[] = [
 ];
 
 export default function MediaOptimization() {
+    const { refresh: refreshCredits } = useCredits();
     const [activeTab, setActiveTab] = useState('Exterior');
     const [isGenerating, setIsGenerating] = useState(false);
     const [categories, setCategories] = useState<CategoryStatus[]>(CATEGORIES);
@@ -61,6 +63,7 @@ export default function MediaOptimization() {
             setError(err.message || 'Image generation failed');
         } finally {
             setIsGenerating(false);
+            refreshCredits();
         }
     };
 
@@ -222,7 +225,7 @@ export default function MediaOptimization() {
                             type="button"
                             onClick={handleGenerateMedia}
                             disabled={isGenerating}
-                            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-70"
+                            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-70"
                         >
                             {isGenerating ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />

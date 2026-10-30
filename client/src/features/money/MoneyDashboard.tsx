@@ -202,7 +202,7 @@ export default function MoneyDashboard() {
                 <button
                     type="button"
                     onClick={downloadCsv}
-                    className="inline-flex items-center gap-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm transition shrink-0"
+                    className="inline-flex items-center gap-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-[var(--brand-primary-foreground)] text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm transition shrink-0"
                 >
                     <Download className="w-4 h-4" /> Export expenses CSV
                 </button>
@@ -252,7 +252,7 @@ export default function MoneyDashboard() {
                     <button
                         type="button"
                         onClick={() => load(from, to)}
-                        className="bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-sm transition"
+                        className="bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-[var(--brand-primary-foreground)] text-xs font-bold px-5 py-2.5 rounded-xl shadow-sm transition"
                     >
                         Apply
                     </button>

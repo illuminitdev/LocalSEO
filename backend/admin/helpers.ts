@@ -23,6 +23,78 @@ function daysLeft(periodEnd?: string | null) {
     return Math.ceil(ms / (1000 * 60 * 60 * 24));
 }
 
+type FreeTierInfo = {
+    isFreeTier: boolean;
+    promoCode: string | null;
+    freeTierStartedAt: string | null;
+    freeTierEndsAt: string | null;
+    freeTierDaysLeft: number | null;
+};
+
+const FREE_TIER_TTL_MS = 5 * 60 * 1000;
+const freeTierCache = new Map<string, { at: number; info: FreeTierInfo }>();
+
+const unixToIso = (s?: number | null) => (s ? new Date(s * 1000).toISOString() : null);
+
+/**
+ * Free tier = a Stripe promotion code made the current invoice £0 (or a Stripe trial).
+ * Read live from Stripe, so users who redeemed a code before this existed show up too.
+ * When the free month ends Stripe bills the card, the latest invoice is no longer £0,
+ * and the user drops back to a normal paid plan.
+ */
+async function lookupFreeTier(stripe: Stripe, subId: string): Promise<FreeTierInfo | null> {
+    const cached = freeTierCache.get(subId);
+    if (cached && Date.now() - cached.at < FREE_TIER_TTL_MS) return cached.info;
+    try {
+        const sub: any = await stripe.subscriptions.retrieve(subId, {
+            expand: ['latest_invoice.discounts.promotion_code']
+        });
+        const item = sub.items?.data?.[0];
+        const periodStart = sub.current_period_start ?? item?.current_period_start;
+        const periodEnd = sub.current_period_end ?? item?.current_period_end;
+        const invoice = sub.latest_invoice && typeof sub.latest_invoice === 'object' ? sub.latest_invoice : null;
+        const discounts: any[] = (invoice?.discounts || []).filter((d: any) => d && typeof d === 'object');
+        const promo = discounts.map((d) => d.promotion_code).find((p) => p && typeof p === 'object');
+
+        const isTrial = sub.status === 'trialing';
+        const isFreeInvoice =
+            ['active', 'past_due'].includes(sub.status) &&
+            !!invoice &&
+            invoice.total === 0 &&
+            invoice.subtotal > 0 &&
+            discounts.length > 0;
+
+        const info: FreeTierInfo = {
+            isFreeTier: isTrial || isFreeInvoice,
+            promoCode: promo?.code || null,
+            freeTierStartedAt: unixToIso(isTrial ? sub.trial_start : periodStart),
+            freeTierEndsAt: unixToIso(isTrial ? sub.trial_end : periodEnd),
+            freeTierDaysLeft: null
+        };
+        info.freeTierDaysLeft = daysLeft(info.freeTierEndsAt);
+        freeTierCache.set(subId, { at: Date.now(), info });
+        return info;
+    } catch (err) {
+        console.warn('Free tier lookup failed for', subId, err);
+        return null;
+    }
+}
+
+/** Adds isFreeTier / promoCode / freeTierEndsAt to each mapped user's subscription. */
+async function attachFreeTier(users: any[]) {
+    const stripe = getStripeClient();
+    if (!stripe) return users;
+    await Promise.all(
+        users.map(async (u) => {
+            const subId = u?.subscription?.stripeSubscriptionId;
+            if (!subId) return;
+            const info = await lookupFreeTier(stripe, subId);
+            if (info) Object.assign(u.subscription, info);
+        })
+    );
+    return users;
+}
+
 function serviceModulesForPlan(planId: string | null | undefined) {
     const features = planId ? getFeaturesForPlan(planId) : [];
     const has = (k: string) => features.includes(k as any);
@@ -260,6 +332,7 @@ function mapInviteUser(row: any) {
 
 export {
     getStripeClient,
+    attachFreeTier,
     daysLeft,
     serviceModulesForPlan,
     PRODUCTS,

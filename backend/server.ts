@@ -15,6 +15,7 @@ import authRouter from './routes/auth';
 import adminRouter from './admin/routes';
 import salesRouter from './sales-agent/routes';
 import integrationsRouter from './routes/integrations';
+import { hostNotificationsRouter } from './routes/notifications';
 import { migrate } from './lib/db';
 import { sendSms } from './lib/inbox';
 import { fetchReviewTask, reviewSyncConfigured, startReviewTask } from './lib/googleReviewSync';
@@ -38,31 +39,42 @@ import {
     normalizeGridSize,
     optimizationHealth,
     rankGridCell,
-    rankGridRow,
     summarizeGrid
 } from './lib/dataForSeoGrid';
 import {
-    MAX_TRACKED_KEYWORDS,
-    checkKeywordRank,
+    checkRank,
     cleanKeyword,
     fetchRelatedKeywords,
     fetchSearchVolumes,
     industryKeywordIdeas,
     industryTerms,
+    keywordServices,
     makeRelevanceFilter,
     trackerConfigured,
     type TrackerKeyword
 } from './lib/visibilityTracker';
-import { ensureLocalSeoBusiness, getLocalSeoUpgradeChoice, loadOrgAppState, saveOrgAppState, setLocalSeoUpgradeChoice } from './lib/orgAppState';
+import {
+    dashboardPatch,
+    ensureLocalSeoBusiness,
+    getLocalSeoUpgradeChoice,
+    loadOrgAppState,
+    saveDetectedServices,
+    saveOrgAppState,
+    saveOrgDashboardPatch,
+    setLocalSeoUpgradeChoice,
+    snapshotDashboard
+} from './lib/orgAppState';
 import {
     analysisJobs,
     askLlm,
     LLM_PLATFORMS,
+    answerVerdicts,
     askGoogleOverview,
     computeChanges,
     summarizeTracker,
     buildActions as buildInsightActions,
     buildPrompts,
+    businessServices,
     cityFromAddress,
     suggestKeywords,
     buildReport as buildVisibilityReport,
@@ -77,7 +89,48 @@ import {
     strategyPrompt,
     weekStart as insightsWeekStart
 } from './lib/aiInsights';
-import { CitationScanError, collectCitationScan, startCitationScan } from './lib/dataForSeoCitations';
+import {
+    CREDIT_COSTS,
+    SCAN_COOLDOWN_HOURS,
+    INSIGHTS_COOLDOWN_HOURS,
+    getTrackedKeywordLimit,
+    getGridScanLimit,
+    getLlmTrackerPromptLimit,
+    getLocationLimit
+} from './lib/planCatalog';
+import {
+    cooldownEnds,
+    creditPeriod,
+    creditsSummary,
+    getUsage,
+    hasRecentCharge,
+    refund,
+    refundOnce,
+    registerCall,
+    sendCooldown,
+    sendCreditError,
+    spend
+} from './lib/credits';
+import { LocationLimitError, addLocation, ensurePrimaryLocation, getLocation, listLocations, primaryLocation, removeLocation, type OrgLocation } from './lib/locations';
+import {
+    backfillFromDashboard,
+    historyFor,
+    lastCheckTimes,
+    claimGridSlot,
+    reclaimStaleGridSlot,
+    scannedKeywords,
+    gridSlotsUsed,
+    releaseGridSlot,
+    latestRuns,
+    recordGridScan,
+    recordRankCheck,
+    trackedFromScans
+} from './lib/rankHistory';
+import { randomUUID } from 'crypto';
+import { detectServices } from './lib/serviceDetect';
+import { appendPoint, checkPrompts, cleanPrompt, pointFromEntries, suggestPrompts, type TrackedPrompt } from './lib/llmTracker';
+import { cachedAnswer, putAnswer, setAnswerPeriod, type StoredAnswer } from './lib/llmAnswers';
+import { CitationScanError,collectCitationScan, startCitationScan } from './lib/dataForSeoCitations';
 
 dotenv.config({ override: true });
 
@@ -130,6 +183,9 @@ app.use(securityHeaders());
 app.use(cors(corsOptions()));
 app.use(globalRateLimit());
 
+// Admin Excel upload sends every row with its original columns (for "Export this Excel"); allow more than the default.
+app.use('/api/admin/crm/leads/bulk-import', express.json({ limit: process.env.LEAD_IMPORT_BODY_LIMIT || '5mb' }));
+
 app.use(
     express.json({
         limit: process.env.JSON_BODY_LIMIT || '1mb',
@@ -177,7 +233,10 @@ const emptyBusiness = () => ({
     lat: null,
     lng: null,
     placeId: '',
-    mapsUrl: ''
+    mapsUrl: '',
+    services: [] as string[],
+    servicesFor: '',
+    aiPrompts: [] as Array<{ prompt: string; topic: string }>
 });
 
 const emptyDashboard = () => ({
@@ -209,7 +268,9 @@ const emptyDashboard = () => ({
     llmVisibility: null as null | Record<string, any>,
     llmVisibilityHistory: [] as Record<string, any>[],
     aiInsights: null as null | Record<string, any>,
-    aiInsightsHistory: [] as Record<string, any>[]
+    aiInsightsHistory: [] as Record<string, any>[],
+    profileAudit: null as null | Record<string, any>,
+    savedTools: {} as Record<string, { value: any; at: string }>
 });
 
 let connectedBusiness = emptyBusiness();
@@ -356,6 +417,8 @@ async function hydrateOrgFromDb(req: any, res: Response, next: NextFunction) {
         dashboardState = state.dashboard;
         req.connectedBusiness = state.business;
         req.dashboardState = state.dashboard;
+        req.dashboardLoaded = snapshotDashboard(state.dashboard);
+        req.businessLoaded = JSON.stringify(state.business);
         req.orgStateHydrated = true;
         next();
     } catch (err: any) {
@@ -376,10 +439,27 @@ async function saveOrgToDb(req: any) {
             req.connectedBusiness = connectedBusiness;
         }
     }
-    await saveOrgAppState(req.orgId, {
-        business,
-        dashboard
-    });
+    if (!req.dashboardLoaded) {
+        await saveOrgAppState(req.orgId, { business, dashboard });
+        return;
+    }
+    // Only what this request changed, so an older in-flight request cannot undo another request's save.
+    const { patch, removed } = dashboardPatch(req.dashboardLoaded, dashboard);
+    const businessJson = JSON.stringify(business);
+    const businessChanged = businessJson !== req.businessLoaded;
+    await saveOrgDashboardPatch(req.orgId, { business: businessChanged ? business : null, patch, removed });
+    req.dashboardLoaded = snapshotDashboard(dashboard);
+    req.businessLoaded = businessJson;
+}
+
+/** Bump when detection gets better: every business then re-reads its website once. */
+const SERVICES_VERSION = 'v3';
+const servicesKey = (website: string) => `${SERVICES_VERSION} ${website}`;
+
+/** True when the services have not been read from the current website yet (pages then call /api/business/detect-services). */
+function servicesPending(b: any = connectedBusiness) {
+    const website = String(b?.website || '').trim();
+    return Boolean(aiClient && website && b?.servicesFor !== servicesKey(website));
 }
 
 function hydrateAppState(raw: any) {
@@ -584,13 +664,49 @@ function errMessage(err: any) {
     return err?.message || err?.error?.message || String(err);
 }
 
+const TEXT_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash';
+
+/** Google returns 503/500/504 when a model is overloaded; these are temporary and are not billed. */
+function isGeminiOverload(err: any) {
+    const raw = errMessage(err);
+    return /\b(500|503|504)\b/.test(raw) || /UNAVAILABLE|high demand|overloaded|INTERNAL|DEADLINE_EXCEEDED/i.test(raw);
+}
+
 async function generateText(prompt: string, extraConfig: any = {}) {
-    const response = await aiClient.models.generateContent({
-        model: TEXT_MODEL,
-        contents: prompt,
-        config: extraConfig
+    const run = async (model: string) =>
+        ((await aiClient.models.generateContent({ model, contents: prompt, config: extraConfig })).text || '').trim();
+    // Retry the main model twice (1s, 2s) when it is overloaded, then try the fallback model once.
+    for (let attempt = 0; ; attempt++) {
+        try {
+            return await run(TEXT_MODEL);
+        } catch (err: any) {
+            if (!isGeminiOverload(err)) throw err;
+            if (attempt >= 2) break;
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+    }
+    if (TEXT_FALLBACK_MODEL && TEXT_FALLBACK_MODEL !== TEXT_MODEL) return run(TEXT_FALLBACK_MODEL);
+    return run(TEXT_MODEL);
+}
+
+/**
+ * Takes the credit for one Gemini action before it runs. Any error response that follows (Gemini failure,
+ * empty answer, quota) refunds it automatically. Returns false when the response was already sent (no credits).
+ */
+async function chargeAi(req: any, res: Response, feature: 'aiText' | 'aiImage', note: string): Promise<boolean> {
+    const ref = `${feature}:${randomUUID()}`;
+    try {
+        await spend(req, feature, CREDIT_COSTS[feature], ref, note);
+    } catch (err: any) {
+        if (!sendCreditError(res, err)) res.status(500).json({ error: errMessage(err) });
+        return false;
+    }
+    res.once('finish', () => {
+        if (res.statusCode >= 400) {
+            refund(req, feature, CREDIT_COSTS[feature], ref, `${note} failed`).catch(() => undefined);
+        }
     });
-    return (response.text || '').trim();
+    return true;
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -740,8 +856,8 @@ app.post('/api/business/upgrade-choice', requireAuth, requireFeature('local_pres
 });
 
 app.get('/api/business', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
-    // If connectedBusiness has a placeId or name+address but rating/reviews are missing, refresh from Google Places
-    if (connectedBusiness.connected && (connectedBusiness.rating == null || !connectedBusiness.reviews?.length) && requirePlacesConfigured()) {
+    // Refreshing from Google Places is a paid call, so it runs only when asked for (?refresh=1), never on a plain page load.
+    if (req.query?.refresh === '1' && connectedBusiness.connected && (connectedBusiness.rating == null || !connectedBusiness.reviews?.length) && requirePlacesConfigured()) {
         try {
             let placeDetails: any = null;
             if (connectedBusiness.placeId) {
@@ -846,8 +962,40 @@ app.post('/api/business/connect', requireAuth, hydrateOrgFromDb, requireFeature(
         icon: 'CheckCircle',
         color: 'text-[#F59E0B]'
     });
+    // Nothing was found last time (no services or no AI prompts): saving the profile again tries the website again.
+    if (!connectedBusiness.services?.length || !connectedBusiness.aiPrompts?.length) connectedBusiness.servicesFor = '';
     await saveOrgToDb(req);
     res.json({ success: true, business: connectedBusiness, stats: dashboardState });
+});
+
+const servicesRunning = new Set<string>();
+
+/**
+ * Reads the services from the business website (free fetch + one Gemini call, not charged) so keyword and AI-prompt
+ * suggestions cover every service. Pages call it when their data says `servicesPending`; runs once per website.
+ */
+app.post('/api/business/detect-services', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req: any, res) => {
+    const b = connectedBusiness;
+    const website = String(b.website || '').trim();
+    if (!servicesPending(b) || !req.orgId) return res.json({ services: b.services || [], updated: false });
+    if (servicesRunning.has(req.orgId)) return res.json({ services: b.services || [], updated: false, running: true });
+    servicesRunning.add(req.orgId);
+    let detected: Awaited<ReturnType<typeof detectServices>> = { services: [], prompts: [] };
+    try {
+        detected = await withTimeout(detectServices({ name: b.name, category: b.category, address: b.address, website }, generateText), 60_000, 'Detect services');
+        console.log(`[services] ${req.orgId}: ${detected.services.length} services, ${detected.prompts.length} prompts from ${website}`);
+    } catch (err: any) {
+        // Still marked as done for this website so it is not retried on every page load; saving the profile retries.
+        console.warn(`[services] ${req.orgId} detection failed:`, errMessage(err));
+    }
+    try {
+        await saveDetectedServices(req.orgId, detected, website, servicesKey(website));
+        res.json({ services: detected.services, updated: true });
+    } catch (err: any) {
+        res.status(500).json({ error: errMessage(err) });
+    } finally {
+        servicesRunning.delete(req.orgId);
+    }
 });
 
 app.post('/api/places/search', requireAuth, requireFeature('local_presence'), async (req, res) => {
@@ -912,6 +1060,12 @@ reviews must be real public snippets only. If you cannot verify reviews, use [].
     }
 });
 
+// Read-only: returns the last saved audit result. Never calls Gemini.
+app.get('/api/ai/audit', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), (req, res) => {
+    const dash: any = (req as any).dashboardState || dashboardState;
+    res.json({ audit: dash.profileAudit || null });
+});
+
 app.post('/api/ai/audit', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     if (!requireGemini(res)) return;
     const incoming = req.body || {};
@@ -929,6 +1083,7 @@ app.post('/api/ai/audit', requireAuth, hydrateOrgFromDb, requireFeature('local_p
     if (!requireBusiness(res)) return;
     const profile = { ...connectedBusiness, ...req.body };
 
+    if (!(await chargeAi(req, res, 'aiText', 'AI audit'))) return;
     try {
         const text = await generateText(
             `Audit this Google Business Profile for Local 3-Pack ranking. Use only the provided fields. Do not invent extra facts.
@@ -947,11 +1102,46 @@ Return JSON only: score (0-100), optimizedDescription, recommendations (array of
             return res.status(502).json({ error: 'Gemini returned an unusable audit.' });
         }
         dashboardState.completenessScore = data.score;
-        res.json(data);
+        // Keep the latest result on the org so it is still there after a refresh, until the user runs the audit again.
+        const saved = {
+            score: data.score,
+            optimizedDescription: data.optimizedDescription || '',
+            recommendations: Array.isArray(data.recommendations) ? data.recommendations : [],
+            createdAt: new Date().toISOString()
+        };
+        ((req as any).dashboardState || dashboardState).profileAudit = saved;
+        dashboardState.profileAudit = saved;
+        await saveOrgToDb(req).catch((e: any) => console.warn('[audit] could not save result:', errMessage(e)));
+        res.json({ ...data, createdAt: saved.createdAt });
     } catch (err: any) {
         console.error('Audit error:', err);
         res.status(502).json({ error: `Gemini audit failed: ${errMessage(err)}` });
     }
+});
+
+// Last result of a tool page (generated post, Q&A board), kept on the org so a refresh does not lose it.
+// Reads and writes here never call Gemini or DataForSEO.
+const SAVED_TOOL_KEYS = new Set(['post-generator', 'qa-board', 'review-drafts']);
+const SAVED_TOOL_MAX_BYTES = 200_000;
+
+app.get('/api/ai/saved/:key', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), (req, res) => {
+    const key = String(req.params.key);
+    if (!SAVED_TOOL_KEYS.has(key)) return res.status(404).json({ error: 'Unknown tool.' });
+    const dash: any = (req as any).dashboardState || dashboardState;
+    res.json({ saved: dash.savedTools?.[key] || null });
+});
+
+app.post('/api/ai/saved/:key', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    const key = String(req.params.key);
+    if (!SAVED_TOOL_KEYS.has(key)) return res.status(404).json({ error: 'Unknown tool.' });
+    const value = req.body?.value ?? null;
+    if (JSON.stringify(value ?? null).length > SAVED_TOOL_MAX_BYTES) {
+        return res.status(413).json({ error: 'Saved result is too large.' });
+    }
+    const dash: any = (req as any).dashboardState || dashboardState;
+    dash.savedTools = { ...(dash.savedTools || {}), [key]: { value, at: new Date().toISOString() } };
+    await saveOrgToDb(req);
+    res.json({ ok: true });
 });
 
 app.post('/api/ai/post-copy', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
@@ -971,6 +1161,7 @@ app.post('/api/ai/post-copy', requireAuth, hydrateOrgFromDb, requireFeature('loc
         time ? `Time: ${String(time).slice(0, 40)}` : ''
     ].filter(Boolean);
 
+    if (!(await chargeAi(req, res, 'aiText', 'post copy'))) return;
     try {
         const copy = await generateText(
             `Write a Google Business Profile ${kind} post for "${name}" (${connectedBusiness.category}) at ${connectedBusiness.address}.
@@ -1017,6 +1208,7 @@ app.post('/api/ai/post-image', requireAuth, hydrateOrgFromDb, requireFeature('lo
         .filter(Boolean)
         .join('\n');
 
+    if (!(await chargeAi(req, res, 'aiImage', 'post image'))) return;
     try {
         const response = await aiClient.models.generateContent({
             model: IMAGE_MODEL,
@@ -1098,6 +1290,7 @@ app.post('/api/ai/review-reply', requireAuth, hydrateOrgFromDb, requireFeature('
     if (!requireBusiness(res)) return;
     const { reviewText, rating, author, tone } = req.body;
 
+    if (!(await chargeAi(req, res, 'aiText', 'review reply'))) return;
     try {
         const reply = await generateText(
             `Draft a Google Business Profile review reply for ${connectedBusiness.name} (${connectedBusiness.category}) in ${connectedBusiness.address}.
@@ -1114,6 +1307,16 @@ Do not invent policies, discounts, or staff names. Under 80 words.`
 });
 
 // ── Review Growth Engine: reviews collected via QR/NFC/email/SMS links ───────
+// Usage credits for the current billing period (usage bar in the app header).
+app.get('/api/credits', requireAuth, async (req, res) => {
+    try {
+        res.json(await creditsSummary(req));
+    } catch (err: any) {
+        console.error('[credits] summary failed:', err?.message || err);
+        res.status(500).json({ error: 'Could not load usage credits.' });
+    }
+});
+
 const reviewGate = [requireAuth, hydrateOrgFromDb, requireFeature('local_presence')] as const;
 
 app.get('/api/reviews/hub', ...reviewGate, async (req, res) => {
@@ -1147,12 +1350,20 @@ app.post('/api/reviews/sync', ...reviewGate, async (req, res) => {
     if (!placeId) return res.status(400).json({ error: 'Connect your Google business on the Business profile page first.' });
     const pending = (dashboardState as any).googleReviewSync;
     if (pending?.taskId && Date.now() - new Date(pending.startedAt).getTime() < 10 * 60 * 1000) return res.json({ status: 'pending' });
+    const syncRef = `reviews:${randomUUID()}`;
+    try {
+        await spend(req, 'reviewSync', CREDIT_COSTS.reviewSync, syncRef);
+    } catch (err: any) {
+        if (sendCreditError(res, err)) return;
+        return res.status(500).json({ error: errMessage(err) });
+    }
     try {
         const taskId = await startReviewTask(placeId, { address: connectedBusiness.address, lat: connectedBusiness.lat, lng: connectedBusiness.lng });
         (dashboardState as any).googleReviewSync = { taskId, startedAt: new Date().toISOString() };
         await saveOrgToDb(req);
         res.json({ status: 'pending' });
     } catch (err: any) {
+        await refund(req, 'reviewSync', CREDIT_COSTS.reviewSync, syncRef, 'could not start').catch(() => undefined);
         console.warn('[reviews] sync start failed:', errMessage(err));
         res.status(502).json({ error: `Could not start the Google review sync: ${errMessage(err)}` });
     }
@@ -1249,6 +1460,7 @@ app.post('/api/ai/qa-answer', requireAuth, hydrateOrgFromDb, requireFeature('loc
     if (!requireBusiness(res)) return;
     const { question, kb } = req.body;
 
+    if (!(await chargeAi(req, res, 'aiText', 'Q&A answer'))) return;
     try {
         const answer = await generateText(
             `Answer this public Google Business Profile question for ${connectedBusiness.name}.
@@ -1264,7 +1476,7 @@ If the knowledge base does not contain the answer, say you do not have that deta
     }
 });
 
-app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+app.post('/api/ai/gap-analysis', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     if (!requireBusiness(res)) return;
     const bodyKeyword = String(req.body?.keyword || '').trim();
     const keyword = bodyKeyword || `${connectedBusiness.category || 'local business'} near me`;
@@ -1441,15 +1653,6 @@ First competitors item must be "${connectedBusiness.name} (You)" with reviews=${
     }
 });
 
-function centerOverride(body: any) {
-    const lat = Number(body?.center?.lat);
-    const lng = Number(body?.center?.lng);
-    if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-        return { lat, lng };
-    }
-    return null;
-}
-
 async function ensureBusinessCenter(req: any) {
     const hasCoords =
         typeof connectedBusiness.lat === 'number' &&
@@ -1475,25 +1678,234 @@ async function ensureBusinessCenter(req: any) {
     return null;
 }
 
-app.get('/api/rank/state', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), (_req, res) => {
-    res.json({
-        trackedKeywords: Array.isArray(dashboardState.trackedKeywords) ? dashboardState.trackedKeywords : [],
-        gapAnalyses: Array.isArray(dashboardState.gapAnalyses) ? dashboardState.gapAnalyses : [],
-        realScansAvailable: gridConfigured()
+// ── Locations: the business address is location 1; clients pick from their saved list ──────────
+type RequestLocation = { location: OrgLocation; locations: OrgLocation[] };
+
+/** The selected location (or the business address), created on first use. Also imports old history once. */
+async function requestLocation(req: any, wantedId?: unknown): Promise<RequestLocation | null> {
+    const center = await ensureBusinessCenter(req);
+    if (!center || !req.orgId) return null;
+    const orgId = String(req.orgId);
+    const primary = await ensurePrimaryLocation(orgId, {
+        name: connectedBusiness.name,
+        address: connectedBusiness.address,
+        lat: center.lat,
+        lng: center.lng,
+        placeId: connectedBusiness.placeId
     });
+    const dash: any = req.dashboardState || dashboardState;
+    if (!dash.historyMigrated) {
+        try {
+            await backfillFromDashboard(orgId, primary.id, dash);
+            dash.historyMigrated = true;
+            await saveOrgToDb(req);
+        } catch (err: any) {
+            console.warn('[history] backfill failed:', errMessage(err));
+        }
+    }
+    const locations = await listLocations(orgId);
+    const wanted = wantedId ? locations.find((l) => l.id === String(wantedId)) : null;
+    return { location: wanted || primary, locations };
+}
+
+function locationPayload(req: any, loc: RequestLocation) {
+    const limit = getLocationLimit(req.entitlements?.planId);
+    return {
+        location: loc.location,
+        locations: loc.locations,
+        locationLimit: limit,
+        canAddLocation: loc.locations.length < limit
+    };
+}
+
+app.get('/api/locations', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+    try {
+        const loc = await requestLocation(req, req.query?.locationId);
+        if (!loc) return res.json({ location: null, locations: [], locationLimit: getLocationLimit((req as any).entitlements?.planId), canAddLocation: false, needsAddress: true });
+        res.json(locationPayload(req, loc));
+    } catch (err: any) {
+        res.status(500).json({ error: errMessage(err) });
+    }
 });
 
-app.get('/api/rank/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), (_req, res) => {
-    const category = String(connectedBusiness.category || '').trim().toLowerCase();
-    const city = cityFromAddress(String(connectedBusiness.address || '')).toLowerCase();
-    const services = String(connectedBusiness.attributes || '')
-        .split(/[,;\n]/)
-        .map((x: string) => x.trim().toLowerCase())
-        .filter((x: string) => x.length > 2 && x.length < 50 && x !== category)
-        .slice(0, 5);
-    const list = [...suggestKeywords(connectedBusiness as any)];
-    for (const svc of services) list.push(city ? `${svc} ${city}` : `${svc} near me`);
-    if (city) for (const svc of services.slice(0, 3)) list.push(`best ${svc} in ${city}`);
+app.post('/api/locations', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+    const address = String(req.body?.address || '').trim().slice(0, 300);
+    if (address.length < 5) return res.status(400).json({ error: 'Enter the full address of the location.' });
+    try {
+        const current = await requestLocation(req);
+        if (!current) return res.status(400).json({ error: 'Your business needs a full address first.' });
+        const limit = getLocationLimit((req as any).entitlements?.planId);
+        if (current.locations.length >= limit) throw new LocationLimitError(limit);
+        // Monthly rule: the business address is always there, so (limit - 1) extra addresses can be added per month.
+        // Removing one does not free its slot until the month resets.
+        const dash: any = (req as any).dashboardState || dashboardState;
+        const { adds, period } = await monthlyAdds(req, dash);
+        if (adds.locations >= Math.max(0, limit - 1)) {
+            return res.status(400).json({
+                error: `Your plan allows ${limit} location${limit === 1 ? '' : 's'}. You can add a new one after ${resetDay(period.end)}.`,
+                code: 'location_limit'
+            });
+        }
+        const geo = await geocodeAddress(address);
+        if (!geo) return res.status(400).json({ error: 'Could not find that address. Try a fuller address with the town and postcode.' });
+        const label = String(req.body?.label || '').trim().slice(0, 80) || address.split(',')[0].trim() || 'Location';
+        const added = await addLocation(
+            String((req as any).orgId),
+            { label, address: geo.formattedAddress || address, lat: geo.lat, lng: geo.lng },
+            limit
+        );
+        adds.locations += 1;
+        await saveOrgToDb(req);
+        const next = await requestLocation(req, added.id);
+        res.json({ added, ...(next ? locationPayload(req, next) : {}) });
+    } catch (err: any) {
+        if (err instanceof LocationLimitError) return res.status(400).json({ error: err.message, code: err.code });
+        res.status(500).json({ error: errMessage(err) });
+    }
+});
+
+app.delete('/api/locations/:id', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+    try {
+        const ok = await removeLocation(String((req as any).orgId), String(req.params.id));
+        if (!ok) return res.status(400).json({ error: 'That location cannot be removed.' });
+        const next = await requestLocation(req);
+        res.json(next ? locationPayload(req, next) : { locations: [] });
+    } catch (err: any) {
+        res.status(500).json({ error: errMessage(err) });
+    }
+});
+
+app.get('/api/rank/state', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    try {
+        const loc = await requestLocation(req, req.query?.locationId);
+        const base = {
+            realScansAvailable: gridConfigured(),
+            cost: CREDIT_COSTS.rankScan,
+            cooldownHours: SCAN_COOLDOWN_HOURS
+        };
+        if (!loc) {
+            return res.json({ ...base, trackedKeywords: [], gapAnalyses: [], location: null, locations: [], needsAddress: true, locationLimit: 1, canAddLocation: false });
+        }
+        const orgId = String((req as any).orgId);
+        const period = await billingPeriod(req);
+        const dash: any = (req as any).dashboardState || dashboardState;
+        res.json({
+            ...base,
+            ...locationPayload(req, loc),
+            // The shared keyword list (same as the Visibility Tracker); scans below are this address's saved results.
+            sharedKeywords: trackerList(dash).map((k) => k.keyword),
+            keywordLimit: trackedKeywordLimit(req),
+            trackedKeywords: await trackedFromScans(orgId, loc.location.id),
+            gapAnalyses: await latestRuns(orgId, loc.location.id),
+            gridScansUsed: await gridSlotsUsed(orgId, period.start),
+            gridScanLimit: getGridScanLimit((req as any).entitlements?.planId),
+            periodEnd: period.end
+        });
+    } catch (err: any) {
+        console.error('[rank] state failed:', errMessage(err));
+        res.status(500).json({ error: errMessage(err) });
+    }
+});
+
+type MonthlyAdds = { periodStart: string; keywords: string[]; prompts: string[]; locations: number };
+
+/** What this business has added this billing month. */
+async function monthlyAdds(req: any, dash: any): Promise<{ adds: MonthlyAdds; period: { start: string; end: string } }> {
+    const period = await billingPeriod(req);
+    let adds: MonthlyAdds = dash.monthlyAdds;
+    if (!adds || adds.periodStart !== period.start) {
+        adds = { periodStart: period.start, keywords: [], prompts: [], locations: 0 };
+        dash.monthlyAdds = adds;
+    }
+    return { adds, period };
+}
+
+const resetDay = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+/** The org's current billing period (falls back to the calendar month when there is no subscription period). */
+async function billingPeriod(req: any): Promise<{ start: string; end: string }> {
+    const usage = await getUsage(req);
+    if (usage.periodStart && usage.periodEnd) return { start: usage.periodStart, end: usage.periodEnd };
+    const p = creditPeriod(req.entitlements || {});
+    return { start: p.start.toISOString(), end: p.end.toISOString() };
+}
+
+// Starts a scan: reserves the keyword for the month, checks the plan's monthly grid limit, takes the credits
+// and returns a scan id the point requests must carry. The keyword is NOT added to the tracked list: the
+// Visibility Tracker shows it as a suggestion, and it only uses a keyword slot once the user tracks it.
+app.post('/api/rank/scan-start', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    if (!requireBusiness(res)) return;
+    if (!gridConfigured()) {
+        return res.status(503).json({ error: 'Real rank scans need DataForSEO.', code: 'not_configured' });
+    }
+    const keyword = String(req.body?.keyword || '').trim().slice(0, 120);
+    if (!keyword) return res.status(400).json({ error: 'Keyword is required.' });
+    try {
+        const loc = await requestLocation(req, req.body?.locationId);
+        if (!loc) return res.status(400).json({ error: 'Your business needs a full address so we can locate the grid center.' });
+        const orgId = String((req as any).orgId);
+        const period = await billingPeriod(req);
+        const scanId = randomUUID();
+        // The keyword+address is reserved for the whole billing month BEFORE any DataForSEO call, so a refresh,
+        // a second tab or a double click can never run it twice. A second click gets the saved result instead.
+        const slot = await claimGridSlot(orgId, loc.location.id, keyword.toLowerCase(), period.start, scanId);
+        if (slot === 'taken') {
+            const runs: any[] = await latestRuns(orgId, loc.location.id);
+            const saved = runs.find((r) => String(r.keyword || '').toLowerCase() === keyword.toLowerCase()) || null;
+            // Only a saved scan from THIS billing period counts; an older one is last month's result.
+            const run = saved && saved.updatedAt && saved.updatedAt >= period.start ? saved : null;
+            // Started but never finished (tab closed) more than 30 minutes ago: the slot can be used again.
+            const abandoned = !run && (await reclaimStaleGridSlot(orgId, loc.location.id, keyword.toLowerCase(), period.start, scanId));
+            if (abandoned) {
+                try {
+                    await spend(req, 'rankScan', CREDIT_COSTS.rankScan, scanId, keyword.slice(0, 80));
+                } catch (err) {
+                    await releaseGridSlot(orgId, scanId).catch(() => undefined);
+                    throw err;
+                }
+                return res.json({ scanId, cost: CREDIT_COSTS.rankScan, location: loc.location, center: { lat: loc.location.lat, lng: loc.location.lng } });
+            }
+            return res.status(409).json({
+                error: run
+                    ? `"${keyword}" was already scanned this month. Showing the saved result.`
+                    : `"${keyword}" is already being scanned. Wait for it to finish.`,
+                code: 'already_scanned',
+                run,
+                nextAvailableAt: period.end
+            });
+        }
+        const limit = getGridScanLimit((req as any).entitlements?.planId);
+        if ((await gridSlotsUsed(orgId, period.start)) > limit) {
+            await releaseGridSlot(orgId, scanId);
+            return res.status(429).json({
+                error: `You have used your ${limit} grid scans this month. They reset on ${new Date(period.end).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}.`,
+                code: 'grid_limit',
+                max: limit,
+                nextAvailableAt: period.end
+            });
+        }
+        try {
+            await spend(req, 'rankScan', CREDIT_COSTS.rankScan, scanId, keyword.slice(0, 80));
+        } catch (err) {
+            await releaseGridSlot(orgId, scanId).catch(() => undefined);
+            throw err;
+        }
+        res.json({
+            scanId,
+            cost: CREDIT_COSTS.rankScan,
+            location: loc.location,
+            center: { lat: loc.location.lat, lng: loc.location.lng }
+        });
+    } catch (err: any) {
+        if (sendCreditError(res, err)) return;
+        console.error('[rank] scan-start failed:', errMessage(err));
+        res.status(500).json({ error: errMessage(err) });
+    }
+});
+
+app.get('/api/rank/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), (_req, res) => {
+    // Category keywords alternated with keywords for every service (typed + read from the website).
+    const list = suggestKeywords(connectedBusiness as any);
     const seen = new Set<string>();
     const keywords = list.filter((k) => {
         const key = k.toLowerCase();
@@ -1501,10 +1913,10 @@ app.get('/api/rank/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('
         seen.add(key);
         return true;
     });
-    res.json({ keywords: keywords.slice(0, 12) });
+    res.json({ keywords: keywords.slice(0, 12), services: businessServices(connectedBusiness), servicesPending: servicesPending() });
 });
 
-app.post('/api/rank/scan-row', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+app.post('/api/rank/scan-row', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     if (!requireBusiness(res)) return;
     if (!gridConfigured()) {
         return res.status(503).json({ error: 'Real rank scans need DataForSEO.', code: 'not_configured' });
@@ -1514,45 +1926,45 @@ app.post('/api/rank/scan-row', requireAuth, hydrateOrgFromDb, requireFeature('lo
     const row = Number(req.body?.row);
     if (!keyword) return res.status(400).json({ error: 'Keyword is required.' });
     if (!Number.isInteger(row) || row < 0 || row >= size) return res.status(400).json({ error: 'Invalid grid row.' });
-    const center = centerOverride(req.body) || (await ensureBusinessCenter(req));
-    if (!center) {
-        return res.status(400).json({ error: 'Your business needs a full address so we can locate the grid center.' });
-    }
-    const col = req.body?.col;
-    if (col !== undefined) {
-        const c = Number(col);
-        if (!Number.isInteger(c) || c < 0 || c >= size) return res.status(400).json({ error: 'Invalid grid column.' });
-        try {
-            const cell = await rankGridCell({
-                keyword,
-                business: { name: connectedBusiness.name, placeId: connectedBusiness.placeId },
-                center,
-                size,
-                row,
-                col: c
-            });
-            return res.json({ row, col: c, size, center, ...cell });
-        } catch (err: any) {
-            console.error('Rank scan cell error:', errMessage(err));
-            return res.status(502).json({ error: `Rank scan failed: ${errMessage(err)}` });
-        }
-    }
+    // Each call must belong to a paid scan (scan-start) and stays within that scan's cell count (plus retries).
+    const scanId = String(req.body?.scanId || '').slice(0, 60);
+    const orgId = String((req as any).orgId || '');
     try {
-        const data = await rankGridRow({
+        if (!scanId || !(await hasRecentCharge(orgId, 'rankScan', scanId, 20))) {
+            return res.status(400).json({ error: 'Start the scan again.', code: 'scan_not_started' });
+        }
+        // One request = one point = one DataForSEO call. 3x3 = 9 points, plus at most one retry per row (12 calls max).
+        if (!(await registerCall(orgId, 'rankScan', scanId, size * size + size))) {
+            return res.status(429).json({ error: 'This scan has already used all its requests. Start a new scan.', code: 'scan_exhausted' });
+        }
+    } catch (err: any) {
+        return res.status(500).json({ error: errMessage(err) });
+    }
+    const location = await getLocation(orgId, String(req.body?.locationId || ''));
+    const center = location ? { lat: location.lat, lng: location.lng } : null;
+    if (!center) {
+        return res.status(400).json({ error: 'Pick one of your saved locations to scan from.' });
+    }
+    // One grid point per request, so each request is exactly one DataForSEO call (whole-row requests were removed).
+    const c = Number(req.body?.col);
+    if (!Number.isInteger(c) || c < 0 || c >= size) return res.status(400).json({ error: 'Invalid grid column.' });
+    try {
+        const cell = await rankGridCell({
             keyword,
             business: { name: connectedBusiness.name, placeId: connectedBusiness.placeId },
             center,
             size,
-            row
+            row,
+            col: c
         });
-        res.json({ row, size, center, ...data });
+        res.json({ row, col: c, size, center, ...cell });
     } catch (err: any) {
-        console.error('Rank scan row error:', errMessage(err));
+        console.error('Rank scan cell error:', errMessage(err));
         res.status(502).json({ error: `Rank scan failed: ${errMessage(err)}` });
     }
 });
 
-app.post('/api/rank/scan-finish', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+app.post('/api/rank/scan-finish', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     if (!requireBusiness(res)) return;
     const keyword = String(req.body?.keyword || '').trim().slice(0, 120);
     const size = normalizeGridSize(req.body?.gridSize);
@@ -1568,7 +1980,26 @@ app.post('/api/rank/scan-finish', requireAuth, hydrateOrgFromDb, requireFeature(
         const n = Number(count);
         if (name && Number.isFinite(n) && n > 0) tally[String(name).slice(0, 160)] = Math.min(n, size * size);
     }
-    const center = centerOverride(req.body) || (await ensureBusinessCenter(req));
+    const orgId = String((req as any).orgId || '');
+    const scanId = String(req.body?.scanId || '').slice(0, 60);
+    if (!scanId || !(await hasRecentCharge(orgId, 'rankScan', scanId, 60))) {
+        return res.status(400).json({ error: 'Start the scan again.', code: 'scan_not_started' });
+    }
+    const location = await getLocation(orgId, String(req.body?.locationId || ''));
+    if (!location) return res.status(400).json({ error: 'Pick one of your saved locations.' });
+    const center = { lat: location.lat, lng: location.lng };
+    // Cells that failed to load were not delivered: give their credits back (once per scan).
+    const failedCells = Math.max(0, Math.min(size * size, Math.round(Number(req.body?.failedCells) || 0)));
+    if (failedCells) {
+        const perCell = CREDIT_COSTS.rankScan / (size * size);
+        await refundOnce(req, 'rankScan', Math.round(failedCells * perCell), scanId, `${failedCells} cell(s) failed`).catch((e: any) =>
+            console.warn('[rank] refund failed:', errMessage(e))
+        );
+        // Nothing came back at all: the scan was fully refunded, so it does not use up this month's slot.
+        if (failedCells === size * size) {
+            await releaseGridSlot(orgId, scanId).catch((e: any) => console.warn('[rank] slot release failed:', errMessage(e)));
+        }
+    }
     const nearby = (Array.isArray(req.body?.competitors) ? req.body.competitors : [])
         .slice(0, 12)
         .map((c: any) => ({
@@ -1583,58 +2014,62 @@ app.post('/api/rank/scan-finish', requireAuth, hydrateOrgFromDb, requireFeature(
     const business = { name: connectedBusiness.name, placeId: connectedBusiness.placeId };
     const share = competitorShare(tally, business, size * size);
     const health = optimizationHealth(avgRank, top3Percentage, scoreProfile(connectedBusiness));
-    const updatedAt = new Date().toISOString();
 
-    const existing: any[] = Array.isArray(dashboardState.trackedKeywords) ? dashboardState.trackedKeywords : [];
-    const prev = existing.find((k: any) => String(k?.keyword || '').toLowerCase() === keyword.toLowerCase());
-    const history = [
-        ...(Array.isArray(prev?.history) ? prev.history : []),
-        { avgRank, top3Percentage, updatedAt }
-    ].slice(-10);
-    const entry = {
-        keyword,
-        avgRank,
-        top3Percentage,
-        updatedAt,
-        previousAvgRank: typeof prev?.avgRank === 'number' && prev.avgRank > 0 ? prev.avgRank : null,
-        health,
-        history
-    };
-    dashboardState.trackedKeywords = [
-        entry,
-        ...existing.filter((k: any) => String(k?.keyword || '').toLowerCase() !== keyword.toLowerCase())
-    ].slice(0, 12);
-    dashboardState.visibilityRank = avgRank;
-    dashboardState.top3Percentage = top3Percentage;
+    // A scan is saved once: a repeated "finish" for the same scan id is ignored.
+    if (!(await registerCall(orgId, 'rankScan', `${scanId}:finish`, 1))) {
+        return res.status(409).json({ error: 'This scan was already saved.', code: 'scan_saved' });
+    }
 
-    const run = {
+    // Scans live in their own table, one row per scan and location.
+    await recordGridScan(orgId, location.id, {
         keyword,
-        gapAnalysis: '',
-        grid,
         gridSize: size,
-        competitors: nearby,
-        competitorShare: share,
-        center,
+        grid,
         avgRank,
         top3Percentage,
-        updatedAt
-    };
-    const prior: any[] = Array.isArray(dashboardState.gapAnalyses) ? dashboardState.gapAnalyses : [];
-    dashboardState.gapAnalyses = [
-        run,
-        ...prior.filter((item: any) => String(item?.keyword || '').toLowerCase() !== keyword.toLowerCase())
-    ].slice(0, 12);
-    (dashboardState as any).rankInsights = null;
+        health,
+        competitorShare: share,
+        competitors: nearby,
+        center
+    });
+    // Dashboard headline numbers follow the business address only.
+    if (location.isPrimary) {
+        dashboardState.visibilityRank = avgRank;
+        dashboardState.top3Percentage = top3Percentage;
+    }
+    // Saved insights are kept until rank-insights replaces them for this scan, so a failed refresh never leaves the page empty.
     await saveOrgToDb(req);
-    res.json({ run, trackedKeywords: dashboardState.trackedKeywords, gapAnalyses: dashboardState.gapAnalyses });
+
+    const gapAnalyses = await latestRuns(orgId, location.id);
+    const run = gapAnalyses.find((r) => r.keyword.toLowerCase() === keyword.toLowerCase()) || null;
+    res.json({ run, trackedKeywords: await trackedFromScans(orgId, location.id), gapAnalyses });
 });
 
-app.post('/api/ai/rank-insights', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
-    const tracked: any[] = Array.isArray(dashboardState.trackedKeywords) ? dashboardState.trackedKeywords : [];
-    const runs: any[] = Array.isArray(dashboardState.gapAnalyses) ? dashboardState.gapAnalyses : [];
-    const cached = (dashboardState as any).rankInsights;
-    if (cached && !req.body?.refresh) return res.json(cached);
-    if (!tracked.length) return res.json({ insights: [], opportunities: [], generatedAt: null });
+app.post('/api/ai/rank-insights', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    const empty = { insights: [], opportunities: [], generatedAt: null };
+    const orgId = String((req as any).orgId || '');
+    const place = await primaryLocation(orgId);
+    const chosen = req.body?.locationId ? await getLocation(orgId, String(req.body.locationId)) : null;
+    const location = chosen || place;
+    if (!location) return res.json(empty);
+    const tracked: any[] = await trackedFromScans(orgId, location.id);
+    const runs: any[] = await latestRuns(orgId, location.id);
+    // Saved insights per location, tagged with the scan they were built from.
+    const legacy = (dashboardState as any).rankInsights;
+    const cached =
+        (dashboardState as any).rankInsightsByLocation?.[location.id] ||
+        (legacy && legacy.locationId === location.id ? legacy : null);
+    if (!tracked.length || !runs.length) return res.json(cached || empty);
+    const scanStamp = String(runs[0].updatedAt || '');
+    const upToDate =
+        cached &&
+        (cached.scanStamp
+            ? cached.scanStamp === scanStamp
+            : cached.generatedAt && new Date(cached.generatedAt).getTime() >= new Date(scanStamp).getTime());
+    // Already built for the latest scan: return it, so Gemini runs at most once per scan whatever the client sends.
+    if (upToDate) return res.json(cached);
+    // Gemini only rewords insights right after a scan the user clicked; page loads and retries get the free computed text.
+    const useAi = Boolean(req.body?.refresh);
 
     const opportunities = tracked
         .filter((k) => k.avgRank >= 4 && k.avgRank <= 10)
@@ -1707,13 +2142,18 @@ app.post('/api/ai/rank-insights', requireAuth, hydrateOrgFromDb, requireFeature(
     });
 
     let insights = plain;
-    if (aiClient && facts.length) {
+    if (useAi && aiClient && facts.length) {
         try {
-            const text = await generateText(
-                `You are a local SEO analyst for "${connectedBusiness.name}" (${connectedBusiness.category || 'local business'}).
+            // Capped so a slow Gemini reply falls back to the computed text instead of timing out the whole request.
+            const text = await withTimeout(
+                generateText(
+                    `You are a local SEO analyst for "${connectedBusiness.name}" (${connectedBusiness.category || 'local business'}).
 Write one short insight (max 35 words, plain, no invented facts) for each fact below, in the same order.
 Facts: ${JSON.stringify(facts)}
 Return JSON only: {"bodies": ["..."]}`
+                ),
+                8000,
+                'rank insights'
             );
             const parsed = parseJsonFromText(text);
             if (Array.isArray(parsed?.bodies) && parsed.bodies.length === plain.length) {
@@ -1724,50 +2164,115 @@ Return JSON only: {"bodies": ["..."]}`
         }
     }
 
-    const payload = { insights, opportunities, generatedAt: new Date().toISOString() };
+    const payload = { insights, opportunities, generatedAt: new Date().toISOString(), locationId: location.id, scanStamp };
     (dashboardState as any).rankInsights = payload;
+    (dashboardState as any).rankInsightsByLocation = {
+        ...((dashboardState as any).rankInsightsByLocation || {}),
+        [location.id]: payload
+    };
     await saveOrgToDb(req);
     res.json(payload);
 });
 
 // ── Visibility Tracker (keyword rank tracking at the business location) ─────
-function trackerList(): TrackerKeyword[] {
-    const raw = (dashboardState as any).visibilityTracker;
+const SUGGESTION_CACHE_DAYS = 7;
+
+// The keyword list and volumes live in the dashboard JSON; rank history lives in the rank_checks table.
+function trackerList(dash: any = dashboardState): TrackerKeyword[] {
+    const raw = dash?.visibilityTracker;
     return Array.isArray(raw?.keywords) ? raw.keywords : [];
 }
 
-function setTrackerList(keywords: TrackerKeyword[]) {
-    (dashboardState as any).visibilityTracker = { keywords, updatedAt: new Date().toISOString() };
+function setTrackerList(keywords: TrackerKeyword[], dash: any = dashboardState) {
+    dash.visibilityTracker = { keywords, updatedAt: new Date().toISOString() };
 }
 
-app.get('/api/visibility-tracker', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), (_req, res) => {
-    res.json({
-        keywords: trackerList(),
-        configured: trackerConfigured(),
-        business: {
-            name: connectedBusiness.name || '',
-            category: connectedBusiness.category || '',
-            city: cityFromAddress(String(connectedBusiness.address || '')),
-            connected: Boolean(connectedBusiness.connected && connectedBusiness.name)
-        },
-        max: MAX_TRACKED_KEYWORDS
+/** Keywords with their history at one location (what the page and the AI Insights summary read). */
+async function trackerWithHistory(orgId: string, locationId: string | null, dash: any = dashboardState): Promise<TrackerKeyword[]> {
+    const list = trackerList(dash);
+    if (!locationId || !orgId) return list.map((k) => ({ ...k, history: [], top: [] }));
+    const hist = await historyFor(orgId, locationId, list.map((k) => k.keyword));
+    return list.map((k) => {
+        const h = hist.get(k.keyword);
+        return { ...k, history: h?.history || [], top: h?.top || [], checkedAt: h?.checkedAt };
     });
+}
+
+app.get('/api/visibility-tracker', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    try {
+        const dash: any = (req as any).dashboardState || dashboardState;
+        const loc = await requestLocation(req, req.query?.locationId);
+        const orgId = String((req as any).orgId || '');
+        res.json({
+            keywords: await trackerWithHistory(orgId, loc?.location.id || null, dash),
+            gridSuggestions: await gridSuggestions(orgId, dash),
+            configured: trackerConfigured(),
+            business: {
+                name: connectedBusiness.name || '',
+                category: connectedBusiness.category || '',
+                city: cityFromAddress(String(connectedBusiness.address || '')),
+                connected: Boolean(connectedBusiness.connected && connectedBusiness.name)
+            },
+            max: trackedKeywordLimit(req),
+            addedThisMonth: (await monthlyAdds(req, dash)).adds.keywords.length,
+            // Each keyword is checked once per billing period; the page uses these to know what is due.
+            ...(await billingPeriod(req).then((p) => ({ periodStart: p.start, periodEnd: p.end }))),
+            costPerKeyword: CREDIT_COSTS.trackerKeyword,
+            ...(loc
+                ? locationPayload(req, loc)
+                : { location: null, locations: [], locationLimit: 1, canAddLocation: false, needsAddress: true })
+        });
+    } catch (err: any) {
+        console.error('[visibility-tracker] load failed:', errMessage(err));
+        res.status(500).json({ error: errMessage(err) });
+    }
 });
 
-app.get('/api/visibility-tracker/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
-    const tracked = new Set(trackerList().map((k) => k.keyword));
+// GET only reads what an earlier manual lookup saved, so opening or refreshing the page never calls DataForSEO.
+// POST is the manual lookup: it fetches, saves the result on the org and charges credits.
+const trackerSuggestions = (allowPaid: boolean): express.RequestHandler => async (req, res) => {
+    const dash: any = (req as any).dashboardState || dashboardState;
+    const tracked = new Set(trackerList(dash).map((k) => k.keyword));
     const address = String(connectedBusiness.address || '');
     const city = cleanKeyword(cityFromAddress(address));
-    const typed = cleanKeyword(req.query?.q);
+    const typed = cleanKeyword(allowPaid ? req.body?.q : req.query?.q);
+    const cache: { initial?: { at: string; all: Record<string, number | null> }; byQuery?: Record<string, { at: string; all: Record<string, number | null> }> } =
+        (dash.suggestionCache = dash.suggestionCache || {});
+    const fresh = (at?: string) => Boolean(at) && Date.now() - new Date(at as string).getTime() < SUGGESTION_CACHE_DAYS * 86_400_000;
     if (typed.length >= 3) {
         // Suggestions for whatever the user is typing (e.g. "facial"), independent of the profile category.
-        const geoQ = { address, lat: connectedBusiness.lat, lng: connectedBusiness.lng };
-        const related = await fetchRelatedKeywords(city ? [typed, `${typed} ${city}`] : [typed], geoQ);
-        const ideas = [typed, `${typed} near me`, `best ${typed} near me`, `${typed} cost`, `${typed} treatment`, ...(city ? [`${typed} ${city}`, `best ${typed} in ${city}`] : [])];
-        const missing = ideas.filter((k) => !(k in related));
-        const extra = await fetchSearchVolumes(missing, geoQ);
-        const all: Record<string, number | null> = { ...related };
-        for (const k of ideas) if (!(k in all)) all[k] = k in extra ? extra[k] : null;
+        // Each new query costs a credit; the same query is free for a week.
+        const hit = cache.byQuery?.[typed];
+        let all: Record<string, number | null>;
+        if (hit && (!allowPaid || fresh(hit.at))) {
+            all = hit.all;
+        } else if (!allowPaid) {
+            return res.json({ suggestions: [], query: typed, needsLookup: true });
+        } else {
+            const geoQ = { address, lat: connectedBusiness.lat, lng: connectedBusiness.lng };
+            const charged = trackerConfigured();
+            try {
+                if (charged) await spend(req, 'keywordSuggest', CREDIT_COSTS.keywordSuggest, `suggest:${typed}`.slice(0, 100), typed);
+            } catch (err: any) {
+                if (sendCreditError(res, err)) return;
+                return res.status(500).json({ error: errMessage(err) });
+            }
+            const related = await fetchRelatedKeywords(city ? [typed, `${typed} ${city}`] : [typed], geoQ);
+            const ideas = [typed, `${typed} near me`, `best ${typed} near me`, `${typed} cost`, `${typed} treatment`, ...(city ? [`${typed} ${city}`, `best ${typed} in ${city}`] : [])];
+            const missing = ideas.filter((k) => !(k in related));
+            const extra = await fetchSearchVolumes(missing, geoQ);
+            all = { ...related };
+            for (const k of ideas) if (!(k in all)) all[k] = k in extra ? extra[k] : null;
+            // Nothing came back at all (lookup failed): give the credit back and do not cache the empty answer.
+            const gotVolume = Object.keys(related).length > 0 || Object.keys(extra).length > 0;
+            if (!gotVolume && charged) {
+                await refund(req, 'keywordSuggest', CREDIT_COSTS.keywordSuggest, `suggest:${typed}`.slice(0, 100), 'lookup failed').catch(() => undefined);
+            } else {
+                const entries = Object.entries({ ...(cache.byQuery || {}), [typed]: { at: new Date().toISOString(), all } });
+                cache.byQuery = Object.fromEntries(entries.slice(-20));
+                await saveOrgToDb(req).catch(() => undefined);
+            }
+        }
         const isRelevant = makeRelevanceFilter(typed, []);
         const list = Object.entries(all)
             .filter(([k]) => !tracked.has(k) && isRelevant(k))
@@ -1777,20 +2282,43 @@ app.get('/api/visibility-tracker/suggestions', requireAuth, hydrateOrgFromDb, re
         return res.json({ suggestions: list.slice(0, 16), query: typed });
     }
     const terms = industryTerms(String(connectedBusiness.category || ''));
-    const services = String(connectedBusiness.attributes || '')
-        .split(/[,;\n]/)
-        .map(cleanKeyword)
-        .filter((x: string) => x.length > 2 && x.length < 50)
-        .slice(0, 6);
+    const services = keywordServices(connectedBusiness as any);
     const seeds = [...terms, ...services].flatMap((t) => (city ? [t, `${t} ${city}`] : [t]));
+    const servicesKey = services.join('|');
 
-    const geo = { address, lat: connectedBusiness.lat, lng: connectedBusiness.lng };
-    const related = await fetchRelatedKeywords(seeds, geo);
-    const templates = industryKeywordIdeas(connectedBusiness as any);
-    const missing = templates.filter((k) => !(k in related)).slice(0, 100);
-    const templateVolumes = await fetchSearchVolumes(missing, geo);
-    const all: Record<string, number | null> = { ...related };
-    for (const k of templates) if (!(k in all)) all[k] = k in templateVolumes ? templateVolumes[k] : null;
+    // The starting list makes two paid lookups, so it is kept for a week instead of being rebuilt on every page load.
+    // A paid refresh also rebuilds it when the services changed since it was made.
+    let all: Record<string, number | null>;
+    if (cache.initial && (!allowPaid || (fresh(cache.initial.at) && (cache.initial as any).services === servicesKey))) {
+        all = { ...cache.initial.all };
+        // Services found after the list was made: show their keyword ideas (volume unknown until the next paid refresh).
+        for (const k of industryKeywordIdeas(connectedBusiness as any)) if (!(k in all)) all[k] = null;
+    } else if (!allowPaid) {
+        return res.json({ suggestions: [], needsLookup: true });
+    } else {
+        // Same as the typed lookup: the starter list is paid, so it takes a credit (refunded if nothing came back).
+        const charged = trackerConfigured();
+        const startRef = `suggest:initial:${randomUUID()}`;
+        try {
+            if (charged) await spend(req, 'keywordSuggest', CREDIT_COSTS.keywordSuggest, startRef, 'starter keywords');
+        } catch (err: any) {
+            if (sendCreditError(res, err)) return;
+            return res.status(500).json({ error: errMessage(err) });
+        }
+        const geo = { address, lat: connectedBusiness.lat, lng: connectedBusiness.lng };
+        const related = await fetchRelatedKeywords(seeds, geo);
+        const templates = industryKeywordIdeas(connectedBusiness as any);
+        const missing = templates.filter((k) => !(k in related)).slice(0, 100);
+        const templateVolumes = await fetchSearchVolumes(missing, geo);
+        all = { ...related };
+        for (const k of templates) if (!(k in all)) all[k] = k in templateVolumes ? templateVolumes[k] : null;
+        if (Object.keys(related).length || Object.keys(templateVolumes).length) {
+            cache.initial = { at: new Date().toISOString(), all, services: servicesKey } as any;
+            await saveOrgToDb(req).catch(() => undefined);
+        } else if (charged) {
+            await refund(req, 'keywordSuggest', CREDIT_COSTS.keywordSuggest, startRef, 'lookup failed').catch(() => undefined);
+        }
+    }
 
     const isRelevant = makeRelevanceFilter(String(connectedBusiness.category || ''), services);
     const suggestions = Object.entries(all)
@@ -1799,84 +2327,208 @@ app.get('/api/visibility-tracker/suggestions', requireAuth, hydrateOrgFromDb, re
         // real demand first; keywords with zero volume are not worth tracking
         .filter((x) => x.volume == null || x.volume > 0)
         .sort((x, y) => (y.volume ?? -1) - (x.volume ?? -1));
-    res.json({ suggestions: suggestions.slice(0, 24) });
-});
+    // Highest volume first, but every service keeps at least one keyword in the list.
+    const picks = [...new Set(services.map((svc) => suggestions.find((s) => s.keyword.includes(svc))).filter(Boolean))] as typeof suggestions;
+    const rest = suggestions.filter((s) => !picks.includes(s)).slice(0, Math.max(0, 24 - picks.length));
+    const top = [...rest, ...picks].sort((x, y) => (y.volume ?? -1) - (x.volume ?? -1));
+    res.json({ suggestions: top, servicesPending: servicesPending() });
+};
+app.get('/api/visibility-tracker/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), trackerSuggestions(false));
+app.post('/api/visibility-tracker/suggestions', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), trackerSuggestions(true));
 
-app.post('/api/visibility-tracker/keywords', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+app.post('/api/visibility-tracker/keywords', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     const incoming: string[] = (Array.isArray(req.body?.keywords) ? req.body.keywords : [req.body?.keyword])
         .map(cleanKeyword)
         .filter((k: string) => k.length >= 2);
     if (!incoming.length) return res.status(400).json({ error: 'Enter at least one keyword.' });
-    const current = trackerList();
-    const have = new Set(current.map((k) => k.keyword));
-    const fresh = Array.from(new Set(incoming)).filter((k) => !have.has(k));
-    if (current.length + fresh.length > MAX_TRACKED_KEYWORDS) {
-        return res.status(400).json({ error: `You can track up to ${MAX_TRACKED_KEYWORDS} keywords.` });
-    }
-    const volumes = await fetchSearchVolumes(fresh, { address: String(connectedBusiness.address || ''), lat: connectedBusiness.lat, lng: connectedBusiness.lng });
-    const now = new Date().toISOString();
-    const added: TrackerKeyword[] = fresh.map((keyword) => ({
-        keyword,
-        volume: keyword in volumes ? volumes[keyword] : null,
-        volumeUpdatedAt: keyword in volumes ? now : undefined,
-        history: [],
-        top: [],
-        addedAt: now
-    }));
-    setTrackerList([...added, ...current]);
+    const dash: any = (req as any).dashboardState || dashboardState;
+    // Adding only saves the keyword to the shared list (Visibility Tracker, Local Search Grid, AI Insights).
+    // No DataForSEO call here: a keyword is checked or scanned only when the user clicks Check or Run Scan.
+    const result = addSharedKeywords(req, dash, incoming, await monthlyAdds(req, dash));
+    if ('error' in result) return res.status(400).json(result);
     await saveOrgToDb(req);
-    res.json({ keywords: trackerList(), added: added.length });
+    const loc = await requestLocation(req, req.body?.locationId);
+    const orgId = String((req as any).orgId || '');
+    res.json({
+        keywords: await trackerWithHistory(orgId, loc?.location.id || null, dash),
+        gridSuggestions: await gridSuggestions(orgId, dash),
+        added: result.added.length
+    });
 });
 
-app.post('/api/visibility-tracker/remove', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+/**
+ * Keywords scanned in the Local Search Grid that are not tracked: shown in the Visibility Tracker as suggestions
+ * and not counted against the keyword limit until the user tracks them. Database only, no paid call.
+ */
+async function gridSuggestions(orgId: string, dash: any): Promise<string[]> {
+    if (!orgId) return [];
+    const scanned = await scannedKeywords(orgId).catch(() => [] as string[]);
+    const skip = new Set([
+        ...trackerList(dash).map((k) => k.keyword),
+        ...(Array.isArray(dash.dismissedGridSuggestions) ? dash.dismissedGridSuggestions : [])
+    ]);
+    return Array.from(new Set(scanned.map(cleanKeyword))).filter((k) => k && !skip.has(k)).slice(0, 10);
+}
+
+app.post('/api/visibility-tracker/dismiss-suggestion', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    const dash: any = (req as any).dashboardState || dashboardState;
     const target = cleanKeyword(req.body?.keyword);
-    setTrackerList(trackerList().filter((k) => k.keyword !== target));
+    if (!target) return res.status(400).json({ error: 'Keyword is required.' });
+    const dismissed: string[] = Array.isArray(dash.dismissedGridSuggestions) ? dash.dismissedGridSuggestions : [];
+    dash.dismissedGridSuggestions = [...dismissed.filter((k) => k !== target), target].slice(-100);
     await saveOrgToDb(req);
-    res.json({ keywords: trackerList() });
+    res.json({ gridSuggestions: await gridSuggestions(String((req as any).orgId || ''), dash) });
 });
 
-app.post('/api/visibility-tracker/check', requireAuth, hydrateOrgFromDb, requireFeature('local_growth'), async (req, res) => {
+/** Search volume already known for free from saved keyword suggestions (no DataForSEO call). */
+function cachedVolume(dash: any, keyword: string): number | null {
+    const cache = dash?.suggestionCache || {};
+    const pools = [cache.initial?.all, ...Object.values(cache.byQuery || {}).map((q: any) => q?.all)];
+    for (const pool of pools) if (pool && keyword in pool && pool[keyword] != null) return pool[keyword];
+    return null;
+}
+
+/**
+ * The one keyword list per business, shared by the Visibility Tracker, the Local Search Grid and AI Insights.
+ * Never goes over the plan limit (Local Presence 5, Growth plans 10). Saving only, no paid call.
+ */
+function addSharedKeywords(req: any, dash: any, keywords: string[], monthly?: { adds: MonthlyAdds; period: { end: string } }) {
+    const current = trackerList(dash);
+    const have = new Set(current.map((k) => k.keyword));
+    const fresh = Array.from(new Set(keywords.map(cleanKeyword).filter((k) => k.length >= 2))).filter((k) => !have.has(k));
+    const limit = trackedKeywordLimit(req);
+    // A keyword already added this month (then removed) can come back without using a new slot.
+    const newThisMonth = monthly ? fresh.filter((k) => !monthly.adds.keywords.includes(k)) : [];
+    const overList = fresh.length && current.length + fresh.length > limit;
+    const overMonth = monthly && newThisMonth.length && monthly.adds.keywords.length + newThisMonth.length > limit;
+    if (overList || overMonth) {
+        return {
+            error: overMonth
+                ? `Your plan allows ${limit} keywords per month. You can add new ones after ${resetDay(monthly!.period.end)}.`
+                : `Your plan allows ${limit} keywords.`,
+            code: 'keyword_limit',
+            max: limit
+        };
+    }
+    if (monthly) monthly.adds.keywords.push(...newThisMonth);
+    const now = new Date().toISOString();
+    const added: TrackerKeyword[] = fresh.map((keyword) => {
+        const volume = cachedVolume(dash, keyword);
+        return { keyword, volume, volumeUpdatedAt: volume != null ? now : undefined, history: [], top: [], addedAt: now };
+    });
+    if (added.length) setTrackerList([...added, ...current], dash);
+    return { added };
+}
+
+app.post('/api/visibility-tracker/remove', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    const dash: any = (req as any).dashboardState || dashboardState;
+    const target = cleanKeyword(req.body?.keyword);
+    setTrackerList(trackerList(dash).filter((k) => k.keyword !== target), dash);
+    await saveOrgToDb(req);
+    const loc = await requestLocation(req, req.body?.locationId);
+    const orgId = String((req as any).orgId || '');
+    res.json({
+        keywords: await trackerWithHistory(orgId, loc?.location.id || null, dash),
+        gridSuggestions: await gridSuggestions(orgId, dash)
+    });
+});
+
+app.post('/api/visibility-tracker/check', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     if (!requireBusiness(res)) return;
     if (!trackerConfigured()) {
         return res.status(503).json({ error: 'Live rank checks need DataForSEO.', code: 'not_configured' });
     }
+    const dash: any = (req as any).dashboardState || dashboardState;
+    const orgId = String((req as any).orgId || '');
     const wanted = new Set<string>(
         (Array.isArray(req.body?.keywords) ? req.body.keywords : []).map(cleanKeyword).filter(Boolean).slice(0, 5)
     );
     if (!wanted.size) return res.status(400).json({ error: 'No keywords to check.' });
-    const center = await ensureBusinessCenter(req);
-    if (!center) {
-        return res.status(400).json({ error: 'Your business needs a full address so we can locate it on the map.' });
-    }
-    const business = { name: connectedBusiness.name, placeId: connectedBusiness.placeId };
-    const list = trackerList();
-    const failed: string[] = [];
-    // Heal volumes that were stored as empty/0 (e.g. looked up for the wrong country earlier).
-    const stale = list.filter((k) => wanted.has(k.keyword) && !k.volume).map((k) => k.keyword);
-    if (stale.length) {
-        const fresh = await fetchSearchVolumes(stale, { address: String(connectedBusiness.address || ''), lat: connectedBusiness.lat, lng: connectedBusiness.lng });
-        for (const k of list) {
-            if (k.keyword in fresh) {
-                k.volume = fresh[k.keyword];
-                k.volumeUpdatedAt = new Date().toISOString();
+    try {
+        const loc = await requestLocation(req, req.body?.locationId);
+        if (!loc) {
+            return res.status(400).json({ error: 'Your business needs a full address so we can locate it on the map.' });
+        }
+        const locationId = loc.location.id;
+        const center = { lat: loc.location.lat, lng: loc.location.lng };
+        const business = { name: connectedBusiness.name, placeId: connectedBusiness.placeId };
+        const list = trackerList(dash);
+        const chosen = list.filter((k) => wanted.has(k.keyword));
+        if (!chosen.length) return res.status(400).json({ error: 'None of those keywords are being tracked.' });
+
+        // Each keyword at a location is checked once per billing month; after that its saved rank is shown.
+        // Removing and re-adding a keyword does not allow a new check, because this month's check is still recorded.
+        const period = await billingPeriod(req);
+        const last = await lastCheckTimes(orgId, locationId, chosen.map((k) => k.keyword));
+        const due: TrackerKeyword[] = [];
+        const skipped: Array<{ keyword: string; nextAvailableAt: string }> = [];
+        for (const k of chosen) {
+            const at = last.get(k.keyword);
+            if (at && new Date(at).getTime() >= new Date(period.start).getTime()) {
+                skipped.push({ keyword: k.keyword, nextAvailableAt: period.end });
+            } else {
+                due.push(k);
             }
         }
-    }
-    const updated = await Promise.all(
-        list.map(async (entry) => {
-            if (!wanted.has(entry.keyword)) return entry;
-            try {
-                return await checkKeywordRank(entry, center, business);
-            } catch (err: any) {
-                console.warn('[visibility-tracker] check failed:', entry.keyword, errMessage(err));
-                failed.push(entry.keyword);
-                return entry;
+        if (!due.length) {
+            const resets = new Date(period.end).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+            return res.status(409).json({
+                error: `Already checked this month. Showing the saved rank. You can check again after ${resets}.`,
+                code: 'already_checked',
+                nextAvailableAt: period.end,
+                skipped,
+                keywords: await trackerWithHistory(orgId, locationId, dash)
+            });
+        }
+
+        const unit = CREDIT_COSTS.trackerKeyword;
+        const ref = `tracker:${randomUUID()}`;
+        await spend(req, 'trackerKeyword', due.length * unit, ref, `${due.length} keyword(s)`);
+
+        // Keywords saved without a known search volume get it once, with this click (one DataForSEO call, 1 credit,
+        // refunded if nothing comes back). After that it is never looked up again.
+        const noVolume = due.filter((k) => k.volume == null && !k.volumeUpdatedAt).map((k) => k.keyword);
+        const volRef = `volume:${randomUUID()}`;
+        const volumePaid =
+            noVolume.length > 0 &&
+            (await spend(req, 'keywordSuggest', CREDIT_COSTS.keywordSuggest, volRef, `volume for ${noVolume.length} keyword(s)`)
+                .then(() => true)
+                .catch(() => false)); // no credit left for it: skip the volume, the rank check still runs
+        if (volumePaid) {
+            const volumes = await fetchSearchVolumes(noVolume, { address: String(connectedBusiness.address || ''), lat: connectedBusiness.lat, lng: connectedBusiness.lng }).catch(() => ({} as Record<string, number>));
+            if (!Object.keys(volumes).length) {
+                await refund(req, 'keywordSuggest', CREDIT_COSTS.keywordSuggest, volRef, 'volume lookup failed').catch(() => undefined);
             }
-        })
-    );
-    setTrackerList(updated);
-    await saveOrgToDb(req);
-    res.json({ keywords: updated, failed });
+            const now = new Date().toISOString();
+            for (const k of list) {
+                if (noVolume.includes(k.keyword)) {
+                    if (k.keyword in volumes) k.volume = volumes[k.keyword];
+                    k.volumeUpdatedAt = now;
+                }
+            }
+        }
+
+        const failed: string[] = [];
+        await Promise.all(
+            due.map(async (entry) => {
+                try {
+                    const result = await checkRank(entry.keyword, center, business);
+                    await recordRankCheck(orgId, locationId, entry.keyword, result.rank, result.top3, 'manual');
+                } catch (err: any) {
+                    console.warn('[visibility-tracker] check failed:', entry.keyword, errMessage(err));
+                    failed.push(entry.keyword);
+                }
+            })
+        );
+        if (failed.length) await refund(req, 'trackerKeyword', failed.length * unit, ref, `${failed.length} check(s) failed`);
+        setTrackerList(list, dash);
+        await saveOrgToDb(req);
+        res.json({ keywords: await trackerWithHistory(orgId, locationId, dash), failed, skipped });
+    } catch (err: any) {
+        if (sendCreditError(res, err)) return;
+        console.error('[visibility-tracker] check error:', errMessage(err));
+        res.status(500).json({ error: errMessage(err) });
+    }
 });
 
 function citationNorm(value: string) {
@@ -2023,7 +2675,15 @@ app.post('/api/ai/citations', requireAuth, hydrateOrgFromDb, requireFeature('loc
         const pendingAge = pending?.startedAt ? Date.now() - new Date(pending.startedAt).getTime() : 0;
         const pendingFresh = Boolean(pending?.mapsTaskId && pending?.organicTaskId && pendingAge < 3 * 60 * 1000);
         if (!pendingFresh) {
-            dashboardState.citationPending = await startCitationScan(connectedBusiness);
+            // A new scan is charged once; the polling calls that follow are free.
+            const creditRef = `citations:${randomUUID()}`;
+            await spend(req, 'citations', CREDIT_COSTS.citations, creditRef);
+            try {
+                dashboardState.citationPending = { ...(await startCitationScan(connectedBusiness)), creditRef } as any;
+            } catch (startErr) {
+                await refund(req, 'citations', CREDIT_COSTS.citations, creditRef, 'could not start').catch(() => undefined);
+                throw startErr;
+            }
             await saveOrgToDb(req);
             return res.json({ retry: true, retryAfterSeconds: 4 });
         }
@@ -2035,6 +2695,9 @@ app.post('/api/ai/citations', requireAuth, hydrateOrgFromDb, requireFeature('loc
         const saved = await storeCitationAudit(req, collected);
         return res.json(saved);
     } catch (err: any) {
+        if (sendCreditError(res, err)) return;
+        const failedRef = String((dashboardState.citationPending as any)?.creditRef || '');
+        if (failedRef) await refundOnce(req, 'citations', CREDIT_COSTS.citations, failedRef, 'scan failed').catch(() => undefined);
         dashboardState.citationPending = null;
         try {
             await saveOrgToDb(req);
@@ -2062,6 +2725,7 @@ app.post('/api/ai/media-generate', requireAuth, hydrateOrgFromDb, requireFeature
         });
     }
 
+    if (!(await chargeAi(req, res, 'aiImage', 'media photo'))) return;
     try {
         const response = await aiClient.models.generateContent({
             model: IMAGE_MODEL,
@@ -2111,6 +2775,15 @@ Requirements:
 // Three short requests (each under the ~30s gateway limit): the client asks ChatGPT and
 // Google AI Overviews in parallel, then posts the raw answers to /analyze for scoring.
 const growthReportingGate = [requireAuth, hydrateOrgFromDb, requireAllFeatures(['local_growth', 'reporting'])] as const;
+// LLM Visibility and LLM Tracking: every Local SEO plan (prompt limit by plan: Local Presence 5, Growth plans 10).
+const llmGate = [requireAuth, hydrateOrgFromDb, requireFeature('local_presence')] as const;
+
+/** Each LLM prompt is asked once per billing month; this tells the shared answer store which month it is. */
+async function llmPeriod(req: any, dash: any) {
+    const period = await billingPeriod(req);
+    setAnswerPeriod(dash, period.start);
+    return period;
+}
 
 function visibilityBusiness() {
     return {
@@ -2118,7 +2791,10 @@ function visibilityBusiness() {
         address: connectedBusiness.address,
         category: connectedBusiness.category,
         website: connectedBusiness.website,
-        completenessScore: dashboardState.completenessScore
+        completenessScore: dashboardState.completenessScore,
+        attributes: connectedBusiness.attributes,
+        services: Array.isArray(connectedBusiness.services) ? connectedBusiness.services : [],
+        aiPrompts: Array.isArray(connectedBusiness.aiPrompts) ? connectedBusiness.aiPrompts : []
     };
 }
 
@@ -2138,25 +2814,92 @@ function llmVisibilityState(dash: any) {
     return { report, history };
 }
 
-app.get('/api/llm/visibility', ...growthReportingGate, (_req, res) => {
+app.get('/api/llm/visibility', ...llmGate, async (_req, res) => {
     const dash: any = (_req as any).dashboardState || dashboardState;
-    res.json(llmVisibilityState(dash));
+    const period = await billingPeriod(_req);
+    res.json({ ...llmVisibilityState(dash), periodStart: period.start, periodEnd: period.end });
 });
 
+// One Gemini pass over answers (per platform, in parallel); falls back to text matching when Gemini is missing or fails.
+async function geminiAnalysis(business: ReturnType<typeof visibilityBusiness>, input: Record<string, any>, timeoutMs = 16000) {
+    const analysis: any = { rows: [], opportunities: [] };
+    if (!aiClient) return analysis;
+    const results = await Promise.all(
+        analysisJobs(business, input).map(async (job) => {
+            try {
+                return parseJsonFromText(
+                    await withTimeout(generateText(job.prompt, { responseMimeType: 'application/json' }), timeoutMs, 'llm-visibility analysis')
+                );
+            } catch (err: any) {
+                console.warn('[llm-visibility] analysis group failed (using text matching):', errMessage(err));
+                return null;
+            }
+        })
+    );
+    for (const r of results) {
+        if (Array.isArray(r?.rows)) analysis.rows.push(...r.rows);
+        if (Array.isArray(r?.opportunities) && !analysis.opportunities.length) analysis.opportunities = r.opportunities;
+    }
+    return analysis;
+}
+
+// Save what a Visibility run learned into the shared store, and add a tracker point for every tracked prompt it covered,
+// so LLM Visibility and LLM Tracking always show the same answers and verdicts.
+function shareVisibilityAnswers(dash: any, business: ReturnType<typeof visibilityBusiness>, input: Record<string, any>, analysis: any) {
+    const verdicts = answerVerdicts(business, input, analysis);
+    const asked = new Set<string>();
+    for (const platform of LLM_PLATFORMS) {
+        for (const { answer, verdict } of verdicts[platform] || []) {
+            if (!answer.present || answer.ok === false || !answer.prompt) continue;
+            putAnswer(dash, { prompt: answer.prompt, platform, askedAt: answer.askedAt || new Date().toISOString(), answer, verdict });
+            asked.add(answer.prompt.toLowerCase().replace(/[^a-z0-9]+/g, ''));
+        }
+    }
+    for (const item of llmTrackerPrompts(dash)) {
+        if (!asked.has(item.prompt.toLowerCase().replace(/[^a-z0-9]+/g, ''))) continue;
+        const entries: Partial<Record<(typeof LLM_PLATFORMS)[number], StoredAnswer>> = {};
+        for (const platform of LLM_PLATFORMS) entries[platform] = cachedAnswer(dash, platform, item.prompt) || undefined;
+        const point = pointFromEntries(entries);
+        if (point) {
+            appendPoint(item, point);
+            dash.llmTracker = { prompts: llmTrackerPrompts(dash), updatedAt: new Date().toISOString() };
+        }
+    }
+}
 for (const platform of LLM_PLATFORMS) {
-    app.post(`/api/llm/visibility/${platform}`, ...growthReportingGate, async (_req, res) => {
+    // Reads the shared answer store (read-only: the platform calls run in parallel, so the store is written by /analyze).
+    app.post(`/api/llm/visibility/${platform}`, ...llmGate, async (_req, res) => {
         if (!requireBusiness(res) || !requireDataForSeo(res)) return;
+        const dash: any = (_req as any).dashboardState || dashboardState;
         const business = visibilityBusiness();
         let firstError = '';
+        // Answers asked this billing month are reused for free; each new answer costs one credit (refunded if it fails).
+        await llmPeriod(_req, dash);
+        const prompts = buildPrompts(business);
+        const toAsk = prompts.filter((p) => !cachedAnswer(dash, platform, p));
+        const ref = `llm:${platform}:${randomUUID()}`;
+        try {
+            await spend(_req, 'llmVisibility', toAsk.length * CREDIT_COSTS.llmTrackerAnswer, ref, platform);
+        } catch (err: any) {
+            if (sendCreditError(res, err)) return;
+            return res.status(500).json({ error: errMessage(err) });
+        }
+        let failedCount = 0;
         const answers = await Promise.all(
-            buildPrompts(business).map((prompt) =>
-                askLlm(platform, prompt, business).catch((err: any) => {
+            prompts.map(async (prompt) => {
+                const cached = cachedAnswer(dash, platform, prompt);
+                if (cached) return { ...cached.answer, askedAt: cached.askedAt };
+                try {
+                    return { ...(await askLlm(platform, prompt, business)), askedAt: new Date().toISOString() };
+                } catch (err: any) {
+                    failedCount += 1;
                     firstError = firstError || errMessage(err);
                     console.warn(`[llm-visibility] ${platform} failed:`, errMessage(err));
-                    return { prompt, ok: false, text: '', present: false, sources: [] };
-                })
-            )
+                    return { prompt, ok: false, text: '', present: false, sources: [] as any[] };
+                }
+            })
         );
+        if (failedCount) await refund(_req, 'llmVisibility', failedCount * CREDIT_COSTS.llmTrackerAnswer, ref, `${failedCount} failed`).catch(() => undefined);
         if (!answers.some((a) => a.present)) {
             return res.status(502).json({ error: firstError || `${platform} returned no answers.` });
         }
@@ -2164,21 +2907,49 @@ for (const platform of LLM_PLATFORMS) {
     });
 }
 
-app.post('/api/llm/visibility/google', ...growthReportingGate, async (_req, res) => {
+app.post('/api/llm/visibility/google', ...llmGate, async (_req, res) => {
     if (!requireBusiness(res) || !requireDataForSeo(res)) return;
+    const dash: any = (_req as any).dashboardState || dashboardState;
     const business = visibilityBusiness();
+    const prompts = buildPrompts(business);
+    // Google AI Overview answers are also asked once per billing month, then shown from the saved copy.
+    const period = await llmPeriod(_req, dash);
+    const saved: Record<string, { answer: any; askedAt: string }> = dash.googleAnswers || {};
+    const keyOf = (p: string) => p.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const isSaved = (p: string) => {
+        const s = saved[keyOf(p)];
+        return Boolean(s?.answer?.present) && new Date(s.askedAt).getTime() >= new Date(period.start).getTime();
+    };
+    const toAsk = prompts.filter((p) => !isSaved(p));
+    const ref = `llm:google:${randomUUID()}`;
+    try {
+        await spend(_req, 'llmVisibility', toAsk.length * CREDIT_COSTS.llmTrackerAnswer, ref, 'google');
+    } catch (err: any) {
+        if (sendCreditError(res, err)) return;
+        return res.status(500).json({ error: errMessage(err) });
+    }
+    let failedCount = 0;
     const answers = await Promise.all(
-        buildPrompts(business).map((prompt) =>
-            askGoogleOverview(prompt, { address: connectedBusiness.address, lat: connectedBusiness.lat, lng: connectedBusiness.lng }).catch((err: any) => {
+        prompts.map(async (prompt) => {
+            if (isSaved(prompt)) return saved[keyOf(prompt)].answer;
+            const answer = await askGoogleOverview(prompt, { address: connectedBusiness.address, lat: connectedBusiness.lat, lng: connectedBusiness.lng }).catch((err: any) => {
+                failedCount += 1;
                 console.warn('[llm-visibility] google failed:', err?.message || err);
                 return { prompt, ok: false, text: '', present: false, sources: [] };
-            })
-        )
+            });
+            if ((answer as any)?.present) saved[keyOf(prompt)] = { answer, askedAt: new Date().toISOString() };
+            return answer;
+        })
     );
+    if (failedCount) await refund(_req, 'llmVisibility', failedCount * CREDIT_COSTS.llmTrackerAnswer, ref, `${failedCount} failed`).catch(() => undefined);
+    if (toAsk.length) {
+        dash.googleAnswers = saved;
+        await saveOrgToDb(_req).catch(() => undefined);
+    }
     res.json({ answers });
 });
 
-app.post('/api/llm/visibility/analyze', ...growthReportingGate, async (req, res) => {
+app.post('/api/llm/visibility/analyze', ...llmGate, async (req, res) => {
     if (!requireBusiness(res)) return;
     const dash: any = (req as any).dashboardState || dashboardState;
     const business = visibilityBusiness();
@@ -2186,27 +2957,15 @@ app.post('/api/llm/visibility/analyze', ...growthReportingGate, async (req, res)
     const input: Record<string, any> = { google: Array.isArray(body.google) ? body.google : [] };
     for (const p of LLM_PLATFORMS) input[p] = Array.isArray(body[p]) ? body[p] : [];
     if (!LLM_PLATFORMS.some((p) => input[p].length)) return res.status(400).json({ error: 'No LLM answers to analyse.' });
-    let analysis: any = { rows: [], opportunities: [] };
-    if (aiClient) {
-        const results = await Promise.all(
-            analysisJobs(business, input).map(async (job) => {
-                try {
-                    return parseJsonFromText(
-                        await withTimeout(generateText(job.prompt, { responseMimeType: 'application/json' }), 16000, 'llm-visibility analysis')
-                    );
-                } catch (err: any) {
-                    console.warn('[llm-visibility] analysis group failed (using text matching):', errMessage(err));
-                    return null;
-                }
-            })
-        );
-        for (const r of results) {
-            if (Array.isArray(r?.rows)) analysis.rows.push(...r.rows);
-            if (Array.isArray(r?.opportunities) && !analysis.opportunities.length) analysis.opportunities = r.opportunities;
-        }
-    }
     const { report: previous, history } = llmVisibilityState(dash);
+    // A report made this billing month is shown again instead of running the Gemini analysis a second time.
+    const period = await llmPeriod(req, dash);
+    if (previous?.createdAt && new Date(previous.createdAt).getTime() >= new Date(period.start).getTime()) {
+        return res.json({ report: previous, history, reused: true, nextAvailableAt: period.end });
+    }
+    const analysis = await geminiAnalysis(business, input);
     const report = buildVisibilityReport(business, input, analysis, previous);
+    shareVisibilityAnswers(dash, business, input, analysis);
     dash.llmVisibility = report;
     dash.llmVisibilityHistory = [report, ...history].slice(0, 20);
     delete dash.aiVisibility;
@@ -2215,7 +2974,7 @@ app.post('/api/llm/visibility/analyze', ...growthReportingGate, async (req, res)
     res.json({ report, history: dash.llmVisibilityHistory });
 });
 
-app.delete('/api/llm/visibility/history', ...growthReportingGate, async (req, res) => {
+app.delete('/api/llm/visibility/history', ...llmGate, async (req, res) => {
     const id = String(req.query.createdAt || '');
     const dash: any = (req as any).dashboardState || dashboardState;
     const { history: existing } = llmVisibilityState(dash);
@@ -2228,12 +2987,134 @@ app.delete('/api/llm/visibility/history', ...growthReportingGate, async (req, re
     res.json({ report: dash.llmVisibility, history });
 });
 
+// ── LLM Tracking (user-chosen prompts, rank re-checked over time) ────────────
+function llmTrackerPrompts(dash: any): TrackedPrompt[] {
+    return Array.isArray(dash?.llmTracker?.prompts) ? dash.llmTracker.prompts : [];
+}
+
+/** Keywords this org's plan may track in the Visibility Tracker (Local Presence 5, Growth plans 10). */
+function trackedKeywordLimit(req: any) {
+    return getTrackedKeywordLimit(req.entitlements?.planId);
+}
+
+function llmTrackerLimit(req: any) {
+    return getLlmTrackerPromptLimit(req.entitlements?.planId);
+}
+
+function llmTrackerPayload(dash: any, req: any) {
+    const prompts = llmTrackerPrompts(dash);
+    const business = visibilityBusiness();
+    return {
+        prompts,
+        suggestions: suggestPrompts(business, prompts.map((p) => p.prompt)).slice(0, 8),
+        configured: dataForSeoReady(),
+        business: {
+            name: connectedBusiness.name || '',
+            category: connectedBusiness.category || '',
+            city: cityFromAddress(String(connectedBusiness.address || '')),
+            connected: Boolean(connectedBusiness.connected && connectedBusiness.name)
+        },
+        max: llmTrackerLimit(req),
+        planName: req.entitlements?.planName || '',
+        servicesPending: servicesPending()
+    };
+}
+
+app.get('/api/llm/tracker', ...llmGate, (req, res) => {
+    res.json(llmTrackerPayload((req as any).dashboardState || dashboardState, req));
+});
+
+app.post('/api/llm/tracker/prompts', ...llmGate, async (req, res) => {
+    const dash: any = (req as any).dashboardState || dashboardState;
+    const existing = llmTrackerPrompts(dash);
+    const incoming = (Array.isArray(req.body?.prompts) ? req.body.prompts : [req.body?.prompt]).map(cleanPrompt).filter((p: string) => p.length >= 5);
+    if (!incoming.length) return res.status(400).json({ error: 'Enter a prompt of at least 5 characters.' });
+    const known = new Set(existing.map((p) => p.prompt.toLowerCase()));
+    const fresh = [...new Set<string>(incoming)].filter((p) => !known.has(p.toLowerCase()));
+    if (!fresh.length) return res.status(409).json({ error: 'That prompt is already being tracked.' });
+    // Same monthly rule as keywords: removing a prompt does not free its slot until the month resets.
+    const limit = llmTrackerLimit(req);
+    const { adds, period } = await monthlyAdds(req, dash);
+    const newThisMonth = fresh.map((p) => p.toLowerCase()).filter((p) => !adds.prompts.includes(p));
+    if (existing.length + fresh.length > limit) {
+        return res.status(400).json({ error: `Your plan allows ${limit} prompts.`, code: 'prompt_limit', upgrade: true });
+    }
+    if (adds.prompts.length + newThisMonth.length > limit) {
+        return res.status(400).json({ error: `Your plan allows ${limit} prompts per month. You can add new ones after ${resetDay(period.end)}.`, code: 'prompt_limit' });
+    }
+    adds.prompts.push(...newThisMonth);
+    const now = new Date().toISOString();
+    dash.llmTracker = {
+        prompts: [...existing, ...fresh.map((prompt) => ({ prompt, addedAt: now, history: [] }))],
+        updatedAt: now
+    };
+    await saveOrgToDb(req);
+    res.json(llmTrackerPayload(dash, req));
+});
+
+app.post('/api/llm/tracker/remove', ...llmGate, async (req, res) => {
+    const dash: any = (req as any).dashboardState || dashboardState;
+    const target = cleanPrompt(req.body?.prompt).toLowerCase();
+    dash.llmTracker = {
+        prompts: llmTrackerPrompts(dash).filter((p) => p.prompt.toLowerCase() !== target),
+        updatedAt: new Date().toISOString()
+    };
+    await saveOrgToDb(req);
+    res.json(llmTrackerPayload(dash, req));
+});
+
+// Each prompt asks 3 platforms in parallel; the client sends small batches to stay under the gateway limit.
+app.post('/api/llm/tracker/check', ...llmGate, async (req, res) => {
+    if (!requireBusiness(res) || !requireDataForSeo(res)) return;
+    const dash: any = (req as any).dashboardState || dashboardState;
+    const prompts = llmTrackerPrompts(dash);
+    const wanted = new Set(
+        (Array.isArray(req.body?.prompts) ? req.body.prompts : []).slice(0, 2).map((p: unknown) => cleanPrompt(p).toLowerCase())
+    );
+    const targets = prompts.filter((p) => wanted.has(p.prompt.toLowerCase()));
+    if (!targets.length) return res.status(400).json({ error: 'Add the prompts you want to check first.' });
+    const business = visibilityBusiness();
+    const errors: Record<string, string> = {};
+    // Answers asked this billing month (from here or from LLM Visibility) are shown again for free;
+    // only a prompt not yet asked this month is sent to the AI engines (one credit per answer).
+    await llmPeriod(req, dash);
+    const unit = CREDIT_COSTS.llmTrackerAnswer;
+    const freshCount = new Map<string, number>();
+    for (const t of targets) {
+        freshCount.set(t.prompt, LLM_PLATFORMS.filter((p) => !cachedAnswer(dash, p, t.prompt)).length);
+    }
+    const ref = `llm-tracker:${randomUUID()}`;
+    try {
+        await spend(req, 'llmTrackerAnswer', [...freshCount.values()].reduce((a, b) => a + b, 0) * unit, ref);
+    } catch (err: any) {
+        if (sendCreditError(res, err)) return;
+        return res.status(500).json({ error: errMessage(err) });
+    }
+    const results = await checkPrompts(dash, targets.map((t) => t.prompt), business, {
+        analyze: (b, input) => geminiAnalysis(b as any, input, 7000)
+    });
+    let refundCount = 0;
+    for (const item of targets) {
+        const result = results.get(item.prompt);
+        if (result && typeof result !== 'string') appendPoint(item, result);
+        else {
+            errors[item.prompt] = String(result || 'Check failed');
+            refundCount += freshCount.get(item.prompt) || 0;
+            console.warn('[llm-tracker] check failed:', errors[item.prompt]);
+        }
+    }
+    if (refundCount) await refund(req, 'llmTrackerAnswer', refundCount * unit, ref, 'check failed').catch(() => undefined);
+    dash.llmTracker = { prompts, updatedAt: new Date().toISOString() };
+    await saveOrgToDb(req);
+    res.json({ ...llmTrackerPayload(dash, req), errors });
+});
+
 // ── AI Insights overview (prioritized actions, growth strategy, pack share vs competitors) ──
-// Everything the AI Insights page needs in one shape; used by every route that returns the page data.
-function insightsPayload(dash: any) {
+function insightsPayload(dash: any, trackerKeywords: TrackerKeyword[] = trackerList(dash)) {
     const state = dash.insightActionState || {};
     const now = Date.now();
-    const all = buildInsightActions(connectedBusiness, dash);
+    // Rank history comes from the rank_checks table (business address), not the dashboard JSON.
+    const all = buildInsightActions(connectedBusiness, { ...dash, visibilityTracker: { keywords: trackerKeywords } });
     const actions = all.filter((a) => {
         const entry = state[a.id];
         if (!entry) return true;
@@ -2247,12 +3128,27 @@ function insightsPayload(dash: any) {
         latest: dash.aiInsights || null,
         history,
         ...computeChanges(history),
-        trackerMoves: summarizeTracker(dash.visibilityTracker?.keywords).moves
+        trackerMoves: summarizeTracker(trackerKeywords).moves,
+        cost: CREDIT_COSTS.aiInsights,
+        cooldownHours: INSIGHTS_COOLDOWN_HOURS,
+        nextCheckAt: cooldownEnds(dash.aiInsights?.createdAt, INSIGHTS_COOLDOWN_HOURS)
     };
 }
 
-app.get('/api/ai/insights', ...growthReportingGate, (_req, res) => {
-    res.json(insightsPayload((_req as any).dashboardState || dashboardState));
+/** Tracked keywords with their rank history at the business address, for the actions and the AI tip. */
+async function insightsTracker(req: any): Promise<TrackerKeyword[]> {
+    const dash: any = req.dashboardState || dashboardState;
+    const orgId = String(req.orgId || '');
+    const primary = orgId ? await primaryLocation(orgId).catch(() => null) : null;
+    return trackerWithHistory(orgId, primary?.id || null, dash);
+}
+
+app.get('/api/ai/insights', ...growthReportingGate, async (_req, res) => {
+    try {
+        res.json(insightsPayload((_req as any).dashboardState || dashboardState, await insightsTracker(_req)));
+    } catch (err: any) {
+        res.status(500).json({ error: errMessage(err) });
+    }
 });
 
 app.post('/api/ai/insights/action', ...growthReportingGate, async (req, res) => {
@@ -2265,32 +3161,57 @@ app.post('/api/ai/insights/action', ...growthReportingGate, async (req, res) => 
     else next[id] = { status, at: new Date().toISOString() };
     dash.insightActionState = next;
     await saveOrgToDb(req);
-    res.json(insightsPayload(dash));
+    res.json(insightsPayload(dash, await insightsTracker(req)));
 });
 
 // The Map Pack check is split into short requests (one per keyword) so each stays under the ~30s gateway limit.
-function insightsPlan() {
-    const tracked = (Array.isArray(dashboardState.trackedKeywords) ? dashboardState.trackedKeywords : [])
-        .map((k: any) => String(k?.keyword || '').trim())
+async function insightsPlan(_orgId: string) {
+    // AI Insights uses the same shared keyword list as the Visibility Tracker and the Local Search Grid.
+    const tracked = trackerList(dashboardState)
+        .map((k) => String(k?.keyword || '').trim())
         .filter(Boolean)
         .slice(0, 3);
     return planKeywords(connectedBusiness as any, tracked);
 }
 
-app.post('/api/ai/insights/plan', ...growthReportingGate, (_req, res) => {
+/** The refresh is paid once, at /plan. The pack and trends requests that follow only run inside that paid window. */
+function insightsRunActive(dash: any) {
+    const run = dash?.insightRun;
+    return Boolean(run?.ref && run?.at && Date.now() - new Date(run.at).getTime() < 15 * 60_000);
+}
+
+app.post('/api/ai/insights/plan', ...growthReportingGate, async (req, res) => {
     if (!requireBusiness(res) || !requireDataForSeo(res)) return;
-    const keywords = insightsPlan();
-    if (!keywords.length) return res.status(400).json({ error: 'Add a business category on the Business profile page first.' });
-    res.json({ keywords });
+    const dash: any = (req as any).dashboardState || dashboardState;
+    try {
+        const keywords = await insightsPlan(String((req as any).orgId || ''));
+        if (!keywords.length) return res.status(400).json({ error: 'Add a business category on the Business profile page first.' });
+        const next = cooldownEnds(dash.aiInsights?.createdAt, INSIGHTS_COOLDOWN_HOURS);
+        if (next) return sendCooldown(res, next, 'The Map Pack check');
+        const ref = `insights:${randomUUID()}`;
+        await spend(req, 'aiInsights', CREDIT_COSTS.aiInsights, ref);
+        dash.insightRun = { ref, at: new Date().toISOString() };
+        await saveOrgToDb(req);
+        res.json({ keywords, cost: CREDIT_COSTS.aiInsights });
+    } catch (err: any) {
+        if (sendCreditError(res, err)) return;
+        res.status(500).json({ error: errMessage(err) });
+    }
 });
 
 app.post('/api/ai/insights/pack', ...growthReportingGate, async (req, res) => {
     if (!requireBusiness(res) || !requireDataForSeo(res)) return;
+    const dash: any = (req as any).dashboardState || dashboardState;
+    if (!insightsRunActive(dash)) return res.status(400).json({ error: 'Start the check again.', code: 'run_not_started' });
     const keyword = String(req.body?.keyword || '').trim();
-    if (!insightsPlan().some((k) => k.toLowerCase() === keyword.toLowerCase())) {
+    if (!(await insightsPlan(String((req as any).orgId || ''))).some((k) => k.toLowerCase() === keyword.toLowerCase())) {
         return res.status(400).json({ error: 'Unknown keyword.' });
     }
     try {
+        // At most a few retries per keyword inside one paid run.
+        if (!(await registerCall(String((req as any).orgId || ''), 'aiInsights', `${dash.insightRun.ref}:pack`, 20))) {
+            return res.status(429).json({ error: 'This check has used all its requests. Start a new check.', code: 'run_exhausted' });
+        }
         res.json({ keyword, top3: await fetchPack(keyword, connectedBusiness as any) });
     } catch (err: any) {
         console.warn('[ai-insights] pack failed:', keyword, errMessage(err));
@@ -2300,7 +3221,12 @@ app.post('/api/ai/insights/pack', ...growthReportingGate, async (req, res) => {
 
 app.post('/api/ai/insights/trends', ...growthReportingGate, async (_req, res) => {
     if (!requireBusiness(res) || !requireDataForSeo(res)) return;
-    res.json({ trendRows: await fetchTrends(insightsPlan(), { address: connectedBusiness.address, lat: connectedBusiness.lat, lng: connectedBusiness.lng }) });
+    const dash: any = (_req as any).dashboardState || dashboardState;
+    if (!insightsRunActive(dash)) return res.status(400).json({ error: 'Start the check again.', code: 'run_not_started' });
+    if (!(await registerCall(String((_req as any).orgId || ''), 'aiInsights', `${dash.insightRun.ref}:trends`, 3))) {
+        return res.status(429).json({ error: 'This check has used all its requests. Start a new check.', code: 'run_exhausted' });
+    }
+    res.json({ trendRows: await fetchTrends(await insightsPlan(String((_req as any).orgId || '')), { address: connectedBusiness.address, lat: connectedBusiness.lat, lng: connectedBusiness.lng }) });
 });
 
 app.post('/api/ai/insights/finish', ...growthReportingGate, async (req, res) => {
@@ -2308,7 +3234,9 @@ app.post('/api/ai/insights/finish', ...growthReportingGate, async (req, res) => 
     // Other requests replace the global dashboardState while this one awaits Gemini, so keep this request's own object.
     const dash: any = (req as any).dashboardState || dashboardState;
     try {
-        const plan = insightsPlan();
+        if (!insightsRunActive(dash)) return res.status(400).json({ error: 'Start the check again.', code: 'run_not_started' });
+        const trackerForPrompt = await insightsTracker(req);
+        const plan = await insightsPlan(String((req as any).orgId || ''));
         const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
         const packs = plan.map((_, i) =>
             (Array.isArray(req.body?.packs?.[i]) ? req.body.packs[i] : []).slice(0, 3).map((r: any) => ({
@@ -2331,7 +3259,7 @@ app.post('/api/ai/insights/finish', ...growthReportingGate, async (req, res) => 
         if (aiClient) {
             try {
                 const data = parseJsonFromText(
-                    await withTimeout(generateText(strategyPrompt(connectedBusiness, market, dashboardState, summarizeTracker(dash.visibilityTracker?.keywords))), 12000, 'ai-insights strategy')
+                    await withTimeout(generateText(strategyPrompt(connectedBusiness, market, dashboardState, summarizeTracker(trackerForPrompt))), 12000, 'ai-insights strategy')
                 );
                 if (data?.recommendation) {
                     strategy = {
@@ -2360,9 +3288,17 @@ app.post('/api/ai/insights/finish', ...growthReportingGate, async (req, res) => 
         const history = Array.isArray(dash.aiInsightsHistory) ? dash.aiInsightsHistory : [];
         dash.aiInsights = latest;
         dash.aiInsightsHistory = [latest, ...history].slice(0, 30);
+        dash.insightRun = null;
         await saveOrgToDb(req);
-        res.json(insightsPayload(dash));
+        res.json(insightsPayload(dash, trackerForPrompt));
     } catch (err: any) {
+        // The refresh did not produce a result: give the credits back (once) and close the paid window.
+        const runRef = String(dash.insightRun?.ref || '');
+        if (runRef) {
+            await refundOnce(req, 'aiInsights', CREDIT_COSTS.aiInsights, runRef, 'refresh failed').catch(() => undefined);
+            dash.insightRun = null;
+            await saveOrgToDb(req).catch(() => undefined);
+        }
         console.error('AI insights finish error:', errMessage(err));
         res.status(502).json({ error: errMessage(err) });
     }
@@ -2375,7 +3311,7 @@ app.delete('/api/ai/insights/history', ...growthReportingGate, async (req, res) 
     dash.aiInsightsHistory = history;
     dash.aiInsights = history.find((h: any) => h?.share) || null;
     await saveOrgToDb(req);
-    res.json(insightsPayload(dash));
+    res.json(insightsPayload(dash, await insightsTracker(req)));
 });
 
 app.get('/api/dashboard/stats', requireAuth, hydrateOrgFromDb, requireFeature('reporting'), (_req, res) => {
@@ -2409,8 +3345,6 @@ app.post('/api/dashboard/update-stats', requireAuth, hydrateOrgFromDb, requireFe
 });
 
 
-
-
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/sales', salesRouter);
@@ -2418,6 +3352,7 @@ app.use('/api/host', createHostRouter({ stripeClient }));
 app.use('/api/public/review', createPublicReviewRouter());
 app.use('/api/public', createPublicRouter({ stripeClient }));
 app.use('/api/integrations', integrationsRouter);
+app.use('/api/notifications', hostNotificationsRouter);
 
 app.post('/api/ops/process-booking-reminders', async (req, res) => {
     const secret = process.env.OPS_SECRET || process.env.ZAPP_OPS_SECRET || 'zappsites-ops-dev';

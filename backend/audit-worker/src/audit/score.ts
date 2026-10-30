@@ -1,4 +1,5 @@
 import { PILLARS } from './checklistSchema.js';
+import { REPORT_SCORE_CAP } from './displayScore.js';
 
 function statusWeight(status) {
   if (status === 'pass') return 1;
@@ -350,7 +351,9 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
   const inPack = rank && typeof rank.position === 'number';
   const position = inPack ? Number(rank.position) : null;
 
-  const capPillar = (value: number) => Math.min(70, Math.max(0, Math.round(Number(value) || 0)));
+  // Pillars are stored as the report shows them, and the overall score is their weighted average,
+  // so every number written in the report is the number on the page.
+  const capPillar = (value: number) => Math.min(REPORT_SCORE_CAP, Math.max(0, Math.round(Number(value) || 0)));
   const localShown = capPillar(local.score);
   const aeoShown = capPillar(aeo.score);
   const geoShown = capPillar(geo.score);
@@ -359,8 +362,8 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
     4,
     (Array.isArray(context.criticalIssues) ? context.criticalIssues : []).filter(Boolean).length
   );
-  const criticalPenalty = criticalIssueCount * 8;
-  const total = Math.min(70, Math.max(0, measuredTotal - criticalPenalty));
+  const criticalPenalty = 0;
+  const total = measuredTotal;
 
   const triad = {
     local_seo: {
@@ -388,7 +391,7 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
       id: 'geo',
       label: 'GEO / AI SEO',
       focus:
-        'Optimising a business/entity to be mentioned or recommended in generative AI/search experiences such as Google AI Overviews, ChatGPT, Perplexity, etc.',
+        'Optimising a business/entity to be mentioned or recommended in generative AI/search experiences such as Google AI Overviews, ChatGPT, Claude and Gemini.',
       weight: 30,
       score: geoShown,
       max: 100,
@@ -408,7 +411,7 @@ export function computeTriadScore(checks = [], context: ScoreContext = {}) {
     pillars: [triad.local_seo, triad.aeo, triad.geo],
     triad,
     note:
-      'Overall = Local SEO 40% + AEO 30% + GEO 30%, shown out of 100. Each of up to four critical issues deducts 8 points, so the result stays below 71. Unknown/N/A checks are excluded.',
+      'Overall = Local SEO 40% + AEO 30% + GEO 30%, shown out of 100.',
     localPack: inPack
       ? { listed: true, position }
       : rank

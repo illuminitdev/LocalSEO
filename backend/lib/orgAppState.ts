@@ -19,7 +19,12 @@ export function emptyBusinessProfile() {
         lat: null,
         lng: null,
         placeId: '',
-        mapsUrl: ''
+        mapsUrl: '',
+        services: [] as string[],
+        /** "<version> <website>" the services were read from; detection runs again when either changes. */
+        servicesFor: '',
+        /** Customer questions written by AI for this business, used as its LLM prompts. */
+        aiPrompts: [] as Array<{ prompt: string; topic: string }>
     };
 }
 
@@ -62,7 +67,9 @@ export function emptyDashboardState() {
         llmVisibility: null as null | Record<string, any>,
         llmVisibilityHistory: [] as Record<string, any>[],
         aiInsights: null as null | Record<string, any>,
-        aiInsightsHistory: [] as Record<string, any>[]
+        aiInsightsHistory: [] as Record<string, any>[],
+        profileAudit: null as null | Record<string, any>,
+        savedTools: {} as Record<string, { value: any; at: string }>
     };
 }
 
@@ -245,6 +252,64 @@ export async function loadOrgAppState(orgId: string) {
         business: { ...emptyBusinessProfile(), ...(row.profile || {}) },
         dashboard: { ...emptyDashboardState(), ...(row.dashboard || {}) }
     };
+}
+
+/** Top-level dashboard keys as JSON, taken when a request loads the state. */
+export function snapshotDashboard(dashboard: Record<string, any>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(dashboard || {})) out[key] = JSON.stringify(value ?? null);
+    return out;
+}
+
+/** Keys this request changed (or added) and keys it removed, compared with its load-time snapshot. */
+export function dashboardPatch(loaded: Record<string, string>, dashboard: Record<string, any>) {
+    const patch: Record<string, any> = {};
+    for (const [key, value] of Object.entries(dashboard || {})) {
+        if (value === undefined) continue;
+        if (loaded[key] !== JSON.stringify(value ?? null)) patch[key] = value;
+    }
+    const removed = Object.keys(loaded).filter((key) => !(key in (dashboard || {})) || dashboard[key] === undefined);
+    return { patch, removed };
+}
+
+/**
+ * Writes only the dashboard keys a request changed, in one statement, so a slower request that loaded
+ * older state cannot overwrite what another request saved meanwhile. Profile is written only when given.
+ */
+export async function saveOrgDashboardPatch(
+    orgId: string,
+    data: { business?: any; patch: Record<string, any>; removed: string[] }
+) {
+    const hasDashboardChange = Object.keys(data.patch).length > 0 || data.removed.length > 0;
+    if (!hasDashboardChange && data.business == null) return;
+    await query(
+        `INSERT INTO org_app_state (org_id, profile, dashboard, updated_at)
+         VALUES ($1, COALESCE($2::jsonb, '{}'::jsonb), $3::jsonb, NOW())
+         ON CONFLICT (org_id) DO UPDATE
+         SET profile = COALESCE($2::jsonb, org_app_state.profile),
+             dashboard = (COALESCE(org_app_state.dashboard, '{}'::jsonb) - $4::text[]) || $3::jsonb,
+             updated_at = NOW()`,
+        [orgId, data.business == null ? null : JSON.stringify(data.business), JSON.stringify(data.patch), data.removed]
+    );
+}
+
+/**
+ * Stores services read from the website without touching the rest of the profile (runs in the background after the
+ * request). Skipped when the website was changed again in the meantime: that change starts its own detection.
+ */
+export async function saveDetectedServices(
+    orgId: string,
+    detected: { services: string[]; prompts: Array<{ prompt: string; topic: string }> },
+    website: string,
+    servicesFor: string
+) {
+    await query(
+        `UPDATE org_app_state
+         SET profile = profile || jsonb_build_object('services', $2::jsonb, 'aiPrompts', $5::jsonb, 'servicesFor', $4::text),
+             updated_at = NOW()
+         WHERE org_id = $1 AND TRIM(COALESCE(profile->>'website', '')) = $3`,
+        [orgId, JSON.stringify(detected.services), website, servicesFor, JSON.stringify(detected.prompts)]
+    );
 }
 
 export async function saveOrgAppState(

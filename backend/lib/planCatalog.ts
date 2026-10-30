@@ -1,5 +1,4 @@
 
-
 const FEATURE_KEYS = ['bookings', 'local_presence', 'local_growth', 'reporting'];
 
 const FEATURE_LABELS: Record<string, string> = {
@@ -29,11 +28,99 @@ const PLAN_FEATURES: Record<string, string[]> = {
     'complete-growth-system': ['local_presence', 'local_growth', 'reporting', 'bookings']
 };
 
+const DEFAULT_LLM_TRACKER_PROMPT_LIMIT = 5;
+/** LLM Tracking prompts per business. Same numbers as the shared keyword list. */
+const LLM_TRACKER_PROMPT_LIMITS: Record<string, number> = {
+    'local-presence': 5,
+    'local-growth': 10,
+    'complete-growth-system': 10
+};
+
+function getLlmTrackerPromptLimit(planId: string | null | undefined) {
+    return LLM_TRACKER_PROMPT_LIMITS[String(planId || '')] ?? DEFAULT_LLM_TRACKER_PROMPT_LIMIT;
+}
+
+/**
+ * Usage credits. 1 credit = 1 DataForSEO call or 1 Gemini text answer (a Gemini image costs 2). The pool resets with the subscription billing period.
+ */
+const CREDIT_COSTS = {
+    rankScan: 9,
+    trackerKeyword: 1,
+    keywordSuggest: 1,
+    aiInsights: 6,
+    llmVisibility: 20,
+    llmTrackerAnswer: 1,
+    citations: 4,
+    reviewSync: 1,
+    /** Gemini text actions: AI audit, post copy, review reply, Q&A answer. */
+    aiText: 1,
+    /** Gemini image actions: post image, media photo. */
+    aiImage: 2
+} as const;
+
+type CreditFeature = keyof typeof CREDIT_COSTS;
+
+const CREDIT_ALLOWANCES: Record<string, number> = {
+    'local-presence': 100,
+    'local-growth': 1000,
+    'complete-growth-system': 2000
+};
+
+const LOCATION_LIMITS: Record<string, number> = {
+    'local-presence': 1,
+    'local-growth': 3,
+    'complete-growth-system': 10
+};
+
+
+/** Keywords a business can track in the Visibility Tracker, by plan. TRACKED_KEYWORD_LIMIT is the highest of these. */
+const TRACKED_KEYWORD_LIMITS: Record<string, number> = {
+    'local-presence': 5,
+    'local-growth': 10,
+    'complete-growth-system': 10
+};
+const DEFAULT_TRACKED_KEYWORD_LIMIT = 5;
+const TRACKED_KEYWORD_LIMIT = 10;
+
+const GRID_SCAN_LIMITS: Record<string, number> = {
+    'local-presence': 5,
+    'local-growth': 10,
+    'complete-growth-system': 10
+};
+
+function getGridScanLimit(planId: string | null | undefined) {
+    return GRID_SCAN_LIMITS[String(planId || '')] ?? 0;
+}
+
+function getTrackedKeywordLimit(planId: string | null | undefined) {
+    return TRACKED_KEYWORD_LIMITS[String(planId || '')] ?? DEFAULT_TRACKED_KEYWORD_LIMIT;
+}
+
+
+/** Automatic keyword checks are off for every plan. Add e.g. 'local-growth': 7 to turn them back on. */
+const AUTO_CHECK_EVERY_DAYS: Record<string, number> = {};
+
+const SCAN_COOLDOWN_HOURS = 24;
+
+/** AI Insights Map Pack check: one refresh per week. */
+const INSIGHTS_COOLDOWN_HOURS = 7 * 24;
+
+function getCreditAllowance(planId: string | null | undefined) {
+    return CREDIT_ALLOWANCES[String(planId || '')] ?? 0;
+}
+
+function getLocationLimit(planId: string | null | undefined) {
+    return LOCATION_LIMITS[String(planId || '')] ?? 1;
+}
+
+function getAutoCheckEveryDays(planId: string | null | undefined) {
+    return AUTO_CHECK_EVERY_DAYS[String(planId || '')] ?? 0;
+}
 
 const ROUTE_FEATURES: Record<string, string | string[] | null> = {
     '/dashboard': null,
-    '/rank-tracker': 'local_growth',
-    '/visibility-tracker': 'local_growth',
+    '/rank-tracker': 'local_presence',
+    '/visibility-tracker': 'local_presence',
     '/report': ['local_growth', 'reporting'],
     '/profile': 'local_presence',
     '/citations': 'local_presence',
@@ -96,13 +183,29 @@ function orgHasBookingTeams(planId: string | null | undefined): boolean {
     return id === 'booking-pro' || id === 'complete-growth-system';
 }
 
+export type { CreditFeature };
 export {
+    CREDIT_COSTS,
+    CREDIT_ALLOWANCES,
+    AUTO_CHECK_EVERY_DAYS,
+    LOCATION_LIMITS,
+    TRACKED_KEYWORD_LIMIT,
+    TRACKED_KEYWORD_LIMITS,
+    getTrackedKeywordLimit,
+    GRID_SCAN_LIMITS,
+    getGridScanLimit,
+    SCAN_COOLDOWN_HOURS,
+    INSIGHTS_COOLDOWN_HOURS,
+    getCreditAllowance,
+    getLocationLimit,
+    getAutoCheckEveryDays,
     FEATURE_KEYS,
     FEATURE_LABELS,
     PLANS,
     PLAN_FEATURES,
     ROUTE_FEATURES,
     getFeaturesForPlan,
+    getLlmTrackerPromptLimit,
     planIncludesFeature,
     planIncludesAllFeatures,
     getRequiredPlanHint,

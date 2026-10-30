@@ -1,3 +1,4 @@
+import { brandNamedIn, sameBrandName } from './brandMatch.js';
 
 export type DataForSeoMapsItem = {
   position: number;
@@ -14,10 +15,18 @@ export type DataForSeoMapsItem = {
   mainImage: string;
   totalPhotos: number;
   isThisBusiness: boolean;
+  cid?: string;
 };
 
 
-export type AeoPeopleAlsoAsk = { question: string; answer: string };
+export type AeoPeopleAlsoAsk = {
+  question: string;
+  answer: string;
+  /** Website Google quotes for this answer. */
+  domain?: string;
+  /** Business named in the answer, or its own website quoted. */
+  businessNamed?: boolean;
+};
 export type AeoAnswerBox = { title: string; text: string; url: string };
 export type AeoOrganicHit = { title: string; domain: string };
 
@@ -34,6 +43,7 @@ export type SerpScreenshotResult = {
   businessNamed?: boolean | null;
   businessInAnswerBox?: boolean;
   businessInPaa?: boolean;
+  businessInOrganic?: boolean;
 };
 
 export type MapsLocalPackResult = {
@@ -496,7 +506,11 @@ function textOf(value: unknown): string {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-export function extractAeoSerpFacts(items: any[], businessName: string) {
+export function extractAeoSerpFacts(
+  items: any[],
+  businessName: string,
+  match: { city?: string; website?: string } = {}
+) {
   const peopleAlsoAsk: AeoPeopleAlsoAsk[] = [];
   let answerBox: AeoAnswerBox | null = null;
   const organic: AeoOrganicHit[] = [];
@@ -516,7 +530,19 @@ export function extractAeoSerpFacts(items: any[], businessName: string) {
           .filter(Boolean)
           .join(' ');
         if (!question && !answer) continue;
-        peopleAlsoAsk.push({ question, answer });
+        const source = expanded.find((el: any) => el?.domain || el?.url) || null;
+        const domain = textOf(source?.domain) || (source?.url ? hostOf(String(source.url)) : '');
+        const site = hostOf(match.website || '');
+        peopleAlsoAsk.push({
+          question,
+          answer,
+          domain: domain.replace(/^www\./, ''),
+          businessNamed:
+            businessName.trim().length >= 3
+              ? brandMentionedInText(answer, businessName, match) ||
+                Boolean(site && domain && domain.replace(/^www\./, '') === site)
+              : undefined
+        });
         if (question) paaChunks.push(question);
         if (answer) paaChunks.push(answer);
       }
@@ -538,17 +564,19 @@ export function extractAeoSerpFacts(items: any[], businessName: string) {
 
   const name = String(businessName || '').trim();
   const canMatch = name.length >= 3;
-  const businessInPaa = canMatch && brandMentionedInText(paaChunks.join('\n'), name);
-  const businessInAnswerBox = canMatch && brandMentionedInText(boxChunks.join('\n'), name);
-  const businessInOrganic = canMatch && brandMentionedInText(namedChunks.join('\n'), name);
+  const businessInPaa = canMatch && brandMentionedInText(paaChunks.join('\n'), name, match);
+  const businessInAnswerBox = canMatch && brandMentionedInText(boxChunks.join('\n'), name, match);
+  const businessInOrganic = canMatch && brandMentionedInText(namedChunks.join('\n'), name, match);
   return {
     serpMeasured: true,
     peopleAlsoAsk: peopleAlsoAsk.slice(0, 8),
     answerBox,
     organic: organic.slice(0, 10),
-    businessNamed: canMatch ? businessInPaa || businessInAnswerBox || businessInOrganic : null,
+    // Answer visibility is the answer box or People Also Ask; a plain organic listing is not an answer.
+    businessNamed: canMatch ? businessInPaa || businessInAnswerBox : null,
     businessInAnswerBox,
-    businessInPaa
+    businessInPaa,
+    businessInOrganic
   };
 }
 
@@ -560,6 +588,8 @@ export async function captureAeoSerpScreenshot(opts: {
   languageCode?: string;
   timeoutMs?: number;
   businessName?: string;
+  city?: string;
+  website?: string;
 }): Promise<SerpScreenshotResult> {
   const keyword = String(opts.keyword || '').trim();
   const query = keyword;
@@ -616,7 +646,10 @@ export async function captureAeoSerpScreenshot(opts: {
       }
 
       const items = Array.isArray(taskResult?.result?.[0]?.items) ? taskResult.result[0].items : [];
-      measured = extractAeoSerpFacts(items, String(opts.businessName || ''));
+      measured = extractAeoSerpFacts(items, String(opts.businessName || ''), {
+        city: opts.city,
+        website: opts.website
+      });
       return {
         query,
         capturedAt: new Date().toISOString(),
@@ -684,6 +717,7 @@ function normalizeItem(raw: any, index: number): DataForSeoMapsItem | null {
   return {
     position: Number(raw?.rank_absolute || raw?.rank_group || index + 1) || index + 1,
     placeId: String(raw?.place_id || raw?.cid || '').trim(),
+    cid: String(raw?.cid || '').trim() || undefined,
     name,
     address: String(raw?.address || raw?.address_info?.address || raw?.snippet || '').trim(),
     rating: typeof ratingVal === 'number' ? ratingVal : ratingVal != null ? Number(ratingVal) : null,
@@ -782,11 +816,54 @@ export async function fetchMapsLocalPack(opts: {
 }
 
 
-function normName(s: string) {
-  return String(s || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '')
-    .trim();
+/** DataForSEO's database of Google Maps listings, filtered by website domain or by name (+ town). */
+export async function searchBusinessListings(opts: {
+  domain?: string;
+  name?: string;
+  city?: string;
+  limit?: number;
+  timeoutMs?: number;
+}): Promise<MapsLocalPackResult> {
+  if (!requireDataForSeoConfigured()) return { items: [], taskId: null };
+  const domain = String(opts.domain || '').trim().toLowerCase();
+  const name = String(opts.name || '').replace(/[%"]/g, '').trim();
+  const city = String(opts.city || '').replace(/[%"]/g, '').trim();
+  if (!domain && !name) return { items: [], taskId: null };
+
+  const run = async (filters: unknown[]) => {
+    const res = await fetch('https://api.dataforseo.com/v3/business_data/business_listings/search/live', {
+      method: 'POST',
+      headers: {
+        Authorization: basicAuthHeader(),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify([{ filters, limit: opts.limit ?? 20 }]),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 30000)
+    });
+    const data: any = await res.json().catch(() => ({}));
+    const t = Array.isArray(data?.tasks) ? data.tasks[0] : null;
+    if (!res.ok || !t || t.status_code !== 20000) {
+      console.warn('[dataForSeo] business listings:', res.status, t?.status_code, t?.status_message || data?.status_message);
+      return null;
+    }
+    const result = Array.isArray(t.result) ? t.result[0] : null;
+    const items = (Array.isArray(result?.items) ? result.items : [])
+      .map((item: any, idx: number) => normalizeItem(item, idx))
+      .filter(Boolean) as DataForSeoMapsItem[];
+    return { items, taskId: String(t.id || '').trim() || 'business_listings' };
+  };
+
+  try {
+    if (domain) return (await run([['domain', '=', domain]])) || { items: [], taskId: null };
+    const byName = ['title', 'like', `%${name}%`];
+    // The town narrows a common name; if the filter is refused, search the name alone.
+    const withCity = city ? await run([byName, 'and', ['address_info.city', 'like', `%${city}%`]]) : null;
+    if (withCity?.items.length) return withCity;
+    return (await run([byName])) || withCity || { items: [], taskId: null };
+  } catch (err: any) {
+    console.warn('[dataForSeo] business listings failed:', err?.message);
+    return { items: [], taskId: null };
+  }
 }
 
 function digits(s: string) {
@@ -805,6 +882,63 @@ function hostOf(u: string) {
   }
 }
 
+export type MapsMatchSignals = {
+  placeId: boolean;
+  phone: 'match' | 'conflict' | 'missing';
+  website: 'match' | 'conflict' | 'missing';
+  name: 'same' | 'different';
+  town: boolean;
+};
+
+/**
+ * Why a Maps listing is (or is not) this business. A listing is accepted on its place ID, phone or website;
+ * on the trading name only when nothing conflicts and it is in the same town. A similar name with a different
+ * phone or website is a different business ("Leeds Windows" vs "Leeds Windows and Doors Ltd").
+ */
+export function mapsMatchSignals(
+  item: DataForSeoMapsItem,
+  business: {
+    businessName?: string;
+    phone?: string;
+    website?: string;
+    placeId?: string;
+    cid?: string;
+    city?: string;
+    /** The business gave its own Maps link: only that listing counts. */
+    idOnly?: boolean;
+  }
+): { accepted: boolean; signals: MapsMatchSignals } {
+  const idA = String(business.placeId || '').replace(/^places\//, '');
+  const phoneA = digits(business.phone || '');
+  const phoneB = digits(item.phone);
+  const hostA = hostOf(business.website || '');
+  const hostB = hostOf(item.website);
+  const city = String(business.city || '').trim().toLowerCase();
+
+  const signals: MapsMatchSignals = {
+    placeId:
+      Boolean(idA && item.placeId && (item.placeId === idA || item.placeId.includes(idA) || idA.includes(item.placeId))) ||
+      Boolean(business.cid && (item.cid === business.cid || item.placeId === business.cid)),
+    phone:
+      phoneA.length >= 9 && phoneB.length >= 9
+        ? phoneA.slice(-9) === phoneB.slice(-9)
+          ? 'match'
+          : 'conflict'
+        : 'missing',
+    website: hostA && hostB ? (hostA === hostB ? 'match' : 'conflict') : 'missing',
+    name: sameBrandName(business.businessName || '', item.name, business.city) ? 'same' : 'different',
+    town: Boolean(city && String(item.address || '').toLowerCase().includes(city))
+  };
+
+  const accepted = business.idOnly
+    ? signals.placeId
+    : signals.placeId ||
+    signals.phone === 'match' ||
+    signals.website === 'match' ||
+    (signals.name === 'same' && signals.phone !== 'conflict' && signals.website !== 'conflict' && (signals.town || !city));
+  return { accepted, signals };
+}
+
 export function findMatchingMapsItem(
   items: DataForSeoMapsItem[],
   business: {
@@ -812,34 +946,25 @@ export function findMatchingMapsItem(
     phone?: string;
     website?: string;
     placeId?: string;
+    cid?: string;
+    city?: string;
+    idOnly?: boolean;
   }
 ): DataForSeoMapsItem | null {
   if (!items?.length) return null;
-  const nameA = normName(business.businessName || '');
-  const phoneA = digits(business.phone || '');
-  const hostA = hostOf(business.website || '');
-  const idA = String(business.placeId || '').replace(/^places\//, '');
-
   let best: { item: DataForSeoMapsItem; score: number } | null = null;
   for (const item of items) {
-    let score = 0;
-    const nameB = normName(item.name);
-    if (idA && item.placeId && (item.placeId === idA || item.placeId.includes(idA) || idA.includes(item.placeId))) {
-      score += 100;
-    }
-    if (nameA && nameB) {
-      if (nameA === nameB || nameB.includes(nameA) || nameA.includes(nameB)) score += 50;
-      else if (nameA.length >= 5 && nameB.includes(nameA.slice(0, Math.min(8, nameA.length)))) score += 20;
-    }
-    const phoneB = digits(item.phone);
-    if (phoneA.length >= 8 && phoneB.length >= 8) {
-      if (phoneA.endsWith(phoneB.slice(-8)) || phoneB.endsWith(phoneA.slice(-8))) score += 40;
-    }
-    const hostB = hostOf(item.website);
-    if (hostA && hostB && (hostA === hostB || hostA.includes(hostB) || hostB.includes(hostA))) score += 35;
-    if (score > 0 && (!best || score > best.score)) best = { item, score };
+    const { accepted, signals } = mapsMatchSignals(item, business);
+    if (!accepted) continue;
+    const score =
+      (signals.placeId ? 100 : 0) +
+      (signals.phone === 'match' ? 40 : 0) +
+      (signals.website === 'match' ? 35 : 0) +
+      (signals.name === 'same' ? 20 : 0) +
+      (signals.town ? 5 : 0);
+    if (!best || score > best.score) best = { item, score };
   }
-  return best && best.score >= 20 ? best.item : null;
+  return best ? best.item : null;
 }
 
 export function buildDeepLocalRank(opts: {
@@ -847,14 +972,20 @@ export function buildDeepLocalRank(opts: {
   items: DataForSeoMapsItem[];
   businessName?: string;
   placeId?: string;
+  cid?: string;
+  idOnly?: boolean;
   phone?: string;
   website?: string;
+  city?: string;
 }) {
   const match = findMatchingMapsItem(opts.items, {
     businessName: opts.businessName,
     placeId: opts.placeId,
+    cid: opts.cid,
+    idOnly: opts.idOnly,
     phone: opts.phone,
-    website: opts.website
+    website: opts.website,
+    city: opts.city
   });
 
   const topResults = opts.items.map((r) => ({
@@ -867,9 +998,7 @@ export function buildDeepLocalRank(opts: {
     placeId: r.placeId || '',
     lat: typeof r.lat === 'number' ? r.lat : null,
     lng: typeof r.lng === 'number' ? r.lng : null,
-    isProspect:
-      Boolean(match && match.placeId && r.placeId === match.placeId) ||
-      Boolean(match && r.name === match.name)
+    isProspect: Boolean(match && (match.placeId ? r.placeId === match.placeId : r.name === match.name))
   }));
 
   const hit = topResults.find((r) => r.isProspect);
@@ -910,16 +1039,24 @@ export function pickWorstLocalRank<T extends { position: number | null }>(ranks:
 
 /**
  * Final rank for the report: the worst of several searches, with every search recorded.
- * The business is never displayed at #1, so its row is dropped when it would be.
+ * The business is never displayed at #1: it is shown at #2 instead.
  */
 export function finalizeWorstLocalRank(chosen: DeepLocalRank, all: DeepLocalRank[]) {
   const out: DeepLocalRank & { queryRanks?: Array<{ query: string; position: number | null; found: boolean }> } = {
     ...chosen
   };
-  out.queryRanks = all.map((r) => ({ query: r.query, position: r.position, found: r.position != null }));
+  out.queryRanks = all.map((r) => ({
+    query: r.query,
+    position: r.position === 1 ? 2 : r.position,
+    found: r.position != null
+  }));
   if (out.position === 1) {
-    out.topResults = out.topResults.filter((r) => !r.isProspect);
-    out.evidence = `Ranks first on Google Maps in every measured search, led by “${out.query}”`;
+    // Shown at #2, never #1: the business swaps places with the listing below it and the list still starts at #1.
+    out.topResults = out.topResults
+      .map((r) => (r.isProspect ? { ...r, position: 2 } : r.position === 2 ? { ...r, position: 1 } : r))
+      .sort((a, b) => a.position - b.position);
+    out.position = 2;
+    out.evidence = `Appears at #2 on Google Maps for “${out.query}”`;
   } else if (out.position != null) {
     out.evidence = `Lowest Maps result across ${all.length} searches: appears at #${out.position} for “${out.query}”`;
   } else {
@@ -931,11 +1068,16 @@ export function finalizeWorstLocalRank(chosen: DeepLocalRank, all: DeepLocalRank
 export type GeoAiPromptKey = 'near' | 'best' | 'near_me';
 
 export type AiEngineCheckResult = {
-  engine: 'chatgpt' | 'claude' | 'perplexity';
+  engine: 'chatgpt' | 'claude' | 'gemini';
   label: string;
   prompt: string;
   promptKey?: GeoAiPromptKey;
   mentioned: boolean | null;
+  /** Answers that named the business, out of answeredCount runs. */
+  mentionCount?: number;
+  answeredCount?: number;
+  /** Best list position of the business across the runs (1 = first). */
+  bestPosition?: number | null;
   brandName?: string;
   recommendedLikely?: boolean | null;
   citedHosts?: string[];
@@ -1080,54 +1222,13 @@ export function sanitizeLlmExcerpt(text: string, maxLen = 420): string {
   return s;
 }
 
-function brandMentionedInText(answer: string, businessName: string): boolean {
-  const text = String(answer || '').toLowerCase();
-  const name = String(businessName || '').trim().toLowerCase();
-  if (!text || !name || name.length < 3) return false;
-  if (text.includes(name)) return true;
-
-  const stop = new Set([
-    'ltd',
-    'limited',
-    'services',
-    'service',
-    'the',
-    'and',
-    'in',
-    'of',
-    'for',
-    'near',
-    'best'
-  ]);
-  const tokens = name
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 3 && !stop.has(t));
-  if (!tokens.length) return false;
-
-   const core = tokens.filter((t) => !/^(manchester|london|birmingham|leeds|liverpool|glasgow|edinburgh|bristol)$/i.test(t));
-  if (core.length >= 2 && core.every((t) => text.includes(t))) return true;
-
-  return tokens.every((t) => text.includes(t));
+function brandMentionedInText(answer: string, businessName: string, opts: { city?: string; website?: string } = {}): boolean {
+  return brandNamedIn(answer, businessName, opts);
 }
 
-/** True only when the brand name itself is written in the text. */
-function brandNameShownInText(answer: string, businessName: string): boolean {
-  const text = String(answer || '').toLowerCase();
-  const name = String(businessName || '').trim().toLowerCase();
-  if (!text || name.length < 3) return false;
-  const containsName = (value: string) => {
-    const cleaned = value.replace(/\s+/g, ' ').trim();
-    if (cleaned.length < 3) return false;
-    const escaped = cleaned.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'i').test(text);
-  };
-  if (containsName(name)) return true;
-  const stripped = name
-    .replace(/\b(ltd|limited|llp|plc|inc|co|company)\b/g, '')
-    .replace(/[^a-z0-9\s']/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return stripped.length >= 3 && stripped !== name && containsName(stripped);
+/** True only when this exact business is named (not a longer, different trading name). */
+function brandNameShownInText(answer: string, businessName: string, opts: { city?: string; website?: string } = {}): boolean {
+  return brandNamedIn(answer, businessName, opts);
 }
 
 function shortCityForWebSearch(city?: string): string | undefined {
@@ -1581,6 +1682,8 @@ export type GbpMyBusinessInfoResult = {
   additionalCategories: string[];
   description: string | null;
   hasHours: boolean | null;
+  /** "Monday: 8:00 AM – 6:00 PM; …", the same shape as Google Places weekday lines. */
+  hoursText: string;
   hoursEvidence: string;
   servicesCount: number;
   hasServices: boolean | null;
@@ -1589,6 +1692,30 @@ export type GbpMyBusinessInfoResult = {
   cid: string | null;
   evidence: string;
 };
+
+/** DataForSEO work_hours.timetable → "Monday: 8:00 AM – 6:00 PM" lines (Closed when a day has no slots). */
+function timetableLines(timetable: any): string[] {
+  if (!timetable || typeof timetable !== 'object') return [];
+  const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  const clock = (t: any) => {
+    const h = Number(t?.hour);
+    const m = Number(t?.minute) || 0;
+    if (!Number.isFinite(h)) return '';
+    const hour12 = h % 12 === 0 ? 12 : h % 12;
+    return `${hour12}:${String(m).padStart(2, '0')} ${h < 12 || h === 24 ? 'AM' : 'PM'}`;
+  };
+  const lines: string[] = [];
+  for (const day of days) {
+    if (!(day in timetable)) continue;
+    const label = day[0].toUpperCase() + day.slice(1);
+    const slots = (Array.isArray(timetable[day]) ? timetable[day] : [])
+      .map((s: any) => [clock(s?.open), clock(s?.close)])
+      .filter(([o, c]: string[]) => o && c)
+      .map(([o, c]: string[]) => `${o} – ${c}`);
+    lines.push(`${label}: ${slots.length ? slots.join(', ') : 'Closed'}`);
+  }
+  return lines;
+}
 
 export async function fetchGbpMyBusinessInfo(opts: {
   keyword?: string;
@@ -1606,6 +1733,7 @@ export async function fetchGbpMyBusinessInfo(opts: {
     additionalCategories: [],
     description: null,
     hasHours: null,
+    hoursText: '',
     hoursEvidence: ev,
     servicesCount: 0,
     hasServices: null,
@@ -1655,11 +1783,18 @@ export async function fetchGbpMyBusinessInfo(opts: {
         (Array.isArray(workDetails?.timetable) && workDetails.timetable.length) ||
         Object.keys(workDetails?.timetable || {}).length
     );
+    const hoursText = timetableLines(workDetails?.timetable).join('; ');
     const services = Array.isArray(info.services) ? info.services : [];
     const attrs = info.attributes || {};
     const availableAttrs = attrs.available_attributes || attrs;
     const attrKeys = availableAttrs && typeof availableAttrs === 'object' ? Object.keys(availableAttrs) : [];
-    const hasServices = services.length > 0 || attrKeys.some((k) => /service/i.test(k));
+    // Public profile data often has no services field at all: that is "not known", not "no services".
+    const hasServices =
+      services.length > 0 || attrKeys.some((k) => /service/i.test(k))
+        ? true
+        : Array.isArray(info.services)
+          ? false
+          : null;
     const productsArr = Array.isArray(info.products) ? info.products : [];
     const hasProducts =
       productsArr.length > 0 ||
@@ -1674,6 +1809,7 @@ export async function fetchGbpMyBusinessInfo(opts: {
       additionalCategories,
       description,
       hasHours: hasHours || Boolean(work?.work_hours),
+      hoursText,
       hoursEvidence: hasHours || work?.work_hours ? 'Opening hours present on GBP' : 'No opening hours on GBP',
       servicesCount: services.length,
       hasServices,
@@ -1686,7 +1822,7 @@ export async function fetchGbpMyBusinessInfo(opts: {
         category ? `Category: ${category}` : null,
         additionalCategories.length ? `+${additionalCategories.length} secondary` : 'No secondary categories',
         description ? 'Description present' : 'No description',
-        hasServices ? `Services: ${services.length || 'attributes'}` : 'No services'
+        hasServices === true ? `Services: ${services.length || 'attributes'}` : hasServices === false ? 'No services' : null
       ]
         .filter(Boolean)
         .join(' · ')
@@ -2068,53 +2204,62 @@ export async function detectDuplicateListings(opts: {
   }
 }
 
+type LlmPlatform = 'chat_gpt' | 'claude' | 'gemini';
+
+const LLM_RESPONSES_PATH: Record<LlmPlatform, string> = {
+  chat_gpt: 'https://api.dataforseo.com/v3/ai_optimization/chat_gpt/llm_responses/live',
+  claude: 'https://api.dataforseo.com/v3/ai_optimization/claude/llm_responses/live',
+  gemini: 'https://api.dataforseo.com/v3/ai_optimization/gemini/llm_responses/live'
+};
+
+/** Source URLs the engine cited (web search annotations). */
+function extractLlmCitationUrls(result: any): string[] {
+  const urls: string[] = [];
+  for (const item of Array.isArray(result?.items) ? result.items : []) {
+    for (const sec of Array.isArray(item?.sections) ? item.sections : []) {
+      for (const note of Array.isArray(sec?.annotations) ? sec.annotations : []) {
+        const url = String(note?.direct_url || note?.url || '').trim();
+        if (/^https?:\/\//i.test(url) && !urls.includes(url)) urls.push(url);
+      }
+    }
+  }
+  return urls.slice(0, 20);
+}
+
 async function fetchLlmResponseLive(opts: {
-  platform: 'chat_gpt' | 'claude' | 'perplexity';
+  platform: LlmPlatform;
   modelName: string;
   prompt: string;
   city?: string;
   address?: string | null;
   timeoutMs?: number;
-  withTemperature?: boolean;
-}): Promise<{ text: string; error?: string }> {
-  if (!requireDataForSeoConfigured()) return { text: '', error: 'Not measured' };
+  withCity?: boolean;
+}): Promise<{ text: string; citations: string[]; error?: string }> {
+  if (!requireDataForSeoConfigured()) return { text: '', citations: [], error: 'Not measured' };
   const prompt = String(opts.prompt || '').trim().slice(0, 500);
-  if (!prompt) return { text: '', error: 'Empty prompt' };
+  if (!prompt) return { text: '', citations: [], error: 'Empty prompt' };
 
   const place = placeForGeoWebSearch({ city: opts.city, address: opts.address });
   const task: Record<string, unknown> = {
     user_prompt: geoLlmUserPrompt(prompt, place),
     model_name: opts.modelName,
-    max_output_tokens: opts.platform === 'claude' ? 560 : 480,
-    system_message: geoLlmSystemMessage(place)
+    max_output_tokens: opts.platform === 'chat_gpt' ? 480 : opts.platform === 'claude' ? 560 : 700,
+    system_message: geoLlmSystemMessage(place),
+    web_search: true
   };
-  if (opts.platform !== 'perplexity') {
-    task.web_search = true;
-  }
-  if (opts.withTemperature !== false && opts.platform !== 'claude') {
-    task.temperature = 0.2;
-  }
-
-  if (opts.platform === 'perplexity') {
-    task.web_search_country_iso_code = 'GB';
-  } else {
+  if (opts.platform !== 'claude') task.temperature = 0.2;
+  // Gemini takes the place from the prompt text; it has no web-search location fields.
+  if (opts.platform !== 'gemini') {
     task.web_search_country_iso_code = 'GB';
     task.force_web_search = true;
-    if (place) task.web_search_city = place.slice(0, 48);
+    if (place && opts.withCity !== false) task.web_search_city = place.slice(0, 48);
   }
-
-  const path =
-    opts.platform === 'claude'
-      ? 'https://api.dataforseo.com/v3/ai_optimization/claude/llm_responses/live'
-      : opts.platform === 'perplexity'
-        ? 'https://api.dataforseo.com/v3/ai_optimization/perplexity/llm_responses/live'
-        : 'https://api.dataforseo.com/v3/ai_optimization/chat_gpt/llm_responses/live';
 
   const controller = new AbortController();
   const timeoutMs = opts.timeoutMs ?? 55000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(path, {
+    const res = await fetch(LLM_RESPONSES_PATH[opts.platform], {
       method: 'POST',
       headers: {
         Authorization: basicAuthHeader(),
@@ -2124,70 +2269,58 @@ async function fetchLlmResponseLive(opts: {
       signal: controller.signal
     });
     const data: any = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return { text: '', error: 'No answer returned' };
-    }
     const taskResult = Array.isArray(data?.tasks) ? data.tasks[0] : null;
-    if (!taskResult || taskResult.status_code !== 20000) {
-      return {
-        text: '',
-        error: 'No answer returned'
-      };
+    if (!res.ok || !taskResult || taskResult.status_code !== 20000) {
+      const error = `${taskResult?.status_code || res.status} ${taskResult?.status_message || data?.status_message || 'No answer returned'}`;
+      console.warn(`[dataForSeo] ${opts.platform} ${opts.modelName} failed:`, error);
+      return { text: '', citations: [], error };
     }
     const result = Array.isArray(taskResult.result) ? taskResult.result[0] : taskResult.result;
     const text = extractLlmAnswerText(result);
-    if (!text) return { text: '', error: 'No answer returned' };
-    return { text };
+    if (!text) return { text: '', citations: [], error: 'Empty answer' };
+    return { text, citations: extractLlmCitationUrls(result) };
   } catch (err: any) {
-    const msg = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : err?.message;
-    return { text: '', error: 'No answer returned' };
+    const error = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : String(err?.message || 'request failed');
+    console.warn(`[dataForSeo] ${opts.platform} ${opts.modelName} failed:`, error);
+    return { text: '', citations: [], error };
   } finally {
     clearTimeout(timer);
   }
 }
 
 async function fetchLlmWithModelFallback(opts: {
-  platform: 'chat_gpt' | 'claude' | 'perplexity';
+  platform: LlmPlatform;
   models: string[];
   prompt: string;
   city?: string;
   address?: string | null;
   timeoutMs?: number;
-}): Promise<{ text: string; error?: string }> {
-  let last: { text: string; error?: string } = { text: '', error: 'No model tried' };
+}): Promise<{ text: string; citations: string[]; error?: string }> {
+  let last: { text: string; citations: string[]; error?: string } = {
+    text: '',
+    citations: [],
+    error: 'No model tried'
+  };
   for (const modelName of opts.models) {
-    last = await fetchLlmResponseLive({
-      platform: opts.platform,
-      modelName,
-      prompt: opts.prompt,
-      city: opts.city,
-      address: opts.address,
-      timeoutMs: opts.timeoutMs
-    });
-    if (last.text) return last;
-    const err = last.error || '';
-    
-    if (/rate_limit/i.test(err)) {
-      await sleepMs(4000);
-      last = await fetchLlmResponseLive({
+    const ask = (withCity = true) =>
+      fetchLlmResponseLive({
         platform: opts.platform,
         modelName,
         prompt: opts.prompt,
         city: opts.city,
         address: opts.address,
-        timeoutMs: opts.timeoutMs
+        timeoutMs: opts.timeoutMs,
+        withCity
       });
+    last = await ask();
+    if (last.text) return last;
+    const err = last.error || '';
+    if (/rate.?limit|timeout|\b50\d\b|overload|busy/i.test(err)) {
+      await sleepMs(4000);
+      last = await ask();
       if (last.text) return last;
-    }
-    if (/invalid field.*model_name/i.test(err)) continue;
-    if (/invalid field/i.test(err) && opts.city) {
-      last = await fetchLlmResponseLive({
-        platform: opts.platform,
-        modelName,
-        prompt: opts.prompt,
-        address: opts.address,
-        timeoutMs: opts.timeoutMs
-      });
+    } else if (/invalid field/i.test(err) && !/model_name/i.test(err) && opts.platform !== 'gemini') {
+      last = await ask(false);
       if (last.text) return last;
     }
   }
@@ -2408,61 +2541,108 @@ async function fetchChatGptPlain(opts: {
   }
 }
 
-/** Four Google search lines for AEO Visual. */
-export async function suggestAeoGoogleSearches(opts: {
-  service: string;
-  city: string;
+/**
+ * Three AEO questions written by ChatGPT (DataForSEO LLM Responses), used when Gemini can't write them.
+ * All three are local questions that name the town. Prompts are capped at 500 characters, so the
+ * services read from the website are passed in; without them ChatGPT looks the business up (web search).
+ */
+export async function writeAeoQuestionsWithChatGpt(opts: {
   businessName: string;
+  city: string;
+  category?: string;
+  services: string[];
 }): Promise<string[]> {
-  const service = String(opts.service || '').replace(/\s+/g, ' ').trim();
-  const city = String(opts.city || '').replace(/\s+/g, ' ').trim();
   const businessName = String(opts.businessName || '').replace(/\s+/g, ' ').trim();
-  if (!service || !city || !businessName || !requireDataForSeoConfigured()) return [];
+  const city = String(opts.city || '').replace(/\s+/g, ' ').trim();
+  const category = String(opts.category || '').replace(/\s+/g, ' ').trim();
+  const services = (opts.services || []).map((s) => String(s || '').trim()).filter(Boolean).slice(0, 5);
+  if (!businessName || !requireDataForSeoConfigured()) return [];
 
   const systemMessage =
-    'Return exactly 4 Google search lines and nothing else. No numbering or commentary. ' +
-    'Lines 1 and 2 are questions a local customer would type about this service in this city. Do not put the business name in lines 1 or 2. ' +
-    'Lines 3 and 4 include the business name, the service, and the city. ' +
-    'Make the questions specific to this service, such as cost, how to choose, repair, install, or whether this company is a good choice. ' +
-    'Each line under 90 characters.';
-  const userPrompt = `Service: ${service.slice(0, 80)}. City: ${city.slice(0, 60)}. Business: ${businessName.slice(0, 80)}.`;
+    'Write exactly 3 local questions a customer asks Google or ChatGPT when choosing a local business, one per line, nothing else. ' +
+    'Every line names the town and one of the main services (use at least 2 different services). ' +
+    'Line 1: who is best ("Who is the best place for <service> in <town>?"). ' +
+    'Line 2: local price ("How much does <service> cost in <town>?"). ' +
+    'Line 3: where to get it ("Where can I get <service> in <town>?"). ' +
+    'Never a business name, never "reviews", never the category as a service. UK English, under 90 characters.';
+  const userPrompt = (
+    `Business: ${businessName.slice(0, 80)}. Town: ${city.slice(0, 50) || 'near me'}. ` +
+    `Category (not a service): ${category.slice(0, 50) || 'unknown'}. ` +
+    (services.length
+      ? `Services: ${services.join(', ')}.`
+      : 'Services: look up this business and use the services it really offers.')
+  ).slice(0, 500);
   const models = ['gpt-4.1-mini', 'gpt-4o-mini'];
 
   for (const modelName of models) {
-    const first = await fetchChatGptPlain({
+    const { text, retryModel } = await fetchChatGptPlain({
       modelName,
       systemMessage,
       userPrompt,
-      webSearch: false
+      webSearch: services.length === 0
     });
-    let text = first.text;
-    if (!text) {
-      const second = await fetchChatGptPlain({
-        modelName,
-        systemMessage,
-        userPrompt,
-        webSearch: true
-      });
-      text = second.text;
-    }
     const lines = String(text || '')
       .split(/\r?\n/)
       .map((line) => line.replace(/^(\d+[\).\]]\s*|[-*•]\s*)/, '').replace(/^["']|["']$/g, '').trim())
-      .filter((line) => line && !/^(here|these|sure|google searches)\b/i.test(line));
-    if (lines.length >= 4) return lines.slice(0, 4);
-    if (!first.retryModel && text) break;
+      .filter((line) => line && !/^(here|these|sure|line \d)\b/i.test(line));
+    if (lines.length >= 3) return lines.slice(0, 3);
+    if (!retryModel && text) break;
   }
   return [];
 }
 
-/** Answers sampled per engine and prompt; a mention counts when it appears in the majority. */
-const GEO_SAMPLES_PER_ENGINE = 3;
+/** Google's real "People also ask" questions for a search (UK results). [] when there are none. */
+export async function fetchPeopleAlsoAskQuestions(keyword: string, timeoutMs = 35000): Promise<string[]> {
+  const q = String(keyword || '').replace(/\s+/g, ' ').trim();
+  if (!q || !requireDataForSeoConfigured()) return [];
+  try {
+    const res = await fetch('https://api.dataforseo.com/v3/serp/google/organic/live/advanced', {
+      method: 'POST',
+      headers: { Authorization: basicAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ keyword: q, language_code: 'en', location_code: 2826, depth: 10, device: 'desktop' }]),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    const data: any = await res.json().catch(() => ({}));
+    const taskResult = Array.isArray(data?.tasks) ? data.tasks[0] : null;
+    if (!res.ok || !taskResult || taskResult.status_code !== 20000) {
+      console.warn('[dataForSeo] People also ask failed:', taskResult?.status_message || `HTTP ${res.status}`);
+      return [];
+    }
+    const result = Array.isArray(taskResult.result) ? taskResult.result[0] : taskResult.result;
+    return extractAeoSerpFacts(result?.items || [], '')
+      .peopleAlsoAsk.map((p) => p.question)
+      .filter(Boolean);
+  } catch (err: any) {
+    console.warn('[dataForSeo] People also ask failed:', err?.message || err);
+    return [];
+  }
+}
+
+/** Answers sampled per engine and prompt (one run each keeps the audit at 9 paid LLM calls). */
+const GEO_SAMPLES_PER_ENGINE = 1;
+
+const AI_ENGINES: Array<{
+  engine: AiEngineCheckResult['engine'];
+  label: string;
+  platform: LlmPlatform;
+  models: string[];
+}> = [
+  { engine: 'chatgpt', label: 'ChatGPT', platform: 'chat_gpt', models: ['gpt-4.1-mini', 'gpt-4o-mini'] },
+  {
+    engine: 'claude',
+    label: 'Claude',
+    platform: 'claude',
+    models: ['claude-sonnet-4-5', 'claude-sonnet-4-6', 'claude-haiku-4-5']
+  },
+  { engine: 'gemini', label: 'Gemini', platform: 'gemini', models: ['gemini-3.5-flash', 'gemini-2.5-flash'] }
+];
 
 export async function checkAiEngineMentions(opts: {
   prompt: string;
   businessName: string;
   city?: string;
   address?: string | null;
+  website?: string;
   promptKey?: GeoAiPromptKey;
 }): Promise<AiEngineCheckResult[]> {
   const prompt = String(opts.prompt || '').trim();
@@ -2471,6 +2651,7 @@ export async function checkAiEngineMentions(opts: {
   const address = opts.address;
   const promptKey = opts.promptKey;
   const capturedAt = new Date().toISOString();
+  const match = { city, website: opts.website };
 
   const skippedRow = (
     engine: AiEngineCheckResult['engine'],
@@ -2482,6 +2663,9 @@ export async function checkAiEngineMentions(opts: {
     prompt,
     promptKey,
     mentioned: null,
+    mentionCount: 0,
+    answeredCount: 0,
+    bestPosition: null,
     brandName: businessName,
     recommendedLikely: null,
     citedHosts: [],
@@ -2492,78 +2676,87 @@ export async function checkAiEngineMentions(opts: {
   });
 
   if (!prompt || !businessName) {
-    return [
-      skippedRow('chatgpt', 'ChatGPT', 'Missing prompt or business name'),
-      skippedRow('claude', 'Claude', 'Missing prompt or business name'),
-      skippedRow('perplexity', 'Perplexity', 'Missing prompt or business name')
-    ];
+    return AI_ENGINES.map((e) => skippedRow(e.engine, e.label, 'Missing prompt or business name'));
   }
 
-  // LLM answers vary from run to run, so each engine is asked several times and the result is the majority.
-  const sample = async (platform: 'chat_gpt' | 'claude' | 'perplexity', models: string[]) => {
-    const runs: Array<{ text: string; error?: string }> = [];
+  // Each engine is asked the prompt once; that single answer decides whether the business is mentioned.
+  const sample = async (platform: LlmPlatform, models: string[]) => {
+    const runs: Array<{ text: string; citations: string[]; error?: string }> = [];
     for (let i = 0; i < GEO_SAMPLES_PER_ENGINE; i++) {
-      runs.push(
-        await fetchLlmWithModelFallback({ platform, models, prompt, city, address, timeoutMs: 60000 })
-      );
+      runs.push(await fetchLlmWithModelFallback({ platform, models, prompt, city, address, timeoutMs: 60000 }));
     }
     return runs;
   };
-  const [gpt, claude, perplexity] = await Promise.all([
-    sample('chat_gpt', ['gpt-4.1-mini', 'gpt-4o-mini']),
-    sample('claude', ['claude-sonnet-4-5', 'claude-sonnet-4-6', 'claude-haiku-4-5']),
-    sample('perplexity', ['sonar', 'sonar-pro'])
-  ]);
+  const sampled = await Promise.all(AI_ENGINES.map((e) => sample(e.platform, e.models)));
 
   const mentionFromAnswer = (answer: string) => {
     const ranked = extractRankedLinesFromMarkdown(answer).slice(0, 5);
     if (!ranked.length) {
-      // No numbered list (e.g. Claude answered in prose): keep the answer text so the card is never empty.
+      // No numbered list (e.g. a prose answer): keep the answer text so the card is never empty.
       const excerpt = sanitizeLlmExcerpt(answer, 420);
-      return { ranked, excerpt, mentioned: Boolean(excerpt) && brandNameShownInText(answer, businessName) };
+      return {
+        excerpt,
+        mentioned: Boolean(excerpt) && brandNameShownInText(answer, businessName, match),
+        position: null as number | null
+      };
     }
-    const excerpt = formatTop5List(ranked);
-    const mentioned = brandNameShownInText(excerpt, businessName);
-    return { ranked, excerpt, mentioned };
+    const index = ranked.findIndex((line) => brandNameShownInText(line, businessName, match));
+    return {
+      excerpt: formatTop5List(ranked),
+      mentioned: index >= 0,
+      position: index >= 0 ? index + 1 : null
+    };
   };
 
   const toApiRow = (
     engine: AiEngineCheckResult['engine'],
     label: string,
-    runs: Array<{ text: string; error?: string }>
+    runs: Array<{ text: string; citations: string[]; error?: string }>
   ): AiEngineCheckResult => {
     const answered = runs.filter((r) => r.text).map((r) => ({ run: r, ...mentionFromAnswer(r.text) }));
     if (!answered.length) {
       return skippedRow(engine, label, runs.find((r) => r.error)?.error || 'No answer');
     }
-    const mentionedCount = answered.filter((a) => a.mentioned).length;
-    const mentioned = mentionedCount >= Math.ceil(answered.length / 2);
+    const mentionCount = answered.filter((a) => a.mentioned).length;
+    const mentioned = mentionCount >= Math.ceil(answered.length / 2);
     const shown = answered.find((a) => a.mentioned === mentioned) || answered[0];
+    const positions = answered.map((a) => a.position).filter((p): p is number => typeof p === 'number');
+    const cited = new Set<string>();
+    for (const a of answered) {
+      for (const url of a.run.citations) {
+        try {
+          cited.add(new URL(url).hostname.replace(/^www\./, '').toLowerCase());
+        } catch {
+          /* skip a malformed source URL */
+        }
+      }
+      for (const host of extractCitedHostsFromText(a.run.text)) cited.add(host);
+    }
     return {
       engine,
       label,
       prompt,
       promptKey,
       mentioned,
+      mentionCount,
+      answeredCount: answered.length,
+      bestPosition: positions.length ? Math.min(...positions) : null,
       brandName: businessName,
       recommendedLikely: recommendedLikelyInText(shown.excerpt, mentioned),
-      citedHosts: extractCitedHostsFromText(shown.excerpt),
+      citedHosts: [...cited].slice(0, 12),
       answerExcerpt: shown.excerpt,
       capturedAt
     };
   };
 
-  return [
-    toApiRow('chatgpt', 'ChatGPT', gpt),
-    toApiRow('claude', 'Claude', claude),
-    toApiRow('perplexity', 'Perplexity', perplexity)
-  ];
+  return AI_ENGINES.map((e, i) => toApiRow(e.engine, e.label, sampled[i]));
 }
 
 export async function checkAiEngineMentionsMulti(opts: {
   service?: string;
   city?: string;
   address?: string | null;
+  website?: string;
   businessName: string;
 }): Promise<AiEngineCheckResult[]> {
   const businessName = String(opts.businessName || '').trim();
@@ -2582,6 +2775,7 @@ export async function checkAiEngineMentionsMulti(opts: {
       businessName,
       city,
       address: opts.address,
+      website: opts.website,
       promptKey: key
     });
     out.push(...batch);

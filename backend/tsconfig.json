@@ -19,6 +19,8 @@
   "include": [
     "server.ts",
     "lambda.ts",
+    "leadEnrich.ts",
+    "jobs.ts",
     "lib/**/*.ts",
     "middleware/**/*.ts",
     "routes/**/*.ts",

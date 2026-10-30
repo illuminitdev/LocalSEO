@@ -8,6 +8,8 @@ import {
 export type AeoQueryIntent =
   | 'service_cost'
   | 'service_best'
+  | 'service_where'
+  // Audits saved before the questions became local-only.
   | 'service_howto'
   | 'brand_trust';
 
@@ -31,98 +33,62 @@ export type AeoQueryAudit = {
       topResults?: Array<{ name?: string; isProspect?: boolean }>;
     };
   };
+  /** Services read from the business website (see extractSiteServices). */
+  siteServices?: string[];
 } | null;
 
-export function buildAeoQuerySpecs(audit: AeoQueryAudit): AeoQuerySpec[] {
-  const { name, city, service } = auditContext(audit);
+/** "tyres" -> plural, "MOT" / "car servicing" / "brake repair" -> singular. */
+function isPlural(service: string): boolean {
+  const last = service.split(' ').pop() || '';
+  return /[a-z]s$/.test(last) && !/(ss|is|us|ics)$/.test(last);
+}
 
+function withArticle(noun: string): string {
+  return /^[aeiou]/i.test(noun) ? `an ${noun}` : `a ${noun}`;
+}
+
+/**
+ * Last resort when the AI questions (aeoQuestionsAi.ts) could not be written: questions built around the services
+ * read from the website, or, without any, the category as the kind of business ("a garage"), never as a service.
+ */
+export function buildAeoQuerySpecs(audit: AeoQueryAudit): AeoQuerySpec[] {
+  const { name, city } = auditContext(audit);
+  const category = String(audit?.business?.serviceLabel || audit?.business?.service || '').trim();
+  const services = (Array.isArray(audit?.siteServices) ? audit.siteServices : [])
+    .map((s) => String(s || '').trim())
+    .filter(Boolean);
+
+  // All three are local: each names the town, none names the business.
+  if (services.length) {
+    const first = services[0];
+    const second = services[1] || first;
+    const third = services[2] || first;
+    return [
+      { query: `Who is the best for ${first} in ${city}?`, intent: 'service_best', kind: 'service' },
+      {
+        query: `How much ${isPlural(second) ? 'do' : 'does'} ${second} cost in ${city}?`,
+        intent: 'service_cost',
+        kind: 'service'
+      },
+      { query: `Where can I get ${third} in ${city}?`, intent: 'service_where', kind: 'service' }
+    ];
+  }
+
+  const business =
+    category && !/^local (services|business)$/i.test(category) ? category.toLowerCase() : 'local business';
   return [
-    {
-      query: `How much does ${service} cost in ${city}?`,
-      intent: 'service_cost',
-      kind: 'service'
-    },
-    {
-      query: `How do I choose ${service} in ${city}?`,
-      intent: 'service_howto',
-      kind: 'service'
-    },
-    {
-      query: `${name} reviews ${city}`,
-      intent: 'brand_trust',
-      kind: 'brand'
-    },
-    {
-      query: `Is ${name} good for ${service} in ${city}?`,
-      intent: 'brand_trust',
-      kind: 'brand'
-    }
+    { query: `Who is the best ${business} in ${city}?`, intent: 'service_best', kind: 'service' },
+    { query: `How much does ${withArticle(business)} in ${city} charge?`, intent: 'service_cost', kind: 'service' },
+    { query: `Which ${business} in ${city} is recommended?`, intent: 'service_where', kind: 'service' }
   ];
 }
 
-function termWords(term: string): string[] {
-  return String(term || '')
-    .toLowerCase()
-    .split(/\s+/)
-    .map((w) => w.replace(/[^a-z0-9]/g, ''))
-    .filter(
-      (w) =>
-        w.length >= 4 &&
-        !['this', 'business', 'local', 'services', 'service', 'limited', 'company'].includes(w)
-    );
-}
-
-function mentionsAny(query: string, words: string[]): boolean {
-  const q = query.toLowerCase();
-  return words.some((w) => q.includes(w) || (w.length >= 5 && q.includes(w.slice(0, 5))));
-}
-
-function cleanSearchLine(line: string): string {
+export function cleanSearchLine(line: string): string {
   return String(line || '')
     .replace(/^(\d+[\).\]]\s*|[-*•]\s*)/, '')
     .replace(/^["']|["']$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-/** Turn ChatGPT's four lines into AEO cards. Returns null when the lines are not usable. */
-export function aeoSpecsFromSearchLines(
-  lines: string[],
-  audit: AeoQueryAudit
-): AeoQuerySpec[] | null {
-  const { service } = auditContext(audit);
-  const businessName = String(audit?.business?.businessName || '').trim();
-  const cleaned = (Array.isArray(lines) ? lines : [])
-    .map(cleanSearchLine)
-    .filter(
-      (line) =>
-        line.length >= 8 &&
-        line.length <= 120 &&
-        !/https?:\/\//i.test(line) &&
-        !/\b(chatgpt|gemini|claude|dataforseo|api)\b/i.test(line)
-    );
-  const unique: string[] = [];
-  for (const line of cleaned) {
-    if (unique.some((u) => u.toLowerCase() === line.toLowerCase())) continue;
-    unique.push(line);
-  }
-  if (unique.length < 4 || !businessName) return null;
-
-  const serviceWords = termWords(service);
-  const nameWords = termWords(businessName).filter(
-    (w) => !serviceWords.some((s) => s.includes(w) || w.includes(s) || (w.length >= 5 && s.startsWith(w.slice(0, 5))))
-  );
-  const serviceLines = unique.filter((line) => mentionsAny(line, serviceWords) && !mentionsAny(line, nameWords));
-  const brandLines = unique.filter((line) => mentionsAny(line, nameWords) && mentionsAny(line, serviceWords));
-  if (serviceLines.length < 2 || brandLines.length < 2) return null;
-
-  const picked = [...serviceLines.slice(0, 2), ...brandLines.slice(0, 2)];
-  const intents: AeoQueryIntent[] = ['service_cost', 'service_howto', 'brand_trust', 'brand_trust'];
-  return picked.map((query, i) => ({
-    query,
-    intent: intents[i],
-    kind: i < 2 ? 'service' : 'brand'
-  }));
 }
 
 function storedAeoQuerySpecs(audit: { aeoQuerySpecs?: unknown } | null): AeoQuerySpec[] | null {
@@ -133,7 +99,11 @@ function storedAeoQuerySpecs(audit: { aeoQuerySpecs?: unknown } | null): AeoQuer
       const kind = (row as AeoQuerySpec)?.kind === 'brand' ? 'brand' : 'service';
       const intent = (row as AeoQuerySpec)?.intent;
       const safeIntent: AeoQueryIntent =
-        intent === 'service_cost' || intent === 'service_howto' || intent === 'service_best' || intent === 'brand_trust'
+        intent === 'service_cost' ||
+        intent === 'service_howto' ||
+        intent === 'service_best' ||
+        intent === 'service_where' ||
+        intent === 'brand_trust'
           ? intent
           : kind === 'brand'
             ? 'brand_trust'
@@ -141,7 +111,8 @@ function storedAeoQuerySpecs(audit: { aeoQuerySpecs?: unknown } | null): AeoQuer
       return query ? { query, intent: safeIntent, kind } : null;
     })
     .filter((row): row is AeoQuerySpec => Boolean(row));
-  return specs.length === 4 ? specs : null;
+  // 3 AI-written questions; audits saved before that have 4.
+  return specs.length >= 3 ? specs : null;
 }
 
 export function buildAeoQueryCards(
@@ -181,7 +152,7 @@ export function buildAeoQueryCards(
       answerBox: shot?.answerBox || null,
       businessNamed: shot?.businessNamed ?? null,
       answerVisibility: !measured
-        ? 'Answer visibility was not measured for this question.'
+        ? `${brand} is not visible in the answer for this question.`
         : named
           ? `${brand} is visible in the answer for this question.`
           : `${brand} is not visible in the answer for this question.`

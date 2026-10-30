@@ -20,7 +20,12 @@ import {
     Mail,
     Eye,
     ClipboardCheck,
-    ListTodo
+    ListTodo,
+    Loader2,
+    CheckCircle2,
+    UserCheck,
+    MousePointerClick,
+    X
 } from 'lucide-react';
 import {
     type LeadTask,
@@ -29,16 +34,18 @@ import {
     fetchCrmTasks,
     fetchSalesAgents,
     fetchAdminExcelBatches,
+    shareLeadObservationsEmail,
     adminGet
 } from './adminApi';
 import LeadStatusHistoryModal from './LeadStatusHistoryModal';
+import BulkAssignTasksModal from './BulkAssignTasksModal';
 import {
     normalizeBusinessCategory,
     matchesStatusDateFilter,
     type StatusDateFilter
 } from './AdminGrowthAuditLeads';
 import { cn } from '../shared/utils';
-import { matchesEmailFilter } from './crmFilters';
+import { matchesAuditClickFilter, matchesEmailFilter } from './crmFilters';
 import { emailShareStatusLabel, emailShareStatusHint } from '../shared/emailShareStatus';
 import { getLeadStatusConfig } from '../sales-agent/SalesTasks';
 
@@ -67,6 +74,38 @@ const TASK_TYPE_OPTIONS: Array<{ value: string; label: string; icon: ElementType
     { value: 'custom', label: 'Custom Task', icon: Plus }
 ];
 
+/**
+ * Sends the GBP / AI visibility observations email to each lead individually, a few at a time.
+ * The server rejects leads with no email or no observations — those are reported as skipped.
+ */
+async function sendObservationEmailsBulk(
+    targets: Array<{ leadId: string; name: string }>,
+    onProgress: (done: number, total: number) => void
+) {
+    const result = { sent: 0, noEmail: [] as string[], noObservations: [] as string[], failed: [] as string[] };
+    const CONCURRENCY = 3;
+    let next = 0;
+    let done = 0;
+    const worker = async () => {
+        while (next < targets.length) {
+            const target = targets[next++];
+            try {
+                await shareLeadObservationsEmail(target.leadId);
+                result.sent++;
+            } catch (err: any) {
+                const msg = String(err?.message || '');
+                if (/valid business email/i.test(msg)) result.noEmail.push(target.name);
+                else if (/observations before emailing/i.test(msg)) result.noObservations.push(target.name);
+                else result.failed.push(target.name);
+            }
+            done++;
+            onProgress(done, targets.length);
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker));
+    return result;
+}
+
 function formatDateParts(value?: string | null) {
     if (!value) return { date: '—', time: '' };
     try {
@@ -91,6 +130,7 @@ function fmtDate(value?: string | null) {
 const PAGE_SIZE = 10;
 
 type EmailOpenFilter = 'all' | 'sent' | 'opened' | 'not_opened' | 'not_sent';
+type AuditClickFilter = 'all' | 'clicked' | 'not_clicked';
 
 const CRM_TASK_FILTER_DEFAULTS = {
     q: '',
@@ -101,6 +141,7 @@ const CRM_TASK_FILTER_DEFAULTS = {
     priority: 'all',
     business: 'all',
     email: 'all' as EmailOpenFilter,
+    auditClick: 'all' as AuditClickFilter,
     batch: 'all',
     statusDate: 'all' as StatusDateFilter,
     statusDateCustom: '',
@@ -206,6 +247,8 @@ export default function AdminCrmTasks() {
     const selectedPriority = filters.priority;
     const selectedBusiness = filters.business;
     const emailFilter = filters.email as EmailOpenFilter;
+    // Audit button filter only applies while "Email Opened" is selected.
+    const auditClickFilter = (emailFilter === 'opened' ? filters.auditClick : 'all') as AuditClickFilter;
     const excelBatchFilter = filters.batch;
     const statusDateFilter = filters.statusDate as StatusDateFilter;
     const statusCustomDate = filters.statusDateCustom;
@@ -421,6 +464,7 @@ function isLeadAdded(lead: any) {
 
             // 7. Email Status
             if (!matchesEmailFilter(t, emailFilter)) return false;
+            if (!matchesAuditClickFilter(t, auditClickFilter)) return false;
 
             // 8. Status Date
             const taskStatusDate = t.updatedAt || t.completedAt || t.createdAt;
@@ -446,6 +490,7 @@ function isLeadAdded(lead: any) {
         selectedStatus,
         selectedLeadStatus,
         emailFilter,
+        auditClickFilter,
         statusDateFilter,
         statusCustomDate,
         selectedPriority,
@@ -582,6 +627,86 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
     const rangeStart = dedupedTasks.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
     const rangeEnd = Math.min(safePage * PAGE_SIZE, dedupedTasks.length);
 
+    // Bulk selection (keyed by lead — one row per lead)
+    const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(() => new Set());
+    const [bulkEmailProgress, setBulkEmailProgress] = useState<{ done: number; total: number } | null>(null);
+    const [bulkEmailReport, setBulkEmailReport] = useState<{ summary: string; details: string[] } | null>(null);
+    const [isBulkAssignModalOpen, setIsBulkAssignModalOpen] = useState(false);
+    const [bulkAssignLeadIds, setBulkAssignLeadIds] = useState<string[]>([]);
+    const [bulkAssignToast, setBulkAssignToast] = useState<string | null>(null);
+    const isAllFilteredSelected =
+        dedupedTasks.length > 0 && dedupedTasks.every((g) => selectedLeadIds.has(g.leadId));
+
+    const toggleLeadSelect = (leadId: string) => {
+        setSelectedLeadIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(leadId)) next.delete(leadId);
+            else next.add(leadId);
+            return next;
+        });
+    };
+
+    const toggleSelectAllFiltered = () => {
+        setSelectedLeadIds((prev) => {
+            const next = new Set(prev);
+            for (const g of dedupedTasks) {
+                if (isAllFilteredSelected) next.delete(g.leadId);
+                else next.add(g.leadId);
+            }
+            return next;
+        });
+    };
+
+    const handleBulkEmailSelected = async () => {
+        const selected = dedupedTasks.filter((g) => selectedLeadIds.has(g.leadId));
+        // Don't re-email businesses that already got the observations email.
+        const alreadySent = selected.filter((g) => {
+            const s = g.primaryTask.observationEmailShareStatus;
+            return s === 'sent' || s === 'opened';
+        });
+        const targets = selected
+            .filter((g) => !alreadySent.includes(g))
+            .map((g) => ({
+                leadId: g.leadId,
+                name: g.primaryTask.leadBusinessName || getLeadName(g.leadId, g.primaryTask)
+            }));
+        if (!targets.length) {
+            setBulkEmailReport({ summary: 'All selected leads have already been sent the observations email.', details: [] });
+            return;
+        }
+        if (
+            !window.confirm(
+                `Email GBP & AI visibility observations to ${targets.length} business(es)?\n\n` +
+                    'Each business gets its own email at its own address. Leads with no email or no ' +
+                    'GBP / AI visibility observation are skipped.' +
+                    (alreadySent.length ? `\n${alreadySent.length} already emailed will also be skipped.` : '')
+            )
+        ) {
+            return;
+        }
+
+        setBulkEmailReport(null);
+        setBulkEmailProgress({ done: 0, total: targets.length });
+        const res = await sendObservationEmailsBulk(targets, (done, total) => setBulkEmailProgress({ done, total }));
+        setBulkEmailProgress(null);
+
+        const skipped = res.noEmail.length + res.noObservations.length + alreadySent.length;
+        setBulkEmailReport({
+            summary:
+                `Emailed ${res.sent} business(es).` +
+                (skipped ? ` Skipped ${skipped}.` : '') +
+                (res.failed.length ? ` Failed ${res.failed.length}.` : ''),
+            details: [
+                alreadySent.length ? `Already emailed: ${alreadySent.length}` : '',
+                res.noEmail.length ? `No email: ${res.noEmail.join(', ')}` : '',
+                res.noObservations.length ? `No GBP / AI observation: ${res.noObservations.join(', ')}` : '',
+                res.failed.length ? `Failed to send (select and try again): ${res.failed.join(', ')}` : ''
+            ].filter(Boolean)
+        });
+        setSelectedLeadIds(new Set());
+        await loadData();
+    };
+
     return (
         <div className="space-y-6 max-w-7xl">
             {error && (
@@ -591,6 +716,47 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         <span>{error}</span>
                     </div>
                     <button onClick={loadData} className="text-xs font-semibold underline">Retry</button>
+                </div>
+            )}
+
+            {bulkAssignToast && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-950 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 font-semibold min-w-0">
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-amber-600" />
+                        <span className="truncate">{bulkAssignToast}</span>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setBulkAssignToast(null)}
+                        className="p-0.5 text-amber-700 hover:text-amber-950"
+                        aria-label="Dismiss"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
+
+            {bulkEmailReport && (
+                <div className="p-4 bg-sky-50 border border-sky-200 rounded-2xl text-sm text-sky-900 flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 font-semibold">
+                            <CheckCircle2 className="w-4 h-4 shrink-0 text-sky-600" />
+                            <span>{bulkEmailReport.summary}</span>
+                        </div>
+                        {bulkEmailReport.details.map((line) => (
+                            <p key={line} className="text-xs text-sky-800 pl-6 break-words">
+                                {line}
+                            </p>
+                        ))}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setBulkEmailReport(null)}
+                        className="p-0.5 text-sky-600 hover:text-sky-900"
+                        aria-label="Dismiss"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
                 </div>
             )}
 
@@ -646,7 +812,12 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                     </button>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-8 gap-2.5 pt-2 border-t border-slate-100">
+                <div
+                    className={cn(
+                        'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 pt-2 border-t border-slate-100',
+                        emailFilter === 'opened' ? 'lg:grid-cols-9' : 'lg:grid-cols-8'
+                    )}
+                >
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                             Business Category
@@ -783,7 +954,16 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         </label>
                         <select
                             value={emailFilter}
-                            onChange={(e) => setFilter('email', e.target.value)}
+                            onChange={(e) => {
+                                const value = e.target.value;
+                                // Leaving "Email Opened" also clears the Audit button filter.
+                                setFilters((prev) => ({
+                                    ...prev,
+                                    email: value as EmailOpenFilter,
+                                    auditClick: value === 'opened' ? prev.auditClick : 'all',
+                                    page: '1'
+                                }));
+                            }}
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                             title="Filter tasks by email open status"
                         >
@@ -794,6 +974,25 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                             <option value="not_sent">Not Sent</option>
                         </select>
                     </div>
+
+                    {emailFilter === 'opened' && (
+                        <div>
+                            <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-1">
+                                <MousePointerClick className="w-3 h-3 text-slate-400 shrink-0" />
+                                Audit Button
+                            </label>
+                            <select
+                                value={auditClickFilter}
+                                onChange={(e) => setFilter('auditClick', e.target.value)}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                                title='Filter by whether they clicked "Request a full main audit" in the observation email'
+                            >
+                                <option value="all">All</option>
+                                <option value="clicked">Clicked</option>
+                                <option value="not_clicked">Not clicked</option>
+                            </select>
+                        </div>
+                    )}
 
                     <div>
                         <label className="block text-[11px] font-semibold text-slate-500 mb-1">
@@ -864,6 +1063,16 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                         <table className="w-full table-fixed text-left border-collapse text-sm min-w-[850px]">
                             <thead>
                                 <tr className="border-b border-slate-100 bg-slate-50/60 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                    <th className="py-3.5 pl-5 pr-0 w-[44px]">
+                                        <input
+                                            type="checkbox"
+                                            className="w-4 h-4 accent-amber-500 cursor-pointer align-middle"
+                                            checked={isAllFilteredSelected}
+                                            onChange={toggleSelectAllFiltered}
+                                            aria-label="Select all leads matching filters"
+                                            title="Select all leads matching filters"
+                                        />
+                                    </th>
                                     <th className="py-3.5 pl-6 pr-4 w-[32%]">Lead / Business</th>
                                     <th className="py-3.5 px-4 w-[18%]">Assigned Agent</th>
                                     <th className="py-3.5 px-4 w-[12%]">Priority</th>
@@ -872,7 +1081,7 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {pageGroups.map(({ primaryTask: task, pendingTasks }) => {
+                                {pageGroups.map(({ leadId: groupLeadId, primaryTask: task, pendingTasks }) => {
                                     const isVirtual = String(task.id || '').startsWith('virtual-');
                                     const isDone = !isVirtual && pendingTasks === 0;
                                     const leadName = task.leadBusinessName || getLeadName(task.leadId, task);
@@ -889,6 +1098,15 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                                                 isDone ? "bg-emerald-50/40 hover:bg-emerald-50/70" : "hover:bg-slate-50/70"
                                             )}
                                         >
+                                            <td className="py-4 pl-5 pr-0 align-middle">
+                                                <input
+                                                    type="checkbox"
+                                                    className="w-4 h-4 accent-amber-500 cursor-pointer align-middle"
+                                                    checked={selectedLeadIds.has(groupLeadId)}
+                                                    onChange={() => toggleLeadSelect(groupLeadId)}
+                                                    aria-label={`Select ${leadName}`}
+                                                />
+                                            </td>
                                             <td className="py-4 px-5 align-middle overflow-hidden">
                                                 <div className="min-w-0">
                                                     <div className="flex items-center gap-2 max-w-full">
@@ -1093,6 +1311,69 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
                     </div>
                 )}
             </div>
+
+            {selectedLeadIds.size > 0 && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 text-white backdrop-blur-md px-5 py-3 rounded-2xl shadow-2xl border border-slate-700/80 flex items-center gap-3.5">
+                    <div className="flex items-center gap-2">
+                        <span className="min-w-6 h-6 px-1 rounded-full bg-amber-500 text-slate-950 font-black text-xs flex items-center justify-center">
+                            {selectedLeadIds.size}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-200 whitespace-nowrap">
+                            {selectedLeadIds.size === 1 ? 'lead selected' : 'leads selected'}
+                        </span>
+                    </div>
+                    <div className="h-5 w-px bg-slate-700/80 shrink-0" />
+                    <button
+                        type="button"
+                        disabled={Boolean(bulkEmailProgress)}
+                        onClick={() => {
+                            setBulkAssignLeadIds(Array.from(selectedLeadIds));
+                            setIsBulkAssignModalOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-sm whitespace-nowrap disabled:opacity-60"
+                        title="Assign all selected leads to a sales agent"
+                    >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        <span>Assign to agent ({selectedLeadIds.size})</span>
+                    </button>
+                    <button
+                        type="button"
+                        disabled={Boolean(bulkEmailProgress)}
+                        onClick={handleBulkEmailSelected}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-400 text-white font-bold text-xs rounded-xl transition-all shadow-sm whitespace-nowrap disabled:opacity-60"
+                        title="Email GBP & AI visibility observations to each selected business"
+                    >
+                        {bulkEmailProgress ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                        <span>
+                            {bulkEmailProgress
+                                ? `Sending ${bulkEmailProgress.done}/${bulkEmailProgress.total}…`
+                                : `Email observations (${selectedLeadIds.size})`}
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        disabled={Boolean(bulkEmailProgress)}
+                        onClick={() => setSelectedLeadIds(new Set())}
+                        className="text-xs font-semibold text-slate-400 hover:text-white transition-colors whitespace-nowrap px-1 disabled:opacity-40"
+                    >
+                        Clear
+                    </button>
+                </div>
+            )}
+
+            <BulkAssignTasksModal
+                isOpen={isBulkAssignModalOpen}
+                leadIds={bulkAssignLeadIds}
+                salesAgents={salesAgents}
+                onClose={() => setIsBulkAssignModalOpen(false)}
+                onSuccess={async (res) => {
+                    setBulkAssignToast(res.message);
+                    setSelectedLeadIds(new Set());
+                    setBulkAssignLeadIds([]);
+                    await loadData();
+                    setTimeout(() => setBulkAssignToast(null), 4000);
+                }}
+            />
 
             {selectedStatusTask && (
                 <LeadStatusHistoryModal

@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 
 function lighthouseAuditState(audit) {
   if (!audit || audit.score == null || audit.scoreDisplayMode === 'notApplicable' || audit.scoreDisplayMode === 'error') {
@@ -112,9 +113,16 @@ export async function runLighthouse(url) {
     const chromeLauncher = await import('chrome-launcher');
     const lighthouse = (await import('lighthouse')).default;
 
-    const chrome = await chromeLauncher.launch({
+    // The Lambda image has no system Chrome: use the bundled Chromium, as the screenshot does.
+    let launchOpts: { chromeFlags: string[]; chromePath?: string } = {
       chromeFlags: ['--headless', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
-    });
+    };
+    if (config.isLambda) {
+      const chromium = (await import('@sparticuz/chromium')).default;
+      chromium.setGraphicsMode = false;
+      launchOpts = { chromeFlags: chromium.args, chromePath: await chromium.executablePath() };
+    }
+    const chrome = await chromeLauncher.launch(launchOpts);
 
     try {
       const result = await lighthouse(url, {

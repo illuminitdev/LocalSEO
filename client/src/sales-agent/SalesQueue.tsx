@@ -851,7 +851,7 @@ export default function SalesQueue() {
                 </div>
                 <Link
                     to="/sales/tasks"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 text-white px-5 py-3 text-sm font-bold hover:bg-orange-400 shrink-0"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 text-[var(--brand-primary-foreground)] px-5 py-3 text-sm font-bold hover:bg-orange-400 shrink-0"
                 >
                     Go to tasks <ArrowRight className="w-4 h-4" />
                 </Link>

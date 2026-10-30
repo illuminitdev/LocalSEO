@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
     MessageSquareWarning,
@@ -20,8 +20,11 @@ import {
     Check,
     X
 } from 'lucide-react';
-import { apiDelete, apiGet, apiPost } from '../../shared/utils';
+import { apiDelete, apiGet, apiPost, type ApiError } from '../../shared/utils';
+import { useCredits } from '../../shared/CreditsContext';
+import { creditErrorMessage } from '../../shared/creditMessages';
 import { downloadElementAsPdf } from '../../shared/downloadElementAsPdf';
+import { getPageCache, setPageCache } from '../../shared/pageCache';
 
 const ACTION_ICONS: Record<string, any> = {
     review: MessageSquareWarning,
@@ -34,7 +37,7 @@ const ACTION_ICONS: Record<string, any> = {
 };
 const ACTION_TONES: Record<string, string> = {
     review: 'bg-rose-50 text-rose-500',
-    clock: 'bg-orange-500 text-white',
+    clock: 'bg-orange-500 text-[var(--brand-primary-foreground)]',
     photo: 'bg-[#0F172A] text-white',
     post: 'bg-blue-50 text-blue-600',
     profile: 'bg-emerald-50 text-emerald-600',
@@ -58,8 +61,11 @@ function weekLabelBuckets(history: any[]) {
 
 function InsightsOverview() {
     const navigate = useNavigate();
-    const [data, setData] = useState<any>(null);
+    const cached = getPageCache<any>('ai-insights');
+    const [data, setData] = useState<any>(cached ?? null);
+    const [loaded, setLoaded] = useState(Boolean(cached));
     const [busy, setBusy] = useState(false);
+    const { refresh: refreshCredits } = useCredits();
     const [err, setErr] = useState('');
     const [viewing, setViewing] = useState<any>(null);
     const [showAll, setShowAll] = useState(false);
@@ -69,8 +75,13 @@ function InsightsOverview() {
     useEffect(() => {
         apiGet('/api/ai/insights')
             .then(setData)
-            .catch(() => {});
+            .catch(() => {})
+            .finally(() => setLoaded(true));
     }, []);
+
+    useEffect(() => {
+        if (data) setPageCache('ai-insights', data);
+    }, [data]);
 
     const deleteCheck = async (createdAt: string) => {
         if (!window.confirm('Delete this check? This cannot be undone.')) return;
@@ -102,11 +113,7 @@ function InsightsOverview() {
     };
 
     const refresh = async () => {
-        const savedAt = data?.latest?.createdAt ? new Date(data.latest.createdAt).getTime() : 0;
-        if (savedAt && Date.now() - savedAt < 24 * 3600 * 1000) {
-            const hours = Math.max(1, Math.round((Date.now() - savedAt) / 3600000));
-            if (!window.confirm(`You checked ${hours} hour${hours === 1 ? '' : 's'} ago. A new check runs paid Google Maps lookups. Run it again?`)) return;
-        }
+        // One refresh per billing month: the server checks that and takes the credits when the check starts.
         setBusy(true);
         setErr('');
         setProgress('Planning keywords…');
@@ -150,12 +157,30 @@ function InsightsOverview() {
             setProgress('Writing your recommendation…');
             setData(await apiPost('/api/ai/insights/finish', { packs, trendRows, errors }));
         } catch (e: any) {
-            setErr(e?.message || 'Could not refresh insights');
+            const apiErr = e as ApiError;
+            if (apiErr?.code === 'insufficient_credits') {
+                setErr(creditErrorMessage(apiErr));
+            } else {
+                setErr(apiErr?.message || 'Could not refresh insights');
+            }
         } finally {
             setBusy(false);
             setProgress('');
+            refreshCredits();
         }
     };
+
+    const fmtResetDay = (iso?: string | null) =>
+        iso ? new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+    const coolingDown = Boolean(data?.nextCheckAt && new Date(data.nextCheckAt).getTime() > Date.now());
+
+    if (!loaded) {
+        return (
+            <div className="flex justify-center py-24">
+                <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+            </div>
+        );
+    }
 
     const actions: any[] = data?.actions || [];
     const visibleActions = showAll ? actions : actions.slice(0, 3);
@@ -247,7 +272,7 @@ function InsightsOverview() {
                                 <button
                                     type="button"
                                     onClick={() => navigate('/posts')}
-                                    className="mt-3 w-full py-2 rounded-lg bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold cursor-pointer"
+                                    className="mt-3 w-full py-2 rounded-lg bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] text-xs font-bold cursor-pointer"
                                 >
                                     Apply Optimization
                                 </button>
@@ -278,7 +303,7 @@ function InsightsOverview() {
                             <button
                                 type="button"
                                 onClick={refresh}
-                                disabled={busy}
+                                disabled={busy || coolingDown}
                                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0F172A] text-white text-xs font-bold cursor-pointer disabled:opacity-70"
                             >
                                 {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
@@ -356,7 +381,7 @@ function InsightsOverview() {
                     ['3', 'Repeat weekly', 'Each run saves a snapshot. After a few weeks the chart shows whether you are gaining or losing ground.']
                 ].map(([n, t, d]) => (
                     <div key={n} className="flex gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3.5">
-                        <span className="w-6 h-6 rounded-full bg-[var(--brand-primary)] text-white text-xs font-bold flex items-center justify-center shrink-0">{n}</span>
+                        <span className="w-6 h-6 rounded-full bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] text-xs font-bold flex items-center justify-center shrink-0">{n}</span>
                         <div>
                             <div className="text-xs font-bold text-[#0F172A]">{t}</div>
                             <p className="text-[11px] text-gray-500 mt-0.5">{d}</p>
@@ -380,8 +405,8 @@ function InsightsOverview() {
                             </p>
                         )}
                     </div>
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
                             {[
                                 ['You', 'bg-[var(--brand-primary)]'],
                                 [names?.compA?.name || 'Competitor A', 'bg-[#BEC6DB]'],
@@ -407,11 +432,16 @@ function InsightsOverview() {
                         <button
                             type="button"
                             onClick={refresh}
-                            disabled={busy}
+                            disabled={busy || coolingDown}
+                            title={coolingDown ? `Refreshed this week. You can refresh again on ${fmtResetDay(data?.nextCheckAt)}.` : undefined}
                             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0F172A] text-white text-[11px] font-bold hover:bg-[#1E293B] cursor-pointer disabled:opacity-70"
                         >
                             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                            {busy ? progress || 'Checking Google Maps…' : hasChart ? 'Refresh' : 'Run Map Pack check'}
+                            {busy
+                                ? progress || 'Checking Google Maps…'
+                                : coolingDown
+                                  ? `Next refresh ${fmtResetDay(data?.nextCheckAt)}`
+                                  : hasChart ? 'Refresh' : 'Run Map Pack check'}
                         </button>
                     </div>
                 </div>
@@ -421,7 +451,7 @@ function InsightsOverview() {
                         <span>50%</span>
                         <span>0%</span>
                     </div>
-                    <div className="flex-1 grid grid-cols-4 gap-6 items-end h-56 border-b border-[#E2E8F0]">
+                    <div className="flex-1 min-w-0 grid grid-cols-4 gap-2 sm:gap-6 items-end h-56 border-b border-[#E2E8F0]">
                         {buckets.map((b) => (
                             <div key={b.key} className="flex flex-col items-center justify-end h-full">
                                 <div className="w-14 sm:w-20 h-[calc(100%-1.5rem)] flex flex-col justify-end">
@@ -430,7 +460,7 @@ function InsightsOverview() {
                                             {[
                                                 [b.share.compB, 'bg-[#4B5563] text-white rounded-t-sm'],
                                                 [b.share.compA, 'bg-[#BEC6DB] text-slate-700'],
-                                                [{ name: 'You', pct: b.share.you }, 'bg-[var(--brand-primary)] text-white']
+                                                [{ name: 'You', pct: b.share.you }, 'bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)]']
                                             ].map(([seg, cls]: any, i) => (
                                                 <div
                                                     key={i}

@@ -129,6 +129,7 @@ export type LeadTask = {
     observationEmailShareStatus?: 'none' | 'sent' | 'opened';
     observationEmailSentAt?: string | null;
     observationEmailOpenedAt?: string | null;
+    observationEmailClickedAt?: string | null;
 };
 
 export type LeadActivity = {
@@ -238,6 +239,7 @@ export type AdminLeadCrmDetail = {
         observationEmailShareStatus?: 'none' | 'sent' | 'opened';
         observationEmailSentAt?: string | null;
         observationEmailOpenedAt?: string | null;
+        observationEmailClickedAt?: string | null;
     };
     tasks: LeadTask[];
     activities: LeadActivity[];
@@ -443,6 +445,10 @@ export type AdminCrmLead = {
     spreadsheetStatus1?: string;
     spreadsheetStatus2?: string;
     spreadsheetStatus3?: string;
+    gbpUrl?: string;
+    /** '' | 'pending' | 'running' | 'done' | 'failed' (GBP auto-analysis from Excel upload) */
+    enrichStatus?: string;
+    enrichError?: string;
     auditId?: string | null;
     createdAt: string;
     updatedAt: string;
@@ -474,7 +480,14 @@ export async function createAdminCrmLead(lead: Partial<AdminCrmLead>): Promise<A
 export async function bulkImportAdminCrmLeads(
     leads: any[],
     meta?: { fileName?: string }
-): Promise<{ count: number; created: number; skipped: number; leads: AdminCrmLead[]; importBatchId?: string | null }> {
+): Promise<{
+    count: number;
+    created: number;
+    skipped: number;
+    leads: AdminCrmLead[];
+    importBatchId?: string | null;
+    enrichQueued?: number;
+}> {
     return adminPost('/api/admin/crm/leads/bulk-import', {
         leads,
         fileName: meta?.fileName || ''
@@ -541,6 +554,36 @@ export async function deleteAdminExcelLeads(
     batchId: string
 ): Promise<{ success: boolean; count: number; message: string; batchId?: string }> {
     return adminDelete(`/api/admin/crm/leads/excel?batchId=${encodeURIComponent(batchId)}`);
+}
+
+export type ExcelExportLead = {
+    sheetName: string;
+    /** Uploaded row as [header, value] pairs; null for Excels uploaded before rows were kept. */
+    raw: [string, string][] | null;
+    name: string;
+    phone: string;
+    email: string;
+    website: string;
+    address: string;
+    industry: string;
+    gbpUrl: string;
+    gbpObservation: string;
+    aiVisibility: string;
+    priority: string;
+    enrichStatus: string;
+};
+
+/** Leads of one Excel upload, for "Export this Excel". */
+export async function fetchAdminExcelExport(batchId: string): Promise<ExcelExportLead[]> {
+    const res = await adminGet(`/api/admin/crm/leads/excel-export?batchId=${encodeURIComponent(batchId)}`);
+    return res.leads || [];
+}
+
+/** Restart GBP auto-analysis for uploaded leads stuck on "Analyzing" (all batches when batchId is omitted). */
+export async function resumeAdminLeadEnrichment(
+    batchId?: string | null
+): Promise<{ resumed: number; message: string }> {
+    return adminPost('/api/admin/crm/leads/enrich-resume', { batchId: batchId || null });
 }
 
 export async function bulkDeleteAdminCrmLeads(

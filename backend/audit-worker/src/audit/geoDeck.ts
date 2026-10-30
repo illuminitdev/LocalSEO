@@ -42,9 +42,9 @@ export function buildGeoFixes(audit) {
 
   return {
     title: 'GEO: AI mentions and citations',
-    visualIntro: `Whether ChatGPT, Claude, and Perplexity name ${name} in the top 5 for ${geoPromptSummary}. ${areaNote}`,
-    goalLine: `Get ${name} named in the top 5 on ChatGPT, Claude, and Perplexity for ${geoPromptSummary}. ${areaNote}`,
-    verifyHint: `Ask ChatGPT, Claude, and Perplexity: ${geoPromptSummary}. ${areaNote}`,
+    visualIntro: `Whether ChatGPT, Claude and Gemini name ${name} in the top 5 for ${geoPromptSummary}. ${areaNote}`,
+    goalLine: `Get ${name} named in the top 5 on ChatGPT, Claude and Gemini for ${geoPromptSummary}. ${areaNote}`,
+    verifyHint: `Ask ChatGPT, Claude and Gemini: ${geoPromptSummary}. ${areaNote}`,
     queryCards: [
       {
         query: measuredQuery,
@@ -79,7 +79,7 @@ export function buildGeoFixes(audit) {
         ? `${name} is mentioned in ${mentioned.join(' / ')} across measured GEO prompts.`
         : missed.length
           ? `${name} is not mentioned in ${missed.join(' / ')} across measured GEO prompts.`
-          : 'AI engine checks were unavailable for this run.';
+          : `${name} is not yet named by ChatGPT, Gemini or Claude for local searches.`;
       const mapsBit = inPack
         ? ` Local SEO note: ${name} is in the Google Maps results for “${measuredQuery}”.`
         : mapsResults.length

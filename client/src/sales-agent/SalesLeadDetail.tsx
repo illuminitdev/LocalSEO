@@ -52,6 +52,7 @@ import {
     BarChart3,
     BadgeCheck
 } from 'lucide-react';
+import AiVisibilityText from '../shared/AiVisibilityText';
 
 export default function SalesLeadDetail() {
     const { id } = useParams<{ id: string }>();
@@ -345,7 +346,7 @@ export default function SalesLeadDetail() {
                         );
                     })()}
                     {emailShareStatusLabel(lead.observationEmailShareStatus) ? (
-                        <div className="flex flex-col items-end gap-0.5">
+                        <div className="group relative flex flex-col items-end">
                             <span
                                 className={cn(
                                     'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
@@ -357,11 +358,18 @@ export default function SalesLeadDetail() {
                             >
                                 Email: {emailShareStatusLabel(lead.observationEmailShareStatus)}
                             </span>
-                            {obsTimeLines.map((line) => (
-                                <span key={line} className="text-[10px] font-medium text-[#64748B] whitespace-nowrap">
-                                    {line}
-                                </span>
-                            ))}
+                            {obsTimeLines.length > 0 ? (
+                                <div
+                                    className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 flex flex-col items-end gap-0.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                    aria-hidden
+                                >
+                                    {obsTimeLines.map((line) => (
+                                        <span key={line} className="text-[10px] font-medium text-slate-500">
+                                            {line}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : null}
                         </div>
                     ) : null}
                     <button
@@ -392,7 +400,7 @@ export default function SalesLeadDetail() {
                     {lead.auditId ? (
                         <>
                             {emailShareStatusLabel(lead.emailShareStatus) ? (
-                                <div className="flex flex-col items-end gap-0.5">
+                                <div className="group relative flex flex-col items-end">
                                     <span
                                         className={cn(
                                             'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
@@ -404,11 +412,18 @@ export default function SalesLeadDetail() {
                                     >
                                         PDF: {emailShareStatusLabel(lead.emailShareStatus)}
                                     </span>
-                                    {auditTimeLines.map((line) => (
-                                        <span key={line} className="text-[10px] font-medium text-[#64748B] whitespace-nowrap">
-                                            {line}
-                                        </span>
-                                    ))}
+                                    {auditTimeLines.length > 0 ? (
+                                        <div
+                                            className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 flex flex-col items-end gap-0.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                            aria-hidden
+                                        >
+                                            {auditTimeLines.map((line) => (
+                                                <span key={line} className="text-[10px] font-medium text-slate-500">
+                                                    {line}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : null}
                                 </div>
                             ) : null}
                             <button
@@ -468,7 +483,7 @@ export default function SalesLeadDetail() {
                         {lead.phone && (
                             <a
                                 href={`tel:${lead.phone}`}
-                                className="inline-flex items-center gap-2 px-4 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-white font-extrabold text-xs rounded-xl transition-colors shadow-sm"
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-[#0F172A] font-extrabold text-xs rounded-xl transition-colors shadow-sm"
                             >
                                 <Phone className="w-3.5 h-3.5" />
                                 Call {lead.phone}
@@ -579,7 +594,7 @@ export default function SalesLeadDetail() {
                                     "font-black uppercase tracking-wider text-[10px] px-2 py-0.5 rounded-md",
                                     lead.opportunityLevel === 'high'
                                         ? "bg-emerald-600 text-white"
-                                        : "bg-amber-600 text-white"
+                                        : "bg-amber-600 text-[var(--brand-primary-foreground)]"
                                 )}>
                                     {lead.opportunityLevel?.toUpperCase() || 'MEDIUM'} OPPORTUNITY
                                 </span>
@@ -838,7 +853,11 @@ export default function SalesLeadDetail() {
                                 : 'text-slate-400 bg-slate-50/60 border-dashed border-slate-200 italic'
                         )}
                     >
-                        {lead.aiVisibilityObservation || 'No AI visibility notes yet.'}
+                        {lead.aiVisibilityObservation ? (
+                            <AiVisibilityText text={lead.aiVisibilityObservation} />
+                        ) : (
+                            'No AI visibility notes yet.'
+                        )}
                     </div>
                 </div>
 
@@ -998,7 +1017,7 @@ export default function SalesLeadDetail() {
                                                         <button
                                                             type="button"
                                                             onClick={() => handleOpenToggleModal(t)}
-                                                            className="inline-flex items-center justify-center px-2.5 h-7 text-[11px] font-bold rounded-lg bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-white transition-all shadow-2xs cursor-pointer whitespace-nowrap"
+                                                            className="inline-flex items-center justify-center px-2.5 h-7 text-[11px] font-bold rounded-lg bg-[#F59E0B] hover:bg-[#D97706] text-[#0F172A] hover:text-[#0F172A] transition-all shadow-2xs cursor-pointer whitespace-nowrap"
                                                             title="Update Status"
                                                         >
                                                             <span>Update Status</span>

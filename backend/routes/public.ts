@@ -63,8 +63,10 @@ import {
 } from '../lib/auditEmailSends';
 import {
     markLeadObservationEmailOpened,
+    markLeadObservationEmailClicked,
     getLeadObservationEmailSendByToken
 } from '../lib/leadObservationEmailSends';
+import { zappSitesOrigin } from '../lib/zappSitesAuditProxy';
 import { ensureCrmTables } from '../sales-agent/sales';
 
 function frontendOrigin() {
@@ -1012,7 +1014,8 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
         try {
             await ensureCrmTables();
             if (token) {
-                await markLeadObservationEmailOpened(token).catch(() => false);
+                // Landing here means the "Request a full main audit" email button was clicked
+                await markLeadObservationEmailClicked(token).catch(() => false);
                 details = await resolveLeadAuditRequestDetails(token);
             }
         } catch (err) {
@@ -1238,8 +1241,11 @@ function createPublicRouter({ stripeClient }: { stripeClient: any }) {
             });
         }
 
-        // If standard browser form POST, redirect back to GET view so user sees confirmed state
-        return res.redirect(303, `${apiPublicOrigin()}/api/public/lead-full-audit-request/${token}`);
+        // Invalid link → confirmation/error page; success → marketing home
+        if (!details) {
+            return res.redirect(303, `${apiPublicOrigin()}/api/public/lead-full-audit-request/${token}`);
+        }
+        return res.redirect(303, `${zappSitesOrigin()}/`);
     });
 
     router.post('/:hostSlug/upload-url', async (req: Request, res: Response) => {

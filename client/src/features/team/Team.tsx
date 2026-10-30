@@ -595,7 +595,7 @@ export default function Team() {
                         setAddCustomRole('');
                         setShowAddModal(true);
                     }}
-                    className="inline-flex items-center gap-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm transition shrink-0"
+                    className="inline-flex items-center gap-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-[var(--brand-primary-foreground)] text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm transition shrink-0"
                 >
                     <Plus className="w-4 h-4" /> Add team member
                 </button>
@@ -1065,7 +1065,7 @@ export default function Team() {
                             <button
                                 type="submit"
                                 disabled={busy}
-                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold shadow-sm transition disabled:opacity-50"
+                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] text-xs font-bold shadow-sm transition disabled:opacity-50"
                             >
                                 {busy ? 'Adding…' : 'Add member'}
                             </button>
@@ -1210,7 +1210,7 @@ export default function Team() {
                             <button
                                 type="submit"
                                 disabled={busy}
-                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold shadow-sm transition disabled:opacity-50"
+                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] text-xs font-bold shadow-sm transition disabled:opacity-50"
                             >
                                 {busy ? 'Saving…' : 'Save changes'}
                             </button>
@@ -1280,7 +1280,7 @@ export default function Team() {
                                             className={cn(
                                                 'min-w-[3rem] px-3 py-2 rounded-xl border text-xs font-bold transition',
                                                 on
-                                                    ? 'bg-[var(--brand-primary)] text-white border-[var(--brand-primary)]'
+                                                    ? 'bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] border-[var(--brand-primary)]'
                                                     : 'bg-white text-slate-700 border-slate-200'
                                             )}
                                         >
@@ -1325,7 +1325,7 @@ export default function Team() {
                                 type="button"
                                 disabled={scheduleBusy}
                                 onClick={() => applyMemberSchedule(false)}
-                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] text-white text-xs font-bold disabled:opacity-50"
+                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] text-xs font-bold disabled:opacity-50"
                             >
                                 {scheduleBusy ? 'Applying…' : 'Apply for this member'}
                             </button>
@@ -1366,7 +1366,7 @@ export default function Team() {
                                 type="button"
                                 disabled={scheduleBusy}
                                 onClick={() => applyMemberSchedule(true)}
-                                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold disabled:opacity-50"
+                                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-[var(--brand-primary-foreground)] text-xs font-bold disabled:opacity-50"
                             >
                                 Apply anyway
                             </button>

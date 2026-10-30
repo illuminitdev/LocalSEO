@@ -3,21 +3,26 @@ import { getAudit, saveAudit } from '../audit/store.js';
 import { crawlWebsite } from '../audit/crawler.js';
 import { applyWebsiteChecks } from '../audit/checksWebsite.js';
 import { runLighthouse } from '../audit/lighthouseRunner.js';
-import { captureHomepageScreenshot } from '../audit/homepageScreenshot.js';
 import { fallbackPillarDecks } from '../audit/pillarFixDecks.js';
-import { buildAeoQuerySpecs, buildAeoQueryCards } from '../audit/aeoDeck.js';
+import { buildAeoQuerySpecs } from '../audit/aeoDeck.js';
+import { extractSiteServices, generateAeoQuestions } from '../audit/aeoQuestionsAi.js';
+import { auditContext } from '../audit/deckShared.js';
 import { buildGeoChecklist, applyGeoChecklistToChecks } from '../audit/geoChecklist.js';
 import { buildAeoCoreChecklist } from '../audit/aeoCoreChecklist.js';
 import { buildLocalSeoCoreChecklist } from '../audit/localSeoCoreChecklist.js';
 import { computeScore } from '../audit/score.js';
-import { generateAiReport, generateDeepAiReport, ensureNarrativeSections } from '../audit/geminiReport.js';
-import { deriveTopFixes } from '../audit/store.js';
+import { generateDeepAiReport } from '../audit/geminiReport.js';
+import { buildAuditFacts } from '../audit/auditFacts.js';
+import { addAreaChecks, businessServices, evaluatePageChecks, relabelQuestionChecks, syncChecksWithFacts } from '../audit/checkSync.js';
+import { buildNarrative, composeReport } from '../audit/narrative.js';
+import { validateReport } from '../audit/reportValidator.js';
+import { geminiCallLog, geminiWarnings, resetGeminiCallLog } from '../lib/gemini.js';
 import { updateAuditJob } from '../lib/auditJobs.js';
 import {
   buildDeepLocalRank,
   buildGeoAiPrompts,
+  captureAeoSerpScreenshot,
   captureMapsScreenshotFromTask,
-  captureOrganicLocalPackScreenshot,
   checkAiEngineMentionsMulti,
   detectDuplicateListings,
   fetchBacklinksSummary,
@@ -30,11 +35,12 @@ import {
   fetchOrganicBrandImages,
   fetchOrganicLocalRank,
   findMatchingMapsItem,
+  mapsMatchSignals,
   measureGeoGridVisibility,
   pickWorstLocalRank,
   requireDataForSeoConfigured,
-  type DataForSeoMapsItem,
-  type SerpScreenshotResult
+  searchBusinessListings,
+  type DataForSeoMapsItem
 } from '../lib/dataForSeo.js';
 import { runCitationAudit } from '../audit/citationAudit.js';
 import {
@@ -42,7 +48,25 @@ import {
   gbpFieldsFromPlaceDetails,
   photoUrlsFromPlace
 } from '../lib/placesGbp.js';
-import { looksLikeStreet, resolveSearchArea } from '../lib/searchArea.js';
+import { looksLikeStreet, resolveSearchArea, trustedCity } from '../lib/searchArea.js';
+import { alignRankWithProfile, markNoProfile, profileStillMatches, similarListing } from '../audit/profileMatch.js';
+import { readIntake, resolveMapsLink, type MapsLinkIds } from '../lib/mapsLink.js';
+
+function hostOf(url: string): string {
+  const u = String(url || '').trim();
+  if (!u) return '';
+  try {
+    return new URL(/^https?:\/\//i.test(u) ? u : `https://${u}`).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/** UK postcode, upper-cased with no spaces ("M1 1AE" → "M11AE"). */
+function postcodeOf(text: string): string {
+  const m = String(text || '').match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i);
+  return m ? m[0].replace(/\s+/g, '').toUpperCase() : '';
+}
 
 async function staticMapDataUrl(lat: number, lng: number): Promise<string | null> {
   const key = String(process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '').trim();
@@ -243,7 +267,7 @@ async function mergeGbpFromMapsHit(
 
 
 
-async function enrichFromDataForSeo(audit: any) {
+async function enrichFromDataForSeo(audit: any, crawl: any) {
   if (!requireDataForSeoConfigured()) return;
 
   const business = audit.business || {};
@@ -251,9 +275,9 @@ async function enrichFromDataForSeo(audit: any) {
     String(business.service || business.serviceLabel || business.primaryService || '').trim() ||
     'local business';
 
-  const intakeCity = String(business.city || '').trim();
+  const intakeCity = trustedCity(business.city, business.address);
   const area = resolveSearchArea({
-    city: business.searchAreaLabel || business.city,
+    city: business.searchAreaLabel || intakeCity,
     address: business.address
   });
   const searchArea = String(business.searchAreaLabel || area.label || '').trim();
@@ -282,7 +306,15 @@ async function enrichFromDataForSeo(audit: any) {
     (nearNorm === cityNorm || nearNorm.endsWith(` ${cityNorm}`) || nearNorm.includes(cityNorm));
 
   const locationLabel = nearPlace || formCity;
-  const brandQuery = [businessName, locationLabel]
+  // The business's own Maps link (from the intake questions) names the exact listing; no guessing.
+  const intake = readIntake(audit);
+  const link = intake.googleMapsUrl ? await resolveMapsLink(intake.googleMapsUrl) : null;
+  if (intake.googleMapsUrl) {
+    console.log('[auditWorker] Maps link from intake:', link ? JSON.stringify({ ...link, url: undefined }) : 'not readable');
+  }
+  const linkIds = link?.placeId || link?.cid ? { placeId: link.placeId, cid: link.cid, idOnly: true } : null;
+  const listingName = link?.name || businessName;
+  const brandQuery = [listingName, listingName.toLowerCase().includes(locationLabel.toLowerCase()) ? '' : locationLabel]
     .filter(Boolean)
     .join(' ')
     .replace(/\s+/g, ' ')
@@ -342,9 +374,12 @@ async function enrichFromDataForSeo(audit: any) {
           query: keyword,
           items: pack.items,
           businessName,
-          placeId: audit.gbpLookup?.placeId || '',
+          placeId: linkIds?.placeId || audit.gbpLookup?.placeId || '',
+          cid: linkIds?.cid,
+          idOnly: Boolean(linkIds),
           phone: business.phone,
-          website: business.website
+          website: business.website,
+          city: formCity || locationLabel
         });
         return { keyword, pack, rank };
       })
@@ -373,12 +408,14 @@ async function enrichFromDataForSeo(audit: any) {
   }
 
   let brandItems: DataForSeoMapsItem[] = [];
+  let brandTaskId: string | null = null;
   if (brandQuery && brandQuery !== packQuery) {
     const brand = await fetchMapsLocalPack({
       ...mapsOptsBase,
       keyword: brandQuery
     });
     brandItems = brand.items;
+    brandTaskId = brand.taskId;
   } else if (brandQuery === packQuery && packItems.length) {
     brandItems = packItems;
   }
@@ -442,23 +479,226 @@ async function enrichFromDataForSeo(audit: any) {
     !(Array.isArray(audit.gbpLookup?.photoUrls) && audit.gbpLookup.photoUrls.length) ||
     !audit.gbpLookup?.placeId;
 
-  if (needsGbp) {
-    const hit =
-      findMatchingMapsItem(brandItems, business) ||
-      findMatchingMapsItem(packItems, business) ||
-      findMatchingMapsItem(brandItems, {
-        businessName,
-        phone: business.phone,
-        website: business.website,
-        placeId: audit.gbpLookup?.placeId
-      });
+  // What the website says about the business: its phones, its domain and links to its own Google listing.
+  const phones: string[] = [];
+  for (const raw of [business.phone, crawl?.technical?.schemaEntity?.telephone, ...(crawl?.sitePhones || [])]) {
+    const p = String(raw || '').trim();
+    const key = p.replace(/\D/g, '').slice(-9);
+    if (key.length === 9 && !phones.some((q) => q.replace(/\D/g, '').slice(-9) === key)) phones.push(p);
+  }
+  const sitePhones = phones.slice(0, 3);
+  const siteDomain = hostOf(crawl?.finalUrl || business.website || '');
+  const siteMapsUrls: string[] = Array.isArray(crawl?.technical?.mapsUrls) ? crawl.technical.mapsUrls : [];
+  const sitePostcode = postcodeOf(
+    [business.postcode, business.address, crawl?.technical?.schemaEntity?.address].filter(Boolean).join(' ')
+  );
 
-    if (hit) {
-      await mergeGbpFromMapsHit(audit, hit, { searchPhotoUrls, googleSearchUrl });
-    } else {
-      console.warn('[auditWorker] DataForSEO Maps: no GBP match for', businessName);
+  const baseTarget = {
+    businessName,
+    phone: business.phone || sitePhones[0],
+    website: business.website,
+    city: formCity || locationLabel
+  };
+  const stored = audit.gbpLookup || {};
+  const storedOk =
+    stored.listedOnMaps === true &&
+    profileStillMatches(stored, {
+      ...baseTarget,
+      placeId: linkIds?.placeId || stored.placeId,
+      cid: linkIds?.cid,
+      idOnly: Boolean(linkIds)
+    });
+  const matchTarget = {
+    ...baseTarget,
+    placeId: linkIds?.placeId || (storedOk ? stored.placeId : undefined),
+    cid: linkIds?.cid,
+    idOnly: Boolean(linkIds)
+  };
+
+  /** A listing counts as theirs only when its place ID, phone, website or postcode ties it to the website. */
+  const confirmed = (item: DataForSeoMapsItem, target: typeof baseTarget & { placeId?: string; cid?: string }) => {
+    const { signals } = mapsMatchSignals(item, target);
+    if (signals.placeId || signals.phone === 'match' || signals.website === 'match') return true;
+    const pc = postcodeOf(item.address);
+    return Boolean(sitePostcode && pc === sitePostcode && signals.phone !== 'conflict' && signals.website !== 'conflict');
+  };
+  const listingFromIds = (ids: MapsLinkIds) =>
+    ({
+      position: 0,
+      placeId: ids.placeId || '',
+      cid: ids.cid,
+      name: ids.name || businessName,
+      address: '',
+      rating: null,
+      reviewsCount: 0,
+      lat: null,
+      lng: null,
+      mapsUrl: ids.url || '',
+      website: '',
+      phone: '',
+      mainImage: '',
+      totalPhotos: 0,
+      isThisBusiness: true
+    }) as DataForSeoMapsItem;
+  const byIds = (ids: MapsLinkIds) => {
+    const t = { ...baseTarget, placeId: ids.placeId, cid: ids.cid, idOnly: true };
+    return findMatchingMapsItem(brandItems, t) || findMatchingMapsItem(packItems, t) || listingFromIds(ids);
+  };
+
+  const tried: string[] = [];
+  // A search that returned no task ID failed (error or timeout); one with a task ID and no items found nothing.
+  let searches = 0;
+  let failedSearches = 0;
+  for (const [ran, taskId] of [
+    [Boolean(brandQuery && brandQuery !== packQuery), brandTaskId],
+    [packQueryVariants.length > 0, packTaskId]
+  ] as const) {
+    if (!ran) continue;
+    searches += 1;
+    if (!taskId) failedSearches += 1;
+  }
+  const mapsSearch = async (keyword: string) => {
+    const r = await fetchMapsLocalPack({ ...mapsOptsBase, keyword });
+    searches += 1;
+    if (!r.taskId) failedSearches += 1;
+    return r.items;
+  };
+  const merge = async (hit: DataForSeoMapsItem, via: string, how: string) => {
+    await mergeGbpFromMapsHit(audit, hit, { searchPhotoUrls, googleSearchUrl });
+    if (hit.cid) audit.gbpLookup.cid = hit.cid;
+    audit.gbpLookup.matchedVia = via;
+    audit.gbpLookup.evidence = `Matched Google listing “${audit.gbpLookup.gbpName || hit.name}” ${how}`;
+    console.log('[auditWorker] GBP lookup:', via, '→', audit.gbpLookup.gbpName || hit.placeId || hit.cid);
+  };
+
+  if (intake.noGoogleProfile) {
+    markNoProfile(audit, null);
+    audit.gbpLookup.evidence = `${businessName || 'The business'} has told us it has no Google Business Profile yet`;
+  } else if (needsGbp || !storedOk) {
+    let matched = false;
+
+    // 1. The Maps link the business gave us names the exact listing.
+    if (linkIds) {
+      await merge(byIds({ ...linkIds, name: link?.name, url: link?.url || '' }), 'form_link', 'from the Maps link provided');
+      matched = true;
     }
-  } else if (searchPhotoUrls.length || googleSearchUrl) {
+
+    // 2. A map embed, Maps link or Google review button on their own website.
+    if (!matched && siteMapsUrls.length) {
+      tried.push('the website’s Google map and review links');
+      for (const url of siteMapsUrls) {
+        const ids = await resolveMapsLink(url);
+        if (!ids?.placeId && !ids?.cid) continue;
+        const before = audit.gbpLookup;
+        await merge(byIds(ids), 'site_link', 'from the Google map/review link on the website');
+        // A map of somewhere else (a venue, a partner): its phone and website both differ from the site.
+        const g = audit.gbpLookup;
+        const s = mapsMatchSignals(
+          { ...listingFromIds(ids), phone: g.phone || '', website: g.websiteOnGbp || '' },
+          baseTarget
+        ).signals;
+        if (s.phone === 'conflict' && s.website === 'conflict') {
+          console.log('[auditWorker] GBP lookup: site link is another business →', g.gbpName);
+          audit.gbpLookup = before;
+          continue;
+        }
+        matched = true;
+        break;
+      }
+    }
+
+    // 3. Results already fetched (brand name and service searches) with a phone, website or postcode match.
+    if (!matched) {
+      const hit = [...brandItems, ...packItems].find((item) => confirmed(item, baseTarget));
+      if (hit) {
+        await merge(hit, 'name', 'by name, confirmed by phone, website or postcode');
+        matched = true;
+      }
+    }
+
+    // 4. DataForSEO's listings database: the listing whose website is this site.
+    const listingsSearch = async (opts: Parameters<typeof searchBusinessListings>[0]) => {
+      const r = await searchBusinessListings(opts);
+      searches += 1;
+      if (!r.taskId) failedSearches += 1;
+      return r.items;
+    };
+    if (!matched && siteDomain) {
+      tried.push(`Google listings with website ${siteDomain}`);
+      const items = await listingsSearch({ domain: siteDomain });
+      const hit = items.find((item) => mapsMatchSignals(item, baseTarget).signals.website === 'match');
+      if (hit) {
+        await merge(hit, 'listings_domain', `by its website ${siteDomain}`);
+        matched = true;
+      }
+    }
+
+    // 5. The same database by name and town, confirmed by phone, website or postcode.
+    if (!matched && businessName) {
+      tried.push(`Google listings named “${businessName}”`);
+      const items = await listingsSearch({ name: businessName, city: formCity || locationLabel });
+      const hit = items.find((item) => confirmed(item, baseTarget));
+      if (hit) {
+        await merge(hit, 'listings_name', 'by name, confirmed by phone, website or postcode');
+        matched = true;
+      }
+    }
+
+    // 6. Google Maps search by phone number: one number belongs to one business.
+    for (const phone of matched ? [] : sitePhones) {
+      tried.push(`phone ${phone}`);
+      const items = await mapsSearch(phone);
+      const hit = items.find((item) => mapsMatchSignals(item, { ...baseTarget, phone }).signals.phone === 'match');
+      if (hit) {
+        await merge(hit, 'phone', `by phone number ${phone}`);
+        matched = true;
+        break;
+      }
+    }
+
+    // 7. Google Maps search by website domain.
+    if (!matched && siteDomain) {
+      tried.push(`website ${siteDomain}`);
+      const items = await mapsSearch(siteDomain);
+      const hit = items.find((item) => mapsMatchSignals(item, baseTarget).signals.website === 'match');
+      if (hit) {
+        await merge(hit, 'domain', `by website ${siteDomain}`);
+        matched = true;
+      }
+    }
+
+    if (!matched) {
+      tried.push(`name “${brandQuery || businessName}”`);
+      // A same-name listing with nothing tying it to the website is shown to the admin, never used.
+      const nameOnly = findMatchingMapsItem(brandItems, matchTarget) || findMatchingMapsItem(packItems, matchTarget);
+      const lookupFailed = searches > 0 && failedSearches === searches;
+      if (storedOk) {
+        console.log('[auditWorker] GBP lookup: no new match, keeping stored listing', stored.gbpName);
+      } else if (lookupFailed) {
+        console.warn('[auditWorker] GBP lookup: Google Maps searches failed for', businessName);
+        markNoProfile(audit, null, tried);
+        audit.gbpLookup.lookupFailed = true;
+        audit.gbpLookup.evidence = 'Google Business Profile could not be checked: Google Maps search failed on this run';
+      } else {
+        console.warn('[auditWorker] GBP lookup: no match for', businessName, '| tried', tried.join(', '));
+        markNoProfile(audit, similarListing([...brandItems, ...packItems], matchTarget), tried);
+        if (nameOnly) {
+          audit.gbpLookup.possibleListing = {
+            name: nameOnly.name,
+            address: nameOnly.address || '',
+            phone: nameOnly.phone || '',
+            website: nameOnly.website || '',
+            mapsUrl: nameOnly.mapsUrl || ''
+          };
+          audit.gbpLookup.evidence = `Possible Google listing “${nameOnly.name}” found by name only; its phone and website could not be tied to the business`;
+        }
+      }
+    }
+  }
+  alignRankWithProfile(audit);
+  const profileFound = audit.gbpLookup?.listedOnMaps === true;
+
+  if (!needsGbp && profileFound && (searchPhotoUrls.length || googleSearchUrl)) {
     
     const prev = audit.gbpLookup || {};
     const merged = searchPhotoUrls.length
@@ -490,7 +730,7 @@ async function enrichFromDataForSeo(audit: any) {
     };
   }
 
-  {
+  if (profileFound) {
     const gbp = audit.gbpLookup || {};
     const olat = typeof gbp.latitude === 'number' ? gbp.latitude : typeof lat === 'number' ? lat : null;
     const olng =
@@ -511,6 +751,7 @@ async function enrichFromDataForSeo(audit: any) {
   try {
     const gbp = audit.gbpLookup || {};
     const placeId = String(gbp.placeId || '').trim();
+    const cid = String(gbp.cid || '').trim();
     const keyword =
       placeId ||
       String(gbp.gbpName || businessName || '').trim() ||
@@ -523,11 +764,15 @@ async function enrichFromDataForSeo(audit: any) {
         timeoutMs: 60000
       };
       const organicKw = packQuery || `${service} ${locationLabel}`.trim();
+      // Profile lookups by name would return another business's data when no listing matched.
+      const noListing = (fields: Record<string, unknown>) =>
+        Promise.resolve({ ok: false, evidence: gbp.evidence || 'No Google Business Profile found', ...fields } as any);
 
       const [updates, reviews, info, qa, backlinks, organic, duplicates, citations] =
         await Promise.all([
-          fetchGbpUpdates({
+          !profileFound ? noListing({ hasRecentPosts: null, totalPosts: null }) : fetchGbpUpdates({
             placeId: placeId || undefined,
+            cid: cid || undefined,
             keyword: placeId ? undefined : String(keyword),
             fallbackKeyword: [businessName || gbp.gbpName, locationLabel].filter(Boolean).join(' '),
             ...locOpts,
@@ -535,35 +780,41 @@ async function enrichFromDataForSeo(audit: any) {
             recentDays: 60,
             timeoutMs: 75000
           }),
-          fetchGbpReviewsSample({
+          !profileFound ? noListing({ replyRate: null, samples: [], reviewsLookRecent: null }) : fetchGbpReviewsSample({
             placeId: placeId || undefined,
+            cid: cid || undefined,
             keyword: placeId ? undefined : String(keyword),
             fallbackKeyword: [businessName || gbp.gbpName, locationLabel].filter(Boolean).join(' '),
             ...locOpts,
             depth: 20,
             recentDays: 90
           }),
-          fetchGbpMyBusinessInfo({
+          !profileFound ? noListing({ additionalCategories: [] }) : fetchGbpMyBusinessInfo({
             placeId: placeId || undefined,
+            cid: cid || undefined,
             keyword: placeId ? undefined : String(keyword),
             ...locOpts
           }),
-          fetchGbpQa({
+          !profileFound ? noListing({ hasQa: null }) : fetchGbpQa({
             placeId: placeId || undefined,
+            cid: cid || undefined,
             keyword: placeId ? undefined : String(keyword),
             ...locOpts,
             depth: 20
           }),
           fetchBacklinksSummary({ website: business.website }),
-          fetchOrganicLocalRank({
-            keyword: organicKw,
-            website: business.website || gbp.websiteOnGbp,
-            businessName: businessName || gbp.gbpName,
-            lat: locOpts.lat,
-            lng: locOpts.lng,
-            locationName: locOpts.locationName
-          }),
-          detectDuplicateListings({
+          // Searched from the town as a whole, not from the business's own street; the pin is only a fallback.
+          (async () => {
+            const rankOpts = {
+              keyword: organicKw,
+              website: business.website || gbp.websiteOnGbp,
+              businessName: businessName || gbp.gbpName,
+              locationName: locOpts.locationName
+            };
+            const town = locOpts.locationName ? await fetchOrganicLocalRank({ ...rankOpts, lat: null, lng: null }) : null;
+            return town?.ok ? town : fetchOrganicLocalRank({ ...rankOpts, lat: locOpts.lat, lng: locOpts.lng });
+          })(),
+          !profileFound ? noListing({ duplicateLikely: null }) : detectDuplicateListings({
             businessName: businessName || gbp.gbpName || '',
             placeId: placeId || undefined,
             phone: business.phone || gbp.phone,
@@ -584,6 +835,7 @@ async function enrichFromDataForSeo(audit: any) {
 
       let geoGrid: Awaited<ReturnType<typeof measureGeoGridVisibility>> | null = null;
       if (
+        profileFound &&
         typeof locOpts.lat === 'number' &&
         typeof locOpts.lng === 'number' &&
         organicKw
@@ -629,6 +881,7 @@ async function enrichFromDataForSeo(audit: any) {
             ? true
             : null,
         hasHours: info.hasHours ?? gbp.hasHours ?? null,
+        hoursText: gbp.hoursText || info.hoursText || '',
         hoursEvidence: info.hoursEvidence,
         hasServices: info.hasServices,
         servicesCount: info.servicesCount,
@@ -699,79 +952,44 @@ async function enrichFromDataForSeo(audit: any) {
     String((audit.gbpLookup?.localRank as { query?: string } | undefined)?.query || '').trim() ||
     packQuery;
   if (measuredQuery) {
-    try {
-      const [localPackScreenshot, mapsScreenshot] = await Promise.all([
-        captureOrganicLocalPackScreenshot({
-          keyword: measuredQuery,
-          lat: typeof lat === 'number' ? lat : null,
-          lng: typeof lng === 'number' ? lng : null,
-          locationName: locationLabel || undefined,
-          timeoutMs: 35000
-        }),
-        captureMapsScreenshotFromTask(packTaskId, measuredQuery)
-      ]);
-      audit.gbpLookup = {
-        ...(audit.gbpLookup || {}),
-        localPackScreenshot: { ...localPackScreenshot, query: measuredQuery },
-        mapsScreenshot: { ...mapsScreenshot, query: measuredQuery }
-      };
-
-      
-      const mapsShotOk =
-        mapsScreenshot?.dataUrl && String(mapsScreenshot.dataUrl).startsWith('data:image/');
-      if (!mapsShotOk && typeof lat === 'number' && typeof lng === 'number') {
-        const mapTile = await staticMapDataUrl(lat, lng);
-        if (mapTile) {
-          audit.gbpLookup = {
-            ...(audit.gbpLookup || {}),
-            mapImageUrl: mapTile
-          };
-        }
-      } else if (mapsShotOk) {
+    // The Maps view is the profile card's map; no other search screenshots are taken for the report.
+    if (profileFound) {
+      try {
+        const mapsScreenshot = await captureMapsScreenshotFromTask(packTaskId, measuredQuery);
         audit.gbpLookup = {
           ...(audit.gbpLookup || {}),
-          mapImageUrl: mapsScreenshot.dataUrl
+          mapsScreenshot: { ...mapsScreenshot, query: measuredQuery }
         };
-      }
-    } catch (shotErr) {
-      const err = shotErr as Error;
-      console.warn('[auditWorker] SERP screenshots failed:', err.message);
-      audit.gbpLookup = {
-        ...(audit.gbpLookup || {}),
-        localPackScreenshot: {
-          query: measuredQuery,
-          skipped: true,
-          reason: err.message || 'screenshot failed',
-          capturedAt: new Date().toISOString()
-        },
-        mapsScreenshot: {
-          query: measuredQuery,
-          skipped: true,
-          reason: err.message || 'screenshot failed',
-          capturedAt: new Date().toISOString()
-        }
-      };
-      if (typeof lat === 'number' && typeof lng === 'number') {
-        const mapTile = await staticMapDataUrl(lat, lng);
-        if (mapTile) {
-          audit.gbpLookup = { ...(audit.gbpLookup || {}), mapImageUrl: mapTile };
+        const mapsShotOk =
+          mapsScreenshot?.dataUrl && String(mapsScreenshot.dataUrl).startsWith('data:image/');
+        const mapImageUrl = mapsShotOk
+          ? mapsScreenshot.dataUrl
+          : typeof lat === 'number' && typeof lng === 'number'
+            ? await staticMapDataUrl(lat, lng)
+            : null;
+        if (mapImageUrl) audit.gbpLookup = { ...(audit.gbpLookup || {}), mapImageUrl };
+      } catch (shotErr) {
+        console.warn('[auditWorker] Maps screenshot failed:', (shotErr as Error).message);
+        if (typeof lat === 'number' && typeof lng === 'number') {
+          const mapTile = await staticMapDataUrl(lat, lng);
+          if (mapTile) audit.gbpLookup = { ...(audit.gbpLookup || {}), mapImageUrl: mapTile };
         }
       }
     }
-
 
     try {
       const aiEngineChecks = await checkAiEngineMentionsMulti({
         service,
         city: locationLabel || undefined,
         address: business.address || (audit.gbpLookup as { address?: string } | undefined)?.address,
+        website: business.website,
         businessName
       });
       console.log(
         '[auditWorker] AI engine checks:',
         aiEngineChecks.length,
         'rows,',
-        [...new Set(aiEngineChecks.map((r) => r.prompt || r.promptKey))].join(' | ')
+        aiEngineChecks.map((r) => `${r.label} ${r.mentionCount ?? 0}/${r.answeredCount ?? 0}${r.skipped ? ` (${r.reason})` : ''}`).join(' | ')
       );
       if (aiEngineChecks.length !== 9) {
         console.warn(
@@ -796,7 +1014,7 @@ async function enrichFromDataForSeo(audit: any) {
       const engines = [
         ['chatgpt', 'ChatGPT'],
         ['claude', 'Claude'],
-        ['perplexity', 'Perplexity']
+        ['gemini', 'Gemini']
       ] as const;
       audit.gbpLookup = {
         ...(audit.gbpLookup || {}),
@@ -807,6 +1025,9 @@ async function enrichFromDataForSeo(audit: any) {
             prompt,
             promptKey: key,
             mentioned: null,
+            mentionCount: 0,
+            answeredCount: 0,
+            bestPosition: null,
             brandName: businessName,
             recommendedLikely: null,
             citedHosts: [],
@@ -819,10 +1040,6 @@ async function enrichFromDataForSeo(audit: any) {
       };
     }
   }
-
-  // AEO questions come from the service and city. No ChatGPT prompts, Google search, or screenshots.
-  audit.aeoQuerySpecs = buildAeoQuerySpecs(audit);
-  audit.aeoSerpScreenshots = [];
 }
 
 export const main: SQSHandler = async (event: SQSEvent) => {
@@ -832,14 +1049,18 @@ export const main: SQSHandler = async (event: SQSEvent) => {
 
     try {
       await updateAuditJob(jobId, 'running');
+      resetGeminiCallLog();
 
       const audit = await getAudit(auditId);
       if (!audit) throw new Error('Audit not found');
+      const dataWarnings: string[] = [];
+      const intake = readIntake(audit);
 
       const website = audit.business?.website;
       if (!website) throw new Error('Business website URL is required');
 
       const crawl = await crawlWebsite(website, { maxPages: 12 });
+      if (!crawl.pageCount) dataWarnings.push('The website could not be read; website checks show No');
       let lighthouse = null;
       if (!skipLighthouse) {
         lighthouse = await runLighthouse(crawl.finalUrl || website);
@@ -847,16 +1068,100 @@ export const main: SQSHandler = async (event: SQSEvent) => {
         lighthouse = { skipped: true, reason: 'Skipped by operator' };
       }
 
-      const screenshot = await captureHomepageScreenshot(crawl.finalUrl || website);
-
       const lhMetrics = lighthouse && !(lighthouse as { skipped?: boolean }).skipped ? lighthouse : null;
+      if (!lhMetrics) {
+        const reason = String((lighthouse as { reason?: string } | null)?.reason || '').trim().slice(0, 160);
+        dataWarnings.push(
+          `Page speed (Lighthouse) was not measured${reason ? ` (${reason})` : ''}; speed checks show No`
+        );
+        console.warn('[auditWorker] Lighthouse not measured:', reason);
+      }
 
-      
+      if (!requireDataForSeoConfigured()) {
+        dataWarnings.push('DataForSEO is not configured: Google Maps, profile and AI checks were not run');
+      }
       try {
-        await enrichFromDataForSeo(audit);
+        await enrichFromDataForSeo(audit, crawl);
+        const g = (audit.gbpLookup || {}) as { lookupFailed?: boolean; possibleListing?: { name: string } };
+        if (g.lookupFailed) dataWarnings.push('Google Business Profile could not be checked: Google Maps search failed');
+        else if (g.possibleListing) {
+          dataWarnings.push(
+            `Possible Google listing “${g.possibleListing.name}” found by name only; confirm it or add the Maps link and re-run`
+          );
+        }
       } catch (rankErr) {
         const err = rankErr as Error;
         console.warn('[auditWorker] DataForSEO/GBP enrich failed:', err.message);
+        dataWarnings.push(`Google Maps / profile data failed: ${err.message}`);
+      }
+
+      // AEO questions: Gemini writes them fresh from the services on the website (or Google Search when the site
+      // can't be read). The services read from the crawl are a hint; the fixed wording is only a last resort.
+      const { city: aeoCity } = auditContext(audit);
+      const aeoCategory = audit.business?.serviceLabel || audit.business?.service;
+      const crawledServices = businessServices(extractSiteServices(crawl.pages, {
+        businessName: audit.business?.businessName,
+        city: aeoCity,
+        category: aeoCategory
+      }), audit, crawl.pages);
+      const aeoAi = await generateAeoQuestions({
+        businessName: audit.business?.businessName,
+        category: aeoCategory,
+        city: aeoCity,
+        address: audit.business?.address,
+        website: crawl.finalUrl || website,
+        pages: crawl.pages,
+        siteServices: intake.topServices?.length ? intake.topServices : crawledServices
+      }).catch((err: Error) => {
+        console.warn('[auditWorker] AEO questions failed:', err?.message || err);
+        return null;
+      });
+      // Services the owner named come first; otherwise the AI-read or crawled services.
+      audit.siteServices = intake.topServices?.length
+        ? intake.topServices
+        : aeoAi?.services.length
+          ? aeoAi.services
+          : crawledServices;
+      addAreaChecks(audit, intake.otherAreas || []);
+      const aeoSpecs = aeoAi?.specs ?? buildAeoQuerySpecs(audit);
+      audit.aeoQuerySpecs = aeoSpecs;
+      console.log(
+        '[auditWorker] AEO questions from',
+        aeoAi?.source || 'fallback',
+        '|',
+        aeoSpecs.map((s) => s.query).join(' | ')
+      );
+      relabelQuestionChecks(audit, aeoSpecs.map((s) => s.query));
+
+      // Google's answer box and People Also Ask for each customer question (search data only, no screenshots).
+      if (requireDataForSeoConfigured() && aeoSpecs.length) {
+        const g = audit.gbpLookup || {};
+        audit.aeoSerpScreenshots = await Promise.all(
+          aeoSpecs.map((spec) =>
+            (async () => {
+              const aeoOpts = { keyword: spec.query, locationName: aeoCity, businessName: audit.business?.businessName, city: aeoCity, website };
+              // Google's answers as seen from the town as a whole; the business's own pin is only a fallback.
+              const town = aeoCity ? await captureAeoSerpScreenshot({ ...aeoOpts, lat: null, lng: null }) : null;
+              if (town?.serpMeasured) return town;
+              return captureAeoSerpScreenshot({
+                ...aeoOpts,
+                lat: typeof g.latitude === 'number' ? g.latitude : null,
+                lng: typeof g.longitude === 'number' ? g.longitude : null
+              });
+            })().catch((err: Error) => ({
+              query: spec.query,
+              skipped: true,
+              reason: err?.message || 'Google results could not be captured',
+              capturedAt: new Date().toISOString()
+            }))
+          )
+        );
+        const measured = (audit.aeoSerpScreenshots as Array<{ serpMeasured?: boolean }>).filter((s) => s.serpMeasured).length;
+        if (measured < aeoSpecs.length) {
+          dataWarnings.push(`Google answers were measured for ${measured} of ${aeoSpecs.length} customer questions`);
+        }
+      } else {
+        audit.aeoSerpScreenshots = [];
       }
 
       applyWebsiteChecks(audit.checklist.checks, crawl, lhMetrics, {
@@ -864,21 +1169,24 @@ export const main: SQSHandler = async (event: SQSEvent) => {
         postcode: (audit.business as { postcode?: string }).postcode,
         phone: audit.business.phone,
         address: audit.business.address,
-        gbpLookup: audit.gbpLookup
+        gbpLookup: audit.gbpLookup,
+        service: audit.business.serviceLabel || audit.business.service
+      });
+      evaluatePageChecks(audit, crawl.pages, (audit.siteServices as string[]) || [], aeoCity, crawl.corpus?.text || '', {
+        trustedServices: Boolean(intake.topServices?.length)
       });
 
       try {
         const napPhone = audit.checklist.checks.find((c) => c.id === 'nap_1')?.status;
         const napAddr = audit.checklist.checks.find((c) => c.id === 'nap_2')?.status;
+        const g = audit.gbpLookup || {};
         const geoChecklist = buildGeoChecklist({
           businessName: audit.business.businessName,
           website: audit.business.website,
           service: audit.business.serviceLabel || audit.business.service,
           city: audit.business.searchAreaLabel || audit.business.city,
-          localRank: audit.gbpLookup?.localRank || null,
-          aiEngines: Array.isArray(audit.gbpLookup?.aiEngineChecks)
-            ? audit.gbpLookup.aiEngineChecks
-            : [],
+          localRank: g.localRank || null,
+          aiEngines: Array.isArray(g.aiEngineChecks) ? g.aiEngineChecks : [],
           crawl: {
             hasLocalBusinessSchema: !!crawl.hasLocalBusinessSchema,
             hasPersonSchema: !!crawl.hasPersonSchema,
@@ -886,19 +1194,23 @@ export const main: SQSHandler = async (event: SQSEvent) => {
             llmsTxtFound: !!crawl.llmsTxtFound,
             spaHeuristic: crawl.spaHeuristic || null,
             corpusText: crawl.corpus?.text || '',
-            hasFaq: !!crawl.hasFaqSchema
+            hasFaq: !!crawl.hasFaqSchema,
+            schemaEntity: crawl.technical?.schemaEntity || null
           } as any,
-          gbp: audit.gbpLookup
-            ? {
-                listedOnMaps: Boolean(audit.gbpLookup.listedOnMaps),
-                gbpName: String(audit.gbpLookup.gbpName || ''),
-                address: String(audit.gbpLookup.address || ''),
-                websiteOnGbp: String(audit.gbpLookup.websiteOnGbp || ''),
-                primaryTypeDisplayName: String(audit.gbpLookup.primaryTypeDisplayName || ''),
-                hasBacklinks: audit.gbpLookup.hasBacklinks === true ? true : audit.gbpLookup.hasBacklinks === false ? false : null,
-                backlinksEvidence: String(audit.gbpLookup.backlinksEvidence || '')
-              }
-            : null,
+          gbp: {
+            listedOnMaps: g.listedOnMaps === true,
+            gbpName: String(g.gbpName || ''),
+            address: String(g.address || ''),
+            phone: String(g.phone || ''),
+            websiteOnGbp: String(g.websiteOnGbp || ''),
+            primaryTypeDisplayName: String(g.primaryTypeDisplayName || ''),
+            hasBacklinks: g.hasBacklinks === true ? true : g.hasBacklinks === false ? false : null,
+            backlinksEvidence: String(g.backlinksEvidence || ''),
+            directoriesPresent: typeof g.directoriesPresent === 'boolean' ? g.directoriesPresent : null,
+            citationsEvidence: String(g.citationsEvidence || ''),
+            brandMentions: typeof g.brandMentions === 'boolean' ? g.brandMentions : null
+          },
+          sitePhones: crawl.sitePhones || [],
           napPhonePass: napPhone === 'pass' ? true : napPhone === 'fail' ? false : null,
           napAddressPass: napAddr === 'pass' ? true : napAddr === 'fail' ? false : null
         });
@@ -910,6 +1222,7 @@ export const main: SQSHandler = async (event: SQSEvent) => {
       } catch (geoChkErr) {
         const err = geoChkErr as Error;
         console.warn('[auditWorker] geoChecklist build failed:', err.message);
+        dataWarnings.push(`GEO checklist could not be built: ${err.message}`);
       }
 
       audit.auditKind = 'deep';
@@ -932,136 +1245,57 @@ export const main: SQSHandler = async (event: SQSEvent) => {
           (crawl.pages?.[0]?.telLinks || []).length ||
             (crawl.pages?.[0]?.phonesInText || []).length
         ),
-        mode: 'deep-crawl',
-        homepageScreenshot: screenshot
+        technical: crawl.technical || null,
+        mode: 'deep-crawl'
       };
       audit.lighthouseMeta = lighthouse;
-      audit.status = autoPublish ? 'published' : 'reviewed';
-      if (autoPublish) {
-        audit.published = true;
-        audit.publishedAt = new Date().toISOString();
-      }
+
+      // One set of facts, then every check, score and sentence is built from it.
+      const facts = buildAuditFacts(audit);
+      syncChecksWithFacts(audit, facts);
+
       const aeoChecklist = buildAeoCoreChecklist(audit);
       const localSeoChecklist = buildLocalSeoCoreChecklist(audit);
-      const geoChecklist = audit.gbpLookup?.geoChecklist || null;
       audit.score = computeScore(audit.checklist.checks, {
         localRank: audit.gbpLookup?.localRank || null,
-        aiEngineChecks: Array.isArray(audit.gbpLookup?.aiEngineChecks)
-          ? audit.gbpLookup.aiEngineChecks
-          : [],
+        aiEngineChecks: Array.isArray(audit.gbpLookup?.aiEngineChecks) ? audit.gbpLookup.aiEngineChecks : [],
         aeoChecklist,
         aeoQueries: Array.isArray(audit.aeoSerpScreenshots) ? audit.aeoSerpScreenshots : [],
         localSeoChecklist,
-        geoChecklist
+        geoChecklist: audit.gbpLookup?.geoChecklist || null
       });
-      audit.topFixes = deriveTopFixes(audit);
 
+      const narrative = buildNarrative(audit, facts);
+      let gemini: any = null;
       if (generateAi !== false) {
         try {
-          audit.aiReport = await generateDeepAiReport(audit);
+          gemini = await generateDeepAiReport(audit);
         } catch (aiErr) {
-          try {
-            audit.aiReport = ensureNarrativeSections(await generateAiReport(audit), audit);
-          } catch (fallbackErr) {
-            const err = fallbackErr as Error;
-            audit.aiReport = ensureNarrativeSections(
-              {
-                ...(audit.aiReport || {}),
-                fallbackError: err.message,
-                generatedAt: new Date().toISOString()
-              },
-              audit
-            );
-          }
-        }
-        try {
-          const decks = fallbackPillarDecks(audit);
-          const aiLocal: any = audit.aiReport?.localSeoFixes || {};
-          const aiAeo: any = audit.aiReport?.aeoFixes || {};
-          const aiGeo: any = audit.aiReport?.geoFixes || {};
-          const deckLocal: any = decks.localSeoFixes || {};
-          const deckAeo: any = decks.aeoFixes || {};
-          const deckGeo: any = decks.geoFixes || {};
-          const measuredAeoCards = buildAeoQueryCards(
-            audit,
-            (Array.isArray(audit.aeoSerpScreenshots)
-              ? audit.aeoSerpScreenshots
-              : null) as SerpScreenshotResult[] | null
-          );
-          audit.aiReport = {
-            ...(audit.aiReport || {}),
-            localSeoFixes: {
-              ...deckLocal,
-              ...aiLocal,
-              // Always keep factual Maps ranking 
-              mapsRanking: deckLocal.mapsRanking || aiLocal.mapsRanking,
-              coreChecklist: deckLocal.coreChecklist || aiLocal.coreChecklist,
-              inconsistencies: Array.isArray(aiLocal.inconsistencies) && aiLocal.inconsistencies.length
-                ? aiLocal.inconsistencies
-                : deckLocal.inconsistencies
-            },
-            aeoFixes: {
-              ...deckAeo,
-              ...aiAeo,
-              visualIntro: deckAeo.visualIntro,
-              opportunity: deckAeo.opportunity,
-              aeoChecklist: deckAeo.aeoChecklist || aiAeo.aeoChecklist || null,
-              queryCards: measuredAeoCards
-            },
-            geoFixes: {
-              ...deckGeo,
-              ...aiGeo,
-              title: deckGeo.title,
-              visualIntro: deckGeo.visualIntro,
-              verifyHint: deckGeo.verifyHint,
-              goalLine: deckGeo.goalLine,
-              opportunity: deckGeo.opportunity,
-              geoChecklist: deckGeo.geoChecklist || aiGeo.geoChecklist || null,
-              queryCards:
-                Array.isArray(aiGeo.queryCards) &&
-                aiGeo.queryCards.some((c: any) => Array.isArray(c?.mapsResults) && c.mapsResults.length)
-                  ? aiGeo.queryCards
-                  : deckGeo.queryCards
-            }
-          };
-        } catch {
-          
+          console.warn('[auditWorker] Gemini report failed, rule-based report used:', (aiErr as Error).message);
         }
       }
+      audit.aiReport = composeReport(audit, fallbackPillarDecks(audit), narrative, gemini);
 
-      const decksForScore = fallbackPillarDecks(audit);
-      const report = (audit.aiReport || {}) as {
-        localSeoFixes?: { actions?: unknown };
-        aeoFixes?: { priorities?: unknown };
-        geoFixes?: { actions?: unknown };
-        criticalIssues?: unknown;
-      };
-      const reportLocal = report.localSeoFixes?.actions;
-      const reportAeo = report.aeoFixes?.priorities;
-      const reportGeo = report.geoFixes?.actions;
-      audit.score = computeScore(audit.checklist.checks, {
-        localRank: audit.gbpLookup?.localRank || null,
-        aiEngineChecks: Array.isArray(audit.gbpLookup?.aiEngineChecks)
-          ? audit.gbpLookup.aiEngineChecks
-          : [],
-        aeoChecklist,
-        aeoQueries: Array.isArray(audit.aeoSerpScreenshots) ? audit.aeoSerpScreenshots : [],
-        localSeoChecklist,
-        geoChecklist,
-        priorityActions: {
-          local:
-            Array.isArray(reportLocal) && reportLocal.length
-              ? reportLocal
-              : decksForScore.localSeoFixes?.actions,
-          aeo:
-            Array.isArray(reportAeo) && reportAeo.length
-              ? reportAeo
-              : decksForScore.aeoFixes?.priorities,
-          geo:
-            Array.isArray(reportGeo) && reportGeo.length ? reportGeo : decksForScore.geoFixes?.actions
-        },
-        criticalIssues: Array.isArray(report.criticalIssues) ? report.criticalIssues : []
-      });
+      for (const w of geminiWarnings()) dataWarnings.push(w);
+      audit.dataWarnings = dataWarnings;
+
+      // Saved as a draft first: saving recalculates the score and the score sentences.
+      const wasPublished = audit.published === true;
+      audit.status = 'reviewed';
+      audit.published = false;
+      await saveAudit(audit);
+
+      const gate = validateReport(audit, facts);
+      audit.qualityGate = { ...gate, checkedAt: new Date().toISOString(), geminiCalls: geminiCallLog() };
+      console.log(
+        `[auditWorker] quality gate ${gate.passed ? 'passed' : 'BLOCKED'} | errors: ${gate.errors.join(' | ') || 'none'} | warnings: ${gate.warnings.join(' | ') || 'none'}`
+      );
+      // A report that fails the gate is never public; it waits in the admin panel with the reasons.
+      if (gate.passed && (autoPublish || wasPublished)) {
+        audit.status = 'published';
+        audit.published = true;
+        audit.publishedAt = wasPublished && audit.publishedAt ? audit.publishedAt : new Date().toISOString();
+      }
 
       await saveAudit(audit);
       await updateAuditJob(jobId, 'complete');

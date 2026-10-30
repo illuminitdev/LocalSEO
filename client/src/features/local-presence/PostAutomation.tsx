@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import {
     Calendar,
     Image as ImageIcon,
@@ -10,11 +10,17 @@ import {
     TrendingUp,
     MousePointerClick,
     Upload,
-    MoreVertical
+    MoreVertical,
+    Loader2
 } from 'lucide-react';
 import { cn, apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
+import { useCredits } from '../../shared/CreditsContext';
+import { getPageCache, setPageCache } from '../../shared/pageCache';
 
 export default function PostAutomation() {
+    const { refresh: refreshCredits } = useCredits();
+    const cached = getPageCache<{ drafts: any[]; businessName: string }>('gbp-posts');
+    const [loaded, setLoaded] = useState(Boolean(cached));
     const [postType, setPostType] = useState('offer');
     const [tone, setTone] = useState('professional');
     const [generatedText, setGeneratedText] = useState('');
@@ -27,9 +33,9 @@ export default function PostAutomation() {
     const [eventTitle, setEventTitle] = useState('');
     const [draftDate, setDraftDate] = useState('');
     const [draftTime, setDraftTime] = useState('');
-    const [drafts, setDrafts] = useState<any[]>([]);
+    const [drafts, setDrafts] = useState<any[]>(cached?.drafts ?? []);
     const [isSavingDraft, setIsSavingDraft] = useState(false);
-    const [businessName, setBusinessName] = useState('');
+    const [businessName, setBusinessName] = useState(cached?.businessName ?? '');
     const [error, setError] = useState('');
     const [targetLink, setTargetLink] = useState('');
     const [isUploading, setIsUploading] = useState(false);
@@ -66,11 +72,72 @@ export default function PostAutomation() {
     };
 
     useEffect(() => {
-        apiGet('/api/business').then((b) => setBusinessName(b.name || '')).catch(() => {});
-        apiGet('/api/ai/gbp-drafts')
-            .then((data) => setDrafts(Array.isArray(data?.drafts) ? data.drafts : []))
-            .catch(() => {});
+        Promise.all([
+            apiGet('/api/business').then((b) => setBusinessName(b.name || '')).catch(() => {}),
+            apiGet('/api/ai/gbp-drafts')
+                .then((data) => setDrafts(Array.isArray(data?.drafts) ? data.drafts : []))
+                .catch(() => {})
+        ]).finally(() => setLoaded(true));
     }, []);
+
+    useEffect(() => {
+        if (loaded) setPageCache('gbp-posts', { drafts, businessName });
+    }, [loaded, drafts, businessName]);
+
+    // The last generated post (text, image and the form values) is kept on the org until the next generation.
+    const restoredRef = useRef(false);
+    const savedKeyRef = useRef('');
+    useEffect(() => {
+        apiGet('/api/ai/saved/post-generator')
+            .then((d) => {
+                const v = d?.saved?.value;
+                if (v) {
+                    if (v.postType) setPostType(v.postType);
+                    if (v.tone) setTone(v.tone);
+                    if (v.ctaValue) setCtaValue(v.ctaValue);
+                    setTopic(v.topic || '');
+                    setDetails(v.details || '');
+                    setEventTitle(v.eventTitle || '');
+                    setDraftDate(v.draftDate || '');
+                    setDraftTime(v.draftTime || '');
+                    setTargetLink(v.targetLink || '');
+                    setGeneratedText(v.generatedText || '');
+                    setGeneratedImage(v.generatedImage || null);
+                    savedKeyRef.current = (v.generatedText || '') + '|' + (v.generatedImage || '');
+                }
+            })
+            .catch(() => {})
+            .finally(() => {
+                restoredRef.current = true;
+            });
+    }, []);
+
+    useEffect(() => {
+        if (!restoredRef.current || (!generatedText && !generatedImage)) return;
+        const key = generatedText + '|' + (generatedImage && !generatedImage.startsWith('data:') ? generatedImage : '');
+        if (key === savedKeyRef.current) return;
+        const t = setTimeout(() => {
+            savedKeyRef.current = key;
+            apiPost('/api/ai/saved/post-generator', {
+                value: {
+                    postType,
+                    tone,
+                    ctaValue,
+                    topic,
+                    details,
+                    eventTitle,
+                    draftDate,
+                    draftTime,
+                    targetLink,
+                    generatedText,
+                    // Inline image data would bloat the saved state; only a stored image URL is kept.
+                    generatedImage: generatedImage && !generatedImage.startsWith('data:') ? generatedImage : null
+                }
+            }).catch(() => {});
+        }, 800);
+        return () => clearTimeout(t);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [generatedText, generatedImage]);
 
     const copyPayload = () => ({
         postType,
@@ -99,6 +166,7 @@ export default function PostAutomation() {
             setError(err.message || 'Copy failed');
         } finally {
             setIsGenerating(false);
+            refreshCredits();
         }
     };
 
@@ -118,6 +186,7 @@ export default function PostAutomation() {
             setError(err.message || 'Image failed');
         } finally {
             setIsGeneratingImage(false);
+            refreshCredits();
         }
     };
 
@@ -167,6 +236,20 @@ export default function PostAutomation() {
         { label: 'Engagement Rate', value: '0%', trend: '0% vs last month', icon: TrendingUp },
         { label: 'Clicks from Posts', value: '0', trend: '0% vs last month', icon: MousePointerClick }
     ];
+
+    if (!loaded) {
+        return (
+            <div className="max-w-6xl mx-auto pb-12">
+                <div className="mb-6">
+                    <h1 className="text-3xl font-bold tracking-tight text-[#0F172A]">Post Automation Agent</h1>
+                    <p className="text-sm text-gray-500 mt-1">AI-powered local updates and promotions.</p>
+                </div>
+                <div className="flex justify-center py-24">
+                    <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="max-w-6xl mx-auto animate-in fade-in duration-500 pb-12">
@@ -228,7 +311,7 @@ export default function PostAutomation() {
                                     <button
                                         onClick={handleGenerateCopy}
                                         disabled={isGenerating}
-                                        className="absolute right-2 bottom-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-ink)] text-white rounded-md text-xs font-semibold transition-colors disabled:opacity-70 cursor-pointer"
+                                        className="absolute right-2 bottom-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-ink)] text-[var(--brand-primary-foreground)] rounded-md text-xs font-semibold transition-colors disabled:opacity-70 cursor-pointer"
                                     >
                                         <Sparkles className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
                                         {isGenerating ? 'Generating...' : 'Generate with AI'}

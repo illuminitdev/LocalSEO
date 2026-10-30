@@ -10,13 +10,17 @@ export type LeadObservationEmailShareInfo = {
     observationEmailShareStatus: EmailShareStatus;
     observationEmailSentAt: string | null;
     observationEmailOpenedAt: string | null;
+    observationEmailClickedAt: string | null;
 };
 
 const EMPTY_SHARE: LeadObservationEmailShareInfo = {
     observationEmailShareStatus: 'none',
     observationEmailSentAt: null,
-    observationEmailOpenedAt: null
+    observationEmailOpenedAt: null,
+    observationEmailClickedAt: null
 };
+
+const FULL_AUDIT_UTM = 'utm_source=audit-email';
 
 export function newLeadObservationEmailToken() {
     return crypto.randomBytes(24).toString('hex');
@@ -46,9 +50,9 @@ export function leadFullAuditRequestUrl(token: string) {
         .trim()
         .replace(/\/$/, '');
     if (appOrigin) {
-        return `${appOrigin}/request-full-audit/${t}`;
+        return `${appOrigin}/request-full-audit/${t}?${FULL_AUDIT_UTM}`;
     }
-    return `${apiPublicOrigin()}/api/public/lead-full-audit-request/${t}`;
+    return `${apiPublicOrigin()}/api/public/lead-full-audit-request/${t}?${FULL_AUDIT_UTM}`;
 }
 
 export async function recordLeadObservationEmailSend(opts: {
@@ -82,6 +86,21 @@ export async function markLeadObservationEmailOpened(tokenRaw: string): Promise<
     return Boolean(rowCount);
 }
 
+/** "Request a full main audit" button in the observation email was clicked (implies opened). */
+export async function markLeadObservationEmailClicked(tokenRaw: string): Promise<boolean> {
+    const token = normalizeOpenToken(tokenRaw);
+    if (!token || !/^[a-f0-9]{16,128}$/i.test(token)) return false;
+    const { rowCount } = await query(
+        `UPDATE lead_observation_email_sends
+         SET clicked_at = COALESCE(clicked_at, NOW()),
+             click_count = click_count + 1,
+             opened_at = COALESCE(opened_at, NOW())
+         WHERE token = $1`,
+        [token]
+    );
+    return Boolean(rowCount);
+}
+
 export async function getLeadObservationEmailSendByToken(tokenRaw: string) {
     const token = normalizeOpenToken(tokenRaw);
     if (!token || !/^[a-f0-9]{16,128}$/i.test(token)) return null;
@@ -107,7 +126,8 @@ export async function fetchLatestLeadObservationEmailShareMap(
             `SELECT
                 lead_id,
                 MAX(sent_at) AS sent_at,
-                MAX(opened_at) AS opened_at
+                MAX(opened_at) AS opened_at,
+                MAX(clicked_at) AS clicked_at
              FROM lead_observation_email_sends
              WHERE lead_id = ANY($1::text[])
              GROUP BY lead_id`,
@@ -117,10 +137,12 @@ export async function fetchLatestLeadObservationEmailShareMap(
             const leadId = String(row.lead_id);
             const openedAt = row.opened_at ? new Date(row.opened_at).toISOString() : null;
             const sentAt = row.sent_at ? new Date(row.sent_at).toISOString() : null;
+            const clickedAt = row.clicked_at ? new Date(row.clicked_at).toISOString() : null;
             map.set(leadId, {
                 observationEmailShareStatus: openedAt ? 'opened' : 'sent',
                 observationEmailSentAt: sentAt,
-                observationEmailOpenedAt: openedAt
+                observationEmailOpenedAt: openedAt,
+                observationEmailClickedAt: clickedAt
             });
         }
     } catch (err) {

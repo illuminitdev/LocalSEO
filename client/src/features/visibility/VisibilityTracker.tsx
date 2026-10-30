@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Download, Loader2, Plus, RefreshCw, Sparkles, Trash2, AlertCircle, CheckCircle2, X, ArrowUp, ArrowDown } from 'lucide-react';
-import { apiGet, apiPost, cn } from '../../shared/utils';
+import { ago, apiDelete, apiGet, apiPost, cn, type ApiError } from '../../shared/utils';
+import LocationPicker, { type SavedLocation } from '../../shared/LocationPicker';
+import { useCredits } from '../../shared/CreditsContext';
+import { creditErrorMessage } from '../../shared/creditMessages';
+import { useServiceDetection } from '../../shared/useServiceDetection';
 
 type Point = { date: string; rank: number };
 type TrackedKeyword = {
@@ -14,9 +19,22 @@ type TrackedKeyword = {
 type Suggestion = { keyword: string; volume: number | null };
 type TrackerInfo = {
     keywords: TrackedKeyword[];
+    /** Keywords scanned in the Local Search Grid but not tracked; they don't use a keyword slot until tracked. */
+    gridSuggestions?: string[];
     configured: boolean;
     business: { name: string; category: string; city: string; connected: boolean };
     max: number;
+    /** Billing period: each keyword is checked once inside it; after that the saved rank is shown. */
+    periodStart?: string;
+    periodEnd?: string;
+    /** New keywords added this billing month (removing one does not free its slot before the month resets). */
+    addedThisMonth?: number;
+    costPerKeyword?: number;
+    location: SavedLocation | null;
+    locations: SavedLocation[];
+    locationLimit: number;
+    canAddLocation: boolean;
+    needsAddress?: boolean;
 };
 
 const NOT_RANKED = 21;
@@ -62,33 +80,94 @@ function visibility(items: Array<{ rank: number | null; volume: number | null }>
 const rankLabel = (rank: number | null) => (rank == null ? '—' : rank >= NOT_RANKED ? '>20' : String(rank));
 const fmtVolume = (v: number | null) => (v == null ? '—' : v.toLocaleString());
 
-function Delta({ value, suffix = '' }: { value: number | null; suffix?: string }) {
-    if (value == null || Math.abs(value) < 0.05) return null;
-    const up = value > 0;
+const places = (n: number) => `${n} place${n === 1 ? '' : 's'}`;
+
+type Tone = 'good' | 'bad' | 'neutral';
+const TONE_DOT: Record<Tone, string> = { good: 'bg-emerald-500', bad: 'bg-red-500', neutral: 'bg-slate-400' };
+const TIP_WIDTH = 248;
+
+/** Small hover card in the site's style. Rendered on <body> so the table's scroll box can't clip it. */
+function Tip({ title, text, note, tone = 'neutral', children }: { title: string; text: string; note?: string; tone?: Tone; children: React.ReactNode }) {
+    const ref = useRef<HTMLSpanElement>(null);
+    const [pos, setPos] = useState<{ left: number; top: number; above: boolean } | null>(null);
+    const show = () => {
+        const r = ref.current?.getBoundingClientRect();
+        if (!r) return;
+        const left = Math.max(8, Math.min(window.innerWidth - TIP_WIDTH - 8, r.left + r.width / 2 - TIP_WIDTH / 2));
+        const above = r.bottom + 120 > window.innerHeight;
+        setPos({ left, top: above ? r.top - 6 : r.bottom + 6, above });
+    };
     return (
-        <span className={cn('inline-flex items-center gap-0.5 text-xs font-bold', up ? 'text-emerald-600' : 'text-red-500')}>
-            {up ? <ArrowUp className="w-3 h-3" strokeWidth={3} /> : <ArrowDown className="w-3 h-3" strokeWidth={3} />}
-            {Math.abs(value).toFixed(1)}
-            {suffix}
+        <span ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)} className="inline-flex">
+            {children}
+            {pos &&
+                createPortal(
+                    <div
+                        role="tooltip"
+                        style={{ left: pos.left, top: pos.top, width: TIP_WIDTH, transform: pos.above ? 'translateY(-100%)' : undefined }}
+                        className="fixed z-50 pointer-events-none rounded-lg border border-[#E2E8F0] bg-white px-3 py-2.5 shadow-lg text-left"
+                    >
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-[#0F172A]">
+                            <i className={cn('w-2 h-2 rounded-full shrink-0', TONE_DOT[tone])} />
+                            {title}
+                        </div>
+                        <p className="mt-1 text-[11px] leading-snug text-slate-600 font-normal">{text}</p>
+                        {note && <p className="mt-1.5 text-[10px] font-semibold text-slate-400">{note}</p>}
+                    </div>,
+                    document.body
+                )}
         </span>
     );
 }
 
-function ChangeChip({ change, rank }: { change: number | null; rank: number | null }) {
+function Delta({ value, suffix = '', what, days }: { value: number | null; suffix?: string; what: string; days: number }) {
+    if (value == null || Math.abs(value) < 0.05) return null;
+    const up = value > 0;
+    const amount = `${Math.abs(value).toFixed(1)}${suffix}`;
+    return (
+        <Tip
+            tone={up ? 'good' : 'bad'}
+            title={up ? `Improved by ${amount}` : `Got worse by ${amount}`}
+            text={`${what} ${up ? 'improved' : 'got worse'} by ${amount} over the last ${days} days.`}
+            note={up ? 'Green = better' : 'Red = worse'}
+        >
+            <span className={cn('inline-flex items-center gap-0.5 text-xs font-bold', up ? 'text-emerald-600' : 'text-red-500')}>
+                {up ? <ArrowUp className="w-3 h-3" strokeWidth={3} /> : <ArrowDown className="w-3 h-3" strokeWidth={3} />}
+                {Math.abs(value).toFixed(1)}
+                {suffix}
+            </span>
+        </Tip>
+    );
+}
+
+function ChangeChip({ change, rank, days }: { change: number | null; rank: number | null; days: number }) {
     if (rank == null) return <span className="text-xs text-slate-400">—</span>;
     if (change == null || change === 0) {
         return (
-            <span
-                className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold"
-                title={change == null ? 'First check — no earlier rank to compare' : 'No change in this period'}
+            <Tip
+                title={change == null ? 'First check' : 'No change'}
+                text={
+                    change == null
+                        ? `Currently ranked ${rankLabel(rank)}. There's no earlier rank to compare with yet.`
+                        : `Still ranked ${rankLabel(rank)}, same as ${days} days ago.`
+                }
             >
-                {change == null ? 'New · ' : 'Same · '}
-                {rankLabel(rank)}
-            </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-bold">
+                    {change == null ? 'New · ' : 'Same · '}
+                    {rankLabel(rank)}
+                </span>
+            </Tip>
         );
     }
     const up = change > 0;
+    const before = rankLabel((rank as number) + change);
     return (
+        <Tip
+            tone={up ? 'good' : 'bad'}
+            title={up ? `Up ${places(change)}` : `Down ${places(Math.abs(change))}`}
+            text={`${up ? 'Moved up' : 'Dropped'} from ${before} to ${rankLabel(rank)} on Google Maps in the last ${days} days.`}
+            note={up ? 'Green = better rank' : 'Red = worse rank'}
+        >
         <span
             className={cn(
                 'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold',
@@ -98,6 +177,7 @@ function ChangeChip({ change, rank }: { change: number | null; rank: number | nu
             {up ? <ArrowUp className="w-3 h-3" strokeWidth={3} /> : <ArrowDown className="w-3 h-3" strokeWidth={3} />}
             {Math.abs(change)}
         </span>
+        </Tip>
     );
 }
 
@@ -108,9 +188,11 @@ function Sparkline({ history }: { history: Point[] }) {
     const h = 24;
     if (pts.length < 2) {
         return (
-            <svg width={w} height={h} aria-hidden>
-                <line x1="1" y1={h / 2} x2={w - 1} y2={h / 2} stroke="#CBD5E1" strokeWidth="1.5" strokeDasharray="3 3" />
-            </svg>
+            <Tip title="No trend yet" text="The line appears once the rank has been checked at least twice in 30 days.">
+                <svg width={w} height={h} aria-hidden>
+                    <line x1="1" y1={h / 2} x2={w - 1} y2={h / 2} stroke="#CBD5E1" strokeWidth="1.5" strokeDasharray="3 3" />
+                </svg>
+            </Tip>
         );
     }
     const ranks = pts.map((p) => p.rank);
@@ -138,10 +220,18 @@ function Sparkline({ history }: { history: Point[] }) {
     }
     const delta = pts[0].rank - pts[pts.length - 1].rank;
     const stroke = delta > 0 ? '#10B981' : delta < 0 ? '#EF4444' : '#94A3B8';
+    const verdict = delta > 0 ? 'Green = improved overall' : delta < 0 ? 'Red = dropped overall' : 'Grey = ended where it started';
     return (
-        <svg width={w} height={h} aria-hidden>
-            <path d={line} fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Tip
+            tone={delta > 0 ? 'good' : delta < 0 ? 'bad' : 'neutral'}
+            title={`30-day trend: ${rankLabel(pts[0].rank)} → ${rankLabel(pts[pts.length - 1].rank)}`}
+            text={`${pts.length} rank checks in the last 30 days. Best rank was ${rankLabel(lo)}. When the line goes up, the rank got better.`}
+            note={verdict}
+        >
+            <svg width={w} height={h} aria-hidden>
+                <path d={line} fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+        </Tip>
     );
 }
 
@@ -170,6 +260,7 @@ function StatCard({ label, children }: { label: string; children: React.ReactNod
 export default function VisibilityTracker() {
     const [info, setInfo] = useState<TrackerInfo | null>(null);
     const [keywords, setKeywords] = useState<TrackedKeyword[]>([]);
+    const [gridSuggestions, setGridSuggestions] = useState<string[]>([]);
     const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
     const [typedSuggestions, setTypedSuggestions] = useState<Suggestion[]>([]);
     const [typedLoading, setTypedLoading] = useState(false);
@@ -184,8 +275,16 @@ export default function VisibilityTracker() {
     const [checking, setChecking] = useState({ done: 0, total: 0 });
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
+    const [servicesPending, setServicesPending] = useState(false);
 
     const busy = checking.total > 0;
+    const { refresh: refreshCredits } = useCredits();
+    const locationId = info?.location?.id || '';
+    const maxKeywords = info?.max ?? 10;
+    // A keyword is checked once per billing month at this location; after that its saved rank is shown (no charge).
+    const periodStartMs = info?.periodStart ? new Date(info.periodStart).getTime() : 0;
+    const resetsOn = info?.periodEnd ? new Date(info.periodEnd).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+    const isDue = (k: TrackedKeyword) => !k.checkedAt || new Date(k.checkedAt).getTime() < periodStartMs;
 
     useEffect(() => {
         if (!notice) return;
@@ -201,13 +300,18 @@ export default function VisibilityTracker() {
                 if (cancelled) return;
                 setInfo(data);
                 setKeywords(data.keywords || []);
+                setGridSuggestions(data.gridSuggestions || []);
             } catch (err: any) {
                 if (!cancelled) setError(err?.message || 'Could not load the visibility tracker.');
             } finally {
                 if (!cancelled) setLoading(false);
             }
             apiGet('/api/visibility-tracker/suggestions')
-                .then((d) => !cancelled && setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []))
+                .then((d) => {
+                    if (cancelled) return;
+                    setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []);
+                    setServicesPending(Boolean(d?.servicesPending));
+                })
                 .catch(() => {});
         })();
         return () => {
@@ -251,29 +355,100 @@ export default function VisibilityTracker() {
         };
     }, [input]);
 
+    // Paid lookups only run from these buttons; the GET calls above just show what was saved earlier.
+    const [lookingUp, setLookingUp] = useState(false);
+    const lookUpSuggestions = async (q?: string) => {
+        setLookingUp(true);
+        setError('');
+        try {
+            const d = await apiPost('/api/visibility-tracker/suggestions', q ? { q } : {});
+            const list = Array.isArray(d?.suggestions) ? d.suggestions : [];
+            if (q) setTypedSuggestions(list);
+            else setSuggestions(list);
+        } catch (e: any) {
+            setError(e?.code === 'insufficient_credits' ? creditErrorMessage(e) : e?.message || 'Could not load suggestions.');
+        } finally {
+            setLookingUp(false);
+            refreshCredits();
+        }
+    };
+
     const refreshSuggestions = () =>
         apiGet('/api/visibility-tracker/suggestions')
-            .then((d) => setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []))
+            .then((d) => {
+                setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []);
+                setServicesPending(Boolean(d?.servicesPending));
+            })
             .catch(() => {});
+
+    // Keyword ideas cover each service once they have been read from the website (free).
+    useServiceDetection(servicesPending, refreshSuggestions);
 
     const runChecks = async (targets: string[]) => {
         if (!targets.length) return;
         setError('');
         setChecking({ done: 0, total: targets.length });
         let failed = 0;
+        let skipped = 0;
         try {
             for (let i = 0; i < targets.length; i += CHECK_BATCH) {
                 const batch = targets.slice(i, i + CHECK_BATCH);
-                const data = await apiPost('/api/visibility-tracker/check', { keywords: batch });
-                setKeywords(data.keywords || []);
-                failed += Array.isArray(data.failed) ? data.failed.length : 0;
+                try {
+                    const data = await apiPost('/api/visibility-tracker/check', { keywords: batch, locationId });
+                    setKeywords(data.keywords || []);
+                    failed += Array.isArray(data.failed) ? data.failed.length : 0;
+                    skipped += Array.isArray(data.skipped) ? data.skipped.length : 0;
+                } catch (err: any) {
+                    // A batch already checked this month is skipped (saved ranks shown); any other error stops the run.
+                    if ((err as ApiError)?.code !== 'already_checked') throw err;
+                    const saved = (err as ApiError)?.body?.keywords;
+                    if (Array.isArray(saved)) setKeywords(saved);
+                    skipped += batch.length;
+                }
                 setChecking({ done: Math.min(targets.length, i + batch.length), total: targets.length });
             }
-            setNotice(failed ? `Rank updated, ${failed} keyword${failed > 1 ? 's' : ''} could not be checked.` : 'Rank updated');
+            const parts = [failed ? `${failed} could not be checked` : '', skipped ? `${skipped} already checked this month` : ''].filter(Boolean);
+            setNotice(parts.length ? `Rank updated (${parts.join(', ')}).` : 'Rank updated');
         } catch (err: any) {
-            setError(err?.message || 'Rank check failed.');
+            const e = err as ApiError;
+            if (e?.code === 'insufficient_credits') {
+                setError(creditErrorMessage(e));
+            } else {
+                setError(e?.message || 'Rank check failed.');
+            }
         } finally {
             setChecking({ done: 0, total: 0 });
+            refreshCredits();
+        }
+    };
+
+    const reloadForLocation = async (id: string) => {
+        setError('');
+        try {
+            const data: TrackerInfo = await apiGet(`/api/visibility-tracker?locationId=${encodeURIComponent(id)}`);
+            setInfo(data);
+            setKeywords(data.keywords || []);
+            setGridSuggestions(data.gridSuggestions || []);
+        } catch (err: any) {
+            setError(err?.message || 'Could not load that location.');
+        }
+    };
+
+    const addLocation = async (address: string, label: string) => {
+        try {
+            const data = await apiPost('/api/locations', { address, label });
+            await reloadForLocation(data?.location?.id || data?.added?.id);
+        } catch (err: any) {
+            return err?.message || 'Could not add that location.';
+        }
+    };
+
+    const removeLocation = async (id: string) => {
+        try {
+            await apiDelete(`/api/locations/${encodeURIComponent(id)}`);
+            await reloadForLocation(info?.locations.find((l) => l.isPrimary)?.id || '');
+        } catch (err: any) {
+            return err?.message || 'Could not remove that location.';
         }
     };
 
@@ -285,16 +460,22 @@ export default function VisibilityTracker() {
         setNotice('');
         try {
             const before = new Set(keywords.map((k) => k.keyword));
-            const data = await apiPost('/api/visibility-tracker/keywords', { keywords: clean });
+            const data = await apiPost('/api/visibility-tracker/keywords', { keywords: clean, locationId });
             const next: TrackedKeyword[] = data.keywords || [];
             setKeywords(next);
+            if (Array.isArray(data.gridSuggestions)) setGridSuggestions(data.gridSuggestions);
             setInput('');
             setSuggestions((s) => s.filter((x) => !clean.map((c) => c.toLowerCase()).includes(x.keyword)));
             setPage(0);
             refreshSuggestions();
             const fresh = next.filter((k) => !before.has(k.keyword)).map((k) => k.keyword);
-            if (info?.configured && fresh.length) await runChecks(fresh);
-            else if (fresh.length) setNotice('Keywords added. Live rank checks are not configured yet.');
+            // Refresh the "added this month" count from the server (a re-added keyword does not use a new slot).
+            apiGet(`/api/visibility-tracker${locationId ? `?locationId=${encodeURIComponent(locationId)}` : ''}`)
+                .then((d: TrackerInfo) => setInfo((i) => (i ? { ...i, addedThisMonth: d.addedThisMonth } : i)))
+                .catch(() => {});
+            // Adding only saves the keyword (it also shows in the Local Search Grid). Its rank is checked
+            // when the user clicks Check, so no paid call happens here.
+            if (fresh.length) setNotice(`Saved ${fresh.length} keyword${fresh.length === 1 ? '' : 's'}. Click Check to see the rank.`);
         } catch (err: any) {
             setError(err?.message || 'Could not add keywords.');
         } finally {
@@ -304,11 +485,22 @@ export default function VisibilityTracker() {
 
     const removeKeyword = async (keyword: string) => {
         try {
-            const data = await apiPost('/api/visibility-tracker/remove', { keyword });
+            const data = await apiPost('/api/visibility-tracker/remove', { keyword, locationId });
             setKeywords(data.keywords || []);
+            if (Array.isArray(data.gridSuggestions)) setGridSuggestions(data.gridSuggestions);
             refreshSuggestions();
         } catch (err: any) {
             setError(err?.message || 'Could not remove keyword.');
+        }
+    };
+
+    const dismissGridSuggestion = async (keyword: string) => {
+        setGridSuggestions((list) => list.filter((k) => k !== keyword));
+        try {
+            const data = await apiPost('/api/visibility-tracker/dismiss-suggestion', { keyword });
+            if (Array.isArray(data.gridSuggestions)) setGridSuggestions(data.gridSuggestions);
+        } catch (err: any) {
+            setError(err?.message || 'Could not dismiss that suggestion.');
         }
     };
 
@@ -426,12 +618,21 @@ export default function VisibilityTracker() {
                     </select>
                     {info?.configured && keywords.length > 0 && (
                         <button
-                            onClick={() => runChecks(keywords.map((k) => k.keyword))}
-                            disabled={busy}
+                            onClick={() => runChecks(keywords.filter(isDue).map((k) => k.keyword))}
+                            disabled={busy || !keywords.some(isDue)}
+                            title={
+                                keywords.some(isDue)
+                                    ? `Checks ${keywords.filter(isDue).length} keyword${keywords.filter(isDue).length === 1 ? '' : 's'}`
+                                    : `All keywords were already checked this month${resetsOn ? `. They can be checked again after ${resetsOn}` : ''}`
+                            }
                             className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                         >
                             <RefreshCw className={cn('w-3.5 h-3.5', busy && 'animate-spin')} />
-                            {busy ? `Checking ${checking.done}/${checking.total}` : 'Refresh ranks'}
+                            {busy
+                                ? `Checking ${checking.done}/${checking.total}`
+                                : keywords.some(isDue)
+                                  ? 'Refresh ranks'
+                                  : 'Up to date'}
                         </button>
                     )}
                     <button
@@ -476,7 +677,7 @@ export default function VisibilityTracker() {
                         <StatCard label="Average Position">
                             <div className="flex items-end gap-3">
                                 <span className="text-4xl font-black tracking-tight text-[#0F172A]">{stats.avg != null ? stats.avg.toFixed(1) : '—'}</span>
-                                <Delta value={stats.avgDelta} />
+                                <Delta value={stats.avgDelta} what="Your average position" days={days} />
                             </div>
                         </StatCard>
                         <StatCard label="Visibility Score">
@@ -484,7 +685,7 @@ export default function VisibilityTracker() {
                                 <span className="text-4xl font-black tracking-tight text-[#0F172A]">
                                     {stats.vis != null ? `${Math.round(stats.vis)}%` : '—'}
                                 </span>
-                                <Delta value={stats.visDelta} suffix="%" />
+                                <Delta value={stats.visDelta} suffix="%" what="Your visibility score" days={days} />
                             </div>
                         </StatCard>
                         <StatCard label={`Keyword Movement (${days}d)`}>
@@ -526,6 +727,24 @@ export default function VisibilityTracker() {
                 )}
             </div>
 
+            {info && !info.needsAddress && info.locations.length > 0 && (
+                <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm p-4">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Location</div>
+                    <div className="max-w-md">
+                        <LocationPicker
+                            locations={info.locations}
+                            selectedId={locationId}
+                            onSelect={reloadForLocation}
+                            limit={info.locationLimit}
+                            canAdd={info.canAddLocation}
+                            disabled={busy}
+                            onAdd={addLocation}
+                            onRemove={removeLocation}
+                        />
+                    </div>
+                </div>
+            )}
+
             <div ref={trackBoxRef} className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm p-4">
                 <form
                     className="flex flex-wrap gap-2"
@@ -545,11 +764,37 @@ export default function VisibilityTracker() {
                     <button
                         type="submit"
                         disabled={adding || busy || !input.trim()}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--brand-primary)] px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--brand-primary)] px-4 py-2 text-sm font-bold text-[var(--brand-primary-foreground)] disabled:opacity-50"
                     >
                         {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Track
                     </button>
                 </form>
+                <p className="mt-2 text-[11px] text-slate-500">
+                    {keywords.length} of {maxKeywords} keywords tracked
+                    {typeof info?.addedThisMonth === 'number' ? ` · ${info.addedThisMonth} of ${maxKeywords} added this month` : ''}
+                </p>
+                {suggestOpen && input.split(/[,\n]/).pop()!.trim().length >= 3 && !typedLoading && typedSuggestions.length === 0 && (
+                    <button
+                        type="button"
+                        disabled={lookingUp}
+                        onClick={() => lookUpSuggestions(input.split(/[,\n]/).pop()!.trim())}
+                        className="mt-3 inline-flex items-center gap-1.5 text-xs font-bold text-[var(--brand-primary)] hover:underline disabled:opacity-50"
+                    >
+                        {lookingUp ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        Get keyword ideas for “{input.split(/[,\n]/).pop()?.trim()}” (uses credits)
+                    </button>
+                )}
+                {suggestOpen && suggestions.length === 0 && (
+                    <button
+                        type="button"
+                        disabled={lookingUp}
+                        onClick={() => lookUpSuggestions()}
+                        className="mt-3 block inline-flex items-center gap-1.5 text-xs font-bold text-[var(--brand-primary)] hover:underline disabled:opacity-50"
+                    >
+                        {lookingUp ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        Get suggested keywords for {info?.business.category || 'your industry'}
+                    </button>
+                )}
                 {suggestOpen && (typedLoading || typedSuggestions.length > 0) && (
                     <div className="mt-3">
                         <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
@@ -583,7 +828,7 @@ export default function VisibilityTracker() {
                             <div className="flex items-center gap-3">
                             <button
                                 disabled={adding || busy}
-                                onClick={() => addKeywords(suggestions.slice(0, 10).map((s) => s.keyword))}
+                                onClick={() => addKeywords(suggestions.slice(0, Math.max(0, Math.min(10, maxKeywords - keywords.length))).map((s) => s.keyword))}
                                 className="text-xs font-bold text-[var(--brand-primary)] hover:underline disabled:opacity-50"
                             >
                                 Track top 10
@@ -637,12 +882,47 @@ export default function VisibilityTracker() {
                             </tr>
                         </thead>
                         <tbody>
+                            {/* Scanned in the Local Search Grid but not tracked: not counted until the user tracks it. */}
+                            {safePage === 0 &&
+                                gridSuggestions.map((kw) => (
+                                    <tr key={`grid-${kw}`} className="border-b border-slate-100 bg-amber-50/40">
+                                        <td className="px-5 py-3 font-semibold text-slate-600">
+                                            {kw}
+                                            <div className="text-[10px] font-medium text-amber-700">From Local Search Grid · not tracked yet</div>
+                                        </td>
+                                        <td colSpan={view === 'you' ? 4 : 5} className="px-3 py-2">
+                                            <button
+                                                type="button"
+                                                disabled={adding || busy || keywords.length >= maxKeywords}
+                                                onClick={() => addKeywords([kw])}
+                                                title={keywords.length >= maxKeywords ? `Your plan allows ${maxKeywords} keywords` : 'Track this keyword'}
+                                                className="inline-flex items-center gap-1 rounded-lg border border-[var(--brand-primary)]/40 bg-white px-2.5 py-1 text-xs font-bold text-[var(--brand-primary)] hover:bg-amber-50 disabled:opacity-50"
+                                            >
+                                                <Plus className="w-3 h-3" /> Track
+                                            </button>
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => dismissGridSuggestion(kw)}
+                                                className="text-slate-300 hover:text-slate-500"
+                                                title="Dismiss suggestion"
+                                                aria-label={`Dismiss ${kw}`}
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
                             {visible.map(({ k, now, change }) => (
                                 <tr key={k.keyword} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
-                                    <td className="px-5 py-3 font-semibold text-[#0F172A]">{k.keyword}</td>
+                                    <td className="px-5 py-3 font-semibold text-[#0F172A]">
+                                        {k.keyword}
+                                        {k.checkedAt && <div className="text-[10px] font-medium text-slate-400">Checked {ago(k.checkedAt)}</div>}
+                                    </td>
                                     <td className="px-3 py-2 font-bold text-[#0F172A]">{rankLabel(now)}</td>
                                     <td className="px-3 py-2">
-                                        <ChangeChip change={change} rank={now} />
+                                        <ChangeChip change={change} rank={now} days={days} />
                                     </td>
                                     {view === 'you' ? (
                                         <td className="px-3 py-2 text-slate-600">{fmtVolume(k.volume)}</td>
@@ -653,12 +933,25 @@ export default function VisibilityTracker() {
                                                 {now == null ? (
                                                     <span className="text-xs text-slate-400">—</span>
                                                 ) : now === 1 ? (
-                                                    <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-600">Leading</span>
+                                                    <Tip tone="good" title="You're #1" text="You hold the top Google Maps spot for this keyword." note="Green = leading">
+                                                        <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-600">Leading</span>
+                                                    </Tip>
                                                 ) : (
+                                                    <Tip
+                                                        tone="bad"
+                                                        title={now >= NOT_RANKED ? 'Not in the top 20' : `${places(now - 1)} behind #1`}
+                                                        text={
+                                                            now >= NOT_RANKED
+                                                                ? `${k.top[0] || 'Another business'} is #1 for this keyword and you're not in the top 20 yet.`
+                                                                : `You're at ${now}. ${k.top[0] || 'Another business'} is #1 for this keyword.`
+                                                        }
+                                                        note="Red = you're not leading yet"
+                                                    >
                                                     <span className="inline-flex items-center gap-0.5 rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-bold text-red-500">
                                                         <ArrowDown className="w-3 h-3" strokeWidth={3} />
                                                         {now >= NOT_RANKED ? '20+' : now - 1}
                                                     </span>
+                                                    </Tip>
                                                 )}
                                             </td>
                                         </>
@@ -678,7 +971,7 @@ export default function VisibilityTracker() {
                                     </td>
                                 </tr>
                             ))}
-                            {!visible.length && (
+                            {!visible.length && !gridSuggestions.length && (
                                 <tr>
                                     <td colSpan={7} className="px-5 py-12 text-center text-sm text-slate-500">
                                         No keywords tracked yet. Add your own above or pick from the suggestions for your industry.

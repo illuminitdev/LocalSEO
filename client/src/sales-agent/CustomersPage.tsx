@@ -669,7 +669,7 @@ export default function CustomersPage() {
 
                         <div className="space-y-3.5 text-xs sm:text-sm text-slate-600">
                             <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                                <div className="w-6 h-6 rounded-full bg-orange-500 text-white font-black text-xs flex items-center justify-center shrink-0 mt-0.5">
+                                <div className="w-6 h-6 rounded-full bg-orange-500 text-[var(--brand-primary-foreground)] font-black text-xs flex items-center justify-center shrink-0 mt-0.5">
                                     1
                                 </div>
                                 <div>

@@ -1,9 +1,12 @@
-import { cityFromAddress } from './aiInsights';
+import { logDfsCost } from './dfsCost';
+import { businessServices, cityFromAddress } from './aiInsights';
 import { dataForSeoConfigured } from './dataForSeoCitations';
 import { locationCodeFor, type GeoHint } from './geo';
+import { TRACKED_KEYWORD_LIMIT } from './planCatalog';
 import { NOT_RANKED, rankAtPoint, type GridBusiness } from './dataForSeoGrid';
 
-export const MAX_TRACKED_KEYWORDS = 100;
+/** Cap on tracked keywords: see TRACKED_KEYWORD_LIMIT in planCatalog.ts. */
+export const MAX_TRACKED_KEYWORDS = TRACKED_KEYWORD_LIMIT;
 export const MAX_HISTORY_POINTS = 120;
 
 export type TrackerPoint = { date: string; rank: number };
@@ -47,6 +50,7 @@ export async function fetchSearchVolumes(keywords: string[], geo: GeoHint | stri
             signal: AbortSignal.timeout(20000)
         });
         const data: any = await res.json().catch(() => ({}));
+        logDfsCost('search_volume', data);
         const task = Array.isArray(data?.tasks) ? data.tasks[0] : null;
         if (!res.ok || !task || task.status_code !== 20000) {
             console.warn('[visibility-tracker] volume lookup failed:', task?.status_message || res.status);
@@ -84,6 +88,7 @@ export async function fetchRelatedKeywords(seeds: string[], geo: GeoHint | strin
             signal: AbortSignal.timeout(25000)
         });
         const data: any = await res.json().catch(() => ({}));
+        logDfsCost('keywords_for_keywords', data);
         const task = Array.isArray(data?.tasks) ? data.tasks[0] : null;
         if (!res.ok || !task || task.status_code !== 20000) {
             console.warn('[visibility-tracker] related keywords failed:', task?.status_message || res.status);
@@ -135,17 +140,21 @@ export function makeRelevanceFilter(category: string, services: string[]) {
     };
 }
 
-type SuggestBusiness = { category?: string; address?: string; attributes?: string };
+type SuggestBusiness = { category?: string; address?: string; attributes?: string; services?: string[] };
+
+/** Typed + website-detected services as keyword phrases (see businessServices). */
+export function keywordServices(business: SuggestBusiness): string[] {
+    const terms = industryTerms(String(business.category || ''));
+    return businessServices(business)
+        .map(cleanKeyword)
+        .filter((x) => x.length > 2 && !terms.includes(x));
+}
 
 /** Keyword ideas built from the business industry, services and city. */
 export function industryKeywordIdeas(business: SuggestBusiness): string[] {
     const terms = industryTerms(String(business.category || ''));
     const city = cleanKeyword(cityFromAddress(String(business.address || '')));
-    const services = String(business.attributes || '')
-        .split(/[,;\n]/)
-        .map(cleanKeyword)
-        .filter((x) => x.length > 2 && x.length < 50 && !terms.includes(x))
-        .slice(0, 8);
+    const services = keywordServices(business);
 
     const ideas: string[] = [];
     for (const t of [...terms, ...services]) {
@@ -161,21 +170,12 @@ export function industryKeywordIdeas(business: SuggestBusiness): string[] {
     });
 }
 
-/** Checks the live Google Maps rank for one keyword at the business location and appends it to history. */
-export async function checkKeywordRank(
-    entry: TrackerKeyword,
+/** One live Google Maps rank check for a keyword at a location (1 DataForSEO call). History is saved by the caller. */
+export async function checkRank(
+    keyword: string,
     center: { lat: number; lng: number },
     business: GridBusiness
-): Promise<TrackerKeyword> {
-    const { rank, top3 } = await rankAtPoint(entry.keyword, center.lat, center.lng, business);
-    const now = new Date();
-    // Keep every check as its own point; only collapse checks made within a minute of each other.
-    const history = entry.history.filter((p) => now.getTime() - new Date(p.date).getTime() > 60_000);
-    history.push({ date: now.toISOString(), rank: Math.min(NOT_RANKED, rank) });
-    return {
-        ...entry,
-        history: history.slice(-MAX_HISTORY_POINTS),
-        top: top3,
-        checkedAt: now.toISOString()
-    };
+): Promise<{ rank: number; top3: string[] }> {
+    const { rank, top3 } = await rankAtPoint(keyword, center.lat, center.lng, business);
+    return { rank: Math.min(NOT_RANKED, rank), top3 };
 }

@@ -689,7 +689,7 @@ export default function BookingPlots() {
                                         type="button"
                                         disabled={busy === service.id}
                                         onClick={() => resumeBooking(service)}
-                                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white px-5 py-2.5 text-sm font-bold shadow-xs transition disabled:opacity-50 shrink-0"
+                                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-[var(--brand-primary-foreground)] px-5 py-2.5 text-sm font-bold shadow-xs transition disabled:opacity-50 shrink-0"
                                     >
                                         <LogIn className="w-4 h-4" />
                                         {busy === service.id ? 'Opening…' : 'Open Dashboard'}
@@ -768,9 +768,9 @@ export default function BookingPlots() {
                             <button
                                 type="button"
                                 onClick={copyLink}
-                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white text-xs font-bold shadow-sm transition"
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-[var(--brand-primary-foreground)] text-xs font-bold shadow-sm transition"
                             >
-                                <Link2 className="w-3.5 h-3.5 text-white" />
+                                <Link2 className="w-3.5 h-3.5 text-[var(--brand-primary-foreground)]" />
                                 {copied ? 'Copied!' : 'Copy link'}
                             </button>
 
@@ -911,7 +911,7 @@ export default function BookingPlots() {
                             <button
                                 type="button"
                                 onClick={copyLink}
-                                className="px-3.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition shrink-0"
+                                className="px-3.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-[var(--brand-primary-foreground)] text-xs font-bold transition shrink-0"
                             >
                                 {copied ? 'Copied!' : 'Copy'}
                             </button>
@@ -1222,7 +1222,7 @@ export default function BookingPlots() {
                                 <button
                                     type="submit"
                                     disabled={manualBusy}
-                                    className="px-5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold disabled:opacity-50 transition"
+                                    className="px-5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-[var(--brand-primary-foreground)] text-xs font-bold disabled:opacity-50 transition"
                                 >
                                     {manualBusy ? 'Saving…' : 'Create Appointment'}
                                 </button>
@@ -1261,7 +1261,7 @@ export default function BookingPlots() {
                                         <button
                                             type="button"
                                             onClick={openCustomerView}
-                                            className="px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold inline-flex items-center gap-2 shadow-xs transition"
+                                            className="px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-[var(--brand-primary-foreground)] text-xs font-bold inline-flex items-center gap-2 shadow-xs transition"
                                         >
                                             <ExternalLink className="w-4 h-4" /> Open customer view
                                         </button>
@@ -1525,7 +1525,7 @@ export default function BookingPlots() {
                                                                 type="button"
                                                                 disabled={busy === b.id}
                                                                 onClick={() => startJob(b.id)}
-                                                                className="px-4 py-2 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition disabled:opacity-50"
+                                                                className="px-4 py-2 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition disabled:opacity-50"
                                                             >
                                                                 <Play className="w-3.5 h-3.5 fill-current" />
                                                                 {busy === b.id ? 'Starting…' : 'Start job'}
@@ -1861,7 +1861,7 @@ export default function BookingPlots() {
                                     <button
                                         type="button"
                                         onClick={copyLink}
-                                        className="flex-1 inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-xs font-bold shadow-sm transition"
+                                        className="flex-1 inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-[var(--brand-primary-foreground)] text-xs font-bold shadow-sm transition"
                                     >
                                         <Link2 className="w-4 h-4" />
                                         {copied ? 'Copied!' : 'Copy Link'}
@@ -1915,7 +1915,7 @@ export default function BookingPlots() {
                                         type="button"
                                         disabled={busy === payDialog.id}
                                         onClick={sendPaymentRequest}
-                                        className="px-5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition disabled:opacity-50"
+                                        className="px-5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-[var(--brand-primary-foreground)] text-xs font-bold transition disabled:opacity-50"
                                     >
                                         {busy === payDialog.id ? 'Sending…' : 'Send Invoice'}
                                     </button>

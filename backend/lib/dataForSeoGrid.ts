@@ -1,6 +1,10 @@
 import { dfsTask, dataForSeoConfigured } from './dataForSeoCitations';
 
-export const GRID_SIZES = [3, 5, 7, 9] as const;
+/**
+ * Only 3x3 for now (9 points = 9 DataForSEO calls = 9 credits). 5x5, 7x7 and 9x9 were removed to control cost;
+ * to bring one back later, add it here and price the scan per point (size * size credits) in scan-start.
+ */
+export const GRID_SIZES = [3] as const;
 export const GRID_HALF_SPAN_MILES = 3;
 export const NOT_RANKED = 21;
 

@@ -8,6 +8,8 @@ import { computeScore } from './score.js';
 import { buildAeoCoreChecklist } from './aeoCoreChecklist.js';
 import { buildLocalSeoCoreChecklist } from './localSeoCoreChecklist.js';
 import { scrubVendorDeep } from './geminiReport.js';
+import { cleanClientText } from './deckShared.js';
+import { scoreText } from './narrative.js';
 import { isDatabaseEnabled, query } from '../lib/db.js';
 import { resolveSearchArea } from '../lib/searchArea.js';
 import type { AuditCreateInput, AuditRecord, ChecklistCheck } from '../types.js';
@@ -147,7 +149,13 @@ export async function saveAudit(audit: AuditRecord) {
     } | null;
     const aeoChecklist = buildAeoCoreChecklist(audit);
     const localSeoChecklist = buildLocalSeoCoreChecklist(audit);
-    const reportIssues = (audit.aiReport as { criticalIssues?: unknown } | null | undefined)?.criticalIssues;
+    const report = (audit.aiReport || {}) as {
+      criticalIssues?: unknown;
+      localSeoFixes?: { actions?: unknown };
+      aeoFixes?: { priorities?: unknown };
+      geoFixes?: { actions?: unknown };
+    };
+    const asList = (v: unknown) => (Array.isArray(v) ? v : null);
     audit.score = computeScore(audit.checklist?.checks || [], {
       localRank: gbpLookup?.localRank || null,
       aiEngineChecks: Array.isArray(gbpLookup?.aiEngineChecks) ? gbpLookup.aiEngineChecks : [],
@@ -155,12 +163,23 @@ export async function saveAudit(audit: AuditRecord) {
       aeoQueries: Array.isArray(audit.aeoSerpScreenshots) ? audit.aeoSerpScreenshots : [],
       localSeoChecklist,
       geoChecklist: (gbpLookup?.geoChecklist as { groups?: Array<{ items?: any[] }> } | null) || null,
-      criticalIssues: Array.isArray(reportIssues) ? reportIssues : []
+      priorityActions: {
+        local: asList(report.localSeoFixes?.actions),
+        aeo: asList(report.aeoFixes?.priorities),
+        geo: asList(report.geoFixes?.actions)
+      },
+      criticalIssues: asList(report.criticalIssues) || []
     }) as AuditRecord['score'];
+    if (audit.aiReport && String((audit.aiReport as { model?: string }).model || '').startsWith('rules')) {
+      Object.assign(audit.aiReport, scoreText(audit));
+    }
+  }
+  if (Array.isArray(audit.checklist?.checks)) {
+    audit.checklist.checks = cleanClientText(audit.checklist.checks);
   }
   audit.topFixes = deriveTopFixes(audit);
   if (audit.aiReport) {
-    audit.aiReport = scrubVendorDeep(audit.aiReport) as AuditRecord['aiReport'];
+    audit.aiReport = cleanClientText(scrubVendorDeep(audit.aiReport)) as AuditRecord['aiReport'];
   }
 
   if (isDatabaseEnabled()) {
@@ -259,6 +278,16 @@ export async function listAudits(options: { deepOnly?: boolean } = {}) {
 }
 
 export function deriveTopFixes(audit: AuditRecord) {
+  const fixes = (audit.aiReport as { priorityFixes?: Array<Record<string, unknown>> } | null | undefined)?.priorityFixes;
+  if (Array.isArray(fixes) && fixes.length) {
+    return fixes.slice(0, 3).map((f, i) => ({
+      id: `fix_${i + 1}`,
+      label: String(f.title || ''),
+      section: String(f.suggestedPackage || ''),
+      evidence: String(f.evidence || ''),
+      notes: String(f.action || '')
+    }));
+  }
   const checks = audit.checklist?.checks || [];
   const prioritySections = [
     'gbp',
@@ -529,27 +558,7 @@ export function publicReportView(audit: AuditRecord | null) {
           schemaTypes: (audit.crawlMeta as Record<string, unknown>).schemaTypes || null,
           spaHeuristic: (audit.crawlMeta as Record<string, unknown>).spaHeuristic || null,
           sitePhones: (audit.crawlMeta as Record<string, unknown>).sitePhones || [],
-          homepageHasTel: (audit.crawlMeta as Record<string, unknown>).homepageHasTel ?? null,
-          homepageScreenshot: (() => {
-            const shot = (audit.crawlMeta as Record<string, unknown>).homepageScreenshot as
-              | { dataUrl?: string; skipped?: boolean; reason?: string; url?: string; capturedAt?: string }
-              | null
-              | undefined;
-            if (!shot) return null;
-            if (shot.dataUrl) {
-              return {
-                dataUrl: shot.dataUrl,
-                url: shot.url || null,
-                capturedAt: shot.capturedAt || null
-              };
-            }
-            return {
-              skipped: true,
-              reason: shot.reason || 'Unavailable',
-              url: shot.url || null,
-              capturedAt: shot.capturedAt || null
-            };
-          })()
+          homepageHasTel: (audit.crawlMeta as Record<string, unknown>).homepageHasTel ?? null
         }
       : null
   });

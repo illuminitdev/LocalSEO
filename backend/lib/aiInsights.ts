@@ -1,3 +1,4 @@
+import { logDfsCost } from './dfsCost';
 import { countryName, locationCodeFor, type GeoHint } from './geo';
 
 
@@ -7,6 +8,12 @@ export type VisibilityBusiness = {
     category?: string;
     website?: string;
     completenessScore?: number;
+    /** Services typed by the user on the business profile (comma / newline separated). */
+    attributes?: string;
+    /** Services detected from the website (e.g. "laser hair removal", "facials"). */
+    services?: string[];
+    /** Customer questions written by AI for this business (see serviceDetect.ts). */
+    aiPrompts?: AiPrompt[];
 };
 
 export type RawAnswer = {
@@ -15,9 +22,11 @@ export type RawAnswer = {
     text: string; 
     present: boolean; 
     sources: Array<{ title: string; url: string; domain: string }>;
+    /** When the LLM was actually asked (kept when an answer is reused from the shared store). */
+    askedAt?: string;
 };
 
-type RowAnalysis = {
+export type RowAnalysis = {
     mentioned: boolean;
     position: number; 
     sentiment: 'positive' | 'neutral' | 'negative';
@@ -45,6 +54,7 @@ async function dfs(path: string, task: Record<string, unknown>, timeoutMs: numbe
         signal: AbortSignal.timeout(timeoutMs)
     });
     const data: any = await res.json().catch(() => ({}));
+    logDfsCost(path, data);
     if (!res.ok) throw new Error(String(data?.status_message || `DataForSEO HTTP ${res.status}`));
     const t = Array.isArray(data?.tasks) ? data.tasks[0] : null;
     if (!t || t.status_code !== 20000) throw new Error(String(t?.status_message || 'DataForSEO task failed'));
@@ -64,19 +74,141 @@ export function cityFromAddress(address: string) {
     return strip(last);
 }
 
-export function buildPrompts(business: VisibilityBusiness): string[] {
-    const category = String(business.category || 'local business').trim().toLowerCase();
-    const city = cityFromAddress(String(business.address || ''));
-    const where = city ? ` in ${city}` : ' near me';
-    return [
-        `Who is the best ${category}${where}?`,
-        `Can you recommend a good ${category}${where}?`,
-        `Top rated ${category}${where} with good reviews`,
-        `Which ${category}${where} should I choose and why?`,
-        `Best local ${category}${where} for first-time customers`
-    ].map((p) => p.slice(0, 480));
+const MAX_SERVICES = 8;
+
+/**
+ * Words that say nothing about what is sold ("health", "treatments", "hospital"). A "service" made only of these
+ * gives prompts like "a good health in Basingstoke", so it is dropped; "skin care" or "teeth whitening" stay.
+ */
+const GENERIC_WORDS = new Set(
+    (
+        'health healthcare treatment treatments service services care hospital hospitals clinic clinics practice centre center ' +
+        'medical medicine wellness wellbeing beauty aesthetic aesthetics cosmetic cosmetics product products consultation ' +
+        'consultations procedure procedures solution solutions general other more home about contact team price prices pricing ' +
+        'offer offers package packages specialist specialists professional private local quality best our and of the for in ' +
+        'with a an doctor doctors salon spa shop store establishment point interest business company options range'
+    ).split(' ')
+);
+
+export function isGenericService(s: string) {
+    const words = s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    return !words.length || words.every((w) => GENERIC_WORDS.has(w));
 }
 
+/** Lowercase, dedupe and drop services that only repeat the category or are generic, so each one gives distinct prompts. */
+export function normalizeServices(list: unknown, category = ''): string[] {
+    const cat = String(category || '').trim().toLowerCase();
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of Array.isArray(list) ? list : []) {
+        const s = String(raw || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        if (!s || s.length > 40 || seen.has(s) || isGenericService(s)) continue;
+        if (cat && (s === cat || cat.includes(s))) continue;
+        seen.add(s);
+        out.push(s);
+        if (out.length >= MAX_SERVICES) break;
+    }
+    return out;
+}
+
+const GBP_ATTRIBUTE =
+    /_|wheelchair|accessib|\bwi-?fi\b|\bparking\b|restroom|toilet|-owned\b|\bowned\b|lgbtq|veteran|transgender|\bappointments?\b|\bdelivery\b|takeaway|\bpayments?\b|\bcards?\b|\bcash\b|on-?site/i;
+
+/** Every service the business offers: the ones typed on the profile first, then the ones read from the website. */
+export function businessServices(business: Pick<VisibilityBusiness, 'attributes' | 'services' | 'category'>): string[] {
+    // The same field also holds GBP attributes ("wheelchair_accessible", "free wi-fi"): those are not services.
+    const typed = String(business.attributes || '')
+        .split(/[,;\n]/)
+        .filter((s) => !GBP_ATTRIBUTE.test(s));
+    const detected = Array.isArray(business.services) ? business.services : [];
+    return normalizeServices([...typed, ...detected], business.category);
+}
+
+/** A customer question written by AI for this business; `topic` is "business" or one of its services. */
+export type AiPrompt = { prompt: string; topic: string };
+
+const MAX_AI_PROMPTS = 15;
+
+/** Keeps AI prompts that read as real questions, are about a kept service (or the business) and never name the business. */
+export function normalizePrompts(list: unknown, opts: { name?: string; services: string[] }): AiPrompt[] {
+    const own = String(opts.name || '')
+        .toLowerCase()
+        .replace(/\s+(ltd|limited|llp|plc|inc)\.?$/, '')
+        .trim();
+    const services = new Set(opts.services);
+    const seen = new Set<string>();
+    const out: AiPrompt[] = [];
+    for (const raw of Array.isArray(list) ? list : []) {
+        const prompt = String(raw?.prompt || '').replace(/\s+/g, ' ').trim();
+        const topic = String(raw?.topic || '').trim().toLowerCase();
+        const key = prompt.toLowerCase();
+        if (prompt.length < 15 || prompt.length > 200 || seen.has(key)) continue;
+        if (own.length >= 4 && key.includes(own)) continue;
+        if (topic !== 'business' && !services.has(topic)) continue;
+        seen.add(key);
+        out.push({ prompt: capitalize(prompt), topic });
+        if (out.length >= MAX_AI_PROMPTS) break;
+    }
+    return out;
+}
+
+function promptWhere(business: VisibilityBusiness) {
+    const city = cityFromAddress(String(business.address || ''));
+    return city ? ` in ${city}` : ' near me';
+}
+
+const capitalize = (p: string) => p.charAt(0).toUpperCase() + p.slice(1);
+
+/** Only when AI prompts are missing (no website, Gemini failed, not read yet): plain questions that read correctly. */
+function fallbackPrompts(business: VisibilityBusiness): AiPrompt[] {
+    const category = String(business.category || 'local business').trim().toLowerCase();
+    const w = promptWhere(business);
+    const list: AiPrompt[] = [
+        `Who is the best ${category}${w}?`,
+        `Can you recommend a good ${category}${w}?`,
+        `Top rated ${category}${w} with good reviews`,
+        `Which ${category}${w} do locals recommend?`,
+        `Most affordable ${category}${w}`
+    ].map((prompt) => ({ prompt, topic: 'business' }));
+    for (const s of businessServices({ ...business, category })) {
+        list.push({ prompt: capitalize(`Where can I get ${s}${w}?`), topic: s }, { prompt: capitalize(`Best place for ${s}${w}`), topic: s });
+    }
+    return list;
+}
+
+function promptSource(business: VisibilityBusiness): AiPrompt[] {
+    return Array.isArray(business.aiPrompts) && business.aiPrompts.length ? business.aiPrompts : fallbackPrompts(business);
+}
+
+/** Business first, then one per service in turn, so the first few cover different services. */
+function byTopic(list: AiPrompt[]): AiPrompt[] {
+    const groups = new Map<string, AiPrompt[]>([['business', []]]);
+    for (const p of list) groups.set(p.topic, [...(groups.get(p.topic) || []), p]);
+    const queues = [...groups.values()].filter((g) => g.length);
+    const out: AiPrompt[] = [];
+    while (queues.some((q) => q.length)) for (const q of queues) if (q.length) out.push(q.shift()!);
+    return out;
+}
+
+/** The 5 LLM Visibility questions: 2 about the business, then one for each of the top 3 services. */
+export function buildPrompts(business: VisibilityBusiness): string[] {
+    const list = promptSource(business);
+    const picked = list.filter((p) => p.topic === 'business').slice(0, 2);
+    const topics = new Set<string>();
+    for (const p of list) {
+        if (p.topic === 'business' || topics.has(p.topic) || topics.size >= 3) continue;
+        topics.add(p.topic);
+        picked.push(p);
+    }
+    for (const p of list) if (picked.length < 5 && !picked.includes(p)) picked.push(p);
+    return picked.slice(0, 5).map((p) => p.prompt.slice(0, 480));
+}
+
+/** Suggested prompts for the tracker (no API cost): the business's AI prompts not tracked yet, mixed across topics. */
+export function suggestPrompts(business: VisibilityBusiness, exclude: string[] = []): string[] {
+    const taken = new Set(exclude.map((p) => p.toLowerCase()));
+    return byTopic(promptSource(business).filter((p) => !taken.has(p.prompt.toLowerCase()))).map((p) => p.prompt);
+}
 function hostOf(url: string) {
     try {
         return new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, '').toLowerCase();
@@ -188,9 +320,9 @@ export async function askGoogleOverview(prompt: string, geo?: GeoHint): Promise<
     return { prompt, ok: true, text: text.trim().slice(0, MAX_TEXT), present: true, sources: [...sources.values()].slice(0, 10) };
 }
 
-const norm = (v: string) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+export const norm = (v: string) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
-function nameMentioned(answer: RawAnswer, business: VisibilityBusiness) {
+export function nameMentioned(answer: RawAnswer, business: VisibilityBusiness) {
     const name = norm(business.name || '');
     const host = hostOf(String(business.website || ''));
     const text = norm(answer.text);
@@ -202,6 +334,7 @@ function sanitizeAnswers(list: any): RawAnswer[] {
     return (Array.isArray(list) ? list : []).slice(0, 8).map((a: any) => ({
         prompt: String(a?.prompt || '').slice(0, 500),
         ok: a?.ok !== false,
+        askedAt: a?.askedAt ? String(a.askedAt).slice(0, 40) : undefined,
         text: String(a?.text || '').slice(0, MAX_TEXT),
         present: Boolean(a?.present),
         sources: (Array.isArray(a?.sources) ? a.sources : []).slice(0, 10).map((s: any) => ({
@@ -278,7 +411,7 @@ const BUSINESS_RE = new RegExp(
 // Text-only fallback used when the Gemini analysis is missing or incomplete.
 // It finds business-like names (links, bold text, list entries, names ending in words like
 // "Clinic"/"Dental"/"Aesthetics") in the order they appear. Position = how early this business is named.
-function textAnalysis(answer: RawAnswer, business: VisibilityBusiness) {
+export function textAnalysis(answer: RawAnswer, business: VisibilityBusiness) {
     const text = answer.text;
     const ourName = String(business.name || '').trim();
     const ourKey = norm(ourName);
@@ -358,6 +491,36 @@ function fallbackOpportunities(business: VisibilityBusiness, ownCitations: numbe
     return out.slice(0, 3);
 }
 
+/**
+ * The one rule for "is this business named in this answer": the Gemini row (when there is one) OR a name/website match,
+ * with the position from Gemini else from the text. Used by LLM Visibility and LLM Tracking so they always agree.
+ */
+export function verdictFor(answer: RawAnswer, business: VisibilityBusiness, geminiRow?: any): RowAnalysis {
+    const a = geminiRow || {};
+    const fb = textAnalysis(answer, business);
+    const sentiment = ['positive', 'neutral', 'negative'].includes(a.sentiment) ? a.sentiment : 'neutral';
+    const mentioned = Boolean(a.mentioned) || nameMentioned(answer, business);
+    const aiCompetitors = (Array.isArray(a.competitors) ? a.competitors : []).map((c: any) => String(c).slice(0, 80)).filter(Boolean);
+    return {
+        mentioned,
+        position: mentioned ? Math.max(0, Number(a.position) || fb.position) : 0,
+        sentiment,
+        context: mentioned ? cleanMarkdown(String(a.context || fb.context || '')).slice(0, 160) : '',
+        competitors: (aiCompetitors.length ? aiCompetitors : fb.competitors).slice(0, 6)
+    };
+}
+
+/** Verdict for every answer in a platform -> answers input, using the same ids `analysisJobs` gave the Gemini rows. */
+export function answerVerdicts(business: VisibilityBusiness, input: Partial<Record<Platform | 'google', any>>, analysis: any) {
+    const byId = new Map<string, any>();
+    for (const r of Array.isArray(analysis?.rows) ? analysis.rows : []) byId.set(String(r?.id), r);
+    const out: Partial<Record<Platform, Array<{ answer: RawAnswer; verdict: RowAnalysis }>>> = {};
+    for (const p of LLM_PLATFORMS) {
+        out[p] = sanitizeAnswers(input[p]).map((answer, i) => ({ answer, verdict: verdictFor(answer, business, byId.get(`${PLATFORM_ID[p]}${i}`)) }));
+    }
+    return out;
+}
+
 export function buildReport(business: VisibilityBusiness, input: Partial<Record<Platform | 'google', any>>, analysis: any, previous: any) {
     const answers = {} as AnswerSet;
     for (const p of [...LLM_PLATFORMS, 'google'] as Array<Platform | 'google'>) answers[p] = sanitizeAnswers(input[p]);
@@ -365,20 +528,7 @@ export function buildReport(business: VisibilityBusiness, input: Partial<Record<
     const byId = new Map<string, any>();
     for (const r of Array.isArray(analysis?.rows) ? analysis.rows : []) byId.set(String(r?.id), r);
 
-    const rowFor = (id: string, answer: RawAnswer): RowAnalysis => {
-        const a = byId.get(id) || {};
-        const fb = textAnalysis(answer, business);
-        const sentiment = ['positive', 'neutral', 'negative'].includes(a.sentiment) ? a.sentiment : 'neutral';
-        const mentioned = Boolean(a.mentioned) || nameMentioned(answer, business);
-        const aiCompetitors = (Array.isArray(a.competitors) ? a.competitors : []).map((c: any) => String(c).slice(0, 80)).filter(Boolean);
-        return {
-            mentioned,
-            position: mentioned ? Math.max(0, Number(a.position) || fb.position) : 0,
-            sentiment,
-            context: mentioned ? cleanMarkdown(String(a.context || fb.context || '')).slice(0, 160) : '',
-            competitors: (aiCompetitors.length ? aiCompetitors : fb.competitors).slice(0, 6)
-        };
-    };
+    const rowFor = (id: string, answer: RawAnswer): RowAnalysis => verdictFor(answer, business, byId.get(id));
     const rowsOf = (p: Platform | 'google') => {
         const prefix = p === 'google' ? 'g' : PLATFORM_ID[p];
         return answers[p].map((a, i) => ({ a, r: rowFor(`${prefix}${i}`, a) }));
@@ -521,6 +671,7 @@ export type KeywordBusiness = VisibilityBusiness & {
     placeId?: string;
 };
 
+/** Category keywords alternated with service keywords, so the first few already cover both the business and its services. */
 export function suggestKeywords(business: KeywordBusiness): string[] {
     const category = String(business.category || '').trim().toLowerCase();
     if (!category) return [];
@@ -528,7 +679,17 @@ export function suggestKeywords(business: KeywordBusiness): string[] {
     const list = [`${category} near me`];
     if (city) list.push(`${category} ${city}`, `best ${category} ${city}`, `${category} in ${city}`, `${category} services ${city}`);
     else list.push(`best ${category}`, `local ${category}`);
-    return list;
+    const services = businessServices(business);
+    const perService = city
+        ? [(s: string) => `${s} ${city}`, (s: string) => `best ${s} in ${city}`, (s: string) => `${s} near me`]
+        : [(s: string) => `${s} near me`, (s: string) => `best ${s}`];
+    const serviceList = perService.flatMap((t) => services.map(t));
+    const out: string[] = [];
+    for (let i = 0; i < Math.max(list.length, serviceList.length); i++) {
+        if (list[i]) out.push(list[i]);
+        if (serviceList[i]) out.push(serviceList[i]);
+    }
+    return out;
 }
 
 // ── Overview (actions, strategy, competitors) ───────────────────────────────

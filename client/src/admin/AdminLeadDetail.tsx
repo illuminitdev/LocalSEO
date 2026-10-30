@@ -42,7 +42,8 @@ import { useToast } from '../shared/Toast';
 import {
     emailShareStatusLabel,
     emailShareStatusHint,
-    emailShareStatusTimeLines
+    emailShareStatusTimeLines,
+    formatEmailShareDateTime
 } from '../shared/emailShareStatus';
 import TaskCompletionModal, { type CrmTaskStatus } from '../shared/TaskCompletionModal';
 
@@ -248,6 +249,7 @@ export default function AdminLeadDetail() {
     };
     const auditTimeLines = emailShareStatusTimeLines(auditTimes);
     const obsTimeLines = emailShareStatusTimeLines(obsTimes);
+    const obsClickedFmt = formatEmailShareDateTime(lead.observationEmailClickedAt);
     const latestAct = activities.length > 0 ? activities[0] : null;
     const status1 = String(lead.spreadsheetStatus1 || '').trim();
     const status2 = String(lead.spreadsheetStatus2 || '').trim();
@@ -338,7 +340,7 @@ export default function AdminLeadDetail() {
                     )}
 
                     {emailShareStatusLabel(lead.observationEmailShareStatus) ? (
-                        <div className="flex flex-col items-end gap-0.5">
+                        <div className="group relative flex flex-col items-end">
                             <span
                                 className={cn(
                                     'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
@@ -350,11 +352,45 @@ export default function AdminLeadDetail() {
                             >
                                 Email: {emailShareStatusLabel(lead.observationEmailShareStatus)}
                             </span>
-                            {obsTimeLines.map((line) => (
-                                <span key={line} className="text-[10px] font-medium text-slate-500 whitespace-nowrap">
-                                    {line}
-                                </span>
-                            ))}
+                            {obsTimeLines.length > 0 ? (
+                                <div
+                                    className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 flex flex-col items-end gap-0.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                    aria-hidden
+                                >
+                                    {obsTimeLines.map((line) => (
+                                        <span key={line} className="text-[10px] font-medium text-slate-500">
+                                            {line}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
+                    {emailShareStatusLabel(lead.observationEmailShareStatus) ? (
+                        <div className="group relative flex flex-col items-end">
+                            <span
+                                className={cn(
+                                    'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
+                                    lead.observationEmailClickedAt
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                                )}
+                                title={
+                                    lead.observationEmailClickedAt
+                                        ? `They clicked "Request a full main audit" in the observation email${obsClickedFmt ? ` · ${obsClickedFmt}` : ''}`
+                                        : 'Waiting — turns Clicked when they click "Request a full main audit" in the observation email'
+                                }
+                            >
+                                Audit button: {lead.observationEmailClickedAt ? 'Clicked' : 'Not clicked'}
+                            </span>
+                            {obsClickedFmt ? (
+                                <div
+                                    className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 flex flex-col items-end gap-0.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                    aria-hidden
+                                >
+                                    <span className="text-[10px] font-medium text-slate-500">Clicked {obsClickedFmt}</span>
+                                </div>
+                            ) : null}
                         </div>
                     ) : null}
                     <button
@@ -386,7 +422,7 @@ export default function AdminLeadDetail() {
                     {lead.auditId ? (
                         <>
                             {shareLabel ? (
-                                <div className="flex flex-col items-end gap-0.5">
+                                <div className="group relative flex flex-col items-end">
                                     <span
                                         className={cn(
                                             'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
@@ -398,11 +434,18 @@ export default function AdminLeadDetail() {
                                     >
                                         PDF: {shareLabel}
                                     </span>
-                                    {auditTimeLines.map((line) => (
-                                        <span key={line} className="text-[10px] font-medium text-slate-500 whitespace-nowrap">
-                                            {line}
-                                        </span>
-                                    ))}
+                                    {auditTimeLines.length > 0 ? (
+                                        <div
+                                            className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 flex flex-col items-end gap-0.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                            aria-hidden
+                                        >
+                                            {auditTimeLines.map((line) => (
+                                                <span key={line} className="text-[10px] font-medium text-slate-500">
+                                                    {line}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    ) : null}
                                 </div>
                             ) : null}
                             <button
@@ -437,7 +480,7 @@ export default function AdminLeadDetail() {
                                 </span>
                             )}
                             {lead.scoreTotal != null && (
-                                <span className="bg-amber-500 text-white text-xs font-black px-2.5 py-0.5 rounded-lg">
+                                <span className="bg-amber-500 text-[var(--brand-primary-foreground)] text-xs font-black px-2.5 py-0.5 rounded-lg">
                                     Score: {lead.scoreTotal}/100
                                 </span>
                             )}
@@ -702,7 +745,7 @@ export default function AdminLeadDetail() {
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setConfirmModalTask({ task: t })}
-                                                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-amber-500 hover:bg-amber-600 text-white"
+                                                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-amber-500 hover:bg-amber-600 text-[var(--brand-primary-foreground)]"
                                                             >
                                                                 Update
                                                             </button>

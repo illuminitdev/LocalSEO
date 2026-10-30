@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, LogOut, Menu, UserRound, X, Bell, CheckSquare, PhoneCall, Users, CheckCheck, Clock, Shield } from 'lucide-react';
-import { apiGet, cn } from '../shared/utils';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import {
+    LayoutDashboard, LogOut, Menu, UserRound, X, Bell, CheckSquare, PhoneCall, Users, CheckCheck, Clock, Shield,
+    UserPlus, FileText, MessageSquare, Mail
+} from 'lucide-react';
+import { apiGet, apiPost, cn } from '../shared/utils';
 import { clearToken } from '../features/auth/auth';
+import { timeAgo, useNotificationFeed, type FeedNotification } from '../shared/useNotificationFeed';
+import { SIDEBAR_RAIL_WIDTH, SidebarToggleButton, useSidebarCollapsed } from '../shared/SidebarToggle';
 
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 380;
@@ -25,36 +30,15 @@ const NAV_GROUPS = [
     }
 ];
 
-const SALES_CLEARED_NOTIFS_KEY = 'lp.sales.clearedNotifs';
-
-function loadSalesClearedIds(): Set<string> {
-    try {
-        const stored = localStorage.getItem(SALES_CLEARED_NOTIFS_KEY);
-        if (!stored) return new Set();
-        const arr = JSON.parse(stored);
-        return new Set(Array.isArray(arr) ? arr.map(String) : []);
-    } catch {
-        return new Set();
-    }
-}
-
-function saveSalesClearedIds(ids: Set<string>) {
-    try {
-        localStorage.setItem(SALES_CLEARED_NOTIFS_KEY, JSON.stringify(Array.from(ids).slice(-400)));
-    } catch {
-        /* ignore */
-    }
-}
-
-interface SalesNotificationItem {
-    id: string;
-    title: string;
-    subtitle: string;
-    time: string;
-    type: 'due_task' | 'admin_task' | 'reminder';
-    link: string;
-    read: boolean;
-}
+const SALES_NOTIF_ICON: Record<string, { icon: React.ElementType; cls: string }> = {
+    due_task: { icon: Clock, cls: 'bg-rose-50 text-rose-600' },
+    admin_task: { icon: Shield, cls: 'bg-purple-50 text-purple-600' },
+    lead: { icon: UserPlus, cls: 'bg-blue-50 text-blue-600' },
+    audit: { icon: FileText, cls: 'bg-emerald-50 text-emerald-600' },
+    note: { icon: MessageSquare, cls: 'bg-sky-50 text-sky-600' },
+    email: { icon: Mail, cls: 'bg-indigo-50 text-indigo-600' },
+    reminder: { icon: Bell, cls: 'bg-amber-50 text-amber-600' }
+};
 
 export default function SalesLayout() {
     const navigate = useNavigate();
@@ -69,72 +53,54 @@ export default function SalesLayout() {
         } catch {  }
         return SIDEBAR_DEFAULT;
     });
+    const [collapsed, toggleCollapsed] = useSidebarCollapsed('lp.sidebarCollapsed.sales');
     const [resizing, setResizing] = useState(false);
     const resizeRef = useRef<{ startX: number; startW: number } | null>(null);
 
-    // Notifications State & Dropdown
-    const [notifications, setNotifications] = useState<SalesNotificationItem[]>([]);
+    const location = useLocation();
+
+    // Notifications: live feed from the server; cleared/read state is stored per agent in the DB.
     const [assignedTasksCount, setAssignedTasksCount] = useState(0);
     const [notifOpen, setNotifOpen] = useState(false);
     const notifRef = useRef<HTMLDivElement | null>(null);
+    const {
+        items: notifications,
+        unreadCount,
+        refresh: refreshNotifications,
+        markRead,
+        markAllRead,
+        clearAll
+    } = useNotificationFeed({
+        fetchFeed: () => apiGet('/api/sales/notifications'),
+        postState: (action) => apiPost('/api/sales/notifications/state', action),
+        refreshKey: location.pathname
+    });
 
-    const loadNotifications = useCallback(async () => {
+    const loadTaskCount = useCallback(async () => {
         try {
             const data = await apiGet('/api/sales/tasks');
             const taskList = Array.isArray(data?.tasks) ? data.tasks : [];
-            const activeList = taskList.filter((t: any) => t.status !== 'completed' && t.status !== 'cancelled');
-            setAssignedTasksCount(activeList.length);
-
-            const readSet = new Set<string>();
-            try {
-                const stored = localStorage.getItem('lp.sales.readNotifs');
-                if (stored) {
-                    JSON.parse(stored).forEach((id: string) => readSet.add(String(id)));
-                }
-            } catch {  }
-
-            const cleared = loadSalesClearedIds();
-            const now = new Date();
-            const items: SalesNotificationItem[] = activeList
-                .slice(0, 15)
-                .map((t: any) => {
-                    const isDueToday = t.dueDate && new Date(t.dueDate).toDateString() === now.toDateString();
-                    const isOverdue = t.dueDate && new Date(t.dueDate) < now;
-                    const type = isOverdue || isDueToday ? 'due_task' : t.createdByRole === 'admin' ? 'admin_task' : 'reminder';
-                    const timeLabel = isOverdue
-                        ? 'Overdue'
-                        : isDueToday
-                        ? 'Due Today'
-                        : t.dueDate
-                        ? new Date(t.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-                        : 'Action required';
-
-                    return {
-                        id: String(t.id),
-                        title: t.title || 'Task reminder',
-                        subtitle: t.leadBusinessName ? `🏢 ${t.leadBusinessName}` : 'Assigned work item',
-                        time: timeLabel,
-                        type,
-                        link: t.leadId ? `/sales/leads/${encodeURIComponent(t.leadId)}` : '/sales',
-                        read: readSet.has(String(t.id))
-                    };
-                })
-                .filter((item: SalesNotificationItem) => !cleared.has(item.id));
-
-            setNotifications(items);
+            setAssignedTasksCount(
+                taskList.filter((t: any) => t.status !== 'completed' && t.status !== 'cancelled').length
+            );
         } catch {  }
     }, []);
 
     useEffect(() => {
-        loadNotifications();
+        loadTaskCount();
         const handler = () => {
-            loadNotifications();
+            loadTaskCount();
+            refreshNotifications();
         };
         window.addEventListener('sales:task-updated', handler);
         return () => {
             window.removeEventListener('sales:task-updated', handler);
         };
-    }, [loadNotifications, location.pathname]);
+    }, [loadTaskCount, refreshNotifications, location.pathname]);
+
+    useEffect(() => {
+        if (notifOpen) refreshNotifications();
+    }, [notifOpen, refreshNotifications]);
 
     useEffect(() => {
         if (!notifOpen) return;
@@ -154,41 +120,12 @@ export default function SalesLayout() {
         };
     }, [notifOpen]);
 
-    const clearAll = () => {
-        const cleared = loadSalesClearedIds();
-        notifications.forEach((n) => cleared.add(n.id));
-        saveSalesClearedIds(cleared);
-        setNotifications([]);
-    };
-
-    const markAllRead = () => {
-        const readIds = notifications.map((n) => n.id);
-        try {
-            const stored = localStorage.getItem('lp.sales.readNotifs');
-            const current = stored ? JSON.parse(stored) : [];
-            const combined = Array.from(new Set([...current, ...readIds]));
-            localStorage.setItem('lp.sales.readNotifs', JSON.stringify(combined));
-        } catch {  }
-        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    };
-
-    const handleNotificationClick = (item: SalesNotificationItem) => {
-        try {
-            const stored = localStorage.getItem('lp.sales.readNotifs');
-            const current = stored ? JSON.parse(stored) : [];
-            if (!current.includes(item.id)) {
-                current.push(item.id);
-                localStorage.setItem('lp.sales.readNotifs', JSON.stringify(current));
-            }
-        } catch {  }
-        setNotifications((prev) =>
-            prev.map((n) => (n.id === item.id ? { ...n, read: true } : n))
-        );
+    const handleNotificationClick = (item: FeedNotification) => {
+        markRead(item.id);
         setNotifOpen(false);
-        navigate(item.link);
+        if (item.link) navigate(item.link);
     };
 
-    const unreadCount = notifications.filter((n) => !n.read).length;
 
     useEffect(() => {
         apiGet('/api/sales/me')
@@ -265,18 +202,26 @@ export default function SalesLayout() {
             .slice(0, 2)
             .toUpperCase() || 'S';
 
-    const logoMaxW = Math.max(120, sidebarWidth - 32);
+    const logoMaxW = Math.max(110, sidebarWidth - 76);
     const logoH = Math.round(Math.min(44, Math.max(32, logoMaxW * 0.22)));
 
-    const sidebar = (
+    const renderSidebar = (rail: boolean) => (
         <>
-            <div className="min-h-14 px-4 py-2.5 shrink-0 flex items-center justify-between gap-2 min-w-0">
-                <img
-                    src="/localseo.png"
-                    alt="Local SEO"
-                    className="w-auto max-w-full object-contain object-left min-w-0"
-                    style={{ height: logoH, maxWidth: logoMaxW }}
-                />
+            <div
+                className={cn(
+                    'min-h-16 pt-5 pb-3 shrink-0 flex items-center gap-2 min-w-0',
+                    rail ? 'px-2 justify-center' : 'px-4 justify-between'
+                )}
+            >
+                {!rail && (
+                    <img
+                        src="/localseo.png"
+                        alt="Local SEO"
+                        className="w-auto max-w-full object-contain object-left min-w-0"
+                        style={{ height: logoH, maxWidth: logoMaxW }}
+                    />
+                )}
+                <SidebarToggleButton collapsed={rail} onClick={toggleCollapsed} />
                 <button
                     type="button"
                     className="lg:hidden p-2 -mr-1 rounded-lg text-[#64748B] hover:bg-[#F1F5F9] shrink-0"
@@ -288,11 +233,15 @@ export default function SalesLayout() {
             </div>
 
             <nav className="flex-1 px-3 pt-3 space-y-4 overflow-y-auto">
-                {NAV_GROUPS.map((grp) => (
+                {NAV_GROUPS.map((grp, i) => (
                     <div key={grp.section} className="space-y-1">
-                        <p className="px-3 text-[10px] font-extrabold uppercase tracking-wider text-[#94A3B8]">
-                            {grp.section}
-                        </p>
+                        {rail ? (
+                            i > 0 && <div className="mx-2 mb-2 border-t border-[#E2E8F0]" />
+                        ) : (
+                            <p className="px-3 text-[10px] font-extrabold uppercase tracking-wider text-[#94A3B8]">
+                                {grp.section}
+                            </p>
+                        )}
                         {grp.items.map((item) => {
                             const isTaskItem = item.to === '/sales/tasks';
                             return (
@@ -300,12 +249,15 @@ export default function SalesLayout() {
                                     key={item.to}
                                     to={item.to}
                                     end={item.end}
+                                    title={rail ? item.name : undefined}
+                                    aria-label={rail ? item.name : undefined}
                                     className={() => {
                                         const active = item.end
                                             ? location.pathname === item.to
                                             : location.pathname.startsWith(item.to);
                                         return cn(
-                                            'flex items-center justify-between gap-2 px-3 py-2.5 min-h-[44px] rounded-xl text-sm transition-colors group/navitem',
+                                            'relative flex items-center gap-2 py-2.5 min-h-[44px] rounded-xl text-sm transition-colors group/navitem',
+                                            rail ? 'justify-center px-0' : 'justify-between px-3',
                                             active
                                                 ? 'bg-[#F59E0B] text-[#0F172A] font-semibold'
                                                 : 'text-[#64748B] font-medium hover:bg-[#F1F5F9] hover:text-[#0F172A]'
@@ -320,11 +272,12 @@ export default function SalesLayout() {
                                             <>
                                                 <div className="flex items-center gap-3 min-w-0">
                                                     <item.icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
-                                                    <span className="truncate">{item.name}</span>
+                                                    {!rail && <span className="truncate">{item.name}</span>}
                                                 </div>
                                                 {isTaskItem && assignedTasksCount > 0 && (
                                                     <span
                                                         className={cn(
+                                                            rail && 'absolute -top-1 -right-1 !px-1.5',
                                                             'text-[10px] font-black px-2 py-0.5 rounded-full tabular-nums shadow-2xs shrink-0 tracking-tight',
                                                             active
                                                                 ? 'bg-[#0F172A] text-[#F59E0B]'
@@ -345,8 +298,8 @@ export default function SalesLayout() {
                 ))}
             </nav>
 
-            <div className="px-4 pb-4 pt-3 border-t-2 border-[#E2E8F0] shrink-0 space-y-3 safe-pb">
-                <div className="flex items-center gap-3 px-1">
+            <div className={cn('pb-4 pt-3 border-t-2 border-[#E2E8F0] shrink-0 space-y-3 safe-pb', rail ? 'px-2' : 'px-4')}>
+                <div className={cn('flex items-center gap-3', rail ? 'justify-center' : 'px-1')}>
                     <div className="w-9 h-9 rounded-full bg-[#0F172A] text-white overflow-hidden flex items-center justify-center text-xs font-bold shrink-0 border border-[#E2E8F0]">
                         {avatarUrl ? (
                             <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
@@ -354,18 +307,22 @@ export default function SalesLayout() {
                             initials
                         )}
                     </div>
-                    <div className="min-w-0 leading-tight">
-                        <p className="text-sm font-semibold text-[#0F172A] truncate">{name || 'Sales'}</p>
-                        <p className="text-xs text-[#94A3B8] mt-0.5 truncate">{email || 'Sales agent'}</p>
-                    </div>
+                    {!rail && (
+                        <div className="min-w-0 leading-tight">
+                            <p className="text-sm font-semibold text-[#0F172A] truncate">{name || 'Sales'}</p>
+                            <p className="text-xs text-[#94A3B8] mt-0.5 truncate">{email || 'Sales agent'}</p>
+                        </div>
+                    )}
                 </div>
                 <button
                     type="button"
                     onClick={logout}
+                    title={rail ? 'Log out' : undefined}
+                    aria-label={rail ? 'Log out' : undefined}
                     className="w-full flex items-center justify-center gap-2 px-3 py-2.5 min-h-[44px] rounded-xl border border-[#E2E8F0] bg-white text-sm font-semibold text-[#0F172A] hover:bg-[#F8FAFC] transition-colors"
                 >
                     <LogOut className="w-4 h-4" strokeWidth={1.75} />
-                    Log out
+                    {!rail && 'Log out'}
                 </button>
             </div>
         </>
@@ -375,28 +332,30 @@ export default function SalesLayout() {
         <div className="flex h-[100dvh] bg-[#EEF2F6] text-[#0F172A] overflow-hidden">
             <aside
                 className="relative hidden lg:flex h-full shrink-0 bg-white border-r border-[#E2E8F0] flex-col overflow-hidden min-w-0"
-                style={{ width: sidebarWidth }}
+                style={{ width: collapsed ? SIDEBAR_RAIL_WIDTH : sidebarWidth }}
             >
-                {sidebar}
-                <div
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label="Resize sidebar"
-                    onPointerDown={(e) => {
-                        if (e.button !== 0) return;
-                        e.preventDefault();
-                        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-                        resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
-                        setResizing(true);
-                    }}
-                    className="absolute inset-y-0 right-0 z-20 w-2 cursor-sidebar-resize touch-none"
-                >
-                    <span
-                        className={`pointer-events-none absolute inset-y-0 right-0 w-px ${
-                            resizing ? 'bg-[#F59E0B]' : 'bg-transparent'
-                        }`}
-                    />
-                </div>
+                {renderSidebar(collapsed)}
+                {!collapsed && (
+                    <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize sidebar"
+                        onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            e.preventDefault();
+                            (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                            resizeRef.current = { startX: e.clientX, startW: sidebarWidth };
+                            setResizing(true);
+                        }}
+                        className="absolute inset-y-0 right-0 z-20 w-2 cursor-sidebar-resize touch-none"
+                    >
+                        <span
+                            className={`pointer-events-none absolute inset-y-0 right-0 w-px ${
+                                resizing ? 'bg-[#F59E0B]' : 'bg-transparent'
+                            }`}
+                        />
+                    </div>
+                )}
             </aside>
 
             {navOpen && (
@@ -408,7 +367,7 @@ export default function SalesLayout() {
                         onClick={() => setNavOpen(false)}
                     />
                     <aside className="absolute inset-y-0 left-0 w-[min(288px,88vw)] max-w-full bg-white border-r border-[#E2E8F0] flex flex-col shadow-xl">
-                        {sidebar}
+                        {renderSidebar(false)}
                     </aside>
                 </div>
             )}
@@ -481,13 +440,13 @@ export default function SalesLayout() {
 
                                     {/* Notifications List or 0 State */}
                                     <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
-                                        {notifications.length === 0 || unreadCount === 0 ? (
+                                        {notifications.length === 0 ? (
                                             <div className="py-8 px-4 text-center">
                                                 <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2">
                                                     <Bell className="w-5 h-5 text-slate-400" />
                                                 </div>
-                                                <p className="text-sm font-bold text-slate-900">0 Notifications</p>
-                                                <p className="text-xs text-slate-500 mt-0.5">All caught up! No pending alerts or reminders.</p>
+                                                <p className="text-sm font-bold text-slate-900">You're all caught up</p>
+                                                <p className="text-xs text-slate-500 mt-0.5">New leads, tasks, due reminders and audit updates will show here.</p>
                                             </div>
                                         ) : (
                                             notifications.map((notif) => (
@@ -500,25 +459,24 @@ export default function SalesLayout() {
                                                     )}
                                                 >
                                                     <div className="flex items-start gap-2.5 min-w-0">
-                                                        <div className={cn(
-                                                            'w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5',
-                                                            notif.type === 'due_task' ? 'bg-rose-50 text-rose-600' :
-                                                            notif.type === 'admin_task' ? 'bg-purple-50 text-purple-600' :
-                                                            'bg-amber-50 text-amber-600'
-                                                        )}>
-                                                            {notif.type === 'due_task' ? <Clock className="w-4 h-4" /> :
-                                                             notif.type === 'admin_task' ? <Shield className="w-4 h-4" /> :
-                                                             <Bell className="w-4 h-4" />}
-                                                        </div>
+                                                        {(() => {
+                                                            const cfg = SALES_NOTIF_ICON[notif.type] || SALES_NOTIF_ICON.reminder;
+                                                            const IconComp = cfg.icon;
+                                                            return (
+                                                                <div className={cn('w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5', cfg.cls)}>
+                                                                    <IconComp className="w-4 h-4" />
+                                                                </div>
+                                                            );
+                                                        })()}
                                                         <div className="min-w-0">
                                                             <p className={cn('text-xs font-bold text-slate-900 truncate', !notif.read && 'text-orange-950')}>
                                                                 {notif.title}
                                                             </p>
                                                             <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                                                                {notif.subtitle}
+                                                                {notif.body}
                                                             </p>
                                                             <span className="text-[10px] text-slate-400 font-medium">
-                                                                {notif.time}
+                                                                {timeAgo(notif.time)}
                                                             </span>
                                                         </div>
                                                     </div>

@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { query } from '../lib/db';
+import { isNoGbpUrl } from '../lib/leadGbpScore';
 
 export const LEAD_STATUSES = [
     'new',
@@ -74,6 +75,14 @@ export async function ensureCrmTables() {
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status_1 TEXT NOT NULL DEFAULT '';
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status_2 TEXT NOT NULL DEFAULT '';
             ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS spreadsheet_status_3 TEXT NOT NULL DEFAULT '';
+
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS gbp_url TEXT NOT NULL DEFAULT '';
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS enrich_status TEXT NOT NULL DEFAULT '';
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS enrich_error TEXT NOT NULL DEFAULT '';
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS enrich_checks JSONB NULL;
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMPTZ NULL;
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS import_raw JSON NULL;
+            ALTER TABLE sales_leads ADD COLUMN IF NOT EXISTS import_sheet_name TEXT NOT NULL DEFAULT '';
 
             CREATE INDEX IF NOT EXISTS idx_sales_leads_industry ON sales_leads(industry);
             CREATE INDEX IF NOT EXISTS idx_sales_leads_is_customer ON sales_leads(is_customer);
@@ -159,6 +168,8 @@ export async function ensureCrmTables() {
             );
             CREATE INDEX IF NOT EXISTS idx_lead_obs_email_lead ON lead_observation_email_sends(lead_id, sent_at DESC);
             CREATE INDEX IF NOT EXISTS idx_lead_obs_email_token ON lead_observation_email_sends(token);
+            ALTER TABLE lead_observation_email_sends ADD COLUMN IF NOT EXISTS clicked_at TIMESTAMPTZ;
+            ALTER TABLE lead_observation_email_sends ADD COLUMN IF NOT EXISTS click_count INT NOT NULL DEFAULT 0;
 
             CREATE TABLE IF NOT EXISTS full_audit_requests (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -241,6 +252,10 @@ function mapLead(row: any) {
         importBatchId: row.import_batch_id || null,
         importFileName: row.import_file_name || '',
         importUploadedAt: row.import_uploaded_at || null,
+        gbpUrl: row.gbp_url || '',
+        enrichStatus: row.enrich_status || '',
+        enrichError: row.enrich_error || '',
+        enrichChecks: row.enrich_checks || null,
         spreadsheetStatus: row.spreadsheet_status || '',
         spreadsheetStatus1: row.spreadsheet_status_1 || '',
         spreadsheetStatus2: row.spreadsheet_status_2 || '',
@@ -617,6 +632,10 @@ export async function createSalesLead(data: {
     spreadsheetStatus1?: string;
     spreadsheetStatus2?: string;
     spreadsheetStatus3?: string;
+    gbpUrl?: string;
+    enrichStatus?: string;
+    importRaw?: [string, string][] | null;
+    importSheetName?: string;
 }) {
     await ensureCrmTables();
     const oppLevel = ['high', 'medium', 'low'].includes(String(data.opportunityLevel || '').toLowerCase())
@@ -648,8 +667,9 @@ export async function createSalesLead(data: {
             gbp_observation, ai_visibility_observation, lead_opportunity, opportunity_level,
             assigned_to, next_follow_up_at, created_by_admin, is_customer, converted_at,
             import_batch_id, import_file_name, import_uploaded_at,
-            spreadsheet_status, spreadsheet_status_1, spreadsheet_status_2, spreadsheet_status_3
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+            spreadsheet_status, spreadsheet_status_1, spreadsheet_status_2, spreadsheet_status_3,
+            gbp_url, enrich_status, import_raw, import_sheet_name
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28::json, $29)
         RETURNING *`,
         [
             String(data.name || 'New Lead').trim(),
@@ -676,7 +696,11 @@ export async function createSalesLead(data: {
             spreadsheetStatus,
             status1,
             status2,
-            status3
+            status3,
+            String(data.gbpUrl || '').trim(),
+            String(data.enrichStatus || '').trim(),
+            data.importRaw ? JSON.stringify(data.importRaw) : null,
+            String(data.importSheetName || '').trim()
         ]
     );
 
@@ -704,6 +728,9 @@ export async function bulkImportSalesLeads(
         spreadsheetStatus1?: string;
         spreadsheetStatus2?: string;
         spreadsheetStatus3?: string;
+        gbpUrl?: string;
+        rawRow?: [string, string][] | null;
+        sheetName?: string;
     }>,
     createdByAdmin = true,
     opts?: {
@@ -748,6 +775,12 @@ export async function bulkImportSalesLeads(
         const rawPhoneDigits = phone.replace(/[^0-9]/g, '');
         const phoneKey = rawPhoneDigits.length >= 7 ? rawPhoneDigits : '';
         const websiteKey = normalizeWebsiteKey(website);
+        // "NA" / "N/A" / "-" in the GBP URL column means no GBP, not a link.
+        const itemGbpUrl = isNoGbpUrl(item.gbpUrl) ? '' : String(item.gbpUrl).trim();
+        // Admin uploads analyse every lead with an empty observation/priority cell (no GBP -> "No GBP found").
+        const needsEnrich =
+            createdByAdmin && !(item.gbpObservation && item.aiVisibilityObservation && item.leadOpportunity);
+        const rawRow = Array.isArray(item.rawRow) && item.rawRow.length ? item.rawRow : null;
 
         if (!name && !phone && !email && !website) {
             skipped++;
@@ -871,6 +904,22 @@ export async function bulkImportSalesLeads(
                 updates.push(`spreadsheet_status_3 = $${params.length}`);
             }
 
+            // GBP URL supplied: remember it. Queue auto-enrichment for any empty observation/priority cells.
+            if (itemGbpUrl) {
+                params.push(itemGbpUrl);
+                updates.push(`gbp_url = $${params.length}`);
+            }
+            if (needsEnrich) {
+                updates.push(`enrich_status = 'pending'`);
+                updates.push(`enrich_error = ''`);
+            }
+            if (rawRow) {
+                params.push(JSON.stringify(rawRow));
+                updates.push(`import_raw = $${params.length}::json`);
+                params.push(String(item.sheetName || '').trim());
+                updates.push(`import_sheet_name = $${params.length}`);
+            }
+
             // Move lead into this upload batch for filter / assign / delete by Excel
             if (importBatchId) {
                 params.push(importBatchId);
@@ -937,7 +986,11 @@ export async function bulkImportSalesLeads(
             spreadsheetStatus: item.spreadsheetStatus || '',
             spreadsheetStatus1: item.spreadsheetStatus1 || '',
             spreadsheetStatus2: item.spreadsheetStatus2 || '',
-            spreadsheetStatus3: item.spreadsheetStatus3 || ''
+            spreadsheetStatus3: item.spreadsheetStatus3 || '',
+            gbpUrl: itemGbpUrl,
+            enrichStatus: needsEnrich ? 'pending' : '',
+            importRaw: rawRow,
+            importSheetName: item.sheetName || ''
         });
 
         createdLeads.push(lead);

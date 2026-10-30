@@ -14,6 +14,7 @@ import {
     Plus,
     Phone,
     Mail,
+    MousePointerClick,
     Globe,
     Trash2,
     Eye,
@@ -23,7 +24,8 @@ import {
     X,
     History,
     Clock,
-    Calendar
+    Calendar,
+    Loader2
 } from 'lucide-react';
 import {
     adminGet,
@@ -35,8 +37,11 @@ import {
     deleteAdminCrmLead,
     bulkDeleteAdminCrmLeads,
     fetchAdminExcelBatches,
+    fetchAdminExcelExport,
+    resumeAdminLeadEnrichment,
     type ExcelImportBatch
 } from './adminApi';
+import { downloadExcelExport, downloadLeadsExport } from './excelExport';
 import LeadCrmDrawer, { type GrowthAuditLeadRef } from './LeadCrmDrawer';
 import LeadDetailsModal from './LeadDetailsModal';
 import BulkAssignTasksModal from './BulkAssignTasksModal';
@@ -45,11 +50,19 @@ import ExcelLeadUploadModal, { downloadLeadsExcelTemplate } from '../sales-agent
 import AddLeadModal from '../sales-agent/AddLeadModal';
 import { emailShareStatusLabel, emailShareStatusHint } from '../shared/emailShareStatus';
 import { cn } from '../shared/utils';
-import { matchesEmailFilter, matchesLeadStatusFilter, resolveLeadStatus } from './crmFilters';
+import {
+    matchesAuditClickFilter,
+    matchesEmailFilter,
+    matchesLeadStatusFilter,
+    resolveEmailState,
+    resolveLeadStatus,
+    type LeadStatusKey
+} from './crmFilters';
 
 type ContactFilter = 'any' | 'email' | 'phone' | 'both';
 type SourceCategoryFilter = 'all' | 'growth_audit' | 'added';
 export type EmailOpenFilter = 'all' | 'sent' | 'opened' | 'not_opened' | 'not_sent';
+export type AuditClickFilter = 'all' | 'clicked' | 'not_clicked';
 
 type AdminLead = GrowthAuditLeadRef & {
     type?: string | null;
@@ -67,6 +80,10 @@ type AdminLead = GrowthAuditLeadRef & {
     importBatchId?: string | null;
     importFileName?: string | null;
     importUploadedAt?: string | null;
+    gbpUrl?: string | null;
+    /** GBP auto-analysis from Excel upload: '' | pending | running | done | failed */
+    enrichStatus?: string | null;
+    enrichError?: string | null;
     spreadsheetStatus?: string | null;
     spreadsheetStatus1?: string | null;
     spreadsheetStatus2?: string | null;
@@ -77,6 +94,7 @@ type AdminLead = GrowthAuditLeadRef & {
     observationEmailShareStatus?: 'none' | 'sent' | 'opened' | null;
     observationEmailSentAt?: string | null;
     observationEmailOpenedAt?: string | null;
+    observationEmailClickedAt?: string | null;
     latestActivity?: {
         type?: string;
         disposition?: string | null;
@@ -87,6 +105,28 @@ type AdminLead = GrowthAuditLeadRef & {
 };
 
 const PAGE_SIZE = 10;
+
+const LEAD_STATUS_LABELS: Record<LeadStatusKey, string> = {
+    new: 'New',
+    in_progress: 'In Progress',
+    contacted: 'Contacted',
+    follow_up: 'Follow Up',
+    interested: 'Interested',
+    not_interested: 'Not Interested',
+    converted: 'Converted',
+    completed: 'Completed',
+    voicemail: 'Voicemail',
+    cancelled: 'Cancelled'
+};
+
+const EMAIL_STATE_LABELS: Record<string, string> = { not_sent: 'Not sent', sent: 'Sent', opened: 'Opened' };
+
+/** DD/MM/YYYY, or '' when the date is missing or invalid. */
+function formatExportDate(raw?: string | null): string {
+    const d = raw ? new Date(raw) : null;
+    if (!d || isNaN(d.getTime())) return '';
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+}
 
 const TYPE_LABELS: Record<string, string> = {
     growth_audit_lead: 'Growth audit',
@@ -408,6 +448,7 @@ const LEADS_FILTER_DEFAULTS = (() => {
         statusDate: 'all' as StatusDateFilter,
         statusDateCustom: '',
         email: 'all' as EmailOpenFilter,
+        auditClick: 'all' as AuditClickFilter,
         page: '1'
     };
 })();
@@ -527,6 +568,8 @@ export default function AdminGrowthAuditLeads() {
     const statusDateFilter = filters.statusDate as StatusDateFilter;
     const statusCustomDate = filters.statusDateCustom;
     const emailFilter = filters.email as EmailOpenFilter;
+    // Audit button filter only applies while "Email Opened" is selected.
+    const auditClickFilter = (emailFilter === 'opened' ? filters.auditClick : 'all') as AuditClickFilter;
     const setPage = useCallback(
         (next: number | ((p: number) => number)) => {
             const value = typeof next === 'function' ? next(page) : next;
@@ -575,6 +618,22 @@ export default function AdminGrowthAuditLeads() {
     useEffect(() => {
         load();
     }, [load]);
+
+    // While GBP auto-analysis is running for uploaded leads, refresh quietly until it finishes.
+    const hasEnriching = leads.some((l) => l.enrichStatus === 'pending' || l.enrichStatus === 'running');
+    useEffect(() => {
+        if (!hasEnriching) return;
+        const params = new URLSearchParams();
+        if (query.trim()) params.set('q', query.trim());
+        if (hasContact !== 'any') params.set('hasContact', hasContact);
+        const qs = params.toString();
+        const timer = setInterval(() => {
+            adminGet(`/api/admin/growth-audit-leads${qs ? `?${qs}` : ''}`)
+                .then((data) => setLeads(data.leads || []))
+                .catch(() => {});
+        }, 8000);
+        return () => clearInterval(timer);
+    }, [hasEnriching, query, hasContact]);
 
     useEffect(() => {
         // Only auto-clear real Excel batch IDs that no longer exist — never source tabs.
@@ -737,6 +796,7 @@ export default function AdminGrowthAuditLeads() {
             }
 
             if (!matchesEmailFilter(lead, emailFilter)) return false;
+            if (!matchesAuditClickFilter(lead, auditClickFilter)) return false;
 
             const statusDate = lead.latestActivity?.createdAt || lead.updatedAt || lead.createdAt;
             if (!matchesStatusDateFilter(statusDate, statusDateFilter, statusCustomDate)) {
@@ -755,6 +815,7 @@ export default function AdminGrowthAuditLeads() {
         selectedStatus,
         selectedPriority,
         emailFilter,
+        auditClickFilter,
         statusDateFilter,
         statusCustomDate,
         salesAgents
@@ -840,6 +901,86 @@ export default function AdminGrowthAuditLeads() {
             setError(err.message || 'Failed to delete excel leads');
         } finally {
             setIsDeletingExcel(false);
+        }
+    };
+
+    // Leads export: ticked rows within the current filters, otherwise every filtered lead (all pages).
+    const exportLeads = useMemo(() => {
+        const ticked = filteredLeads.filter((l) => selectedLeadIds.has(l.id));
+        return ticked.length ? ticked : filteredLeads;
+    }, [filteredLeads, selectedLeadIds]);
+    const exportingTicked = exportLeads !== filteredLeads;
+
+    const handleExportLeads = () => {
+        if (!exportLeads.length) return;
+        const rows = exportLeads.map((lead) => {
+            const agentId = String((lead as any).assignedToUserId || lead.assignedTo || '').trim();
+            const agent = agentId ? salesAgents.find((a) => a.id === agentId) : undefined;
+            const assigned = lead.assignedAgentName || (lead as any).assignedToName || agent?.name || agent?.email || '';
+            const prio = String(lead.opportunityLevel || (lead as any).priority || 'medium').trim().toLowerCase();
+            return {
+                'Business name': String(lead.businessName || lead.name || ''),
+                Phone: String(lead.phone || ''),
+                Email: String(lead.email || ''),
+                'Website URL': String(lead.website || ''),
+                'Assigned to': assigned || 'Unassigned',
+                'Lead status': LEAD_STATUS_LABELS[resolveLeadStatus(lead)],
+                'Date added': formatExportDate(lead.createdAt),
+                Priority: prio.charAt(0).toUpperCase() + prio.slice(1),
+                'Email status': EMAIL_STATE_LABELS[resolveEmailState(lead)],
+                'Audit button clicked': lead.observationEmailClickedAt ? 'Yes' : 'No',
+                'Audit PDF status': EMAIL_STATE_LABELS[lead.emailShareStatus || 'not_sent'] || 'Not sent'
+            };
+        });
+        const today = new Date().toISOString().slice(0, 10);
+        downloadLeadsExport(rows, `leads${exportingTicked ? '-selected' : ''}-${today}.xlsx`);
+    };
+
+    const [isExportingExcel, setIsExportingExcel] = useState(false);
+
+    // Download the selected Excel upload: original columns + GBP Observation, AI Visibility, Priority.
+    const handleExportExcel = async () => {
+        if (excelBatchFilter === 'all' || !selectedExcelBatch) {
+            setError('Select one Excel file from the filter before exporting.');
+            return;
+        }
+        setIsExportingExcel(true);
+        setError('');
+        try {
+            const leads = await fetchAdminExcelExport(excelBatchFilter);
+            if (!leads.length) {
+                setError('This Excel has no leads to export.');
+                return;
+            }
+            const analysing = leads.filter((l) => l.enrichStatus === 'pending' || l.enrichStatus === 'running').length;
+            if (
+                analysing > 0 &&
+                !window.confirm(`${analysing} lead(s) are still being analysed, so their cells may be empty. Export anyway?`)
+            ) {
+                return;
+            }
+            downloadExcelExport(leads, selectedExcelBatch.fileName || 'leads');
+        } catch (err: any) {
+            setError(err.message || 'Failed to export this Excel');
+        } finally {
+            setIsExportingExcel(false);
+        }
+    };
+
+    const [isResumingEnrich, setIsResumingEnrich] = useState(false);
+
+    // Restart GBP analysis for leads stuck on "Analyzing" (the selected Excel file, or every upload).
+    const handleResumeEnrich = async () => {
+        setIsResumingEnrich(true);
+        setError('');
+        try {
+            const res = await resumeAdminLeadEnrichment(selectedExcelBatch ? excelBatchFilter : null);
+            window.alert(res.message);
+            await load();
+        } catch (err: any) {
+            setError(err.message || 'Failed to resume analysis');
+        } finally {
+            setIsResumingEnrich(false);
         }
     };
 
@@ -931,6 +1072,23 @@ export default function AdminGrowthAuditLeads() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                            <button
+                                type="button"
+                                disabled={exportLeads.length === 0}
+                                onClick={handleExportLeads}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition-colors shadow-2xs"
+                                title={
+                                    exportingTicked
+                                        ? 'Download the selected leads as an Excel sheet'
+                                        : 'Download all leads matching the current filters (every page) as an Excel sheet'
+                                }
+                            >
+                                <Download className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>
+                                    {exportingTicked ? 'Export selected' : 'Export leads'} ({exportLeads.length})
+                                </span>
+                            </button>
+
                             {excelBatchFilter !== 'all' && excelBatchLeadIds.length > 0 && (
                                 <button
                                     type="button"
@@ -946,6 +1104,19 @@ export default function AdminGrowthAuditLeads() {
                             {excelBatchFilter !== 'all' && selectedExcelBatch && (
                                 <button
                                     type="button"
+                                    disabled={isExportingExcel}
+                                    onClick={handleExportExcel}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 transition-colors shadow-2xs"
+                                    title="Download this Excel with GBP observation, AI visibility and priority filled in"
+                                >
+                                    <Download className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>{isExportingExcel ? 'Exporting...' : `Export this Excel (${selectedExcelBatch.leadCount})`}</span>
+                                </button>
+                            )}
+
+                            {excelBatchFilter !== 'all' && selectedExcelBatch && (
+                                <button
+                                    type="button"
                                     disabled={isDeletingExcel}
                                     onClick={handleDeleteExcelLeads}
                                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors shadow-2xs"
@@ -953,6 +1124,19 @@ export default function AdminGrowthAuditLeads() {
                                 >
                                     <Trash2 className="w-3.5 h-3.5 text-red-600" />
                                     <span>{isDeletingExcel ? 'Deleting...' : 'Delete this Excel'}</span>
+                                </button>
+                            )}
+
+                            {hasEnriching && (
+                                <button
+                                    type="button"
+                                    onClick={handleResumeEnrich}
+                                    disabled={isResumingEnrich}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 transition-colors shadow-2xs disabled:opacity-60"
+                                    title="Restart GBP analysis for leads stuck on Analyzing. Only leads not yet analysed are processed."
+                                >
+                                    <Loader2 className={cn('w-3.5 h-3.5 text-indigo-600', isResumingEnrich && 'animate-spin')} />
+                                    <span>Resume analysis</span>
                                 </button>
                             )}
 
@@ -978,7 +1162,7 @@ export default function AdminGrowthAuditLeads() {
                             <button
                                 type="button"
                                 onClick={() => setIsAddLeadModalOpen(true)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[#F59E0B] text-white hover:bg-[#D97706] transition-colors shadow-2xs"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[#F59E0B] text-[#0F172A] hover:bg-[#D97706] transition-colors shadow-2xs"
                             >
                                 <Plus className="w-3.5 h-3.5" />
                                 <span>Add Lead</span>
@@ -1000,6 +1184,7 @@ export default function AdminGrowthAuditLeads() {
                                         statusDate: 'all' as StatusDateFilter,
                                         statusDateCustom: '',
                                         email: 'all' as EmailOpenFilter,
+                                        auditClick: 'all' as AuditClickFilter,
                                         page: '1'
                                     };
                                     setDraftQ('');
@@ -1142,7 +1327,14 @@ export default function AdminGrowthAuditLeads() {
                             </label>
                             <select
                                 value={emailFilter}
-                                onChange={(e) => setFilter('email', e.target.value)}
+                                onChange={(e) =>
+                                    // Leaving "Email Opened" also clears the Audit button filter.
+                                    patchFilters(
+                                        e.target.value === 'opened'
+                                            ? { email: e.target.value as EmailOpenFilter }
+                                            : { email: e.target.value as EmailOpenFilter, auditClick: 'all' }
+                                    )
+                                }
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
                                 title="Filter by email open status"
                             >
@@ -1153,6 +1345,25 @@ export default function AdminGrowthAuditLeads() {
                                 <option value="not_sent">Not Sent</option>
                             </select>
                         </div>
+
+                        {emailFilter === 'opened' && (
+                            <div>
+                                <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-1">
+                                    <MousePointerClick className="w-3 h-3 text-slate-400 shrink-0" />
+                                    Audit Button
+                                </label>
+                                <select
+                                    value={auditClickFilter}
+                                    onChange={(e) => setFilter('auditClick', e.target.value)}
+                                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-amber-500"
+                                    title='Filter by whether they clicked "Request a full main audit" in the observation email'
+                                >
+                                    <option value="all">All</option>
+                                    <option value="clicked">Clicked</option>
+                                    <option value="not_clicked">Not clicked</option>
+                                </select>
+                            </div>
+                        )}
 
                         <div>
                             <label className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 mb-1">
@@ -1757,7 +1968,19 @@ export default function AdminGrowthAuditLeads() {
                                                         })()}
                                                     </td>
                                                     <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                                                        {lead.opportunityLevel ? (
+                                                        {lead.enrichStatus === 'pending' || lead.enrichStatus === 'running' ? (
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-indigo-50 text-indigo-700 border-indigo-200">
+                                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                                                Analyzing
+                                                            </span>
+                                                        ) : lead.enrichStatus === 'failed' ? (
+                                                            <span
+                                                                title={lead.enrichError || 'GBP analysis failed'}
+                                                                className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-red-50 text-red-700 border-red-200"
+                                                            >
+                                                                GBP failed
+                                                            </span>
+                                                        ) : lead.opportunityLevel ? (
                                                             <span className={cn(
                                                                 'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border shadow-2xs',
                                                                 oppLevel === 'high' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :

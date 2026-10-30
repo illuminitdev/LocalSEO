@@ -191,9 +191,74 @@ function flattenSchemaTypes(node, out: Set<string> = new Set()) {
   return out;
 }
 
-function extractPage(html, pageUrl) {
+/** NAP and entity details from the first LocalBusiness-style JSON-LD node. */
+function schemaEntityFrom(jsonLd) {
+  const nodes = [];
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    const type = [].concat(node['@type'] || []).join(' ');
+    if (/LocalBusiness|Organization|ProfessionalService|HomeAndConstructionBusiness|Store|Contractor|Service/i.test(type)) {
+      nodes.push(node);
+    }
+    if (node['@graph']) walk(node['@graph']);
+  };
+  walk(jsonLd);
+  const node = nodes.find((n) => n.telephone || n.address) || nodes[0];
+  if (!node) return null;
+  const addr = node.address;
+  const address =
+    typeof addr === 'string'
+      ? addr
+      : addr && typeof addr === 'object'
+        ? [addr.streetAddress, addr.addressLocality, addr.postalCode].filter(Boolean).join(', ')
+        : '';
+  return {
+    type: [].concat(node['@type'] || []).join(', '),
+    name: String(node.name || '').trim(),
+    telephone: String(node.telephone || '').trim(),
+    address: String(address || '').trim(),
+    sameAs: [].concat(node.sameAs || []).map(String).slice(0, 12),
+    hasMap: typeof node.hasMap === 'string' ? node.hasMap.trim() : String(node.hasMap?.url || '').trim(),
+    hasOpeningHours: Boolean(node.openingHours || node.openingHoursSpecification),
+    hasGeo: Boolean(node.geo || node.hasMap),
+    hasAreaServed: Boolean(node.areaServed)
+  };
+}
+
+function extractPage(html, pageUrl, headers = null) {
   const $ = cheerio.load(html);
   const title = ($('title').first().text() || '').trim();
+  const metaRobots = [
+    $('meta[name="robots"]').attr('content') || '',
+    $('meta[name="googlebot"]').attr('content') || ''
+  ]
+    .join(',')
+    .toLowerCase();
+  const xRobotsTag = String(headers?.get?.('x-robots-tag') || '').toLowerCase();
+  const noindex = /noindex/.test(metaRobots) || /noindex/.test(xRobotsTag);
+  const footerText = $('footer').text().replace(/\s+/g, ' ').trim();
+  const hasMapsEmbed =
+    $('iframe[src*="google.com/maps"], iframe[src*="maps.google"]').length > 0 ||
+    $('a[href*="maps.google"], a[href*="google.com/maps"], a[href*="g.page"], a[href*="maps.app.goo.gl"]').length > 0;
+  // Links that name the business's own Google listing: map embeds, Maps links, review buttons and widgets.
+  const mapsUrls = [
+    ...$('iframe[src*="google.com/maps"], iframe[src*="maps.google"]')
+      .map((_, el) => $(el).attr('src'))
+      .get(),
+    ...$(
+      'a[href*="maps.google"], a[href*="google.com/maps"], a[href*="g.page"], a[href*="maps.app.goo.gl"], a[href*="writereview"]'
+    )
+      .map((_, el) => $(el).attr('href'))
+      .get(),
+    ...[...new Set(html.match(/ChIJ[\w-]{20,}/g) || [])].map(
+      (id) => `https://www.google.com/maps/place/?q=place_id:${id}`
+    )
+  ]
+    .map((u) => String(u || '').trim())
+    .filter((u) => /^(https?:)?\/\//i.test(u))
+    .map((u) => (u.startsWith('//') ? `https:${u}` : u))
+    .slice(0, 8);
   const metaDescription = (
     $('meta[name="description"]').attr('content') ||
     $('meta[property="og:description"]').attr('content') ||
@@ -273,6 +338,13 @@ function extractPage(html, pageUrl) {
   return {
     url: pageUrl,
     title,
+    noindex,
+    metaRobots,
+    xRobotsTag,
+    footerText: footerText.slice(0, 2000),
+    hasMapsEmbed,
+    mapsUrls,
+    schemaEntity: schemaEntityFrom(jsonLd),
     metaDescription,
     canonical,
     viewport,
@@ -301,6 +373,125 @@ function extractPage(html, pageUrl) {
 
 
 
+
+// The AI engines the report measures: ChatGPT, Claude and Gemini (Google-Extended).
+const AI_CRAWLERS = ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'Google-Extended'];
+
+/** Groups of robots.txt rules per user agent ("*" included). */
+function parseRobots(text) {
+  const groups = [];
+  let current = null;
+  let lastWasAgent = false;
+  const sitemaps = [];
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, '').trim();
+    const m = line.match(/^([A-Za-z-]+)\s*:\s*(.*)$/);
+    if (!m) continue;
+    const key = m[1].toLowerCase();
+    const value = m[2].trim();
+    if (key === 'sitemap') {
+      if (value) sitemaps.push(value);
+      continue;
+    }
+    if (key === 'user-agent') {
+      if (!current || !lastWasAgent) {
+        current = { agents: [], disallow: [], allow: [] };
+        groups.push(current);
+      }
+      current.agents.push(value.toLowerCase());
+      lastWasAgent = true;
+      continue;
+    }
+    lastWasAgent = false;
+    if (!current) continue;
+    if (key === 'disallow') current.disallow.push(value);
+    if (key === 'allow') current.allow.push(value);
+  }
+  return { groups, sitemaps };
+}
+
+/** True when the rules that apply to this agent block the whole site. */
+function robotsBlocksSite(parsed, agent) {
+  const name = agent.toLowerCase();
+  const own = parsed.groups.filter((g) => g.agents.some((a) => a !== '*' && name.includes(a)));
+  const rules = own.length ? own : parsed.groups.filter((g) => g.agents.includes('*'));
+  return rules.some((g) => g.disallow.includes('/') && !g.allow.includes('/'));
+}
+
+export function analyseRobots(text) {
+  if (!text) return null;
+  const parsed = parseRobots(text);
+  return {
+    blocksAll: robotsBlocksSite(parsed, '*'),
+    blocksGooglebot: robotsBlocksSite(parsed, 'Googlebot'),
+    aiCrawlersBlocked: AI_CRAWLERS.filter((bot) => robotsBlocksSite(parsed, bot)),
+    sitemapUrls: parsed.sitemaps.slice(0, 5)
+  };
+}
+
+/** Sitemap quality: valid XML, URL count, homepage listed, and a small sample of URLs that load. */
+async function analyseSitemap(urls, origin) {
+  for (const url of urls) {
+    try {
+      const res = await fetchText(url, 10000);
+      if (!res.ok) continue;
+      let xml = res.text;
+      if (/<sitemapindex/i.test(xml)) {
+        const child = (xml.match(/<loc>\s*([^<\s]+)\s*<\/loc>/i) || [])[1];
+        if (!child) continue;
+        const sub = await fetchText(child, 10000);
+        if (!sub.ok) continue;
+        xml = sub.text;
+      }
+      if (!/<urlset/i.test(xml)) continue;
+      const locs = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
+      const home = origin.replace(/\/$/, '');
+      const hasHomepage = locs.some((l) => l.replace(/\/$/, '').replace('://www.', '://') === home.replace('://www.', '://'));
+      const broken = [];
+      for (const loc of locs.slice(0, 3)) {
+        try {
+          const r = await fetchText(loc, 10000);
+          if (r.status >= 400) broken.push({ url: loc, status: r.status });
+        } catch {
+          broken.push({ url: loc, status: 0 });
+        }
+      }
+      return { url, valid: true, urlCount: locs.length, hasHomepage, brokenSample: broken };
+    } catch {
+      /* try the next sitemap location */
+    }
+  }
+  return null;
+}
+
+/** Whether http:// and the www / non-www host all redirect to the one site the crawl landed on. */
+async function analyseRedirects(finalUrl) {
+  let final;
+  try {
+    final = new URL(finalUrl);
+  } catch {
+    return null;
+  }
+  const host = final.hostname;
+  const altHost = host.startsWith('www.') ? host.slice(4) : `www.${host}`;
+  const variants = [`http://${host}/`, `https://${altHost}/`];
+  const results = [];
+  for (const v of variants) {
+    try {
+      const r = await fetchText(v, 10000, BROWSER_HEADERS);
+      const landed = new URL(r.url || v);
+      results.push({ from: v, to: landed.origin, ok: landed.origin === final.origin });
+    } catch {
+      results.push({ from: v, to: null, ok: null });
+    }
+  }
+  const measured = results.filter((r) => r.ok !== null);
+  return {
+    finalOrigin: final.origin,
+    variants: results,
+    consolidated: measured.length ? measured.every((r) => r.ok) : null
+  };
+}
 
 export async function crawlWebsite(websiteUrl, { maxPages = 12 } = {}) {
   const start = normalizeUrl(websiteUrl);
@@ -362,7 +553,7 @@ export async function crawlWebsite(websiteUrl, { maxPages = 12 } = {}) {
       if (ct && !/html|xml|text\/plain/i.test(ct) && !res.text.includes('<html')) {
         continue;
       }
-      const page = extractPage(res.text, res.url || next);
+      const page = extractPage(res.text, res.url || next, res.headers);
       pages.push(page);
       if (pages.length === 1) {
         try {
@@ -422,16 +613,70 @@ export async function crawlWebsite(websiteUrl, { maxPages = 12 } = {}) {
     )
   ];
 
+  const finalUrl = pages[0]?.url || start.href;
+  const robots = analyseRobots(robotsTxt);
+  const sitemap = await analyseSitemap(
+    [...(robots?.sitemapUrls || []), `${origin}/sitemap.xml`, `${origin}/sitemap_index.xml`],
+    origin
+  );
+  const redirects = pages.length ? await analyseRedirects(finalUrl) : null;
+  let finalHost = '';
+  try {
+    finalHost = new URL(finalUrl).hostname.replace(/^www\./, '');
+  } catch {
+    /* keep empty */
+  }
+  const home = pages[0];
+  let canonicalHost = '';
+  try {
+    canonicalHost = home?.canonical ? new URL(home.canonical, finalUrl).hostname.replace(/^www\./, '') : '';
+  } catch {
+    /* keep empty */
+  }
+  // "www.site.com" without https:// is read as a relative path, i.e. a page that does not exist.
+  const canonicalRaw = String(home?.canonical || '').trim();
+  const canonicalValid = !canonicalRaw || /^https?:\/\//i.test(canonicalRaw) || canonicalRaw.startsWith('/');
+  const titleCounts = new Map();
+  for (const p of pages) {
+    const t = String(p.title || '').trim().toLowerCase();
+    if (t) titleCounts.set(t, (titleCounts.get(t) || 0) + 1);
+  }
+  const duplicateTitles = [...titleCounts.entries()].filter(([, n]) => n > 1).map(([t]) => t);
+  const schemaEntity = pages.map((p) => p.schemaEntity).find(Boolean) || null;
+  const isMapsUrl = (u) => /google\.[a-z.]+\/maps|maps\.google|g\.page|maps\.app\.goo\.gl|writereview|place_id/i.test(u);
+  const mapsUrls = [
+    ...new Set([
+      ...pages.flatMap((p) => p.mapsUrls || []),
+      ...[schemaEntity?.hasMap, ...(schemaEntity?.sameAs || [])].filter((u) => u && isMapsUrl(u))
+    ])
+  ].slice(0, 5);
+  const technical = {
+    robots,
+    sitemap,
+    redirects,
+    noindexPages: pages.filter((p) => p.noindex).map((p) => p.url).slice(0, 5),
+    homepageNoindex: Boolean(home?.noindex),
+    canonicalHost,
+    canonicalValid,
+    canonicalMatchesHost: home?.canonical ? canonicalHost === finalHost : null,
+    duplicateTitles: duplicateTitles.slice(0, 5),
+    schemaEntity,
+    hasMapsEmbed: pages.some((p) => p.hasMapsEmbed),
+    mapsUrls,
+    footerText: home?.footerText || ''
+  };
+
   return {
     fetchedAt: new Date().toISOString(),
     requestedUrl: start.href,
-    finalUrl: pages[0]?.url || start.href,
+    finalUrl,
     origin,
-    https: start.protocol === 'https:',
+    https: /^https:/i.test(finalUrl),
+    technical,
     pageCount: pages.length,
     pages,
     robotsTxt,
-    sitemapFound,
+    sitemapFound: sitemapFound || Boolean(sitemap?.valid),
     llmsTxtFound,
     llmsTxtSnippet,
     schemaTypes,

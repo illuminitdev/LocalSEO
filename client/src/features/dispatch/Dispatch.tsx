@@ -285,7 +285,7 @@ export default function Dispatch() {
                     <button
                         type="button"
                         onClick={() => setShowAssignModal(true)}
-                        className="inline-flex items-center gap-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-white text-xs font-bold px-4 py-2 rounded-xl shadow-sm transition"
+                        className="inline-flex items-center gap-1.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] active:bg-[var(--brand-primary-active)] text-[var(--brand-primary-foreground)] text-xs font-bold px-4 py-2 rounded-xl shadow-sm transition"
                     >
                         <Plus className="w-4 h-4" /> Assign job
                     </button>
@@ -678,7 +678,7 @@ export default function Dispatch() {
                             </button>
                             <button
                                 type="submit"
-                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-white text-xs font-bold shadow-sm transition"
+                                className="px-5 py-2.5 rounded-xl bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] text-xs font-bold shadow-sm transition"
                             >
                                 Save & Dispatch
                             </button>

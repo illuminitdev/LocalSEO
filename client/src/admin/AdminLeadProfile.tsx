@@ -34,8 +34,10 @@ import { useToast } from '../shared/Toast';
 import {
     emailShareStatusHint,
     emailShareStatusLabel,
-    emailShareStatusTimeLines
+    emailShareStatusTimeLines,
+    formatEmailShareDateTime
 } from '../shared/emailShareStatus';
+import AiVisibilityText from '../shared/AiVisibilityText';
 
 function formatTimestamp(isoString?: string | null) {
     if (!isoString) return '';
@@ -314,6 +316,7 @@ export default function AdminLeadProfile() {
         openedAt: lead.emailShareOpenedAt
     };
     const obsTimeLines = emailShareStatusTimeLines(obsTimes);
+    const obsClickedFmt = formatEmailShareDateTime(lead.observationEmailClickedAt);
     const auditTimeLines = emailShareStatusTimeLines(auditTimes);
 
     return (
@@ -328,7 +331,7 @@ export default function AdminLeadProfile() {
                 </Link>
                 <div className="flex items-center gap-2 flex-wrap">
                     {obsLabel ? (
-                        <div className="flex flex-col items-end gap-0.5">
+                        <div className="group relative flex flex-col items-end">
                             <span
                                 className={cn(
                                     'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
@@ -340,15 +343,49 @@ export default function AdminLeadProfile() {
                             >
                                 Email: {obsLabel}
                             </span>
-                            {obsTimeLines.map((line) => (
-                                <span key={line} className="text-[10px] font-medium text-slate-500 whitespace-nowrap">
-                                    {line}
-                                </span>
-                            ))}
+                            {obsTimeLines.length > 0 ? (
+                                <div
+                                    className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 flex flex-col items-end gap-0.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                    aria-hidden
+                                >
+                                    {obsTimeLines.map((line) => (
+                                        <span key={line} className="text-[10px] font-medium text-slate-500">
+                                            {line}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
+                    {obsLabel ? (
+                        <div className="group relative flex flex-col items-end">
+                            <span
+                                className={cn(
+                                    'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
+                                    lead.observationEmailClickedAt
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                                )}
+                                title={
+                                    lead.observationEmailClickedAt
+                                        ? `They clicked "Request a full main audit" in the observation email${obsClickedFmt ? ` · ${obsClickedFmt}` : ''}`
+                                        : 'Waiting — turns Clicked when they click "Request a full main audit" in the observation email'
+                                }
+                            >
+                                Audit button: {lead.observationEmailClickedAt ? 'Clicked' : 'Not clicked'}
+                            </span>
+                            {obsClickedFmt ? (
+                                <div
+                                    className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 flex flex-col items-end gap-0.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                    aria-hidden
+                                >
+                                    <span className="text-[10px] font-medium text-slate-500">Clicked {obsClickedFmt}</span>
+                                </div>
+                            ) : null}
                         </div>
                     ) : null}
                     {auditLabel ? (
-                        <div className="flex flex-col items-end gap-0.5">
+                        <div className="group relative flex flex-col items-end">
                             <span
                                 className={cn(
                                     'inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-xl border',
@@ -360,11 +397,18 @@ export default function AdminLeadProfile() {
                             >
                                 Audit email: {auditLabel}
                             </span>
-                            {auditTimeLines.map((line) => (
-                                <span key={line} className="text-[10px] font-medium text-slate-500 whitespace-nowrap">
-                                    {line}
-                                </span>
-                            ))}
+                            {auditTimeLines.length > 0 ? (
+                                <div
+                                    className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 flex flex-col items-end gap-0.5 whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                    aria-hidden
+                                >
+                                    {auditTimeLines.map((line) => (
+                                        <span key={line} className="text-[10px] font-medium text-slate-500">
+                                            {line}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : null}
                         </div>
                     ) : null}
                     {!editing ? (
@@ -766,7 +810,7 @@ export default function AdminLeadProfile() {
                                                     ? 'bg-emerald-600 text-white border-emerald-700'
                                                     : oppLevel === 'low'
                                                       ? 'bg-slate-200 text-slate-700 border-slate-300'
-                                                      : 'bg-amber-500 text-white border-amber-600'
+                                                      : 'bg-amber-500 text-[var(--brand-primary-foreground)] border-amber-600'
                                             )}
                                         >
                                             {lead.opportunityLevel} Opportunity
@@ -805,12 +849,12 @@ export default function AdminLeadProfile() {
                                     <Bot className="w-3.5 h-3.5" />
                                 </div>
                                 <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                                    AI Visibility Observations (Search / Perplexity / Gemini)
+                                    AI Visibility Observations
                                 </h2>
                             </div>
                             {lead.aiVisibilityObservation ? (
                                 <div className="text-slate-700 text-xs whitespace-pre-line leading-relaxed pl-1 pt-1">
-                                    {lead.aiVisibilityObservation}
+                                    <AiVisibilityText text={lead.aiVisibilityObservation} />
                                 </div>
                             ) : (
                                 <p className="text-slate-400 text-xs italic pl-1">No AI visibility observations recorded.</p>

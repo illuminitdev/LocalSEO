@@ -51,6 +51,7 @@ export function applyWebsiteChecks(
     phone?: string;
     address?: string;
     gbpLookup?: any;
+    service?: string;
   } = {}
 ) {
   const byId = new Map(checks.map((c) => [c.id, c]));
@@ -97,7 +98,7 @@ export function applyWebsiteChecks(
       `Lighthouse performance ${(lighthouse.performance * 100).toFixed(0)}`
     );
   } else {
-    setCheck(byId, 'web_basic_4', 'unknown', 'Lighthouse not available on this server');
+    setCheck(byId, 'web_basic_4', 'fail', 'Page speed could not be measured on this run, so it is not confirmed as fast');
   }
   {
     const modern =
@@ -197,7 +198,14 @@ export function applyWebsiteChecks(
   }
 
   const uniqueHint = crawl.pageCount >= 3;
-  setCheck(byId, 'loc_qual_1', uniqueHint ? 'pass' : 'unknown', `${crawl.pageCount} pages crawled — uniqueness spot-check recommended`);
+  setCheck(
+    byId,
+    'loc_qual_1',
+    uniqueHint ? 'pass' : 'fail',
+    uniqueHint
+      ? `${crawl.pageCount} distinct pages found`
+      : `Only ${crawl.pageCount} page(s) found, too few for unique service and area content`
+  );
   setCheck(
     byId,
     'loc_qual_2',
@@ -224,16 +232,49 @@ export function applyWebsiteChecks(
   );
 
   
-  setCheck(byId, 'onpage_1', home.title ? 'pass' : 'fail', home.title || 'Missing title');
-  setCheck(
-    byId,
-    'onpage_2',
-    home.metaDescription.length >= 50 ? 'pass' : 'fail',
-    home.metaDescription ? home.metaDescription.slice(0, 160) : 'Missing meta description'
-  );
+  {
+    const title = String(home.title || '').trim();
+    const len = title.length;
+    const hasCity = Boolean(city && title.toLowerCase().includes(city));
+    const lengthNote = len < 30 ? ' is too short' : len > 65 ? ' is cut off in Google' : '';
+    const cityNote = hasCity ? '' : `${lengthNote ? ' and' : ''} does not name ${context.city || 'the town'}`;
+    setCheck(
+      byId,
+      'onpage_1',
+      len >= 30 && len <= 65 && hasCity ? 'pass' : 'fail',
+      title ? `“${title}” (${len} characters)${lengthNote}${cityNote}` : 'The homepage has no title tag'
+    );
+  }
+  {
+    const meta = String(home.metaDescription || '').trim();
+    const note = meta.length < 70 ? ' (too short to earn the click)' : meta.length > 160 ? ' (cut off in Google)' : '';
+    setCheck(
+      byId,
+      'onpage_2',
+      meta.length >= 70 && meta.length <= 160 ? 'pass' : 'fail',
+      meta
+        ? `${meta.length} characters${note}: “${meta.slice(0, 160)}”`
+        : 'No meta description, so Google writes its own snippet'
+    );
+  }
   setCheck(byId, 'onpage_3', home.h1s.length === 1 ? 'pass' : home.h1s.length === 0 ? 'fail' : 'fail', `H1 count: ${home.h1s.length}`);
   setCheck(byId, 'onpage_4', home.h2s.length >= 2 ? 'pass' : 'fail', `H2 count: ${home.h2s.length}`);
-  setCheck(byId, 'onpage_5', home.title.length > 5 ? 'pass' : 'fail', home.title);
+  {
+    const serviceWords = String(context.service || '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length > 3);
+    const heading = `${home.title} ${home.h1s.join(' ')}`.toLowerCase();
+    const ok = serviceWords.length ? serviceWords.some((w) => heading.includes(w)) : home.title.length > 5;
+    setCheck(
+      byId,
+      'onpage_5',
+      ok ? 'pass' : 'fail',
+      ok
+        ? `Title or H1 names the service (${context.service || home.title})`
+        : `Neither the title nor the H1 names “${context.service || 'the main service'}”`
+    );
+  }
   setCheck(
     byId,
     'onpage_6',
@@ -284,14 +325,14 @@ export function applyWebsiteChecks(
       `Performance ${(lighthouse.performance * 100).toFixed(0)}`
     );
   } else {
-    setCheck(byId, 'tech_1', 'unknown', 'Lighthouse not available');
+    setCheck(byId, 'tech_1', 'fail', 'Page speed could not be measured on this run, so it is not confirmed');
   }
   setCheck(byId, 'tech_2', home.viewport ? 'pass' : 'fail', home.viewport || 'No viewport');
   {
     const layout = lighthouse?.mobileLayout;
     const measured = layout && (layout.pass === true || layout.pass === false);
-    const evidence = layout?.evidence || 'Mobile layout requires Lighthouse';
-    const status = measured ? (layout.pass ? 'pass' : 'fail') : 'unknown';
+    const evidence = layout?.evidence || 'Mobile layout could not be measured on this run';
+    const status = measured ? (layout.pass ? 'pass' : 'fail') : 'fail';
     setCheck(byId, 'web_basic_3', status, evidence);
     setCheck(byId, 'tech_2', status, evidence);
   }
@@ -307,11 +348,80 @@ export function applyWebsiteChecks(
     crawl.errors.some((e) => e.status === 404) ? 'fail' : 'pass',
     '404 scan during crawl'
   );
-  setCheck(byId, 'tech_5', 'unknown', 'Indexing requires Search Console — not assessed automatically');
-  setCheck(byId, 'tech_6', crawl.sitemapFound ? 'pass' : 'fail', crawl.sitemapFound ? 'Sitemap found' : 'No sitemap detected');
-  setCheck(byId, 'tech_7', crawl.robotsTxt ? 'pass' : 'fail', crawl.robotsTxt ? 'robots.txt present' : 'No robots.txt');
-  setCheck(byId, 'tech_8', home.canonical ? 'pass' : 'fail', home.canonical || 'No canonical');
-  setCheck(byId, 'tech_9', crawl.https ? 'pass' : 'fail', crawl.https ? 'HTTPS' : 'Not HTTPS');
+  const tech = crawl.technical || {};
+  {
+    const blocked = tech.robots?.blocksAll || tech.robots?.blocksGooglebot;
+    const noindex = Array.isArray(tech.noindexPages) ? tech.noindexPages : [];
+    setCheck(
+      byId,
+      'tech_5',
+      blocked || noindex.length ? 'fail' : 'pass',
+      blocked
+        ? 'robots.txt blocks Google from crawling the whole site'
+        : noindex.length
+          ? `noindex tag on ${noindex.length} page(s), e.g. ${noindex[0]}: Google is told not to show them`
+          : 'No noindex tags, and robots.txt allows Google'
+    );
+  }
+  {
+    const sm = tech.sitemap;
+    const broken = Array.isArray(sm?.brokenSample) ? sm.brokenSample.length : 0;
+    const ok = Boolean(sm?.valid && sm.urlCount > 0 && broken === 0);
+    const missing = crawl.sitemapFound
+      ? 'A sitemap is referenced but could not be read as a valid XML sitemap'
+      : 'No XML sitemap found at /sitemap.xml or in robots.txt';
+    setCheck(
+      byId,
+      'tech_6',
+      ok ? 'pass' : 'fail',
+      sm
+        ? `${sm.urlCount} URLs in ${sm.url}${sm.hasHomepage ? '' : '; homepage not listed'}${broken ? `; ${broken} sampled URL(s) return errors` : ''}`
+        : missing
+    );
+  }
+  {
+    const r = tech.robots;
+    const blocks = Boolean(r?.blocksAll || r?.blocksGooglebot);
+    setCheck(
+      byId,
+      'tech_7',
+      crawl.robotsTxt && !blocks ? 'pass' : 'fail',
+      !crawl.robotsTxt
+        ? 'No robots.txt at the site root'
+        : blocks
+          ? 'robots.txt blocks Google from the whole site (Disallow: /)'
+          : `robots.txt present${r?.sitemapUrls?.length ? ' and points to the sitemap' : ', but it does not list the sitemap'}`
+    );
+  }
+  {
+    const clash = tech.canonicalMatchesHost === false;
+    const invalid = tech.canonicalValid === false;
+    setCheck(
+      byId,
+      'tech_8',
+      home.canonical && !clash && !invalid ? 'pass' : 'fail',
+      !home.canonical
+        ? 'Homepage has no canonical tag'
+        : invalid
+          ? `Canonical tag “${home.canonical}” has no https://, so it points to a page that does not exist`
+          : clash
+            ? `Canonical points to another site (${tech.canonicalHost}), so Google may index that one instead`
+            : `Canonical: ${home.canonical}`
+    );
+  }
+  {
+    const consolidated = tech.redirects?.consolidated;
+    setCheck(
+      byId,
+      'tech_9',
+      crawl.https && consolidated !== false ? 'pass' : 'fail',
+      !crawl.https
+        ? 'Site loads over http, not https'
+        : consolidated === false
+          ? `The http / www versions do not all redirect to ${tech.redirects.finalOrigin}, which splits ranking signals`
+          : 'HTTPS, and the http / www versions redirect to one site'
+    );
+  }
   {
     const imgs = crawl.pages.flatMap((p) => p.images);
     const heavy = imgs.filter((i) => /\.bmp($|\?)/i.test(i.src)).length;
@@ -326,9 +436,20 @@ export function applyWebsiteChecks(
       `LCP=${lighthouse.lcp ?? 'n/a'} CLS=${lighthouse.cls ?? 'n/a'}`
     );
   } else {
-    setCheck(byId, 'tech_11', 'unknown', 'Core Web Vitals require Lighthouse');
+    setCheck(byId, 'tech_11', 'fail', 'Core Web Vitals could not be measured on this run, so they are not confirmed');
   }
-  setCheck(byId, 'tech_12', home.hasSchema || crawl.pages.some((p) => p.hasSchema) ? 'pass' : 'fail', 'Schema / JSON-LD scan');
+  {
+    const types = (crawl.schemaTypes || []).slice(0, 6);
+    const has = home.hasSchema || crawl.pages.some((p) => p.hasSchema);
+    setCheck(
+      byId,
+      'tech_12',
+      has ? 'pass' : 'fail',
+      has
+        ? `Structured data found${types.length ? `: ${types.join(', ')}` : ''}`
+        : 'No structured data (JSON-LD) on the pages read'
+    );
+  }
 
   
   setCheck(
@@ -370,14 +491,20 @@ export function applyWebsiteChecks(
     crawl.llmsTxtFound ? 'pass' : 'fail',
     crawl.llmsTxtFound ? 'llms.txt present' : 'No llms.txt at site root'
   );
-  setCheck(
-    byId,
-    'geo_2',
-    crawl.spaHeuristic?.likelySpa ? 'fail' : 'pass',
-    crawl.spaHeuristic?.likelySpa
-      ? 'Thin HTML shell — likely SPA; crawlers may miss content'
-      : `Body length signals OK (${home.bodyText?.length || 0} chars)`
-  );
+  {
+    const aiBlocked = Array.isArray(tech.robots?.aiCrawlersBlocked) ? tech.robots.aiCrawlersBlocked : [];
+    const spa = Boolean(crawl.spaHeuristic?.likelySpa);
+    setCheck(
+      byId,
+      'geo_2',
+      spa || aiBlocked.length ? 'fail' : 'pass',
+      aiBlocked.length
+        ? `robots.txt blocks AI crawlers: ${aiBlocked.join(', ')}`
+        : spa
+          ? 'The page is a thin JavaScript shell, so AI crawlers may not see the content'
+          : `Content is readable without JavaScript and AI crawlers are allowed (${home.bodyText?.length || 0} characters)`
+    );
+  }
   setCheck(
     byId,
     'geo_3',
@@ -491,7 +618,7 @@ export function applyWebsiteChecks(
       `Address token overlap ${hit}/${tokens.length}`
     );
   } else {
-    setCheck(byId, 'nap_2', 'unknown', 'No address provided for NAP compare');
+    setCheck(byId, 'nap_2', 'fail', 'No full address on record to compare with the website');
   }
 
   
@@ -501,12 +628,26 @@ export function applyWebsiteChecks(
     crawl.hasFaqSchema ? 'pass' : 'fail',
     crawl.hasFaqSchema ? 'FAQPage schema' : 'Missing FAQPage schema'
   );
-  setCheck(
-    byId,
-    'tech_14',
-    crawl.hasLocalBusinessSchema ? 'pass' : 'fail',
-    crawl.hasLocalBusinessSchema ? 'LocalBusiness-family schema' : 'No LocalBusiness schema type'
-  );
+  {
+    const entity = tech.schemaEntity;
+    const digitsOf = (v) => String(v || '').replace(/\D/g, '');
+    const gbpPhone = digitsOf(context.gbpLookup?.listedOnMaps ? context.gbpLookup?.phone : '');
+    const schemaPhone = digitsOf(entity?.telephone);
+    const phoneClash = Boolean(gbpPhone && schemaPhone && gbpPhone.slice(-9) !== schemaPhone.slice(-9));
+    const missing = [!entity?.telephone && 'telephone', !entity?.address && 'address'].filter(Boolean).join(' and ');
+    setCheck(
+      byId,
+      'tech_14',
+      crawl.hasLocalBusinessSchema && !missing && !phoneClash ? 'pass' : 'fail',
+      !crawl.hasLocalBusinessSchema
+        ? 'No LocalBusiness schema, so search and AI cannot read the business details reliably'
+        : phoneClash
+          ? `LocalBusiness schema phone ${entity.telephone} differs from the Google listing`
+          : missing
+            ? `LocalBusiness schema is missing ${missing}`
+            : `LocalBusiness schema with name, address and phone${entity.sameAs?.length ? ` and ${entity.sameAs.length} sameAs link(s)` : ''}`
+    );
+  }
   setCheck(
     byId,
     'tech_15',

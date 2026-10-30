@@ -15,6 +15,7 @@ import {
     shareInfoForLeadObservation
 } from '../lib/leadObservationEmailSends';
 import { sendLeadObservationsEmail } from '../lib/bookingEmail';
+import { triggerLeadEnrichment, enrichStatusForBatch, countStuckEnrichment } from '../lib/leadGbpEnrich';
 import { reportShareUrl } from '../lib/zappSitesAuditProxy';
 
 const router = Router();
@@ -271,7 +272,8 @@ router.get('/crm/tasks', requireAdmin, async (req: Request, res: Response) => {
                     emailShareOpenedAt: share.emailShareOpenedAt,
                     observationEmailShareStatus: obs.observationEmailShareStatus,
                     observationEmailSentAt: obs.observationEmailSentAt,
-                    observationEmailOpenedAt: obs.observationEmailOpenedAt
+                    observationEmailOpenedAt: obs.observationEmailOpenedAt,
+                    observationEmailClickedAt: obs.observationEmailClickedAt
                 };
             });
 
@@ -1180,7 +1182,14 @@ router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Re
                 spreadsheetStatus: String(item.spreadsheetStatus || '').trim(),
                 spreadsheetStatus1: String(item.spreadsheetStatus1 || '').trim(),
                 spreadsheetStatus2: String(item.spreadsheetStatus2 || '').trim(),
-                spreadsheetStatus3: String(item.spreadsheetStatus3 || '').trim()
+                spreadsheetStatus3: String(item.spreadsheetStatus3 || '').trim(),
+                gbpUrl: String(item.gbpUrl || item['GBP URL'] || item['GBP Link'] || item['Google Maps URL'] || '').trim(),
+                rawRow: Array.isArray(item.rawRow)
+                    ? (item.rawRow as unknown[])
+                          .filter((p): p is unknown[] => Array.isArray(p) && p.length >= 1)
+                          .map((p) => [String(p[0] ?? ''), String(p[1] ?? '')] as [string, string])
+                    : null,
+                sheetName: String(item.sheetName || '').trim()
             };
         });
 
@@ -1189,10 +1198,51 @@ router.post('/crm/leads/bulk-import', requireAdmin, async (req: Request, res: Re
             importBatchId,
             importUploadedAt
         });
-        res.json(result);
+
+        // Leads with empty observation/priority cells are queued as 'pending' (with or without a GBP URL);
+        // analyse them in the background so the upload returns immediately.
+        const queuedForEnrich = normalizedLeads.filter(
+            (l: any) => !(l.gbpObservation && l.aiVisibilityObservation && l.leadOpportunity)
+        ).length;
+        if (queuedForEnrich > 0) {
+            await triggerLeadEnrichment(result.importBatchId || importBatchId);
+        }
+        res.json({ ...result, enrichQueued: queuedForEnrich });
     } catch (err: any) {
         console.error('Admin bulk import error:', err);
         res.status(500).json({ error: err.message || 'Failed to import leads' });
+    }
+});
+
+/**
+ * Admin: restart GBP auto-analysis for leads left pending / stuck running (e.g. the worker stopped).
+ * Only leads not yet analysed are picked up, so nothing is charged twice.
+ */
+router.post('/crm/leads/enrich-resume', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const batchId = String(req.body?.batchId || '').trim() || null;
+        const waiting = await countStuckEnrichment(batchId);
+        if (!waiting) return res.json({ resumed: 0, message: 'No leads are waiting for analysis.' });
+        const ok = await triggerLeadEnrichment(batchId);
+        if (!ok) return res.status(502).json({ error: 'Could not start the analysis worker. Check the lead-enrich Lambda logs.' });
+        res.json({ resumed: waiting, message: `Analysis restarted for ${waiting} lead${waiting === 1 ? '' : 's'}.` });
+    } catch (err: any) {
+        console.error('Enrich resume error:', err);
+        res.status(500).json({ error: err.message || 'Failed to resume analysis' });
+    }
+});
+
+/** Admin: progress of GBP auto-analysis for an Excel upload batch */
+router.get('/crm/leads/enrich-status', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const batchId = String(req.query.batchId || '').trim();
+        if (!batchId) return res.status(400).json({ error: 'batchId is required' });
+        res.json(await enrichStatusForBatch(batchId));
+    } catch (err: any) {
+        console.error('Enrich status error:', err);
+        res.status(500).json({ error: err.message || 'Failed to load enrichment status' });
     }
 });
 
@@ -1708,6 +1758,49 @@ router.get('/crm/leads/excel-batches', requireAdmin, async (_req: Request, res: 
     } catch (err: any) {
         console.error('Admin list excel batches error:', err);
         res.status(500).json({ error: err.message || 'Failed to load excel batches' });
+    }
+});
+
+/** Admin: Leads of one Excel upload for export (original row + filled GBP observation / AI visibility / priority) */
+router.get('/crm/leads/excel-export', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const batchId = String(req.query.batchId || '').trim();
+        const isLegacy = batchId === 'legacy';
+        if (!isLegacy && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(batchId)) {
+            return res.status(400).json({ error: 'Select one Excel file (batchId) to export.' });
+        }
+
+        const { rows } = await query(
+            `SELECT name, phone, email, website, address, industry, gbp_url, gbp_observation,
+                    ai_visibility_observation, lead_opportunity, enrich_status, import_raw, import_sheet_name
+             FROM sales_leads
+             WHERE ${isLegacy ? 'import_batch_id IS NULL' : 'import_batch_id = $1::uuid'}
+               AND (source = 'excel_import' OR source ILIKE '%excel%')
+             ORDER BY created_at, id`,
+            isLegacy ? [] : [batchId]
+        );
+
+        res.json({
+            leads: rows.map((r: any) => ({
+                sheetName: r.import_sheet_name || '',
+                raw: Array.isArray(r.import_raw) ? r.import_raw : null,
+                name: r.name || '',
+                phone: r.phone || '',
+                email: r.email || '',
+                website: r.website || '',
+                address: r.address || '',
+                industry: r.industry || '',
+                gbpUrl: r.gbp_url || '',
+                gbpObservation: r.gbp_observation || '',
+                aiVisibility: r.ai_visibility_observation || '',
+                priority: r.lead_opportunity || '',
+                enrichStatus: r.enrich_status || ''
+            }))
+        });
+    } catch (err: any) {
+        console.error('Admin export excel leads error:', err);
+        res.status(500).json({ error: err.message || 'Failed to export excel leads' });
     }
 });
 
