@@ -771,6 +771,13 @@ const rankText = (n: number) => (n > 20 ? '20+' : String(n));
 
 export type InsightChange = { label: string; from: number; to: number; delta: number; unit: string; goodWhenUp: boolean };
 
+/** Your share of all top-3 spots checked. Older snapshots stored share vs the top 2 only, so it is recomputed from the slot counts. */
+export function sharePct(h: any) {
+    const total = Number(h?.totalSlots) || 0;
+    if (h?.share?.others == null && total) return Math.round(((Number(h?.youSlots) || 0) / total) * 100);
+    return Number(h?.share?.you) || 0;
+}
+
 /** Latest saved Map Pack check vs the one before it. */
 export function computeChanges(history: any[]): { changes: InsightChange[]; since: string | null } {
     const checks = (Array.isArray(history) ? history : []).filter((h) => h?.share);
@@ -783,23 +790,62 @@ export function computeChanges(history: any[]): { changes: InsightChange[]; sinc
         since: prev.createdAt || null,
         changes: [
             item('Map Pack spots you hold', Number(prev.youSlots) || 0, Number(cur.youSlots) || 0, '', true),
-            item('Your Map Pack share', Number(prev.share?.you) || 0, Number(cur.share?.you) || 0, '%', true),
+            item('Your Map Pack share', sharePct(prev), sharePct(cur), '%', true),
             item('Top competitor reviews', topReviews(prev), topReviews(cur), '', false)
         ]
     };
 }
 
+// Same key the Reviews page uses for replies saved from the app (ReviewsAndQA.tsx hashKey).
+function reviewKey(author: string, text: string) {
+    const s = `${author}|${text}`;
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return `g:${(h >>> 0).toString(36)}`;
+}
+
+/** Google reviews (synced list first, else the profile sample) with whether the owner has replied. */
+export function reviewsWithReplies(business: any, stats: any): Array<{ author: string; rating: number; text: string; replied: boolean }> {
+    const synced: any[] = Array.isArray(stats?.googleReviews?.items) ? stats.googleReviews.items : [];
+    const source: any[] = synced.length ? synced : Array.isArray(business?.reviews) ? business.reviews : [];
+    const saved = stats?.reviewReplies || {};
+    return source.map((r) => {
+        const author = String(r?.author || r?.author_name || '');
+        const text = String(r?.text || '');
+        return {
+            author,
+            rating: Number(r?.rating) || 0,
+            text,
+            replied: Boolean(String(r?.ownerReply || '').trim() || saved[reviewKey(author, text)]?.text)
+        };
+    });
+}
+
+/** Average review count of the competitors in the latest Map Pack results (one entry per business). */
+function rivalAverage(stats: any) {
+    const seen = new Map<string, { name: string; reviews: number }>();
+    for (const p of Array.isArray(stats?.aiInsights?.packs) ? stats.aiInsights.packs : []) {
+        for (const r of p?.top3 || []) {
+            if (r?.isYou || !r?.name) continue;
+            seen.set(norm(r.name), { name: String(r.name), reviews: Number(r.reviews) || 0 });
+        }
+    }
+    const list = [...seen.values()];
+    if (!list.length) return null;
+    return { avg: Math.round(list.reduce((s, r) => s + r.reviews, 0) / list.length), count: list.length };
+}
+
 export function buildActions(business: any, stats: any, now = new Date()): InsightAction[] {
     const out: InsightAction[] = [];
-    const reviews: any[] = Array.isArray(business?.reviews) ? business.reviews : [];
-    const low = reviews.filter((r) => Number(r?.rating) > 0 && Number(r.rating) <= 3).length;
+    const reviews = reviewsWithReplies(business, stats);
+    const low = reviews.filter((r) => r.rating > 0 && r.rating <= 3 && !r.replied).length;
     const replyRate = Number(stats?.reviewResponseRate) || 0;
     if (low > 0) {
         out.push({
             id: 'low-reviews',
-            title: `Respond to ${low} low-rated review${low === 1 ? '' : 's'}`,
-            desc: 'Timely, polite replies limit the damage to your local ranking. AI drafted responses are ready.',
-            cta: 'Review Drafts',
+            title: `Reply to ${low} unanswered low-rated review${low === 1 ? '' : 's'}`,
+            desc: 'A calm, helpful reply shows future customers you fix problems. Use AI Draft Reply to write each response in seconds.',
+            cta: 'Reply to Reviews',
             to: '/reviews',
             icon: 'review',
             weight: 100
@@ -834,7 +880,7 @@ export function buildActions(business: any, stats: any, now = new Date()): Insig
             id: 'holiday-hours',
             title: 'Update holiday business hours',
             desc: `${upcoming.name} is in ${upcoming.days} day${upcoming.days === 1 ? '' : 's'}. Set special hours so Google shows the right times.`,
-            cta: 'Sync Hours',
+            cta: 'Set Holiday Hours',
             to: '/profile',
             icon: 'clock',
             weight: 80
@@ -907,16 +953,19 @@ export function buildActions(business: any, stats: any, now = new Date()): Insig
         });
     }
 
-    // Review gap to the strongest competitor in the latest Map Pack check.
-    const rivals = (Array.isArray(stats?.aiInsights?.packs) ? stats.aiInsights.packs : []).flatMap((p: any) => (p?.top3 || []).filter((r: any) => !r?.isYou));
-    const rival = rivals.sort((a: any, b: any) => (Number(b?.reviews) || 0) - (Number(a?.reviews) || 0))[0];
+    // Review gap to the average Map Pack competitor (not the biggest chain), at a steady pace Google's filters accept.
+    const rivals = rivalAverage(stats);
     const myReviews = Number(business?.reviewsCount) || 0;
-    const gap = rival ? (Number(rival.reviews) || 0) - myReviews : 0;
+    const gap = rivals ? rivals.avg - myReviews : 0;
     if (gap > 0) {
+        const perWeek = Math.ceil(gap / 26);
         out.push({
             id: 'review-gap',
-            title: `Close the review gap with ${rival.name}`,
-            desc: `${rival.name} has ${gap.toLocaleString()} more Google reviews than you. About ${Math.max(1, Math.ceil(gap / 12))} new reviews a week would close it in roughly 3 months.`,
+            title: 'Close the review gap with the Map Pack',
+            desc:
+                perWeek <= 10
+                    ? `The businesses in your Map Pack average ${rivals!.avg.toLocaleString()} Google reviews; you have ${myReviews.toLocaleString()}. About ${perWeek} new review${perWeek === 1 ? '' : 's'} a week would close the gap in 6 months.`
+                    : `The businesses in your Map Pack average ${rivals!.avg.toLocaleString()} Google reviews; you have ${myReviews.toLocaleString()}. Ask every happy customer and aim for a steady 5–10 new reviews a week. Sudden spikes can be filtered by Google.`,
             cta: 'Get More Reviews',
             to: '/reviews',
             icon: 'gap',
@@ -926,7 +975,7 @@ export function buildActions(business: any, stats: any, now = new Date()): Insig
     return out.sort((a, b) => b.weight - a.weight).slice(0, 8);
 }
 
-export type PackRow = { title: string; reviews: number; rating: number };
+export type PackRow = { title: string; reviews: number; rating: number; placeId?: string; category?: string };
 
 export async function fetchPack(keyword: string, business: KeywordBusiness): Promise<PackRow[]> {
     const where =
@@ -942,7 +991,9 @@ export async function fetchPack(keyword: string, business: KeywordBusiness): Pro
     return items.slice(0, 3).map((i: any) => ({
         title: String(i.title),
         reviews: Number(i?.rating?.votes_count) || 0,
-        rating: Number(i?.rating?.value) || 0
+        rating: Number(i?.rating?.value) || 0,
+        placeId: String(i?.place_id || ''),
+        category: String(i?.category || '')
     }));
 }
 
@@ -960,12 +1011,11 @@ export async function fetchTrends(keywords: string[], geo?: GeoHint) {
             const months = (Array.isArray(r.monthly_searches) ? r.monthly_searches : [])
                 .map((m: any) => ({ k: Number(m.year) * 100 + Number(m.month), v: Number(m.search_volume) || 0 }))
                 .sort((a: any, b: any) => b.k - a.k);
+            // Latest month vs the same month a year earlier, so seasonal swings are not read as growth.
             let trendPct: number | null = null;
-            if (months.length >= 4) {
-                const latest = months[0].v;
-                const prior = months.slice(1, 4).reduce((s: number, m: any) => s + m.v, 0) / 3;
-                if (prior > 0) trendPct = Math.round(((latest - prior) / prior) * 100);
-            }
+            const latest = months[0];
+            const lastYear = latest && months.find((m: any) => m.k === latest.k - 100);
+            if (latest && lastYear && lastYear.v > 0) trendPct = Math.round(((latest.v - lastYear.v) / lastYear.v) * 100);
             out.push({ keyword: String(r.keyword), volume: Number(r.search_volume) || 0, trendPct });
         }
     } catch (err: any) {
@@ -996,40 +1046,47 @@ export function summarizeMarket(
         );
     }
 
+    // Match on Google's place ID; fall back to the name only when either ID is missing.
     const me = norm(business.name || '');
-    const isMe = (title: string) => {
-        const t = norm(title);
-        return Boolean(me && t && (t === me || t.includes(me) || me.includes(t)));
+    const myPlace = String(business.placeId || '');
+    const isMe = (row: PackRow) => {
+        if (myPlace && row.placeId) return row.placeId === myPlace;
+        const t = norm(row.title);
+        if (!me || !t) return false;
+        const [short, long] = t.length < me.length ? [t, me] : [me, t];
+        return t === me || (short.length >= 8 && long.includes(short));
     };
     let you = 0;
-    const comps = new Map<string, { name: string; slots: number; reviews: number }>();
+    const comps = new Map<string, { name: string; slots: number; reviews: number; rating: number; category: string }>();
     for (const pack of packs) {
         for (const row of pack) {
-            if (isMe(row.title)) {
+            if (isMe(row)) {
                 you += 1;
                 continue;
             }
-            const cur = comps.get(norm(row.title)) || { name: row.title, slots: 0, reviews: 0 };
+            const id = row.placeId || norm(row.title);
+            const cur = comps.get(id) || { name: row.title, slots: 0, reviews: 0, rating: 0, category: '' };
             cur.slots += 1;
             cur.reviews = Math.max(cur.reviews, row.reviews);
-            comps.set(norm(row.title), cur);
+            cur.rating = row.rating || cur.rating;
+            cur.category = row.category || cur.category;
+            comps.set(id, cur);
         }
     }
-    const ranked = [...comps.values()].sort((a, b) => b.slots - a.slots);
+    const ranked = [...comps.values()].sort((a, b) => b.slots - a.slots || b.reviews - a.reviews);
     const [a, b] = [ranked[0], ranked[1]];
-    const total = you + (a?.slots || 0) + (b?.slots || 0);
-    const pct = (n: number) => (total ? Math.round((n / total) * 100) : 0);
-    const share = total
-        ? {
-              you: pct(you),
-              compA: { name: a?.name || '', pct: pct(a?.slots || 0) },
-              compB: { name: b?.name || '', pct: pct(b?.slots || 0) }
-          }
-        : null;
+    // Share of every top-3 spot checked, so "you" is never inflated by leaving other businesses out.
+    const pct = (n: number) => Math.round((n / slotsChecked) * 100);
+    const share = {
+        you: pct(you),
+        compA: { name: a?.name || '', pct: pct(a?.slots || 0) },
+        compB: { name: b?.name || '', pct: pct(b?.slots || 0) },
+        others: Math.max(0, 100 - pct(you) - pct(a?.slots || 0) - pct(b?.slots || 0))
+    };
 
     const packView = keywords.map((keyword, i) => ({
         keyword,
-        top3: packs[i].map((r) => ({ name: r.title, reviews: r.reviews, rating: r.rating, isYou: isMe(r.title) }))
+        top3: packs[i].map((r) => ({ name: r.title, reviews: r.reviews, rating: r.rating, category: r.category || '', isYou: isMe(r) }))
     }));
 
     return {
@@ -1067,7 +1124,7 @@ export function marketOpportunities(business: any, market: Market) {
     const out: string[] = [];
     const rising = [...market.trendRows].filter((t) => t.trendPct != null && t.trendPct >= 10 && t.volume > 0).sort((x, y) => (y.trendPct || 0) - (x.trendPct || 0))[0];
     const biggest = [...market.trendRows].sort((x, y) => y.volume - x.volume)[0];
-    if (rising) out.push(`"${rising.keyword}" searches up ${rising.trendPct}% recently (${countryName(business as any)}, ${rising.volume.toLocaleString()}/mo).`);
+    if (rising) out.push(`"${rising.keyword}" searches are up ${rising.trendPct}% on the same month last year (${countryName(business as any)}, ${rising.volume.toLocaleString()}/mo).`);
     else if (biggest && biggest.volume > 0) out.push(`"${biggest.keyword}" gets about ${biggest.volume.toLocaleString()} searches a month in ${countryName(business as any)}.`);
 
     const top = market.topCompetitors[0];
@@ -1077,14 +1134,82 @@ export function marketOpportunities(business: any, market: Market) {
     return out.slice(0, 2);
 }
 
-export function strategyPrompt(business: any, market: Market, stats: any, tracker?: TrackerSummary) {
-    return `You are a local SEO strategist. Business: "${business.name}" (${business.category || 'local business'}) at ${business.address || 'n/a'}.
-Real data (do not invent other numbers):
-- Keyword volumes/trend (${countryName(business)}): ${JSON.stringify(market.trendRows)}
-- Map Pack share across these keywords: ${JSON.stringify(market.share)}
-${tracker && tracker.checked ? `- Tracked keyword ranks (Google Maps, 1 = best, >20 = not found): ${JSON.stringify(tracker.rows.slice(0, 8))}\n` : ''}- Rating ${business.rating ?? 'n/a'} from ${business.reviewsCount || 0} reviews; review reply rate ${stats.reviewResponseRate || 0}%; photos ${stats.photoCount || 0}; weekly posts ${stats.weeklyPosts || 0}.
-Write ONE concrete growth recommendation (max 230 characters) the owner can apply to their Google Business Profile this week, naming a specific keyword from the data. Only cite numbers present above.
-Return JSON only: {"recommendation":"","keyword":""}`;
+export const REPORT_AREAS = ['reviews', 'profile', 'category', 'photos', 'posts', 'keywords', 'website', 'citations'] as const;
+export type ReportArea = (typeof REPORT_AREAS)[number];
+
+export type InsightReport = {
+    summary: string;
+    actions: Array<{ title: string; why: string; area: ReportArea; priority: 'high' | 'medium' | 'low' }>;
+    competitors: Array<{ name: string; whyAhead: string }>;
+    reviews: { praise: string[]; complaints: string[]; keywords: string[] };
+    keywords: Array<{ keyword: string; reason: string }>;
+    plan: string[];
+};
+
+/** One Gemini call that writes the whole AI report from real data only. */
+export function reportPrompt(business: any, market: Market, stats: any, tracker?: TrackerSummary) {
+    const reviews = reviewsWithReplies(business, stats)
+        .filter((r) => r.text.trim())
+        .slice(0, 20)
+        .map((r) => ({ rating: r.rating, text: r.text.slice(0, 220), replied: r.replied }));
+    const competitors = market.topCompetitors.map((c) => ({ name: c.name, category: c.category, mapPackSpots: c.slots, reviews: c.reviews, rating: c.rating }));
+    return `You are a senior local SEO consultant writing a short report for a business owner. Plain English, no jargon, no markdown.
+Business: "${business.name}", primary category "${business.category || 'n/a'}", address ${business.address || 'n/a'}, website ${business.website || 'none'}.
+Real data (never invent numbers, names or facts that are not below):
+- Google Maps top 3 for ${market.packs.length} keywords, checked from the business location: ${JSON.stringify(market.packs.map((p) => ({ keyword: p.keyword, top3: p.top3.map((r) => (r.isYou ? 'YOU' : `${r.name} (${r.category || 'n/a'}, ${r.rating}★, ${r.reviews} reviews)`)) })))}
+- You hold ${market.youSlots} of ${market.packSlotsChecked} top-3 spots (${market.share?.you ?? 0}%).
+- Strongest competitors: ${JSON.stringify(competitors)}
+- Keyword search volume and change vs same month last year (${countryName(business)}): ${JSON.stringify(market.trendRows)}
+${tracker && tracker.checked ? `- Tracked keyword ranks (Google Maps, 1 = best, >20 = not found; previous = check before): ${JSON.stringify(tracker.rows.slice(0, 10))}\n` : ''}- Profile: rating ${business.rating ?? 'n/a'} from ${business.reviewsCount || 0} reviews; reply rate ${stats.reviewResponseRate || 0}%; photos ${stats.photoCount || 0}; posts this week ${stats.weeklyPosts || 0}; profile ${stats.completenessScore || 0}% complete; hours ${String(business.hours || '').trim() ? 'set' : 'missing'}.
+- Recent Google reviews: ${JSON.stringify(reviews)}
+Local ranking factors, most important first: primary category match, relevance of services/description to the keyword, distance, review count/rating/recency and keywords inside reviews, website pages for each service and town, consistent name/address/phone across directories. Posts and photos help conversion more than ranking.
+Return JSON only, this shape:
+{"summary":"2-3 sentences on where the business stands in its local market and the biggest reason",
+"actions":[{"title":"short imperative","why":"one sentence citing the data","area":"one of ${REPORT_AREAS.join('|')}","priority":"high|medium|low"}],
+"competitors":[{"name":"exact competitor name from the data","whyAhead":"one sentence: what they have that you lack, from the data"}],
+"reviews":{"praise":["what customers like"],"complaints":["what customers dislike"],"keywords":["service words customers use"]},
+"keywords":[{"keyword":"a keyword from the data","reason":"one sentence why to target it next"}],
+"recommendation":"the single most important change this week, max 230 characters, naming a keyword",
+"keyword":"that keyword",
+"plan":["this week's steps, in order"]}
+Limits: 3-5 actions sorted by impact, up to 3 competitors, up to 3 items per review list (empty lists if there are no reviews), up to 3 keywords, 3-4 plan steps.`;
+}
+
+const clip = (v: unknown, n: number) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+const clipList = (v: unknown, max: number, n: number) => (Array.isArray(v) ? v.map((x) => clip(x, n)).filter(Boolean).slice(0, max) : []);
+
+/** Keeps only well-formed parts of the AI report; returns null when nothing usable came back. */
+export function normalizeReport(data: any, market: Market): InsightReport | null {
+    if (!data || typeof data !== 'object') return null;
+    const names = new Set(market.topCompetitors.map((c) => norm(c.name)));
+    const keywords = new Set([...market.keywords, ...market.trendRows.map((t) => t.keyword)].map((k) => k.toLowerCase()));
+    const report: InsightReport = {
+        summary: clip(data.summary, 600),
+        actions: (Array.isArray(data.actions) ? data.actions : [])
+            .map((a: any) => ({
+                title: clip(a?.title, 120),
+                why: clip(a?.why, 300),
+                area: (REPORT_AREAS as readonly string[]).includes(a?.area) ? a.area : 'profile',
+                priority: ['high', 'medium', 'low'].includes(a?.priority) ? a.priority : 'medium'
+            }))
+            .filter((a: any) => a.title)
+            .slice(0, 5),
+        competitors: (Array.isArray(data.competitors) ? data.competitors : [])
+            .map((c: any) => ({ name: clip(c?.name, 120), whyAhead: clip(c?.whyAhead, 300) }))
+            .filter((c: any) => c.name && c.whyAhead && names.has(norm(c.name)))
+            .slice(0, 3),
+        reviews: {
+            praise: clipList(data.reviews?.praise, 3, 160),
+            complaints: clipList(data.reviews?.complaints, 3, 160),
+            keywords: clipList(data.reviews?.keywords, 6, 40)
+        },
+        keywords: (Array.isArray(data.keywords) ? data.keywords : [])
+            .map((k: any) => ({ keyword: clip(k?.keyword, 120), reason: clip(k?.reason, 300) }))
+            .filter((k: any) => k.keyword && k.reason && keywords.has(k.keyword.toLowerCase()))
+            .slice(0, 3),
+        plan: clipList(data.plan, 4, 240)
+    };
+    return report.summary || report.actions.length ? report : null;
 }
 
 export function fallbackRecommendation(market: Market) {

@@ -86,7 +86,8 @@ import {
     fallbackRecommendation,
     marketOpportunities,
     marketProblems,
-    strategyPrompt,
+    reportPrompt,
+    normalizeReport,
     weekStart as insightsWeekStart
 } from './lib/aiInsights';
 import {
@@ -131,6 +132,7 @@ import { detectServices } from './lib/serviceDetect';
 import { appendPoint, checkPrompts, cleanPrompt, pointFromEntries, suggestPrompts, type TrackedPrompt } from './lib/llmTracker';
 import { cachedAnswer, putAnswer, setAnswerPeriod, type StoredAnswer } from './lib/llmAnswers';
 import { CitationScanError,collectCitationScan, startCitationScan } from './lib/dataForSeoCitations';
+import { brightLocalConfigured, collectBrightLocalScan, startBrightLocalScan } from './lib/brightLocalCitations';
 
 dotenv.config({ override: true });
 
@@ -2593,7 +2595,11 @@ function matchCitationRows(citations: any[], business: { name?: string; address?
             url,
             businessName,
             address,
-            phone
+            phone,
+            // Extra listing details only BrightLocal returns.
+            ...(row?.claimed != null ? { claimed: Boolean(row.claimed) } : {}),
+            ...(row?.rating != null ? { rating: Number(row.rating) } : {}),
+            ...(row?.reviewCount != null ? { reviewCount: Number(row.reviewCount) } : {})
         };
         if (phoneCompared && !samePhone) {
             return { ...base, status: 'mismatch', note: 'Phone on this listing does not match' };
@@ -2664,19 +2670,39 @@ app.get('/api/ai/citations', requireAuth, hydrateOrgFromDb, requireFeature('loca
     res.json({ ...saved, history });
 });
 
+app.delete('/api/ai/citations/history', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
+    const id = String(req.query.scannedAt || '');
+    const history = citationHistoryList().filter((item) => item?.scannedAt !== id);
+    dashboardState.citationHistory = history;
+    dashboardState.citationAudit = history[0] || null;
+    await saveOrgToDb(req);
+    const saved = history[0];
+    if (!saved || !Array.isArray(saved.citations)) {
+        return res.json({ citations: [], found: 0, missing: 0, mismatch: 0, scannedAt: null, history });
+    }
+    res.json({ ...saved, history });
+});
+
 app.post('/api/ai/citations', requireAuth, hydrateOrgFromDb, requireFeature('local_presence'), async (req, res) => {
     if (!requireBusiness(res)) return;
 
     try {
-        const pending = dashboardState.citationPending;
+        const pending: any = dashboardState.citationPending;
         const pendingAge = pending?.startedAt ? Date.now() - new Date(pending.startedAt).getTime() : 0;
-        const pendingFresh = Boolean(pending?.mapsTaskId && pending?.organicTaskId && pendingAge < 3 * 60 * 1000);
+        const pendingFresh =
+            pending?.provider === 'brightlocal'
+                ? Boolean(pending.requests?.length && pendingAge < 4 * 60 * 1000)
+                : Boolean(pending?.mapsTaskId && pending?.organicTaskId && pendingAge < 3 * 60 * 1000);
         if (!pendingFresh) {
             // A new scan is charged once; the polling calls that follow are free.
+            // BrightLocal is used when its key is set; DataForSEO is the fallback.
             const creditRef = `citations:${randomUUID()}`;
             await spend(req, 'citations', CREDIT_COSTS.citations, creditRef);
             try {
-                dashboardState.citationPending = { ...(await startCitationScan(connectedBusiness)), creditRef } as any;
+                const started = brightLocalConfigured()
+                    ? await startBrightLocalScan(connectedBusiness)
+                    : await startCitationScan(connectedBusiness);
+                dashboardState.citationPending = { ...started, creditRef } as any;
             } catch (startErr) {
                 await refund(req, 'citations', CREDIT_COSTS.citations, creditRef, 'could not start').catch(() => undefined);
                 throw startErr;
@@ -2684,7 +2710,19 @@ app.post('/api/ai/citations', requireAuth, hydrateOrgFromDb, requireFeature('loc
             await saveOrgToDb(req);
             return res.json({ retry: true, retryAfterSeconds: 4 });
         }
-        const collected = await collectCitationScan(dashboardState.citationPending, connectedBusiness);
+        let collected: { ready: boolean; citations?: any[]; source?: string };
+        if (pending.provider === 'brightlocal') {
+            const polled = await collectBrightLocalScan(pending);
+            if (!polled.ready) {
+                // Keep finished directories so later polls only check the rest.
+                dashboardState.citationPending = { ...polled.pending, creditRef: pending.creditRef } as any;
+                await saveOrgToDb(req);
+                return res.json({ retry: true, retryAfterSeconds: 6 });
+            }
+            collected = polled;
+        } else {
+            collected = await collectCitationScan(pending, connectedBusiness);
+        }
         if (!collected.ready) {
             return res.json({ retry: true, retryAfterSeconds: 6 });
         }
@@ -2702,9 +2740,10 @@ app.post('/api/ai/citations', requireAuth, hydrateOrgFromDb, requireFeature('loc
             // Keep the error response even if the pending scan could not be cleared.
         }
         const status = err instanceof CitationScanError ? err.status : 502;
-        console.warn('[citations] DataForSEO search failed:', errMessage(err));
+        console.warn('[citations] directory search failed:', errMessage(err));
+        // Only setup messages (like a missing business name) are shown; provider errors stay in the log.
         return res.status(status).json({
-            error: errMessage(err) || 'Citation search did not finish. Run it again.'
+            error: status === 400 ? errMessage(err) : 'Citation search did not finish. Your credits were refunded. Run it again.'
         });
     }
 });
@@ -3126,6 +3165,8 @@ function insightsPayload(dash: any, trackerKeywords: TrackerKeyword[] = trackerL
         history,
         ...computeChanges(history),
         trackerMoves: summarizeTracker(trackerKeywords).moves,
+        trackerRows: summarizeTracker(trackerKeywords).rows.slice(0, 10),
+        business: { name: connectedBusiness.name || '', address: connectedBusiness.address || '', category: connectedBusiness.category || '' },
         cost: CREDIT_COSTS.aiInsights,
         cooldownHours: INSIGHTS_COOLDOWN_HOURS,
         nextCheckAt: cooldownEnds(dash.aiInsights?.createdAt, INSIGHTS_COOLDOWN_HOURS)
@@ -3252,20 +3293,24 @@ app.post('/api/ai/insights/finish', ...growthReportingGate, async (req, res) => 
         const errors: string[] = Array.isArray(req.body?.errors) ? req.body.errors.map((e: any) => String(e).slice(0, 200)) : [];
         const market = summarizeMarket(connectedBusiness as any, plan, packs, trendRows, errors);
 
-        let strategy = fallbackRecommendation(market);
+        // One Gemini call writes the AI report (summary, actions, competitors, reviews, keywords, plan) from the real data above.
+        let strategy: { recommendation: string; keyword: string; source: 'ai' | 'rule' } = { ...fallbackRecommendation(market), source: 'rule' };
+        let report: ReturnType<typeof normalizeReport> = null;
         if (aiClient) {
             try {
                 const data = parseJsonFromText(
-                    await withTimeout(generateText(strategyPrompt(connectedBusiness, market, dashboardState, summarizeTracker(trackerForPrompt))), 12000, 'ai-insights strategy')
+                    await withTimeout(generateText(reportPrompt(connectedBusiness, market, dash, summarizeTracker(trackerForPrompt))), 20000, 'ai-insights report')
                 );
+                report = normalizeReport(data, market);
                 if (data?.recommendation) {
                     strategy = {
                         recommendation: String(data.recommendation).slice(0, 300),
-                        keyword: String(data.keyword || strategy.keyword).slice(0, 120)
+                        keyword: String(data.keyword || strategy.keyword).slice(0, 120),
+                        source: 'ai'
                     };
                 }
             } catch (err: any) {
-                console.warn('[ai-insights] strategy fell back:', errMessage(err));
+                console.warn('[ai-insights] report fell back:', errMessage(err));
             }
         }
 
@@ -3275,6 +3320,10 @@ app.post('/api/ai/insights/finish', ...growthReportingGate, async (req, res) => 
             weekStart: insightsWeekStart(now),
             recommendation: strategy.recommendation,
             keyword: strategy.keyword,
+            recommendationSource: strategy.source,
+            report,
+            competitors: market.topCompetitors,
+            trendRows: market.trendRows,
             opportunities: marketOpportunities(connectedBusiness, market),
             share: market.share,
             packs: market.packs,

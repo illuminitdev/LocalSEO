@@ -21,6 +21,7 @@ import { useToast } from '../../shared/Toast';
 import { useCredits } from '../../shared/CreditsContext';
 import { getPageCache, setPageCache } from '../../shared/pageCache';
 import HoursPicker from './HoursPicker';
+import { InfoTip } from '../../shared/InfoTip';
 
 const REQUIRED_FIELDS = ['name', 'category', 'address', 'phone'] as const;
 
@@ -250,13 +251,9 @@ export default function ProfileAudit() {
                 <button
                     onClick={handleAudit}
                     disabled={isAuditing}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-xs font-bold transition-colors disabled:opacity-70 shadow-xs cursor-pointer shrink-0"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] rounded-xl text-xs font-bold transition-colors disabled:opacity-70 shadow-xs cursor-pointer shrink-0"
                 >
-                    {isAuditing ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
-                    ) : (
-                        <BadgeCheck className="w-4 h-4 text-emerald-400" />
-                    )}
+                    {isAuditing ? <Loader2 className="w-4 h-4 animate-spin" /> : <BadgeCheck className="w-4 h-4" />}
                     {isAuditing ? 'Analyzing Profile...' : 'Run AI audit'}
                 </button>
             </div>
@@ -331,7 +328,7 @@ export default function ProfileAudit() {
                                 <MapPin className="w-4 h-4 text-[var(--brand-primary)]" />
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">ADDRESS</p>
+                                <p className="flex items-center gap-1 text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">ADDRESS <InfoTip info={{ title: 'Address', body: ['Your business address exactly as it appears on Google. Every tool uses it as the centre point for local searches.', 'Use the same format everywhere online (website, directories) so Google can match your listings.'] }} /></p>
                                 <p className="text-xs font-semibold text-[#0F172A] leading-relaxed break-words">
                                     {formData.address || 'Not set'}
                                 </p>
@@ -365,7 +362,7 @@ export default function ProfileAudit() {
                                 <Clock className="w-4 h-4 text-[var(--brand-primary)]" />
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2">HOURS</p>
+                                <p className="flex items-center gap-1 text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2">HOURS <InfoTip info={{ title: 'Hours', body: ['Your opening hours. Google can show businesses that are open at the time of the search higher.', 'Set special hours for bank holidays so customers never arrive to a closed door.'] }} /></p>
                                 <p className="text-xs font-semibold text-[#0F172A] whitespace-pre-wrap">
                                     {formData.hours || 'Not set'}
                                 </p>
@@ -378,7 +375,7 @@ export default function ProfileAudit() {
                                 <Globe className="w-4 h-4 text-[var(--brand-primary)]" />
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">WEBSITE</p>
+                                <p className="flex items-center gap-1 text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">WEBSITE <InfoTip info={{ title: 'Website', body: ['The website linked from your Google profile. Google reads it to understand your services and location.', 'Link to a page that clearly names your services and town.'] }} /></p>
                                 {formData.website ? (
                                     <a
                                         href={formData.website}
@@ -402,7 +399,7 @@ export default function ProfileAudit() {
                             <Tag className="w-4 h-4 text-[var(--brand-primary)]" />
                         </div>
                         <div className="flex-1 min-w-0">
-                            <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2">ATTRIBUTES</p>
+                            <p className="flex items-center gap-1 text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2">ATTRIBUTES <InfoTip info={{ title: 'Attributes', body: ['Extra facts about your business and services, such as wheelchair access, free consultation or the services you offer.', 'They help Google match you to more specific searches, and the AI tools use them to write posts and check AI answers.'] }} /></p>
                             {attributeList.length > 0 ? (
                                 <div className="flex flex-wrap gap-2">
                                     {attributeList.map((attr, idx) => (
@@ -596,6 +593,7 @@ export default function ProfileAudit() {
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
                             <BadgeCheck className="w-4 h-4 text-[var(--brand-primary)]" /> Audit Results
+                            <InfoTip info={{ title: 'Audit results', body: ['An AI review of your business profile. The Optimization Score (out of 100) shows how complete and well written it is.', 'Use the suggested description and recommendations below to raise the score.'] }} />
                             {auditResult.createdAt && (
                                 <span className="text-[11px] font-medium text-gray-400">
                                     Last run {new Date(auditResult.createdAt).toLocaleString()}
@@ -615,6 +613,7 @@ export default function ProfileAudit() {
                             <div>
                                 <h3 className="text-xs font-bold text-[#0F172A] mb-1 flex items-center gap-1.5">
                                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> AI Suggested Description
+                                    <InfoTip info={{ title: 'AI suggested description', body: ['A rewritten business description that names your main services and area in natural language.', 'Click Apply & edit to review it before saving. Avoid stuffing keywords; Google prefers clear, honest descriptions.'] }} />
                                 </h3>
                                 <div className="bg-white p-3.5 rounded-xl border border-[#E2E8F0] text-xs text-gray-700 leading-relaxed relative group">
                                     <p className="pr-20">{auditResult.optimizedDescription}</p>
@@ -632,6 +631,7 @@ export default function ProfileAudit() {
                             <div>
                                 <h3 className="text-xs font-bold text-[#0F172A] mb-2 flex items-center gap-1.5">
                                     <ShieldAlert className="w-3.5 h-3.5 text-[var(--brand-primary)]" /> Actionable Recommendations
+                                    <InfoTip info={{ title: 'Actionable recommendations', body: ['Specific changes the audit found that would improve your profile, such as missing details or weak wording.', 'Work through them, then run the audit again to see the score change.'] }} />
                                 </h3>
                                 <ul className="space-y-1.5">
                                     {auditResult.recommendations.map((rec: string, i: number) => (

@@ -2,11 +2,30 @@
 
 ## What it does
 
-Overview page with prioritized tasks, an AI growth recommendation and a weekly Map Pack comparison against competitors. (LLM answer tracking lives on its own page: see [llm-visibility.md](llm-visibility.md).)
+A report page: one click checks who holds the Google Maps top 3 for 5 keywords, then **one Gemini call writes the report** from that real data. **Export** (top right, next to History and Refresh) downloads the report (`#insights-content`; buttons and links marked `.pdf-hide` are left out). (LLM answer tracking lives on its own page: see [llm-visibility.md](llm-visibility.md).)
 
-- **Prioritized Actions** — top 3 tasks worked out from stored data (no external calls): respond to low-rated reviews (≤3★ in the saved reviews) or reply rate under 80%, add business hours / update holiday hours (UK bank holiday within 30 days), upload photos (<20), publish a post (none this week), complete the profile (<90%). Each links to the page that fixes it.
-- **Growth Strategy** — AI recommendation (Gemini, from real keyword volumes and Map Pack data; falls back to a rule-based line) with an "Apply Optimization" button (opens Posts), plus **Market Opportunities** (rising keyword searches from DataForSEO monthly trends; strongest Map Pack competitor and review gap).
-- **Visibility Share vs. Competitors** — stacked bars for the last 4 weeks: share of Map Pack (top 3) slots held by You vs the two strongest competitors across 5 keywords (tracked keywords first, then category + town suggestions). One snapshot is saved each time "Generate strategy" / "Refresh" is clicked; the latest snapshot per week is shown, so the chart fills in as it is refreshed weekly.
+Report sections, in order (situation → evidence → plan):
+
+1. **Header**: business name, category, address, report date, keywords checked.
+2. **Summary**: AI summary (falls back to the rule-based problems), a pointer to the Action plan, and tiles: top-3 spots held, Map Pack share, top competitor reviews, tracked keywords up/down, each with the change since the previous check.
+3. **Map Pack share by week** (graph): stacked bars for the last 4 weeks: You, the two strongest competitors, Others.
+4. **Keyword rank movement** (graph): previous vs latest Google Maps rank for each Visibility Tracker keyword (`trackerRows`). Hidden when nothing is tracked.
+5. **Who holds the top 3**: keyword × #1/#2/#3 table.
+6. **Competitor analysis**: up to 3 competitors with category, rating, reviews and spots, plus the AI's "why they are ahead". AI names not in the data are dropped.
+7. **What your customers say**: AI praise / complaints / words customers use, from the recent Google reviews.
+8. **Keyword opportunities**: search volume and change **vs the same month last year** (so seasonality is not read as growth), with the AI's reason for keywords it picks. AI keywords not in the data are dropped.
+9. **Action plan** (last, after the evidence): this week's recommendation and plan steps, then the 3–5 AI **priority actions** (`report.actions`: title, why, area, priority; each links to the page that fixes it via `AREA_LINKS`), then the rule-based **Profile checklist** (`buildActions`, Done / Dismiss). Without an AI report the checklist is the action list.
+
+Every section and summary tile has an (i) explainer (`client/src/shared/InfoTip.tsx`, texts in `INFO`).
+
+Accuracy rules:
+
+- **Share** is your part of **all** top-3 spots checked (`summarizeMarket`), not you vs the top 2 only. Snapshots saved before this change used the old method.
+- **You** are matched by Google place ID (`place_id` from the Maps results vs `connectedBusiness.placeId`); the name is used only when an ID is missing, and a partial name match needs 8+ characters.
+- **Low-rated review** action counts only reviews without an owner reply (synced `ownerReply` or a reply saved in the app, `reviewReplies`).
+- **Review gap** compares with the **average** Map Pack competitor, at a steady pace (gap ÷ 26 weeks; above 10 a week it advises 5–10 a week, since sudden spikes can be filtered).
+
+If Gemini fails or times out (20 s), the report still saves with the rule-based summary, checklist and recommendation (`recommendationSource: 'rule'`, `report: null`).
 
 Direction requests, calls and website clicks are not shown (no data source).
 
@@ -28,7 +47,7 @@ Plans: `local-growth`, `complete-growth-system`.
 | Method | Endpoint | Features | Purpose |
 |--------|----------|----------|---------|
 | `GET` | `/api/ai/insights` | `local_growth` + `reporting` | Live actions + latest strategy + snapshot history |
-| `POST` | `/api/ai/insights/plan`, `/pack`, `/trends`, `/finish` | The check runs as short requests: plan the 5 keywords, one Maps top-3 lookup per keyword (in parallel, retried once), search-volume trends, then `finish` builds the snapshot + Gemini recommendation and saves it (`aiInsights`, `aiInsightsHistory`, last 30) |
+| `POST` | `/api/ai/insights/plan`, `/pack`, `/trends`, `/finish` | The check runs as short requests: plan the 5 keywords, one Maps top-3 lookup per keyword (in parallel, retried once), search-volume trends, then `finish` builds the snapshot, asks Gemini for the report (`reportPrompt` → `normalizeReport`) and saves it (`aiInsights`, `aiInsightsHistory`, last 30) |
 
 All backend logic for AI Insights and LLM Visibility lives in `backend/lib/aiInsights.ts`; routes are in `backend/server.ts`.
 
@@ -37,23 +56,19 @@ All backend logic for AI Insights and LLM Visibility lives in `backend/lib/aiIns
 | API | Env | Role |
 |-----|-----|------|
 | DataForSEO (Maps SERP, Google Ads search volume) | `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD` | Map Pack share, keyword volume/trend |
-| Google Gemini | `GEMINI_API_KEY` | Growth recommendation |
+| Google Gemini | `GEMINI_API_KEY` | The written report (summary, actions, competitors, reviews, keywords, plan) |
 
 Each refresh bills 5 Maps SERP calls + 1 search-volume call on DataForSEO, so it runs on demand only.
 
-## Running the Map Pack check
+## Running the report
 
-Click **Run Map Pack check** (chart card) or **Generate strategy** (Growth Strategy card); both run the check described above. It takes up to ~30s. The page then shows:
+Click **Generate report** / **Refresh report** (top right). The check takes up to ~30s (progress shows on the button) and the report appears. Before the first run the page shows a short "how it works" card instead of the report; Export is disabled until there is a report.
 
-- the 4-week chart (this week's bar appears immediately; earlier weeks fill in as the check is run in later weeks),
-- a table of who holds the Map Pack top 3 for each of the 5 keywords (you highlighted),
-- "What this means for you": plain-English problems (not in the top 3, review gap vs the strongest competitor).
-
-If Google Maps returns nothing, or DataForSEO errors (login/balance/access), nothing is saved and the page shows the real error message instead of an empty chart.
+If Google Maps returns nothing or DataForSEO fails, nothing is saved, credits are refunded and the page shows a clean "No findings this time" message (no technical error text).
 
 ## History
 
-The Past Map Pack checks box shows the latest 5 runs. Each row has a delete (trash) icon: `DELETE /api/ai/insights/history?createdAt=...`.
+A **History (n)** button at the top right opens a popup with every saved check (date, spots held, share, change vs the check before). Clicking a row opens that check on the page and closes the popup; while an older check is open, a banner shows its date with a "Back to latest" button. Each row has a delete (trash) icon: `DELETE /api/ai/insights/history?createdAt=...`. The same popup (`client/src/shared/HistoryPanel.tsx`) is used on LLM Visibility and Citations (`DELETE /api/ai/citations/history?scannedAt=...`).
 
 ## Credits and cooldown
 

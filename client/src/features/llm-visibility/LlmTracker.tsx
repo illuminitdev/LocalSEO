@@ -4,6 +4,8 @@ import { apiGet, apiPost, cn } from '../../shared/utils';
 import { getPageCache, setPageCache } from '../../shared/pageCache';
 import { useServiceDetection } from '../../shared/useServiceDetection';
 import { LlmTabs } from './LlmVisibility';
+import { Tip } from '../visibility/VisibilityTracker';
+import { InfoTip, type InfoText } from '../../shared/InfoTip';
 
 type Platform = 'chatgpt' | 'claude' | 'perplexity';
 type PlatformResult = {
@@ -132,6 +134,33 @@ function ResponsePanel({ item, platform, businessName, onClose }: { item: Tracke
     );
 }
 
+/** Where a business is first named in an answer; tries the full name, then shorter versions ("Chequers Dental Clinic Basingstoke" → "Chequers Dental"). */
+function nameIndex(text: string, name: string) {
+    const t = text.toLowerCase();
+    const words = name.toLowerCase().replace(/[^\w&' ]+/g, ' ').split(/\s+/).filter(Boolean);
+    for (let n = words.length; n >= Math.min(2, words.length); n--) {
+        const i = t.indexOf(words.slice(0, n).join(' '));
+        if (i >= 0) return i;
+    }
+    return -1;
+}
+
+/**
+ * Ranks of one competitor and of you in a saved answer, by the order businesses are first named in the text
+ * (the same rule as your own position). null when the answer text is not saved or the names can't be found.
+ */
+function answerRanks(r: PlatformResult, competitor: string, businessName: string) {
+    if (!r.text) return null;
+    const spots = (r.competitors ?? []).map((n) => nameIndex(r.text as string, n));
+    const them = spots[(r.competitors ?? []).indexOf(competitor)];
+    if (them == null || them < 0) return null;
+    const you = r.mentioned && businessName ? nameIndex(r.text, businessName) : -1;
+    if (r.mentioned && you < 0) return null;
+    const all = [...spots.filter((i) => i >= 0), ...(you >= 0 ? [you] : [])];
+    const rankOf = (i: number) => all.filter((x) => x < i).length + 1;
+    return { them: rankOf(them), you: you >= 0 ? rankOf(you) : null };
+}
+
 /** Rank at the start of the window: last check on/before the cutoff, else the earliest check. */
 function previous(p: TrackedPrompt, days: number) {
     if (p.history.length < 2) return null;
@@ -160,10 +189,13 @@ function ChangeChip({ value }: { value: number | null }) {
     );
 }
 
-function StatCard({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: string }) {
+function StatCard({ label, value, hint, tone, info }: { label: string; value: string; hint?: string; tone?: string; info?: InfoText }) {
     return (
         <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">{label}</div>
+            <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                {label}
+                {info && <InfoTip info={info} />}
+            </div>
             <div className={cn('text-3xl font-black text-[#0F172A]', tone)}>{value}</div>
             {hint && <div className="text-xs text-slate-500 mt-1">{hint}</div>}
         </div>
@@ -463,16 +495,28 @@ export default function LlmTracker() {
     );
 
     // Businesses the AI answers name instead of you, counted over the latest check of every prompt.
+    // For each one, the prompts where they were named, on which platforms, and how you did in those same answers.
+    const businessName = info?.business.name || '';
     const competitors = useMemo(() => {
-        const counts = new Map<string, number>();
+        type Hit = { platform: Platform; you: PlatformResult; ranks: ReturnType<typeof answerRanks> };
+        const byName = new Map<string, { count: number; prompts: Map<string, Hit[]> }>();
         for (const p of prompts) {
             const last = p.history[p.history.length - 1];
-            for (const r of Object.values(last?.platforms ?? {})) {
-                for (const name of r?.competitors ?? []) counts.set(name, (counts.get(name) || 0) + 1);
+            for (const [platform, r] of Object.entries(last?.platforms ?? {}) as Array<[Platform, PlatformResult | undefined]>) {
+                for (const name of r?.competitors ?? []) {
+                    const entry = byName.get(name) || { count: 0, prompts: new Map() };
+                    entry.count += 1;
+                    const hit = { platform, you: r as PlatformResult, ranks: answerRanks(r as PlatformResult, name, businessName) };
+                    entry.prompts.set(p.prompt, [...(entry.prompts.get(p.prompt) || []), hit]);
+                    byName.set(name, entry);
+                }
             }
         }
-        return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
-    }, [prompts]);
+        return [...byName.entries()]
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 8)
+            .map(([name, e]) => ({ name, count: e.count, prompts: [...e.prompts.entries()].map(([prompt, hits]) => ({ prompt, hits })) }));
+    }, [prompts, businessName]);
 
     if (loading) {
         return (
@@ -524,14 +568,14 @@ export default function LlmTracker() {
             {error && <p className="mb-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5">{error}</p>}
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-                <StatCard label="Average rank" value={stats.avg == null ? '—' : `#${stats.avg.toFixed(1)}`} hint="Across prompts where you are named" tone={stats.avg == null ? '' : 'text-red-500'} />
-                <StatCard label="Prompts naming you" value={`${stats.named}/${stats.checked}`} hint="Of the prompts checked" />
-                <StatCard label="Best prompt" value={stats.best ? rankLabel(current(stats.best)) : '—'} hint={stats.best?.prompt} tone="text-emerald-600" />
+                <StatCard label="Average rank" info={{ title: 'Average rank', body: ['When AI assistants list businesses for your prompts, your average place in that list. #1 means you are named first.', 'Only prompts where you are named are counted.'] }} value={stats.avg == null ? '—' : `#${stats.avg.toFixed(1)}`} hint="Across prompts where you are named" tone={stats.avg == null ? '' : 'text-red-500'} />
+                <StatCard label="Prompts naming you" info={{ title: 'Prompts naming you', body: ['How many of your checked prompts got at least one AI answer that named your business.'] }} value={`${stats.named}/${stats.checked}`} hint="Of the prompts checked" />
+                <StatCard label="Best prompt" info={{ title: 'Best prompt', body: ['The prompt where AI ranks you highest right now. It shows what AI already associates you with.'] }} value={stats.best ? rankLabel(current(stats.best)) : '—'} hint={stats.best?.prompt} tone="text-emerald-600" />
             </div>
 
             <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm mb-6">
                 <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-sm font-bold text-[#0F172A]">Average rank over time</h2>
+                    <h2 className="flex items-center gap-1.5 text-sm font-bold text-[#0F172A]">Average rank over time <InfoTip info={{ title: 'Average rank over time', body: ['Your average position in AI answers each time your prompts were checked.', 'Green points mean your average rank improved since the check before, red means it got worse.'] }} /></h2>
                     <select
                         value={days}
                         onChange={(e) => setDays(Number(e.target.value))}
@@ -553,6 +597,9 @@ export default function LlmTracker() {
                             Your prompts{' '}
                             <span className={cn('font-medium', full ? 'text-red-500' : 'text-slate-400')}>
                                 · {prompts.length}/{max} used · {Math.max(0, max - prompts.length)} left
+                            </span>{' '}
+                            <span className="inline-flex align-middle">
+                                <InfoTip info={{ title: 'Your prompts', body: ['The questions you track. Each check asks every AI assistant the prompt and records whether and where it names you.', 'Your plan sets how many prompts you can track at once.'] }} />
                             </span>
                         </h2>
                         {full && (
@@ -599,7 +646,7 @@ export default function LlmTracker() {
                                     <th className="px-4 py-2.5 font-bold">Prompt</th>
                                     <th className="px-4 py-2.5 font-bold">Rank</th>
                                     <th className="px-4 py-2.5 font-bold">Change</th>
-                                    <th className="px-4 py-2.5 font-bold">Platforms</th>
+                                    <th className="px-4 py-2.5 font-bold"><span className="inline-flex items-center gap-1">Platforms <InfoTip info={{ title: 'Platforms', body: ['Which AI assistants named you for this prompt in the latest check.'] }} /></span></th>
                                     <th className="px-4 py-2.5 font-bold">Trend</th>
                                     <th className="px-2 py-2.5" />
                                 </tr>
@@ -686,6 +733,7 @@ export default function LlmTracker() {
                 <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
                     <h2 className="flex items-center gap-2 text-sm font-bold text-[#0F172A] mb-3">
                         <Trophy className="w-4 h-4 text-amber-500" /> Best prompts for you
+                        <InfoTip info={{ title: 'Best prompts for you', body: ['Your prompts where AI ranks you highest. Mention these services prominently on your website and profile to keep the lead.'] }} />
                     </h2>
                     {best.length === 0 ? (
                         <p className="text-xs text-slate-500">Check your prompts to see which ones get you named by AI assistants.</p>
@@ -706,6 +754,7 @@ export default function LlmTracker() {
                 <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
                     <h2 className="flex items-center gap-2 text-sm font-bold text-[#0F172A] mb-3">
                         <Sparkles className="w-4 h-4 text-blue-500" /> Suggested prompts
+                        <InfoTip info={{ title: 'Suggested prompts', body: ['Questions customers are likely to ask AI about your services and area, written without your business name.', 'Click one to start tracking it.'] }} />
                     </h2>
                     {(info?.suggestions.length ?? 0) === 0 ? (
                         <p className="text-xs text-slate-500">No more suggestions right now.</p>
@@ -733,15 +782,71 @@ export default function LlmTracker() {
                 <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm mt-4">
                     <h2 className="flex items-center gap-2 text-sm font-bold text-[#0F172A] mb-1">
                         <Users className="w-4 h-4 text-red-500" /> Who AI recommends instead of you
+                        <InfoTip info={{ title: 'Who AI recommends instead', body: ['Other businesses named in the AI answers to your prompts, and how many answers named each one.', 'Look at their reviews, website and listings to see what AI finds about them that it does not find about you.'] }} />
                     </h2>
-                    <p className="text-xs text-slate-500 mb-3">Businesses named in the latest answers, by how many platform answers mention them.</p>
+                    <p className="text-xs text-slate-500 mb-3">
+                        Businesses named in the latest answers, by how many platform answers mention them. Hover a name to see the prompts.
+                    </p>
                     <div className="flex flex-wrap gap-2">
-                        {competitors.map(([name, count]) => (
-                            <span key={name} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-50 text-red-600 text-xs font-bold">
-                                {name}
-                                <span className="px-1.5 rounded-full bg-white text-[10px]">{count}</span>
-                            </span>
-                        ))}
+                        {competitors.map((c) => {
+                            // Only answers where they beat you: named and you were not, or named before you.
+                            const replaced = c.prompts
+                                .map((p) => ({
+                                    prompt: p.prompt,
+                                    hits: p.hits.filter((h) => !h.you.mentioned || (h.ranks?.you != null && h.ranks.them < h.ranks.you))
+                                }))
+                                .filter((p) => p.hits.length);
+                            return (
+                                <Tip
+                                    key={c.name}
+                                    tone="bad"
+                                    width={340}
+                                    title={c.name}
+                                    text={
+                                        replaced.length ? (
+                                            <>
+                                                <p>
+                                                    Ahead of you for <strong className="text-red-600">{replaced.length}</strong> of your {stats.checked} checked prompt
+                                                    {stats.checked === 1 ? '' : 's'}.
+                                                </p>
+                                                <ul className="mt-2 space-y-1.5">
+                                                    {replaced.slice(0, 6).map((p) => (
+                                                        <li key={p.prompt} className="rounded-md bg-slate-50 px-2 py-1.5">
+                                                            <div className="font-semibold text-[#0F172A]">&ldquo;{p.prompt}&rdquo;</div>
+                                                            <div className="mt-1 space-y-0.5 text-[10px]">
+                                                                {p.hits.map((h) => (
+                                                                    <div key={h.platform} className="flex items-center gap-1.5">
+                                                                        <span className="w-16 shrink-0 text-slate-500">{PLATFORM_LABEL[h.platform]}</span>
+                                                                        <span className="px-1.5 py-0.5 rounded bg-white border border-red-200 text-red-600 font-bold">
+                                                                            Them {h.ranks ? `#${h.ranks.them}` : 'named'}
+                                                                        </span>
+                                                                        <span className="px-1.5 py-0.5 rounded bg-white border border-[#E2E8F0] text-slate-700 font-bold">
+                                                                            You {h.you.mentioned ? `#${h.ranks?.you ?? h.you.position}` : 'not named'}
+                                                                        </span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                                {replaced.length > 6 && <p className="mt-1.5 text-[10px] text-slate-400">+{replaced.length - 6} more prompts</p>}
+                                            </>
+                                        ) : (
+                                            <p>
+                                                Named in {c.prompts.length} of your prompts, and you were named in those same answers too
+                                                {c.prompts.every((p) => p.hits.every((h) => h.ranks)) ? ', ahead of them every time' : ''}. They did not take your place.
+                                            </p>
+                                        )
+                                    }
+                                    note={replaced.length ? 'Rank = the order businesses are named in the AI answer (#1 = named first).' : undefined}
+                                >
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-50 text-red-600 text-xs font-bold cursor-help">
+                                        {c.name}
+                                        <span className="px-1.5 rounded-full bg-white text-[10px]">{c.count}</span>
+                                    </span>
+                                </Tip>
+                            );
+                        })}
                     </div>
                 </div>
             )}

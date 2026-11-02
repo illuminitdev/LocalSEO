@@ -3,24 +3,26 @@ import { Link } from 'react-router-dom';
 import { getPageCache, setPageCache } from '../../shared/pageCache';
 import {
     LineChart,
-    Download,
     Loader2,
     Lightbulb,
     BookOpen,
     X,
     BadgeCheck,
     CheckCircle2,
-    Clock,
     MessageSquare,
     Smile,
     ShieldCheck,
     Bot,
     ArrowUpRight,
-    Trash2
+    ArrowUp,
+    ArrowDown,
+    ExternalLink
 } from 'lucide-react';
 import { apiDelete, apiGet, apiPost, cn, logDashboardActivity } from '../../shared/utils';
+import { HistoryButton, HistoryModal, ViewingOldBanner, historyDate } from '../../shared/HistoryPanel';
 import { useCredits } from '../../shared/CreditsContext';
 import { downloadElementAsPdf } from '../../shared/downloadElementAsPdf';
+import { InfoTip } from '../../shared/InfoTip';
 
 type Step = '' | 'asking' | 'analysing';
 
@@ -84,6 +86,7 @@ function ReportView({
                         <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-gray-500">
                             <Bot className="w-4 h-4 text-[var(--brand-primary)]" />
                             AI Share of Voice
+                            <InfoTip info={{ title: 'AI share of voice', body: ['Out of all the businesses AI assistants named when we asked local questions about your category, the share that were you.', 'Higher means AI tools recommend you more often than competitors. The badge shows the change since the last check.'] }} />
                         </div>
                         {sov.delta != null && (
                             <span className="px-2 py-0.5 rounded-full bg-slate-700 text-white text-[10px] font-bold">
@@ -106,6 +109,7 @@ function ReportView({
                     <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-3">
                         <Smile className="w-4 h-4 text-[var(--brand-primary)]" />
                         Brand Sentiment
+                        <InfoTip info={{ title: 'Brand sentiment', body: ['How positively AI answers describe your business when they mention it, from 0% (negative) to 100% (very positive).', 'It mostly reflects what your reviews and website say, so good reviews and clear service pages lift it.'] }} />
                     </div>
                     {sentiment.score == null ? (
                         <>
@@ -132,6 +136,7 @@ function ReportView({
                         <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-gray-500">
                             <ShieldCheck className="w-4 h-4 text-[var(--brand-primary)]" />
                             LLM Optimization
+                            <InfoTip info={{ title: 'LLM optimization grade', body: ['A grade (A+ to F) for how ready your business is for AI search: mention rate 35%, Google AI Overview inclusion 25%, sentiment 20%, share of voice 10% and profile completeness 10%.', 'Raise it with consistent business details across the web, a clear website and plenty of recent reviews.'] }} />
                         </div>
                         <BadgeCheck className="w-5 h-5 text-[var(--brand-primary)]" />
                     </div>
@@ -141,7 +146,7 @@ function ReportView({
             </div>
 
             <div>
-                <h2 className="text-xl font-black text-[#0F172A] mb-3">Platform Breakdown</h2>
+                <h2 className="flex items-center gap-1.5 text-xl font-black text-[#0F172A] mb-3">Platform Breakdown <InfoTip info={{ title: 'Platform breakdown', body: ['Results for each AI assistant we asked (such as ChatGPT, Claude and Perplexity) and for Google AI Overviews.', 'Each card shows how often that assistant named you, where you appeared in its answer, and who it named instead.'] }} /></h2>
                 {report.analysisUsed === false && (
                     <p className="text-[11px] text-gray-500 mb-3">
                         Detailed AI analysis was unavailable for this run, so positions and competitor names may be missing. Run the check again.
@@ -176,11 +181,11 @@ function ReportView({
                                 </div>
                                 <div className="grid grid-cols-2 gap-4 mb-4">
                                     <div>
-                                        <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Mention Rate</div>
+                                        <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">Mention Rate <InfoTip info={{ title: 'Mention rate', body: ['The percentage of our questions where this AI assistant named your business in its answer.'] }} /></div>
                                         <div className="text-3xl font-black text-[#0F172A]">{p.mentionRate ?? 0}%</div>
                                     </div>
                                     <div>
-                                        <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Avg Position</div>
+                                        <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">Avg Position <InfoTip info={{ title: 'Average position', body: ['When the assistant lists several businesses, where you appear in that list on average. #1 means you are named first.'] }} /></div>
                                         {p.avgPosition != null ? (
                                             <div className="text-3xl font-black text-[#0F172A]">
                                                 #{p.avgPosition}
@@ -194,7 +199,7 @@ function ReportView({
                                     </div>
                                 </div>
                                 <div className="border-t border-[#E2E8F0] pt-3">
-                                    <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Common Response Contexts</div>
+                                    <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Common Response Contexts <InfoTip info={{ title: 'Common response contexts', body: ['Sentences from the AI answers that mention you, showing what the assistant says about your business.'] }} /></div>
                                     {p.contexts?.length ? (
                                         <ul className="space-y-2">
                                             {p.contexts.map((c: string, i: number) => (
@@ -226,17 +231,17 @@ function ReportView({
                         <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-2.5">
                                 <PlatformLogo id="google" />
-                                <h3 className="text-base font-bold text-[#0F172A]">Google AI Overviews</h3>
+                                <h3 className="flex items-center gap-1.5 text-base font-bold text-[#0F172A]">Google AI Overviews <InfoTip info={{ title: 'Google AI Overviews', body: ['The AI summary Google sometimes shows above normal results. We checked whether one appeared for our questions and whether it named you.', 'For many local searches Google shows the Map Pack instead of an AI Overview.'] }} /></h3>
                             </div>
                             <Badge tone={badgeTone(google.badge || '')}>{google.badge}</Badge>
                         </div>
                         <div className="grid grid-cols-2 gap-4 mb-4">
                             <div>
-                                <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">AI Overview Inclusion</div>
+                                <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">AI Overview Inclusion <InfoTip info={{ title: 'AI Overview inclusion', body: ['The percentage of our questions where Google showed an AI Overview that named your business or cited your website.'] }} /></div>
                                 <div className="text-3xl font-black text-[#0F172A]">{google.inclusion ?? 0}%</div>
                             </div>
                             <div>
-                                <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Overview Shown</div>
+                                <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">Overview Shown <InfoTip info={{ title: 'Overview shown', body: ['The percentage of our questions where Google displayed an AI Overview at all. Sources cited = websites the overviews linked to.'] }} /></div>
                                 <div className="text-3xl font-black text-[#0F172A]">{google.overviewShown ?? 0}%</div>
                                 <div className="text-[11px] text-gray-500">{google.sourcesCited ?? 0} sources cited</div>
                             </div>
@@ -247,7 +252,7 @@ function ReportView({
                             </p>
                         )}
                         <div className="border-t border-[#E2E8F0] pt-3">
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Optimization Opportunities</div>
+                            <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Optimization Opportunities <InfoTip info={{ title: 'Optimization opportunities', body: ['Suggestions to make AI tools more likely to mention you, based on what the answers and cited sources show.'] }} /></div>
                             {google.opportunities?.length ? (
                                 <ul className="space-y-2">
                                     {google.opportunities.map((o: string, i: number) => (
@@ -267,7 +272,7 @@ function ReportView({
 
             {report.questions?.length > 0 && (
                 <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5">
-                    <h3 className="text-sm font-bold text-[#0F172A] mb-3">Questions we asked</h3>
+                    <h3 className="flex items-center gap-1.5 text-sm font-bold text-[#0F172A] mb-3">Questions we asked <InfoTip info={{ title: 'Questions we asked', body: ['The local questions we put to each AI assistant, written the way a customer would ask them, without naming your business.', 'They show whether AI recommends you when someone asks for your kind of service in your area.'] }} /></h3>
                     <ul className="divide-y divide-[#E2E8F0]">
                         {report.questions.map((q: any, i: number) => (
                             <li key={i} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-xs">
@@ -404,6 +409,7 @@ export default function LlmVisibility() {
     const [savedNotice, setSavedNotice] = useState('');
     const [platformErrors, setPlatformErrors] = useState<Record<string, string>>({});
     const [showHowItWorks, setShowHowItWorks] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
     const [tracked, setTracked] = useState<string[]>(pageCache?.tracked ?? []);
     const [answersAskedAt, setAnswersAskedAt] = useState('');
     const isGenerating = step !== '';
@@ -526,13 +532,14 @@ export default function LlmVisibility() {
                     </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                    <HistoryButton count={history.length} onClick={() => setShowHistory(true)} />
                     {report && (
                         <button
                             onClick={handleExport}
                             disabled={isExporting}
                             className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 border border-[#E2E8F0] text-[#0F172A] text-xs font-bold rounded-xl cursor-pointer disabled:opacity-70"
                         >
-                            {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                            {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ExternalLink className="w-3.5 h-3.5" />}
                             Export Report
                         </button>
                     )}
@@ -600,6 +607,12 @@ export default function LlmVisibility() {
                 </div>
             )}
 
+            {report && !isGenerating && history[0]?.createdAt && report.createdAt !== history[0].createdAt && (
+                <div className="mb-4">
+                    <ViewingOldBanner date={historyDate(report.createdAt)} onBack={() => setReport(history[0])} />
+                </div>
+            )}
+
             {report && !isGenerating && (
                 <div id="report-content" className="bg-slate-50/60 rounded-2xl animate-in slide-in-from-bottom-4 duration-500 mb-6">
                     <p className="text-[11px] text-gray-500 mb-4 font-semibold">
@@ -615,54 +628,40 @@ export default function LlmVisibility() {
                 </div>
             )}
 
-            {history.length > 0 && (
-                <div className="mt-6 mb-6 bg-white rounded-2xl border border-[#E2E8F0] shadow-xs overflow-hidden print:hidden">
-                    <div className="p-4 border-b border-[#E2E8F0] flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <Clock className="w-4 h-4 text-gray-700" />
-                            <h2 className="text-xs font-bold text-[#0F172A]">Past checks</h2>
-                        </div>
-                        <span className="text-[11px] text-gray-400 font-medium">Latest {Math.min(5, history.length)} of {history.length}</span>
-                    </div>
-                    <ul className="divide-y divide-[#E2E8F0]">
-                        {history.slice(0, 5).map((run, idx) => {
-                            const isCurrent = run.createdAt === report?.createdAt;
-                            return (
-                                <li key={run.createdAt || idx} className={`flex items-center ${isCurrent ? 'bg-[var(--brand-primary-soft)]' : 'hover:bg-[#F8FAFC]'}`}>
-                                    <button
-                                        type="button"
-                                        onClick={() => setReport(run)}
-                                        className="flex-1 min-w-0 text-left px-4 py-3.5 flex flex-wrap items-center justify-between gap-3 text-xs cursor-pointer"
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <span className="font-black px-2.5 py-0.5 rounded-lg border border-[#E2E8F0] bg-slate-50">
-                                                {run.llm?.grade || '—'}
-                                            </span>
-                                            <span className="font-bold text-[#0F172A]">{when(run.createdAt)}</span>
-                                        </div>
-                                        <div className="flex items-center gap-3 text-gray-600">
-                                            <span className="hidden sm:inline">Share of voice {run.shareOfVoice?.value ?? 0}%</span>
-                                            <span className="hidden sm:inline">ChatGPT {run.platforms?.chatgpt?.mentionRate ?? run.chatgpt?.mentionRate ?? 0}%</span>
-                                            <span className={`font-bold ${isCurrent ? 'text-[#0F172A]' : 'text-gray-400'}`}>
-                                                {isCurrent ? 'Viewing' : 'View →'}
-                                            </span>
-                                        </div>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        title="Delete this check"
-                                        aria-label="Delete this check"
-                                        onClick={() => deleteRun(run.createdAt)}
-                                        className="p-2.5 mr-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
-                                </li>
-                            );
-                        })}
-                    </ul>
-                </div>
-            )}
+            <HistoryModal
+                open={showHistory}
+                title="LLM visibility check history"
+                rows={history.map((run, i) => {
+                    const sov = Number(run.shareOfVoice?.value) || 0;
+                    const prev = history[i + 1];
+                    const delta = prev ? sov - (Number(prev.shareOfVoice?.value) || 0) : null;
+                    return {
+                        id: run.createdAt,
+                        date: historyDate(run.createdAt),
+                        badge: <span className="font-black px-2 py-0.5 rounded-lg border border-[#E2E8F0] bg-slate-50">{run.llm?.grade || '—'}</span>,
+                        summary: `Share of voice ${sov}% · ChatGPT ${run.platforms?.chatgpt?.mentionRate ?? run.chatgpt?.mentionRate ?? 0}%`,
+                        change:
+                            delta == null ? (
+                                <span className="text-[11px] text-gray-400">First check</span>
+                            ) : delta === 0 ? (
+                                <span className="text-[11px] text-gray-400">No change</span>
+                            ) : (
+                                <span className={`inline-flex items-center gap-0.5 text-[11px] font-bold ${delta > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                    {delta > 0 ? <ArrowUp className="w-3 h-3" strokeWidth={3} /> : <ArrowDown className="w-3 h-3" strokeWidth={3} />}
+                                    {Math.abs(delta)}%
+                                </span>
+                            )
+                    };
+                })}
+                viewingId={report?.createdAt}
+                latestId={history[0]?.createdAt}
+                onView={(id) => {
+                    const run = history.find((h) => h.createdAt === id);
+                    if (run) setReport(run);
+                }}
+                onDelete={deleteRun}
+                onClose={() => setShowHistory(false)}
+            />
 
             <div className="bg-[#F8FAFC] rounded-2xl border border-[#E2E8F0] p-4 md:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden">
                 <div className="flex items-center gap-3.5">

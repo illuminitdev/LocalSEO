@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Download, Loader2, Plus, RefreshCw, Sparkles, Trash2, AlertCircle, CheckCircle2, X, ArrowUp, ArrowDown } from 'lucide-react';
+import { Loader2, Plus, RefreshCw, Sparkles, Trash2, AlertCircle, CheckCircle2, X, ArrowUp, ArrowDown, ExternalLink } from 'lucide-react';
 import { ago, apiDelete, apiGet, apiPost, cn, type ApiError } from '../../shared/utils';
 import LocationPicker, { type SavedLocation } from '../../shared/LocationPicker';
 import { useCredits } from '../../shared/CreditsContext';
 import { creditErrorMessage } from '../../shared/creditMessages';
 import { useServiceDetection } from '../../shared/useServiceDetection';
+import { InfoTip, type InfoText } from '../../shared/InfoTip';
 
 type Point = { date: string; rank: number };
 type TrackedKeyword = {
@@ -82,19 +83,33 @@ const fmtVolume = (v: number | null) => (v == null ? '—' : v.toLocaleString())
 
 const places = (n: number) => `${n} place${n === 1 ? '' : 's'}`;
 
-type Tone = 'good' | 'bad' | 'neutral';
-const TONE_DOT: Record<Tone, string> = { good: 'bg-emerald-500', bad: 'bg-red-500', neutral: 'bg-slate-400' };
+export type TipTone = 'good' | 'bad' | 'neutral';
+const TONE_DOT: Record<TipTone, string> = { good: 'bg-emerald-500', bad: 'bg-red-500', neutral: 'bg-slate-400' };
 const TIP_WIDTH = 248;
 
-/** Small hover card in the site's style. Rendered on <body> so the table's scroll box can't clip it. */
-function Tip({ title, text, note, tone = 'neutral', children }: { title: string; text: string; note?: string; tone?: Tone; children: React.ReactNode }) {
+/** Small hover card in the site's style. Rendered on <body> so scroll boxes can't clip it. Also used by AI Insights. */
+export function Tip({
+    title,
+    text,
+    note,
+    tone = 'neutral',
+    width = TIP_WIDTH,
+    children
+}: {
+    title: string;
+    text: React.ReactNode;
+    note?: string;
+    tone?: TipTone;
+    width?: number;
+    children: React.ReactNode;
+}) {
     const ref = useRef<HTMLSpanElement>(null);
     const [pos, setPos] = useState<{ left: number; top: number; above: boolean } | null>(null);
     const show = () => {
         const r = ref.current?.getBoundingClientRect();
         if (!r) return;
-        const left = Math.max(8, Math.min(window.innerWidth - TIP_WIDTH - 8, r.left + r.width / 2 - TIP_WIDTH / 2));
-        const above = r.bottom + 120 > window.innerHeight;
+        const left = Math.max(8, Math.min(window.innerWidth - width - 8, r.left + r.width / 2 - width / 2));
+        const above = r.bottom + (typeof text === 'string' ? 120 : 280) > window.innerHeight;
         setPos({ left, top: above ? r.top - 6 : r.bottom + 6, above });
     };
     return (
@@ -104,14 +119,14 @@ function Tip({ title, text, note, tone = 'neutral', children }: { title: string;
                 createPortal(
                     <div
                         role="tooltip"
-                        style={{ left: pos.left, top: pos.top, width: TIP_WIDTH, transform: pos.above ? 'translateY(-100%)' : undefined }}
+                        style={{ left: pos.left, top: pos.top, width, transform: pos.above ? 'translateY(-100%)' : undefined }}
                         className="fixed z-50 pointer-events-none rounded-lg border border-[#E2E8F0] bg-white px-3 py-2.5 shadow-lg text-left"
                     >
                         <div className="flex items-center gap-1.5 text-xs font-bold text-[#0F172A]">
                             <i className={cn('w-2 h-2 rounded-full shrink-0', TONE_DOT[tone])} />
                             {title}
                         </div>
-                        <p className="mt-1 text-[11px] leading-snug text-slate-600 font-normal">{text}</p>
+                        <div className="mt-1 text-[11px] leading-snug text-slate-600 font-normal">{text}</div>
                         {note && <p className="mt-1.5 text-[10px] font-semibold text-slate-400">{note}</p>}
                     </div>,
                     document.body
@@ -248,10 +263,108 @@ function Triple({ items }: { items: Array<{ n: number; label: string; tone: stri
     );
 }
 
-function StatCard({ label, children }: { label: string; children: React.ReactNode }) {
+type TrendSnapshot = { date: string; avg: number | null; vis: number | null; gap: number | null; pack: number | null };
+
+/** One snapshot per check date: each keyword's latest rank on that day, turned into the card figures. */
+function trendSnapshots(keywords: TrackedKeyword[], days: number): TrendSnapshot[] {
+    const dayKey = (iso: string) => iso.slice(0, 10);
+    const allDays = [...new Set(keywords.flatMap((k) => k.history.map((p) => dayKey(p.date))))].sort();
+    const cutoff = dayKey(new Date(Date.now() - days * DAY).toISOString());
+    // Days inside the period, plus the last check before it so the line has a starting point.
+    const before = allDays.filter((d) => d < cutoff);
+    const picked = [...before.slice(-1), ...allDays.filter((d) => d >= cutoff)].slice(-12);
+    return picked.map((d) => {
+        const items = keywords
+            .map((k) => {
+                let rank: number | null = null;
+                for (const p of k.history) if (dayKey(p.date) <= d) rank = p.rank;
+                return { rank, volume: k.volume };
+            })
+            .filter((i) => i.rank != null) as Array<{ rank: number; volume: number | null }>;
+        const ranked = items.filter((i) => i.rank < NOT_RANKED);
+        return {
+            date: d,
+            avg: ranked.length ? ranked.reduce((a, i) => a + i.rank, 0) / ranked.length : null,
+            vis: visibility(items),
+            gap: ranked.length ? ranked.reduce((a, i) => a + (i.rank - 1), 0) / ranked.length : null,
+            pack: items.length ? (items.filter((i) => i.rank <= 3).length / items.length) * 100 : null
+        };
+    });
+}
+
+/** Small coloured area chart for a stat card. lowerIsBetter flips it so a rising line always means better. */
+function CardTrend({
+    points,
+    color,
+    lowerIsBetter = false,
+    format,
+    name
+}: {
+    points: Array<{ date: string; value: number | null }>;
+    color: string;
+    lowerIsBetter?: boolean;
+    format: (v: number) => string;
+    name: string;
+}) {
+    const pts = points.filter((p) => p.value != null) as Array<{ date: string; value: number }>;
+    const w = 150;
+    const h = 56;
+    const pad = 6;
+    if (pts.length < 2) {
+        return (
+            <Tip title="No trend yet" text="The line appears once ranks have been checked on at least two days.">
+                <svg width={w} height={h} aria-hidden className="shrink-0">
+                    <line x1="2" y1={h - 12} x2={w - 2} y2={h - 12} stroke={color} strokeOpacity="0.35" strokeWidth="2" strokeDasharray="4 4" strokeLinecap="round" />
+                </svg>
+            </Tip>
+        );
+    }
+    const vals = pts.map((p) => p.value);
+    let lo = Math.min(...vals);
+    let hi = Math.max(...vals);
+    if (hi === lo) {
+        lo -= 1;
+        hi += 1;
+    }
+    const coords = pts.map((p, i) => {
+        const x = 3 + (i / (pts.length - 1)) * (w - 6);
+        const t = (p.value - lo) / (hi - lo);
+        const y = pad + (lowerIsBetter ? t : 1 - t) * (h - pad * 2);
+        return [x, y] as const;
+    });
+    const line = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
+    const gradId = `card-trend-${name.replace(/\W+/g, '-')}`;
+    const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    const first = pts[0];
+    const last = pts[pts.length - 1];
+    const [lx, ly] = coords[coords.length - 1];
+    return (
+        <Tip
+            title={`${name}: ${format(first.value)} → ${format(last.value)}`}
+            text={`${pts.length} checks from ${fmtDate(first.date)} to ${fmtDate(last.date)}.${lowerIsBetter ? ' Lower is better, so the line rises when it improves.' : ''}`}
+        >
+            <svg width={w} height={h} aria-hidden className="shrink-0 overflow-visible">
+                <defs>
+                    <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+                        <stop offset="100%" stopColor={color} stopOpacity="0" />
+                    </linearGradient>
+                </defs>
+                <path d={`M${coords[0][0]},${h} L${line} L${lx},${h} Z`} fill={`url(#${gradId})`} />
+                <path d={`M${line}`} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx={lx} cy={ly} r="3.5" fill={color} stroke="#fff" strokeWidth="1.5" />
+            </svg>
+        </Tip>
+    );
+}
+
+function StatCard({ label, info, children }: { label: string; info?: InfoText; children: React.ReactNode }) {
     return (
         <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">{label}</div>
+            <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                {label}
+                {info && <InfoTip info={info} />}
+            </div>
             {children}
         </div>
     );
@@ -514,6 +627,8 @@ export default function VisibilityTracker() {
         [keywords, days]
     );
 
+    const trend = useMemo(() => trendSnapshots(keywords, days), [keywords, days]);
+
     const stats = useMemo(() => {
         const checked = rows.filter((r) => r.now != null);
         const ranked = checked.filter((r) => (r.now as number) < NOT_RANKED);
@@ -640,7 +755,7 @@ export default function VisibilityTracker() {
                         disabled={!rows.length}
                         className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F172A] px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-50"
                     >
-                        <Download className="w-3.5 h-3.5" /> Export
+                        <ExternalLink className="w-3.5 h-3.5" /> Export
                     </button>
                 </div>
             </div>
@@ -674,21 +789,38 @@ export default function VisibilityTracker() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {view === 'you' ? (
                     <>
-                        <StatCard label="Average Position">
-                            <div className="flex items-end gap-3">
-                                <span className="text-4xl font-black tracking-tight text-[#0F172A]">{stats.avg != null ? stats.avg.toFixed(1) : '—'}</span>
-                                <Delta value={stats.avgDelta} what="Your average position" days={days} />
+                        <StatCard label="Average Position" info={{ title: 'Average position', body: ['Your average Google Maps rank across the tracked keywords you appear for, checked from your business location.', 'Lower is better: 1 is first. Keywords where you are not in the top 20 are left out of the average.'] }}>
+                            <div className="flex items-end justify-between gap-3">
+                                <div className="flex items-end gap-3">
+                                    <span className="text-4xl font-black tracking-tight text-[#0F172A]">{stats.avg != null ? stats.avg.toFixed(1) : '—'}</span>
+                                    <Delta value={stats.avgDelta} what="Your average position" days={days} />
+                                </div>
+                                <CardTrend
+                                    name="Average position"
+                                    color="#2a78d6"
+                                    lowerIsBetter
+                                    points={trend.map((t) => ({ date: t.date, value: t.avg }))}
+                                    format={(v) => v.toFixed(1)}
+                                />
                             </div>
                         </StatCard>
-                        <StatCard label="Visibility Score">
-                            <div className="flex items-end gap-3">
-                                <span className="text-4xl font-black tracking-tight text-[#0F172A]">
-                                    {stats.vis != null ? `${Math.round(stats.vis)}%` : '—'}
-                                </span>
-                                <Delta value={stats.visDelta} suffix="%" what="Your visibility score" days={days} />
+                        <StatCard label="Visibility Score" info={{ title: 'Visibility score', body: ['An estimate of how many of the possible clicks you get across your keywords, weighted by monthly searches.', '100% would mean #1 for every keyword. A high-volume keyword moves this score more than a rare one.'] }}>
+                            <div className="flex items-end justify-between gap-3">
+                                <div className="flex items-end gap-3">
+                                    <span className="text-4xl font-black tracking-tight text-[#0F172A]">
+                                        {stats.vis != null ? `${Math.round(stats.vis)}%` : '—'}
+                                    </span>
+                                    <Delta value={stats.visDelta} suffix="%" what="Your visibility score" days={days} />
+                                </div>
+                                <CardTrend
+                                    name="Visibility score"
+                                    color="#10B981"
+                                    points={trend.map((t) => ({ date: t.date, value: t.vis }))}
+                                    format={(v) => `${Math.round(v)}%`}
+                                />
                             </div>
                         </StatCard>
-                        <StatCard label={`Keyword Movement (${days}d)`}>
+                        <StatCard label={`Keyword Movement (${days}d)`} info={{ title: 'Keyword movement', body: [`How many tracked keywords moved up, moved down or stayed the same over the last ${days} days.`, 'Each keyword is checked once per billing month, so movement shows month to month.'] }}>
                             <Triple
                                 items={[
                                     { n: stats.up, label: 'Up', tone: 'text-emerald-500' },
@@ -701,19 +833,40 @@ export default function VisibilityTracker() {
                     </>
                 ) : (
                     <>
-                        <StatCard label="Avg Gap to #1">
-                            <span className="text-4xl font-black tracking-tight text-[#0F172A]">
-                                {stats.avgGap != null ? `${stats.avgGap.toFixed(1)}` : '—'}
-                            </span>
-                            <span className="ml-2 text-xs text-slate-500">places behind the leader</span>
+                        <StatCard label="Avg Gap to #1" info={{ title: 'Average gap to #1', body: ['On average, how many places you are behind the business ranked #1 for your keywords.', '0 means you lead every keyword. Smaller is better.'] }}>
+                            <div className="flex items-end justify-between gap-3">
+                                <div>
+                                    <span className="text-4xl font-black tracking-tight text-[#0F172A]">
+                                        {stats.avgGap != null ? `${stats.avgGap.toFixed(1)}` : '—'}
+                                    </span>
+                                    <span className="ml-2 text-xs text-slate-500">places behind the leader</span>
+                                </div>
+                                <CardTrend
+                                    name="Avg gap to #1"
+                                    color="#eb6834"
+                                    lowerIsBetter
+                                    points={trend.map((t) => ({ date: t.date, value: t.gap }))}
+                                    format={(v) => v.toFixed(1)}
+                                />
+                            </div>
                         </StatCard>
-                        <StatCard label="Map Pack Share">
-                            <span className="text-4xl font-black tracking-tight text-[#0F172A]">
-                                {stats.packShare != null ? `${Math.round(stats.packShare)}%` : '—'}
-                            </span>
-                            <span className="ml-2 text-xs text-slate-500">of keywords in the top 3</span>
+                        <StatCard label="Map Pack Share" info={{ title: 'Map Pack share', body: ['The percentage of your checked keywords where you appear in the Google Maps top 3.', 'The top 3 get most of the calls and clicks, so this is the number to grow.'] }}>
+                            <div className="flex items-end justify-between gap-3">
+                                <div>
+                                    <span className="text-4xl font-black tracking-tight text-[#0F172A]">
+                                        {stats.packShare != null ? `${Math.round(stats.packShare)}%` : '—'}
+                                    </span>
+                                    <span className="ml-2 text-xs text-slate-500">of keywords in the top 3</span>
+                                </div>
+                                <CardTrend
+                                    name="Map Pack share"
+                                    color="#8B5CF6"
+                                    points={trend.map((t) => ({ date: t.date, value: t.pack }))}
+                                    format={(v) => `${Math.round(v)}%`}
+                                />
+                            </div>
                         </StatCard>
-                        <StatCard label="Competitive Position">
+                        <StatCard label="Competitive Position" info={{ title: 'Competitive position', body: ['Leading = you are #1. Top 3 = you are #2 or #3. Behind = you rank 4th or lower, or are not found.', 'Focus on the Behind keywords that have the most monthly searches.'] }}>
                             <Triple
                                 items={[
                                     { n: stats.leading, label: 'Leading', tone: 'text-emerald-500' },
@@ -729,7 +882,7 @@ export default function VisibilityTracker() {
 
             {info && !info.needsAddress && info.locations.length > 0 && (
                 <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm p-4">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Location</div>
+                    <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Location <InfoTip info={{ title: 'Location', body: ['Ranks are checked from this point. Google Maps results depend on where the searcher is.', 'Add other towns you serve to see how you rank there.'] }} /></div>
                     <div className="max-w-md">
                         <LocationPicker
                             locations={info.locations}
@@ -870,14 +1023,14 @@ export default function VisibilityTracker() {
                                 <th className="px-3 py-2 font-semibold">{view === 'you' ? 'Current Rank' : 'Your Rank'}</th>
                                 <th className="px-3 py-2 font-semibold">Change ({days}d)</th>
                                 {view === 'you' ? (
-                                    <th className="px-3 py-2 font-semibold">Search Volume</th>
+                                    <th className="px-3 py-2 font-semibold"><span className="inline-flex items-center gap-1">Search Volume <InfoTip info={{ title: 'Search volume', body: ['About how many times a month this keyword is searched on Google in your country.', 'Higher volume means more potential customers, but usually more competition.'] }} /></span></th>
                                 ) : (
                                     <>
                                         <th className="px-3 py-2 font-semibold">Leader (#1)</th>
-                                        <th className="px-3 py-2 font-semibold">Gap to #1</th>
+                                        <th className="px-3 py-2 font-semibold"><span className="inline-flex items-center gap-1">Gap to #1 <InfoTip info={{ title: 'Gap to #1', body: ['How many places you are behind the business ranked first for this keyword.'] }} /></span></th>
                                     </>
                                 )}
-                                <th className="px-3 py-2 font-semibold">Trend (30d)</th>
+                                <th className="px-3 py-2 font-semibold"><span className="inline-flex items-center gap-1">Trend (30d) <InfoTip info={{ title: 'Trend', body: ['A small line of your rank for this keyword over recent checks. Going up means your rank improved.'] }} /></span></th>
                                 <th className="px-3 py-3 w-10" />
                             </tr>
                         </thead>

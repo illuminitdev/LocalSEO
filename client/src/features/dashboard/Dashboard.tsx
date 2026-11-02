@@ -26,6 +26,7 @@ import {
 import { apiGet, apiPost, formatCents } from '../../shared/utils';
 import GroundingModal from './GroundingModal';
 import { useEntitlements } from '../../shared/EntitlementsContext';
+import { InfoTip, type InfoText } from '../../shared/InfoTip';
 
 type BookingOverview = {
     organization: {
@@ -63,6 +64,15 @@ type LocalBusinessData = {
     reviews?: any[];
     categories?: string[];
     website?: string;
+};
+
+// What each local SEO tile means, shown in the (i) popups.
+const SEO_STAT_INFO: Record<string, InfoText> = {
+    'Avg Map Rank': { title: 'Average map rank', body: ['Your average Google Maps position from your latest Local Search Grid scan. Lower is better: 1 is first.', 'The top 3 (the Local 3-Pack) get most of the calls and clicks.'] },
+    'Search Grid Visibility': { title: 'Search grid visibility', body: ['The share of points on your Local Search Grid where you appear in the Google Maps top 3.', 'It shows how much of your area sees you first.'] },
+    'GBP Profile Health': { title: 'Google Business Profile health', body: ['How complete and well optimised your Google Business Profile is.', 'Run the audit on the Business profile page to get a score and fixes.'] },
+    'Google Reviews': { title: 'Google reviews', body: ['Your Google star rating and total number of reviews.', 'Review count, rating and recent reviews are among the strongest local ranking signals.'] },
+    'Active Citations': { title: 'Active citations', body: ['Directories (such as Yelp, Bing, Apple Maps) where your business listing was found with matching details.', 'Run a scan on the Citations page to fill this in.'] }
 };
 
 function formatMapRank(rank: number | null | undefined) {
@@ -801,7 +811,10 @@ function LocalSeoOnlyDashboard({
                                 ) : (
                                     <p className="text-2xl font-black text-slate-900 mt-2.5 tracking-tight">{s.value}</p>
                                 )}
-                                <p className="text-xs font-bold text-slate-700 mt-0.5">{s.label}</p>
+                                <p className="flex items-center gap-1 text-xs font-bold text-slate-700 mt-0.5">
+                                    {s.label}
+                                    {SEO_STAT_INFO[s.label] && <InfoTip info={SEO_STAT_INFO[s.label]} />}
+                                </p>
                                 <p className="text-[11px] text-slate-400">{s.sub}</p>
                             </div>
                             <p className="text-[10px] font-bold mt-3 text-emerald-600 flex items-center gap-1">
@@ -827,7 +840,7 @@ function LocalSeoOnlyDashboard({
                                     <MapPin className="w-4 h-4" />
                                 </div>
                                 <div>
-                                    <h3 className="font-bold text-slate-900 text-sm">Local Search Grid Rankings</h3>
+                                    <h3 className="flex items-center gap-1.5 font-bold text-slate-900 text-sm">Local Search Grid Rankings <InfoTip info={{ title: 'Local Search Grid rankings', body: ['Your latest Google Maps ranks for your keywords, checked from many points around your business.', 'Open the full grid to see where in your area you rank well and where you drop.'] }} /></h3>
                                     <p className="text-xs text-slate-400">Target search queries across your local area</p>
                                 </div>
                             </div>
@@ -862,6 +875,7 @@ function LocalSeoOnlyDashboard({
                         <div className="flex items-center justify-between">
                             <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
                                 <Building2 className="w-4 h-4 text-blue-600" /> Google Business Profile Health
+                                <InfoTip info={{ title: 'Google Business Profile health', body: ['A checklist of the key parts of your Google profile: hours, photos, posts, reviews and description.', 'A complete, active profile earns more trust from Google and from customers.'] }} />
                             </h3>
                             <Link to="/profile" className="text-xs font-bold text-blue-600 hover:underline">
                                 Audit details →
@@ -892,7 +906,7 @@ function LocalSeoOnlyDashboard({
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
-                                <h3 className="font-bold text-slate-900 text-sm">Recent Reviews ({rating} ★)</h3>
+                                <h3 className="flex items-center gap-1.5 font-bold text-slate-900 text-sm">Recent Reviews ({rating} ★) <InfoTip info={{ title: 'Recent reviews', body: ['Your latest Google reviews and your average star rating.', 'Reply to every review, especially low ratings. Customers read replies before choosing a business.'] }} /></h3>
                             </div>
                             <Link to="/reviews" className="text-xs font-bold text-[var(--brand-primary)] hover:underline">
                                 Reply to all →
@@ -933,7 +947,7 @@ function LocalSeoOnlyDashboard({
 
                     {/* Quick SEO Tools Grid */}
                     <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-3">
-                        <h3 className="font-bold text-slate-900 text-sm">Local SEO Suite</h3>
+                        <h3 className="flex items-center gap-1.5 font-bold text-slate-900 text-sm">Local SEO Suite <InfoTip info={{ title: 'Local SEO suite', body: ['Shortcuts to the main local SEO tools: rankings, AI insights, profile, reviews, citations and posts.'] }} /></h3>
                         <div className="space-y-2">
                             {quickSeoTools.map((tool) => {
                                 const Icon = tool.icon;
@@ -1128,7 +1142,10 @@ function HybridDashboard({
                                 ) : (
                                     <p className="text-2xl font-black text-slate-900 mt-2.5 tracking-tight">{s.value}</p>
                                 )}
-                                <p className="text-xs font-bold text-slate-700 mt-0.5">{s.label}</p>
+                                <p className="flex items-center gap-1 text-xs font-bold text-slate-700 mt-0.5">
+                                    {s.label}
+                                    {SEO_STAT_INFO[s.label] && <InfoTip info={SEO_STAT_INFO[s.label]} />}
+                                </p>
                                 <p className="text-[11px] text-slate-400">{s.sub}</p>
                             </div>
                             <p className="text-[10px] font-bold mt-3 text-emerald-600 flex items-center gap-1">
@@ -1155,7 +1172,7 @@ function HybridDashboard({
                                     <MapPin className="w-4 h-4" />
                                 </div>
                                 <div>
-                                    <h3 className="font-bold text-slate-900 text-sm">Local SEO & Google Rankings</h3>
+                                    <h3 className="flex items-center gap-1.5 font-bold text-slate-900 text-sm">Local SEO & Google Rankings <InfoTip info={{ title: 'Local SEO & Google rankings', body: ['How much of the Google Maps top 3 you hold for your keywords, plus the status of your Google Business Profile.'] }} /></h3>
                                     <p className="text-xs text-slate-400">Map pack coverage & GBP status</p>
                                 </div>
                             </div>

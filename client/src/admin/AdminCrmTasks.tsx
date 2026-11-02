@@ -613,9 +613,12 @@ function compareTasksForPrimary(a: LeadTask, b: LeadTask): number {
         return dedupedTasks.slice(start, start + PAGE_SIZE);
     }, [dedupedTasks, safePage]);
 
+    // Only clamp once data has loaded — while loading the list is empty, which would
+    // reset the page to 1 when returning from a lead's detail page.
     useEffect(() => {
+        if (loading) return;
         if (page !== safePage) setPage(safePage);
-    }, [page, safePage]);
+    }, [loading, page, safePage]);
 
     const rangeStart = dedupedTasks.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
     const rangeEnd = Math.min(safePage * PAGE_SIZE, dedupedTasks.length);

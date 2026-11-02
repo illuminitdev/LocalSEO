@@ -16,6 +16,7 @@ import {
 import { cn, apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
 import { useCredits } from '../../shared/CreditsContext';
 import { getPageCache, setPageCache } from '../../shared/pageCache';
+import { InfoTip } from '../../shared/InfoTip';
 
 export default function PostAutomation() {
     const { refresh: refreshCredits } = useCredits();
@@ -268,6 +269,7 @@ export default function PostAutomation() {
                         <div className="flex items-center justify-between mb-5">
                             <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
                                 <PenLine className="w-4 h-4 text-[var(--brand-primary)]" /> Create New Post
+                                <InfoTip info={{ title: 'Create new post', body: ['Write a Google Business Profile post. Offer = a deal or discount, Update = news or a tip, Event = something with a date.', 'Posts keep your profile fresh and help customers choose you. Name a service and your town, and add a clear call to action.'] }} />
                             </h2>
                             <div className="inline-flex p-0.5 bg-[#F1F5F9] rounded-md">
                                 {['offer', 'update', 'event'].map((type) => (
@@ -484,7 +486,7 @@ export default function PostAutomation() {
                     {/* Upcoming posts */}
                     <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-hidden">
                         <div className="flex items-center justify-between px-5 py-3 border-b border-[#E2E8F0]">
-                            <h2 className="text-sm font-bold text-[#0F172A]">Upcoming Posts</h2>
+                            <h2 className="flex items-center gap-1.5 text-sm font-bold text-[#0F172A]">Upcoming Posts <InfoTip info={{ title: 'Upcoming posts', body: ['Posts you have scheduled, with the date each one goes live.', 'Aim for at least one post a week so your profile always shows recent activity.'] }} /></h2>
                             <span className="text-xs font-semibold text-[var(--brand-primary)] cursor-pointer">View All</span>
                         </div>
                         <div className="overflow-x-auto">
@@ -550,6 +552,7 @@ export default function PostAutomation() {
                     <div className="bg-white p-5 rounded-xl border border-[#E2E8F0] shadow-sm">
                         <h2 className="text-sm font-bold text-[#0F172A] mb-4 flex items-center gap-2">
                             <Calendar className="w-4 h-4 text-[var(--brand-primary)]" /> Schedule
+                            <InfoTip info={{ title: 'Schedule', body: ['Pick the date and time the post should go live on your Google profile.', 'Posting when customers are planning (for example early in the week) usually gets more views.'] }} />
                         </h2>
                         <div className="space-y-3">
                             <div>
@@ -583,7 +586,7 @@ export default function PostAutomation() {
                     {/* Live preview */}
                     <div className="bg-white p-5 rounded-xl border border-[#E2E8F0] shadow-sm">
                         <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Live Preview</h2>
+                            <h2 className="flex items-center gap-1 text-[10px] font-bold text-gray-500 uppercase tracking-wider">Live Preview <InfoTip info={{ title: 'Live preview', body: ['Roughly how the post will look to customers on Google as you type.', 'Google cuts long posts short in search, so put the most important words first.'] }} /></h2>
                             <span className="px-2 py-0.5 bg-[#F1F5F9] rounded text-[10px] text-gray-500">Google</span>
                         </div>
                         <div className="mx-auto max-w-[320px] border-[3px] border-[#CBD5E1] rounded-[2rem] p-4 bg-white">

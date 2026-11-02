@@ -5,7 +5,6 @@ import {
     Users,
     Sparkles,
     Target,
-    Download,
     Loader2,
     ArrowUp,
     ArrowDown,
@@ -18,7 +17,8 @@ import {
     TrendingUp,
     MoreVertical,
     BarChart3,
-    Play
+    Play,
+    ExternalLink
 } from 'lucide-react';
 import { ago, apiDelete, apiGet, apiPost, logDashboardActivity, updateDashboardStats, cn, type ApiError } from '../../shared/utils';
 import PlacesMap, { mapsJsConfigured, type MapMarker } from '../../shared/PlacesMap';
@@ -26,6 +26,7 @@ import LocationPicker, { type SavedLocation } from '../../shared/LocationPicker'
 import { useCredits } from '../../shared/CreditsContext';
 import { creditErrorMessage } from '../../shared/creditMessages';
 import { useServiceDetection } from '../../shared/useServiceDetection';
+import { InfoTip } from '../../shared/InfoTip';
 
 type TrackedKeyword = {
     keyword: string;
@@ -575,7 +576,7 @@ export default function RankTracker() {
                         onClick={handleExport}
                         className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-[#E2E8F0] rounded-lg text-sm font-semibold text-[#0F172A] hover:bg-[#F8FAFC] cursor-pointer"
                     >
-                        <Download className="w-4 h-4" /> Export
+                        <ExternalLink className="w-4 h-4" /> Export
                     </button>
                 </div>
             </div>
@@ -590,7 +591,7 @@ export default function RankTracker() {
             {/* Controls */}
             <div className={cn(card, 'p-4 mb-5 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,auto)] gap-x-4 gap-y-3 items-start')}>
                 <div className="min-w-0 flex flex-col">
-                    <label className={miniLabel}>Target Keyword</label>
+                    <label className={`${miniLabel} flex items-center gap-1`}>Target Keyword <InfoTip info={{ title: 'Target keyword', body: ['The search you want to rank for on Google Maps, for example "emergency plumber".', 'Use the words customers actually type. Each scan checks this one keyword across the whole grid.'] }} /></label>
                     <div className="relative">
                         <input
                             list="rank-keywords"
@@ -613,7 +614,7 @@ export default function RankTracker() {
                     ) : null}
                 </div>
                 <div className="min-w-0 flex flex-col">
-                    <label className={miniLabel}>Location</label>
+                    <label className={`${miniLabel} flex items-center gap-1`}>Location <InfoTip info={{ title: 'Location', body: ['The centre point of the grid. Normally your business address; you can add other areas you serve.', 'Google Maps results change with where the searcher is, so the grid shows your rank from many points around this location.'] }} /></label>
                     {needsAddress ? (
                         <p className="h-10 flex items-center text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3">
                             Add a full address on your Business profile page to place your first location.
@@ -636,6 +637,7 @@ export default function RankTracker() {
                     <div className="h-10 flex items-center lg:justify-end">
                         <p className="text-xs text-gray-500 leading-none">
                             Avg. Rank: <span className="text-xl font-bold text-[var(--brand-primary)] ml-1 align-middle">{avgRank}</span>
+                            <span className="ml-1 align-middle inline-flex"><InfoTip info={{ title: 'Average rank', body: ['Your average Google Maps position across every point on the grid for this keyword.', 'Lower is better: 1 means first everywhere. Points where you were not found count as 21.'] }} /></span>
                         </p>
                     </div>
                     {lastScan && (
@@ -652,6 +654,7 @@ export default function RankTracker() {
                     <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
                         <h2 className="text-sm font-bold text-[#0F172A] flex items-center gap-2">
                             <MapIcon className="w-4 h-4 text-[var(--brand-primary)]" /> Local Competitors Map
+                            <InfoTip info={{ title: 'Local competitors map', body: ['Each dot is a grid point. The number is your Google Maps rank for the keyword when someone searches from that spot.', 'Dark orange = top 3, light orange = 4 to 10, grey = 11 or lower / not found. It shows how far from your address you stay visible.'] }} />
                         </h2>
                         <div className="flex items-center gap-3 text-[11px] font-medium text-gray-500">
                             <span className="flex items-center gap-1.5">
@@ -704,6 +707,7 @@ export default function RankTracker() {
                 <div className={cn(card, 'lg:col-span-5 p-6 flex flex-col')}>
                     <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2 mb-1">
                         <Target className="w-5 h-5 text-[var(--brand-primary)]" /> Competitor Map Share
+                        <InfoTip info={{ title: 'Competitor map share', body: ['Across all grid points, the share of top 3 spots each business holds.', 'The business with the biggest share is the one customers see first most often in your area.'] }} />
                     </h2>
                     <p className="text-sm text-gray-500 mb-6">
                         Percentage of top 3 spots owned by each business around your location.
@@ -745,6 +749,7 @@ export default function RankTracker() {
                     <div className="flex items-center justify-between mb-4">
                         <h2 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
                             <Sparkles className="w-4 h-4 text-[var(--brand-primary)]" /> AI Ranking Insights
+                            <InfoTip info={{ title: 'AI ranking insights', body: ['AI reads the scan results and explains what changed, where you are weak and what to fix.', 'Each insight links to the page where you can act on it.'] }} />
                         </h2>
                         {insights.some((i) => i.type === 'drop') && (
                             <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-bold uppercase tracking-wide">
@@ -818,6 +823,7 @@ export default function RankTracker() {
                 <div className={cn(card, 'lg:col-span-4 p-5')}>
                     <h2 className="text-sm font-bold text-[#0F172A] flex items-center gap-2 mb-1">
                         <Target className="w-4 h-4 text-[var(--brand-primary)]" /> Opportunity Finder
+                        <InfoTip info={{ title: 'Opportunity finder', body: ['Keywords where you rank just outside the top 3 (around 4 to 10).', 'These are the quickest wins: a few more reviews or a post about that service can push you into the top 3.'] }} />
                     </h2>
                     <p className="text-xs text-gray-500 mb-4">Keywords on the cusp of the Local Pack.</p>
                     {opportunities.length === 0 ? (
@@ -860,6 +866,7 @@ export default function RankTracker() {
                         <h2 className="flex items-center gap-2 text-base font-bold text-[#0F172A]">
                             <BarChart3 className="w-5 h-5 text-[var(--brand-primary)] shrink-0" />
                             Keyword Optimization Health
+                            <InfoTip info={{ title: 'Keyword optimization health', body: ['Every keyword you scanned, plus suggestions from your services and city, with your average rank and change since the last scan.', 'Health is a 0 to 100 score: 60% from your average rank and 40% from how much of the grid you hold in the top 3.'] }} />
                         </h2>
                         <p className="text-[11px] text-gray-500 mt-0.5">
                             {trackedKeywords.length} scanned · {keywordRows.length - trackedKeywords.length} suggested from your services and city.

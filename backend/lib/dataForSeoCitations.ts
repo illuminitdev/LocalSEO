@@ -129,7 +129,7 @@ function directoryForUrl(url: string): DirectoryRule | null {
     return DIRECTORIES.find((rule) => rule.id !== 'google' && rule.id !== 'bing' && rule.hosts.some((h) => hostMatches(host, h))) || null;
 }
 
-function cityFromAddress(address: string) {
+export function cityFromAddress(address: string) {
     const parts = String(address || '')
         .split(',')
         .map((part) => part.trim())

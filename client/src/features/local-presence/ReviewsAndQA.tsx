@@ -29,6 +29,7 @@ import { apiGet, apiPost, logDashboardActivity } from '../../shared/utils';
 import { useCredits } from '../../shared/CreditsContext';
 import { useToast } from '../../shared/Toast';
 import { getPageCache, setPageCache } from '../../shared/pageCache';
+import { InfoTip } from '../../shared/InfoTip';
 
 function getInitials(name: string): string {
     if (!name) return 'U';
@@ -528,7 +529,7 @@ export function ReviewManagement() {
                                 <Inbox className="w-4 h-4" />
                             </span>
                             <div>
-                                <h2 className="text-base font-bold text-[#0F172A]">Unified Inbox</h2>
+                                <h2 className="flex items-center gap-1.5 text-base font-bold text-[#0F172A]">Unified Inbox <InfoTip info={{ title: 'Unified inbox', body: ['All your reviews in one list: Google reviews plus reviews customers left through your review page, QR card or campaigns.', 'Reply to every review, especially low ratings. Use AI Draft Reply for a quick first draft, then make it personal.'] }} /></h2>
                                 <p className="text-[11px] text-gray-500">
                                     {business.rating != null ? `${business.rating}★ on Google · ` : ''}
                                     {items.length} review{items.length === 1 ? '' : 's'} shown{hub?.googleTotal ? ` (${hub.googleTotal.toLocaleString()} on Google)` : ''} · {needsReplyCount} need a reply{hub?.googleSyncedAt ? ` · synced ${ago(hub.googleSyncedAt)}` : ''}
@@ -731,7 +732,7 @@ export function ReviewManagement() {
                 {/* Right column */}
                 <div className="space-y-5">
                     <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5">
-                        <h3 className="text-base font-bold text-[#0F172A]">In-Store Collection</h3>
+                        <h3 className="flex items-center gap-1.5 text-base font-bold text-[#0F172A]">In-Store Collection <InfoTip info={{ title: 'In-store collection', body: ['A QR card or NFC tag customers tap or scan at your counter to leave a review on their phone.', 'Asking in person, right after a good experience, is the easiest way to get a steady flow of new reviews.'] }} /></h3>
                         <p className="text-[11px] text-gray-500 mt-1">Customers scan the card, rate you and leave a review in seconds. Happy customers are invited to post on Google too.</p>
 
                         <div className="mt-4 rounded-xl bg-[#0F172A] p-4 text-white">
@@ -798,7 +799,7 @@ export function ReviewManagement() {
 
                     <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5">
                         <div className="flex items-start justify-between gap-2">
-                            <h3 className="text-base font-bold text-[#0F172A]">Source Attribution</h3>
+                            <h3 className="flex items-center gap-1.5 text-base font-bold text-[#0F172A]">Source Attribution <InfoTip info={{ title: 'Source attribution', body: ['Where your collected reviews came from in the last 30 days: QR, NFC, email, SMS, receipt or direct link.', 'Put more effort into the sources that bring in the most reviews.'] }} /></h3>
                             <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Last 30 Days</span>
                         </div>
                         {sourceRows.total === 0 ? (
@@ -834,7 +835,7 @@ export function ReviewManagement() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !sending && setCampaignOpen(false)}>
                     <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-between">
-                            <h3 className="text-base font-bold text-[#0F172A]">Launch review campaign</h3>
+                            <h3 className="flex items-center gap-1.5 text-base font-bold text-[#0F172A]">Launch review campaign <InfoTip info={{ title: 'Review campaign', body: ['Send recent customers an email or text with a link to your review page.', 'Only send to real customers, and spread requests out. A sudden burst of reviews can be filtered by Google.'] }} /></h3>
                             <button type="button" onClick={() => setCampaignOpen(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer" aria-label="Close">
                                 <X className="w-4 h-4" />
                             </button>
@@ -1040,6 +1041,7 @@ export function QAAutoResponder() {
                             <div className="flex items-center gap-2 mb-1">
                                 <Database className="w-4 h-4 text-[#0F172A]" />
                                 <h2 className="font-bold text-sm text-[#0F172A]">Business knowledge</h2>
+                                <InfoTip info={{ title: 'Business knowledge', body: ['Confirmed facts about your business (prices, parking, services, policies) that the AI uses when writing answers.', 'The more accurate facts you add, the less likely an answer is to be wrong.'] }} />
                             </div>
                             <p className="text-xs text-gray-500 mb-3">
                                 Add confirmed details so suggested answers stay accurate.
@@ -1083,6 +1085,7 @@ export function QAAutoResponder() {
                         <div className="flex items-center gap-2 mb-1">
                             <SlidersHorizontal className="w-4 h-4 text-[#0F172A]" />
                             <h2 className="font-bold text-sm text-[#0F172A]">Answer style</h2>
+                            <InfoTip info={{ title: 'Answer style', body: ['The tone the AI uses when it drafts answers, for example friendly or professional.', 'Pick the tone you would use if the customer asked you in person.'] }} />
                         </div>
                         <p className="text-xs text-gray-500 mb-3">Choose the tone for generated replies.</p>
 
@@ -1115,6 +1118,7 @@ export function QAAutoResponder() {
                                 <div className="flex items-center gap-2">
                                     <MessageSquare className="w-4 h-4 text-[#0F172A]" />
                                     <h2 className="font-bold text-sm text-[#0F172A]">Customer questions</h2>
+                                    <InfoTip info={{ title: 'Customer questions', body: ['Questions customers ask about your business, with AI-suggested answers based on your business knowledge.', 'Clear answers to common questions help customers decide, and the same answers are useful on your website FAQ.'] }} />
                                     <span className="bg-gray-100 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
                                         {questions.length} saved
                                     </span>
@@ -1267,7 +1271,7 @@ export function QAAutoResponder() {
                             <div className="w-8 h-8 rounded-xl bg-amber-50 flex items-center justify-center text-amber-500">
                                 <Lightbulb className="w-4 h-4" />
                             </div>
-                            <h3 className="text-base font-bold text-[#0F172A]">Example Questions</h3>
+                            <h3 className="flex items-center gap-1.5 text-base font-bold text-[#0F172A]">Example Questions <InfoTip info={{ title: 'Example questions', body: ['Common questions customers ask businesses like yours.', 'Click one to add it to your list, then answer it before a customer has to ask.'] }} /></h3>
                         </div>
 
                         <p className="text-xs text-gray-500 mb-4">

@@ -142,6 +142,10 @@ export default function Account() {
     const [avatarBusy, setAvatarBusy] = useState(false);
     const [profileErr, setProfileErr] = useState('');
     const [profileBusy, setProfileBusy] = useState(false);
+    // Name/phone are read-only until the user clicks the edit icon; snapshot lets Cancel restore them.
+    const [profileEditing, setProfileEditing] = useState(false);
+    const [profileSnapshot, setProfileSnapshot] = useState({ name: '', phone: '' });
+    const [profileSaved, setProfileSaved] = useState(false);
     const [showPasswordForm, setShowPasswordForm] = useState(forcePassword);
 
     const [org, setOrg] = useState<OrgForm>({
@@ -289,12 +293,41 @@ export default function Account() {
                 phone: updated.phone || ''
             }));
 
+            setProfileEditing(false);
+            setProfileSaved(true);
             show('Profile saved.');
         } catch (err: any) {
             setProfileErr(err.message);
         } finally {
             setProfileBusy(false);
         }
+    };
+
+    useEffect(() => {
+        if (!profileSaved) return;
+        const t = window.setTimeout(() => setProfileSaved(false), 3000);
+        return () => window.clearTimeout(t);
+    }, [profileSaved]);
+
+    const profileFieldCls = cn(
+        'rounded-xl border border-[#E2E8F0] px-4 py-2.5 flex items-center gap-3 transition-all shadow-sm',
+        profileEditing
+            ? 'bg-white focus-within:border-[var(--brand-primary,#F59E0B)] focus-within:ring-2 focus-within:ring-amber-500/15'
+            : 'bg-[#FAFBFC]'
+    );
+
+    const startProfileEdit = () => {
+        setProfileSnapshot({ name: displayName, phone: org.phone || '' });
+        setProfileSaved(false);
+        setProfileErr('');
+        setProfileEditing(true);
+    };
+
+    const cancelProfileEdit = () => {
+        setDisplayName(profileSnapshot.name);
+        setOrg((o) => ({ ...o, phone: profileSnapshot.phone }));
+        setProfileErr('');
+        setProfileEditing(false);
     };
 
     const uploadAvatar = async (file: File) => {
@@ -648,18 +681,30 @@ export default function Account() {
                                 <div className="flex items-center gap-2.5 mb-1">
                                     <UserRound className="w-4 h-4 text-[#0F172A]" strokeWidth={2.5} />
                                     <h2 className="text-base font-black tracking-tight text-[#0F172A]">Personal Information</h2>
+                                    {!profileEditing && (
+                                        <button
+                                            type="button"
+                                            onClick={startProfileEdit}
+                                            className="ml-auto inline-flex items-center justify-center w-8 h-8 rounded-lg border border-[#E2E8F0] bg-white text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#0F172A] transition-colors shadow-sm"
+                                            title="Edit details"
+                                            aria-label="Edit details"
+                                        >
+                                            <Pencil className="w-3.5 h-3.5" />
+                                        </button>
+                                    )}
                                 </div>
                                 <p className="text-xs text-[#64748B] mb-5 ml-6.5">Update your basic details and contact information.</p>
 
                                 <div className="space-y-3">
                                     {/* Name field */}
-                                    <div className="rounded-xl border border-[#E2E8F0] px-4 py-2.5 flex items-center gap-3 bg-white focus-within:border-[var(--brand-primary,#F59E0B)] focus-within:ring-2 focus-within:ring-amber-500/15 transition-all shadow-sm">
+                                    <div className={profileFieldCls}>
                                         <UserRound className="w-4 h-4 text-[#94A3B8] shrink-0" />
                                         <div className="min-w-0 flex-1">
                                             <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Name</p>
                                             <input
                                                 type="text"
                                                 required
+                                                readOnly={!profileEditing}
                                                 value={displayName}
                                                 onChange={(e) => setDisplayName(e.target.value)}
                                                 className="w-full text-sm font-semibold text-[#0F172A] bg-transparent border-0 p-0 focus:outline-none placeholder:text-[#CBD5E1]"
@@ -678,12 +723,13 @@ export default function Account() {
                                     </div>
 
                                     {/* Phone field */}
-                                    <div className="rounded-xl border border-[#E2E8F0] px-4 py-2.5 flex items-center gap-3 bg-white focus-within:border-[var(--brand-primary,#F59E0B)] focus-within:ring-2 focus-within:ring-amber-500/15 transition-all shadow-sm">
+                                    <div className={profileFieldCls}>
                                         <Phone className="w-4 h-4 text-[#94A3B8] shrink-0" />
                                         <div className="min-w-0 flex-1">
                                             <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Phone</p>
                                             <input
                                                 type="tel"
+                                                readOnly={!profileEditing}
                                                 value={org.phone}
                                                 onChange={(e) => setOrg((o) => ({ ...o, phone: e.target.value }))}
                                                 className="w-full text-sm font-semibold text-[#0F172A] bg-transparent border-0 p-0 focus:outline-none placeholder:text-[#CBD5E1]"
@@ -696,16 +742,35 @@ export default function Account() {
                             </div>
 
                             {/* Save changes button */}
-                            <div className="mt-5 pt-2">
-                                <button
-                                    type="submit"
-                                    disabled={profileBusy}
-                                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-xs font-bold shadow-sm hover:shadow transition-all disabled:opacity-55"
-                                    style={{ background: 'var(--brand-primary, #F59E0B)' }}
-                                >
-                                    <Check className="w-4 h-4" strokeWidth={2.5} />
-                                    {profileBusy ? 'Saving…' : 'Save changes'}
-                                </button>
+                            <div className="mt-5 pt-2 min-h-[42px] flex items-center gap-2">
+                                {profileEditing ? (
+                                    <>
+                                        <button
+                                            type="submit"
+                                            disabled={profileBusy}
+                                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-xs font-bold shadow-sm hover:shadow transition-all disabled:opacity-55"
+                                            style={{ background: 'var(--brand-primary, #F59E0B)' }}
+                                        >
+                                            <Check className="w-4 h-4" strokeWidth={2.5} />
+                                            {profileBusy ? 'Saving…' : 'Save changes'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={cancelProfileEdit}
+                                            disabled={profileBusy}
+                                            className="px-4 py-2.5 rounded-xl border border-[#E2E8F0] bg-white text-xs font-bold text-[#0F172A] hover:bg-[#F8FAFC] transition-colors disabled:opacity-55"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </>
+                                ) : (
+                                    profileSaved && (
+                                        <span className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#F0FDF4] border border-[#DCFCE7] text-xs font-bold text-[#16A34A]">
+                                            <Check className="w-4 h-4" strokeWidth={2.5} />
+                                            Saved
+                                        </span>
+                                    )
+                                )}
                             </div>
                         </form>
                     </div>

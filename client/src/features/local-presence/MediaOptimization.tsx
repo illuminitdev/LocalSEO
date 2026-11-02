@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { apiPost, logDashboardActivity } from '../../shared/utils';
 import { useCredits } from '../../shared/CreditsContext';
+import { InfoTip } from '../../shared/InfoTip';
 
 interface CategoryStatus {
     id: string;
@@ -94,13 +95,9 @@ export default function MediaOptimization() {
                 <button
                     onClick={handleGenerateMedia}
                     disabled={isGenerating}
-                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-xs font-bold transition-colors disabled:opacity-70 shadow-xs cursor-pointer shrink-0"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] rounded-xl text-xs font-bold transition-colors disabled:opacity-70 shadow-xs cursor-pointer shrink-0"
                 >
-                    {isGenerating ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
-                    ) : (
-                        <BadgeCheck className="w-4 h-4 text-emerald-400" />
-                    )}
+                    {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <BadgeCheck className="w-4 h-4" />}
                     {isGenerating ? 'Generating Photo...' : 'AI Generate Photo'}
                 </button>
             </div>
@@ -119,7 +116,7 @@ export default function MediaOptimization() {
                         <ImageIcon className="w-5 h-5 text-blue-500" />
                     </div>
                     <div>
-                        <p className="text-xs text-gray-500 font-medium">Total photos</p>
+                        <p className="flex items-center gap-1 text-xs text-gray-500 font-medium">Total photos <InfoTip info={{ title: 'Total photos', body: ['All photos saved for your business profile across every category.', 'Profiles with plenty of recent, real photos get more clicks, calls and direction requests.'] }} /></p>
                         <p className="text-2xl font-bold text-[#0F172A]">{totalPhotos}</p>
                     </div>
                 </div>
@@ -130,7 +127,7 @@ export default function MediaOptimization() {
                         <CheckCircle2 className="w-5 h-5 text-emerald-500" />
                     </div>
                     <div>
-                        <p className="text-xs text-gray-500 font-medium">Categories filled</p>
+                        <p className="flex items-center gap-1 text-xs text-gray-500 font-medium">Categories filled <InfoTip info={{ title: 'Categories filled', body: ['How many of the 5 photo categories have at least the recommended number of photos.', 'Covering every category (for example exterior, interior, team, work) shows customers the full picture of your business.'] }} /></p>
                         <p className="text-2xl font-bold text-[#0F172A]">
                             {completedCategories} <span className="text-sm font-medium text-gray-400">/ 5</span>
                         </p>
@@ -143,7 +140,7 @@ export default function MediaOptimization() {
                         <MapPin className="w-5 h-5 text-[var(--brand-primary)]" />
                     </div>
                     <div>
-                        <p className="text-xs text-gray-500 font-medium">Geotagging</p>
+                        <p className="flex items-center gap-1 text-xs text-gray-500 font-medium">Geotagging <InfoTip info={{ title: 'Geotagging', body: ['We add your business location to the photo file data (EXIF).', 'Google removes this data when photos are uploaded, so it is good housekeeping rather than a ranking boost. Real, recent photos matter more.'] }} /></p>
                         <p className="text-lg font-bold text-[#0F172A]">Auto EXIF</p>
                     </div>
                 </div>
@@ -154,7 +151,7 @@ export default function MediaOptimization() {
                         <TagIcon className="w-5 h-5 text-purple-500" />
                     </div>
                     <div>
-                        <p className="text-xs text-gray-500 font-medium">SEO Alt-Text</p>
+                        <p className="flex items-center gap-1 text-xs text-gray-500 font-medium">SEO Alt-Text <InfoTip info={{ title: 'SEO Alt-Text', body: ['A short text description of each photo, written by AI, naming the service and your town.', 'It helps when the same photos are used on your website, where search engines read alt text.'] }} /></p>
                         <p className="text-lg font-bold text-[#0F172A]">AI Optimized</p>
                     </div>
                 </div>
@@ -207,6 +204,7 @@ export default function MediaOptimization() {
                         <div>
                             <h2 className="text-lg font-bold text-[#0F172A] flex items-center gap-2">
                                 {activeTab} Photos
+                                <InfoTip info={{ title: 'Photo category', body: ['The photos saved in this category. The badge on each tab shows photos added / photos recommended.', 'Reach the recommended number in every category, and keep adding new photos every few weeks so the profile looks active.'] }} />
                             </h2>
                             <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5 font-medium">
                                 {isComplete ? (
@@ -250,9 +248,9 @@ export default function MediaOptimization() {
                                 type="button"
                                 onClick={handleGenerateMedia}
                                 disabled={isGenerating}
-                                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
+                                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-hover)] text-[var(--brand-primary-foreground)] rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors"
                             >
-                                <BadgeCheck className="w-3.5 h-3.5 text-emerald-400" />
+                                <BadgeCheck className="w-3.5 h-3.5" />
                                 Generate first photo
                             </button>
                         </div>
