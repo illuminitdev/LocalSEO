@@ -1410,11 +1410,6 @@ export default function AdminFullAudits() {
                                                 ) : (
                                                     <div className="font-bold text-[#0F172A] leading-snug">{req.businessName || '—'}</div>
                                                 )}
-                                                {req.fulfilledAuditId ? (
-                                                    <div className="text-[10px] text-emerald-700 mt-0.5 font-mono">
-                                                        Audit: {req.fulfilledAuditId.slice(0, 8)}…
-                                                    </div>
-                                                ) : null}
                                             </td>
                                             <td className="px-3 py-3 whitespace-nowrap">
                                                 {isCustomerEmail ? (
