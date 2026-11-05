@@ -32,6 +32,8 @@ import {
     type AdminLeadCrmDetail,
     fetchAdminLeadCrm,
     fetchSalesAgents,
+    fetchFullAudits,
+    type FullAuditListItem,
     convertAdminCrmLead,
     shareFullAuditEmail,
     confirmAndShareLeadObservationsEmail,
@@ -47,6 +49,39 @@ import {
 } from '../shared/emailShareStatus';
 import TaskCompletionModal, { type CrmTaskStatus } from '../shared/TaskCompletionModal';
 
+function normHost(url?: string | null) {
+    return String(url || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .replace(/[/?#].*$/, '');
+}
+
+function normName(name?: string | null) {
+    return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** Latest scored full audit for this lead: its linked audit, or any newer run on the same website / business. */
+function latestFullAuditScore(
+    lead: { auditId?: string | null; website?: string; businessName?: string },
+    audits: FullAuditListItem[]
+): number | null {
+    const host = normHost(lead.website);
+    const name = normName(lead.businessName);
+    const timeOf = (a: FullAuditListItem) => new Date(a.createdAt || a.updatedAt || 0).getTime() || 0;
+    const matches = audits.filter(
+        (a) =>
+            a.totalScore != null &&
+            ((lead.auditId && a.id === lead.auditId) ||
+                (host && normHost(a.website) === host) ||
+                (name && normName(a.businessName) === name))
+    );
+    if (!matches.length) return null;
+    matches.sort((a, b) => timeOf(b) - timeOf(a));
+    return Number(matches[0].totalScore);
+}
+
 export default function AdminLeadDetail() {
     const { id } = useParams<{ id: string }>();
     const location = useLocation();
@@ -58,6 +93,7 @@ export default function AdminLeadDetail() {
     const [tasks, setTasks] = useState<LeadTask[]>([]);
     const [activities, setActivities] = useState<LeadActivity[]>([]);
     const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
+    const [fullAudits, setFullAudits] = useState<FullAuditListItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [converting, setConverting] = useState(false);
@@ -88,11 +124,13 @@ export default function AdminLeadDetail() {
         if (!silent) setLoading(true);
         setError('');
         try {
-            const [data, agents] = await Promise.all([
+            const [data, agents, audits] = await Promise.all([
                 fetchAdminLeadCrm(id),
-                fetchSalesAgents().catch(() => [] as SalesAgent[])
+                fetchSalesAgents().catch(() => [] as SalesAgent[]),
+                fetchFullAudits().catch(() => [] as FullAuditListItem[])
             ]);
             setLead(data.lead);
+            setFullAudits(audits);
             setTasks(data.tasks || []);
             setActivities(data.activities || []);
             setSalesAgents(agents);
@@ -493,15 +531,38 @@ export default function AdminLeadDetail() {
                         <p className="text-xs text-slate-500">Admin CRM — status, notes, tasks & email tracking</p>
                     </div>
 
-                    {lead.phone && (
-                        <a
-                            href={`tel:${lead.phone}`}
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 font-extrabold text-xs rounded-xl transition-colors shadow-sm"
-                        >
-                            <Phone className="w-3.5 h-3.5" />
-                            Call {lead.phone}
-                        </a>
-                    )}
+                    {(() => {
+                        const fullScore = latestFullAuditScore(lead, fullAudits);
+                        if (fullScore == null && !lead.phone) return null;
+                        return (
+                            <div className="flex items-center gap-2">
+                                {fullScore != null && (
+                                    <span
+                                        className={cn(
+                                            'inline-flex items-center px-4 py-2 rounded-xl text-xs font-extrabold border shadow-sm',
+                                            fullScore >= 70
+                                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                : fullScore >= 40
+                                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                                  : 'bg-rose-50 text-rose-700 border-rose-200'
+                                        )}
+                                        title="Latest full audit score"
+                                    >
+                                        Audit score: {fullScore}/100
+                                    </span>
+                                )}
+                                {lead.phone && (
+                                    <a
+                                        href={`tel:${lead.phone}`}
+                                        className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 font-extrabold text-xs rounded-xl transition-colors shadow-sm"
+                                    >
+                                        <Phone className="w-3.5 h-3.5" />
+                                        Call {lead.phone}
+                                    </a>
+                                )}
+                            </div>
+                        );
+                    })()}
                 </div>
 
                 {(hasSheetStatuses || showCrmPill || activeNote) && (
