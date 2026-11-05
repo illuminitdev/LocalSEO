@@ -29,7 +29,6 @@ import {
 } from 'lucide-react';
 import {
     adminGet,
-    fetchFullAudits,
     fetchSalesAgents,
     type SalesAgent,
     bulkImportAdminCrmLeads,
@@ -501,25 +500,6 @@ export default function AdminGrowthAuditLeads() {
         },
         [defaults, setSearchParams]
     );
-
-    // Full audit scores keyed by audit id, so leads with a completed full audit show their score.
-    const [fullAuditScores, setFullAuditScores] = useState<Map<string, number>>(() => new Map());
-    useEffect(() => {
-        let cancelled = false;
-        fetchFullAudits()
-            .then((audits) => {
-                if (cancelled) return;
-                const map = new Map<string, number>();
-                for (const a of audits) {
-                    if (a.id && a.totalScore != null) map.set(String(a.id), Number(a.totalScore));
-                }
-                setFullAuditScores(map);
-            })
-            .catch(() => {});
-        return () => {
-            cancelled = true;
-        };
-    }, []);
 
     // Keep URL in sync when filters change (for back/detail restore).
     useEffect(() => {
@@ -1642,25 +1622,6 @@ export default function AdminGrowthAuditLeads() {
                                                          </div>
                                                      </td>
                                                      <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                                                         {(() => {
-                                                             const fullScore = lead.auditId ? fullAuditScores.get(String(lead.auditId)) : undefined;
-                                                             if (fullScore == null) return null;
-                                                             return (
-                                                                 <div className="mb-1">
-                                                                     <span
-                                                                         className={cn(
-                                                                             'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border shadow-2xs',
-                                                                             fullScore >= 70 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                                                             fullScore >= 40 ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                                                                             'bg-rose-50 text-rose-700 border-rose-200'
-                                                                         )}
-                                                                         title="Full audit score"
-                                                                     >
-                                                                         Audit score: {fullScore}/100
-                                                                     </span>
-                                                                 </div>
-                                                             );
-                                                         })()}
                                                          {lead.scoreTotal != null ? (
                                                              <div className="space-y-1">
                                                                  <span className={cn(
@@ -1693,7 +1654,7 @@ export default function AdminGrowthAuditLeads() {
                                                              >
                                                                  Open Report <ExternalLink className="w-3 h-3" />
                                                              </a>
-                                                         ) : lead.auditId && fullAuditScores.has(String(lead.auditId)) ? null : (
+                                                         ) : (
                                                              <span className="text-xs text-[#94A3B8]">—</span>
                                                          )}
                                                      </td>
