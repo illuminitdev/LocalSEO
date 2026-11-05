@@ -29,6 +29,7 @@ import {
 import {
     assignFullAuditToAgent,
     deleteFullAudit,
+    deleteFullAuditRequest,
     fetchAdminCrmIndustries,
     fetchFullAudit,
     fetchFullAuditRequests,
@@ -496,6 +497,8 @@ export default function AdminFullAudits() {
     const [fulfillAgentId, setFulfillAgentId] = useState('');
     const [assignModalReq, setAssignModalReq] = useState<FullAuditRequest | null>(null);
     const [assignSaving, setAssignSaving] = useState(false);
+    const [deleteModalReq, setDeleteModalReq] = useState<FullAuditRequest | null>(null);
+    const [deleteSaving, setDeleteSaving] = useState(false);
     const [seenRequestIds, setSeenRequestIds] = useState<Set<string>>(() => loadSeenRequestIds());
     const [prefillRequestId, setPrefillRequestId] = useState<string | null>(null);
     const pendingAssignRef = useRef<{ reqId: string; auditId: string } | null>(null);
@@ -708,6 +711,26 @@ export default function AdminFullAudits() {
             setFulfillAgentId('');
             setAssignSaving(false);
             setError('');
+        }
+    };
+
+    const closeDeleteModal = () => {
+        if (deleteSaving) return;
+        setDeleteModalReq(null);
+    };
+
+    const confirmDeleteRequest = async () => {
+        if (!deleteModalReq) return;
+        setDeleteSaving(true);
+        try {
+            await deleteFullAuditRequest(deleteModalReq.id);
+            setRequests((prev) => prev.filter((r) => r.id !== deleteModalReq.id));
+            show('Request deleted.');
+            setDeleteModalReq(null);
+        } catch {
+            show('Could not delete this request. Please try again.');
+        } finally {
+            setDeleteSaving(false);
         }
     };
 
@@ -1351,10 +1374,9 @@ export default function AdminFullAudits() {
                             <table className="w-full text-left text-sm">
                                 <thead className="bg-[#F8FAFC] text-[11px] uppercase tracking-wider text-[#64748B]">
                                     <tr>
-                                        <th className="px-5 py-3 font-bold">Business</th>
+                                        <th className="px-5 py-3 font-bold min-w-[240px]">Business</th>
                                         <th className="px-4 py-3 font-bold whitespace-nowrap">Source</th>
                                         <th className="px-4 py-3 font-bold">Sales Agent</th>
-                                        <th className="px-4 py-3 font-bold">Contact</th>
                                         <th className="px-4 py-3 font-bold">Requested</th>
                                         <th className="px-4 py-3 font-bold whitespace-nowrap">Status</th>
                                         <th className="px-4 py-3 font-bold text-right whitespace-nowrap">Actions</th>
@@ -1375,8 +1397,19 @@ export default function AdminFullAudits() {
 
                                         return (
                                         <tr key={req.id} className="align-middle hover:bg-[#F8FAFC]/70 transition-colors">
-                                            <td className="px-4 py-3">
-                                                <div className="font-bold text-[#0F172A] leading-snug">{req.businessName || '—'}</div>
+                                            <td className="px-5 py-3 min-w-[240px]">
+                                                {req.leadId ? (
+                                                    <Link
+                                                        to={`/admin/leads/${encodeURIComponent(req.leadId)}`}
+                                                        state={listReturnState}
+                                                        className="font-bold text-[#0F172A] leading-snug hover:text-[#F59E0B] hover:underline transition-colors"
+                                                        title="Open lead"
+                                                    >
+                                                        {req.businessName || '—'}
+                                                    </Link>
+                                                ) : (
+                                                    <div className="font-bold text-[#0F172A] leading-snug">{req.businessName || '—'}</div>
+                                                )}
                                                 {req.fulfilledAuditId ? (
                                                     <div className="text-[10px] text-emerald-700 mt-0.5 font-mono">
                                                         Audit: {req.fulfilledAuditId.slice(0, 8)}…
@@ -1422,9 +1455,26 @@ export default function AdminFullAudits() {
                                                     <span className="text-xs text-[#94A3B8] italic">Unassigned</span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 text-xs text-[#334155] whitespace-nowrap">{req.toEmail || '—'}</td>
                                             <td className="px-4 py-3 text-xs text-[#64748B] whitespace-nowrap">
-                                                {formatDateTime(req.requestedAt)}
+                                                {timeOf(req.requestedAt) ? (
+                                                    <>
+                                                        <div className="font-medium text-[#334155]">
+                                                            {new Date(req.requestedAt).toLocaleDateString(undefined, {
+                                                                day: 'numeric',
+                                                                month: 'short',
+                                                                year: 'numeric'
+                                                            })}
+                                                        </div>
+                                                        <div className="mt-0.5">
+                                                            {new Date(req.requestedAt).toLocaleTimeString(undefined, {
+                                                                hour: '2-digit',
+                                                                minute: '2-digit'
+                                                            })}
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    '—'
+                                                )}
                                             </td>
                                             <td className="px-4 py-3.5 whitespace-nowrap">
                                                 {isAssigned ? (
@@ -1489,10 +1539,11 @@ export default function AdminFullAudits() {
                                                                 <Link
                                                                     to={`/admin/leads/${encodeURIComponent(req.leadId)}`}
                                                                     state={listReturnState}
-                                                                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-[#0F172A] transition-colors whitespace-nowrap"
+                                                                    className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-[#CBD5E1] bg-white text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:border-[#94A3B8] transition-all shadow-2xs"
+                                                                    title="Open lead"
+                                                                    aria-label="Open lead"
                                                                 >
-                                                                    <span>Open lead</span>
-                                                                    <ExternalLink className="w-3 h-3" />
+                                                                    <ExternalLink className="w-3.5 h-3.5" />
                                                                 </Link>
                                                             ) : null}
                                                         </>
@@ -1501,24 +1552,34 @@ export default function AdminFullAudits() {
                                                             <button
                                                                 type="button"
                                                                 onClick={() => openAssignModal(req)}
-                                                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg border border-[#CBD5E1] bg-white text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:border-[#94A3B8] transition-all shadow-2xs cursor-pointer whitespace-nowrap"
-                                                                title="Edit assigned sales agent or audit report"
+                                                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-[#CBD5E1] bg-white text-[#F59E0B] hover:bg-[#FFFBEB] hover:border-[#F59E0B] transition-all shadow-2xs cursor-pointer"
+                                                                title="Edit assignment"
+                                                                aria-label="Edit assignment"
                                                             >
-                                                                <Edit2 className="w-3 h-3 text-[#F59E0B]" />
-                                                                <span>Edit Assignment</span>
+                                                                <Edit2 className="w-3.5 h-3.5" />
                                                             </button>
                                                             {req.leadId ? (
                                                                 <Link
                                                                     to={`/admin/leads/${encodeURIComponent(req.leadId)}`}
                                                                     state={listReturnState}
-                                                                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-[#0F172A] transition-colors whitespace-nowrap"
+                                                                    className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-[#CBD5E1] bg-white text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:border-[#94A3B8] transition-all shadow-2xs"
+                                                                    title="Open lead"
+                                                                    aria-label="Open lead"
                                                                 >
-                                                                    <span>Open lead</span>
-                                                                    <ExternalLink className="w-3 h-3" />
+                                                                    <ExternalLink className="w-3.5 h-3.5" />
                                                                 </Link>
                                                             ) : null}
                                                         </div>
                                                     )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setDeleteModalReq(req)}
+                                                        className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-[#CBD5E1] bg-white text-[#94A3B8] hover:bg-rose-50 hover:text-rose-600 hover:border-rose-300 transition-all shadow-2xs cursor-pointer"
+                                                        title="Delete request"
+                                                        aria-label="Delete request"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -2130,6 +2191,59 @@ export default function AdminFullAudits() {
                 />
             ) : null}
 
+            {deleteModalReq ? (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <button
+                        type="button"
+                        aria-label="Close delete dialog"
+                        className="absolute inset-0 bg-slate-900/40"
+                        onClick={closeDeleteModal}
+                    />
+                    <div
+                        role="alertdialog"
+                        aria-modal="true"
+                        aria-labelledby="delete-full-audit-request-title"
+                        className="relative w-full max-w-sm rounded-2xl border border-[#E2E8F0] bg-white shadow-xl p-6 text-center"
+                    >
+                        <div className="mx-auto w-12 h-12 rounded-full bg-rose-50 flex items-center justify-center">
+                            <Trash2 className="w-5 h-5 text-rose-600" />
+                        </div>
+                        <h3
+                            id="delete-full-audit-request-title"
+                            className="mt-4 text-base font-black text-[#0F172A]"
+                        >
+                            Are you sure?
+                        </h3>
+                        <p className="mt-1.5 text-sm text-[#64748B]">
+                            This will delete the full audit request for{' '}
+                            <span className="font-semibold text-[#0F172A]">
+                                {deleteModalReq.businessName || 'this business'}
+                            </span>
+                            . The lead itself is not affected.
+                        </p>
+                        <div className="mt-5 flex gap-2">
+                            <button
+                                type="button"
+                                onClick={closeDeleteModal}
+                                disabled={deleteSaving}
+                                className="flex-1 px-4 py-2 text-sm font-semibold rounded-lg border border-[#CBD5E1] bg-white text-[#1E293B] hover:bg-[#F8FAFC] transition-all cursor-pointer disabled:opacity-60"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={confirmDeleteRequest}
+                                disabled={deleteSaving}
+                                className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-[#F59E0B] text-[#0F172A] hover:bg-[#FBBF24] transition-all cursor-pointer disabled:opacity-60"
+                            >
+                                {deleteSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
             {assignModalReq ? (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <button
@@ -2142,7 +2256,7 @@ export default function AdminFullAudits() {
                         role="dialog"
                         aria-modal="true"
                         aria-labelledby="assign-full-audit-title"
-                        className="relative w-full max-w-sm rounded-2xl border border-[#E2E8F0] bg-white shadow-xl p-5 space-y-4"
+                        className="relative w-full max-w-lg rounded-2xl border border-[#E2E8F0] bg-white shadow-xl p-7 space-y-5"
                     >
                         <div className="flex items-start justify-between gap-3">
                             <div>
@@ -2155,7 +2269,7 @@ export default function AdminFullAudits() {
                                 >
                                     {isAssignedRequest(assignModalReq) ? 'Edit assignment' : 'Assign & complete'}
                                 </h3>
-                                <p className="text-xs text-[#64748B] mt-1 truncate max-w-[240px]">
+                                <p className="text-xs text-[#64748B] mt-1 truncate max-w-[380px]">
                                     {assignModalReq.businessName || 'Lead'}
                                 </p>
                             </div>

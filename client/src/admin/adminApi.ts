@@ -401,6 +401,10 @@ export async function updateFullAuditRequest(
     return res.request;
 }
 
+export async function deleteFullAuditRequest(id: string): Promise<void> {
+    await adminDelete(`/api/admin/full-audit-requests/${encodeURIComponent(id)}`);
+}
+
 export async function assignFullAuditToAgent(payload: {
     requestId?: string;
     auditId: string;
