@@ -1459,14 +1459,14 @@ export default function AdminFullAudits() {
                                                 {timeOf(req.requestedAt) ? (
                                                     <>
                                                         <div className="font-medium text-[#334155]">
-                                                            {new Date(req.requestedAt).toLocaleDateString(undefined, {
+                                                            {new Date(req.requestedAt as string).toLocaleDateString(undefined, {
                                                                 day: 'numeric',
                                                                 month: 'short',
                                                                 year: 'numeric'
                                                             })}
                                                         </div>
                                                         <div className="mt-0.5">
-                                                            {new Date(req.requestedAt).toLocaleTimeString(undefined, {
+                                                            {new Date(req.requestedAt as string).toLocaleTimeString(undefined, {
                                                                 hour: '2-digit',
                                                                 minute: '2-digit'
                                                             })}
