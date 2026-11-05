@@ -129,10 +129,11 @@ router.get('/full-audit-requests', requireAdmin, async (req: Request, res: Respo
 
         const status = String(req.query.status || '').trim().toLowerCase();
         const params: any[] = [];
-        let where = '';
+        // Deleted requests are soft-deleted (kept so the lead_tasks auto-sync above won't re-create them).
+        let where = `WHERE r.status <> 'deleted'`;
         if (status && status !== 'all') {
             params.push(status);
-            where = `WHERE r.status = $${params.length}`;
+            where += ` AND r.status = $${params.length}`;
         }
 
         const { rows } = await query(
@@ -170,6 +171,23 @@ router.get('/full-audit-requests', requireAdmin, async (req: Request, res: Respo
     } catch (err: any) {
         console.error('Admin list full-audit-requests error:', err);
         res.status(500).json({ error: err.message || 'Failed to load full audit requests' });
+    }
+});
+
+router.delete('/full-audit-requests/:id', requireAdmin, async (req: Request, res: Response) => {
+    try {
+        await ensureCrmTables();
+        const id = String(req.params.id || '').trim();
+        if (!id) return res.status(400).json({ error: 'Missing request id' });
+        const { rowCount } = await query(
+            `UPDATE full_audit_requests SET status = 'deleted' WHERE id = $1`,
+            [id]
+        );
+        if (!rowCount) return res.status(404).json({ error: 'Request not found' });
+        res.json({ success: true });
+    } catch (err: any) {
+        console.error('Admin delete full-audit-requests error:', err);
+        res.status(500).json({ error: err.message || 'Failed to delete request' });
     }
 });
 
